@@ -18,20 +18,27 @@ packages/             Workspace packages — @sym/* scope
   contracts/            Pure TypeScript types shared by all units           [Sp3]
   db/                   Drizzle schema + migrations                         [Sp2]
   secrets/              libsodium encrypt/decrypt + encryptedText column    [Sp4]
-  adapter-slack/        Slack ingress + outbound + Block Kit                [S1]
   kernel/               Thin agent loop                                     [S2]
-  provider-fireworks/   Fireworks provider impl                             [S2]
   memory/               5-scope memory + retrieval gate                     [S7a]
   audit/                Hash-chained audit + receipts                       [S7b]
   tasks/                Durable queue + slice/checkpoint                    [S7c]
   soul/                 Cascade + tone-rewrite + substance-diff guard       [S7d]
-  ext-mcp/              MCP HTTP + stdio + tool registry                    [S5]
-  ext-skills/           Skill loader + activation                           [S5]
   sandbox/              Docker + gVisor + egress proxy + leases             [S6]
+  adapter/              Inbound surfaces (grouped; Slack-only in v1)
+    slack/                Slack ingress + outbound + Block Kit              [S1]
+  provider/             LLM providers (grouped; one impl per backend)
+    fireworks/            Fireworks impl (OpenAI-compat)                    [S2]
+  ext/                  Extensions (grouped)
+    mcp/                  MCP HTTP + stdio + tool registry                  [S5]
+    skills/               Skill loader + activation                         [S5]
 
 docs/                 Specs, build plan, schema draft, blast-radius map
 .claude/skills/       Discipline skills (cross-unit-impact, future)
 ```
+
+> Package names keep a flat scope (`@sym/adapter-slack`, `@sym/provider-fireworks`)
+> since npm package names can't nest; only the on-disk directories are grouped
+> under `adapter/`, `provider/`, and `ext/`.
 
 ## Working model
 

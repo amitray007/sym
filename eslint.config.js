@@ -70,7 +70,13 @@ export default [
     },
     settings: {
       'import/resolver': {
-        typescript: { project: ['./packages/*/tsconfig.json', './apps/*/tsconfig.json'] },
+        typescript: {
+          project: [
+            './packages/*/tsconfig.json',
+            './packages/*/*/tsconfig.json',
+            './apps/*/tsconfig.json',
+          ],
+        },
         node: true,
       },
     },

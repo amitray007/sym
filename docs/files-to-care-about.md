@@ -74,7 +74,7 @@ Touched often, but with care. Run the checklist; PR description carries
 the impact section.
 
 - Any package's `src/index.ts` (the public API)
-- Provider interface implementations: `packages/provider-fireworks/src/client.ts` and any future provider
+- Provider interface implementations: `packages/provider/fireworks/src/provider.ts` and any future provider
 - The retrieval gate: `packages/memory/src/retrieval-gate.ts`
 - The egress proxy: `packages/sandbox/src/proxy/server.ts` + `lease-store.ts`
 - JWT minter + verifier: `packages/sandbox/src/jwt-minter.ts`
@@ -114,11 +114,11 @@ files; cross-stream changes here trigger the discipline.
 | **Sp2** db | `packages/db/**`, `drizzle.config.ts` |
 | **Sp3** contracts | `packages/contracts/**` |
 | **Sp4** secrets | `packages/secrets/**` |
-| **S1** Slack adapter | `packages/adapter-slack/**`, `apps/agent/src/routes/slack/**` |
-| **S2** kernel + Fireworks | `packages/kernel/**`, `packages/provider-fireworks/**` |
+| **S1** Slack adapter | `packages/adapter/slack/**`, `apps/agent/src/routes/slack/**` |
+| **S2** kernel + Fireworks | `packages/kernel/**`, `packages/provider/fireworks/**` |
 | **S3** dashboard shell | `apps/dashboard/**` (layout, auth, nav, layout shell) |
 | **S4** first-time settings | `apps/dashboard/app/(onboarding)/**` and wizard-specific routes |
-| **S5** MCP + skills | `packages/ext-mcp/**`, `packages/ext-skills/**` |
+| **S5** MCP + skills | `packages/ext/mcp/**`, `packages/ext/skills/**` |
 | **S6** sandbox + egress | `packages/sandbox/**`, sandbox base Dockerfile |
 | **S7a** memory | `packages/memory/**` + `packages/memory/evals/**` |
 | **S7b** audit + receipts | `packages/audit/**` |
