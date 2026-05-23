@@ -1,0 +1,39 @@
+# Dokploy env-template.txt
+#
+# Paste these variable names into the Dokploy → App → Environment tab for
+# each deployable and supply the real values from your secrets manager.
+# Never commit actual secret values; this file contains only placeholders.
+#
+# Both apps share the same Postgres + Redis on the VPS.
+# Set the same DATABASE_URL and REDIS_URL for both apps.
+
+# ── Shared (both Dashboard and Agent) ────────────────────────────────────────
+
+NODE_ENV=production
+
+DATABASE_URL=<postgres://user:pass@localhost:5432/sym_prod>
+REDIS_URL=<redis://localhost:6379>
+
+SYM_ENCRYPTION_KEY=<base64-encoded-32-byte-key>
+# SYM_ENCRYPTION_KEYS_RETIRED=<comma-separated-retired-keys>
+
+# ── Dashboard (apps/dashboard) ────────────────────────────────────────────────
+
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=<pk_live_...>
+CLERK_SECRET_KEY=<sk_live_...>
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/
+DASHBOARD_URL=<https://dashboard.yourdomain.com>
+
+# ── Agent (apps/agent) ────────────────────────────────────────────────────────
+
+SLACK_CLIENT_ID=<from Slack app credentials>
+SLACK_CLIENT_SECRET=<from Slack app credentials>
+SLACK_SIGNING_SECRET=<from Slack app credentials>
+AGENT_URL=<https://agent.yourdomain.com>
+SANDBOX_JWT_SECRET=<random 32+ byte secret>
+
+# ── Fireworks ─────────────────────────────────────────────────────────────────
+# Stored encrypted in provider_configs table. Set here for the agent to
+# bootstrap if provider_configs is empty on first boot.
+FIREWORKS_API_KEY=<fw-...>

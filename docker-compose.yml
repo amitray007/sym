@@ -1,0 +1,57 @@
+# docker-compose.yml — OPTIONAL local Postgres + Redis for Sym development.
+#
+# Production and the default dev path use NATIVE installs of Postgres and
+# Redis (see scripts/setup-macos.sh and scripts/setup-linux.sh). This file
+# exists for engineers who cannot or prefer not to run native services.
+#
+# Usage:
+#   docker compose up -d          # start Postgres + Redis in background
+#   docker compose down           # stop and remove containers
+#   docker compose down -v        # also remove named volumes (wipes data)
+#
+# After starting, run: sh scripts/dev-setup.sh
+# (dev-setup.sh honours the DATABASE_URL / REDIS_URL in your .env)
+#
+# If you use this compose file, set in .env:
+#   DATABASE_URL=postgres://sym:sym@localhost:5434/sym_dev
+#   REDIS_URL=redis://localhost:6380
+#
+# Ports are intentionally offset (+2) from default to avoid collisions with
+# any native Postgres (5432) or Redis (6379) you might also have running.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: sym-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sym_dev
+      POSTGRES_USER: sym
+      POSTGRES_PASSWORD: sym
+    ports:
+      - '5434:5432'
+    volumes:
+      - sym_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sym -d sym_dev']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: sym-redis
+    restart: unless-stopped
+    ports:
+      - '6380:6379'
+    volumes:
+      - sym_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  sym_postgres_data:
+  sym_redis_data:

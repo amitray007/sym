@@ -1,0 +1,47 @@
+# dokploy/apps/dashboard.yml
+#
+# Dokploy app configuration skeleton for apps/dashboard (Next.js).
+#
+# TODO(S3): This file is a placeholder. Fill it in once apps/dashboard exists.
+#           Create apps/dashboard/Dockerfile using Next.js standalone output.
+#
+# Deploy order: DB migration → Dashboard (this app) → Agent
+# See dokploy/deploy-hooks/pre-deploy.sh for the migration gate.
+
+# ── Metadata ──────────────────────────────────────────────────────────────────
+name: sym-dashboard
+description: 'Sym admin dashboard — Next.js, Clerk auth, admin-only'
+
+# ── Build ─────────────────────────────────────────────────────────────────────
+# TODO(S3): Create apps/dashboard/Dockerfile with Next.js standalone build.
+# Suggested Dockerfile stages:
+#   1. builder — pnpm install --frozen-lockfile && pnpm --filter @sym/dashboard build
+#   2. runner  — node:24-slim, copy .next/standalone, EXPOSE 3000, CMD ["node", "server.js"]
+build:
+  type: dockerfile
+  # TODO: dockerfile: apps/dashboard/Dockerfile
+  context: .
+
+# ── Runtime ───────────────────────────────────────────────────────────────────
+runtime:
+  port: 3000
+  # TODO: healthcheck path once /health endpoint exists in apps/dashboard
+  # healthcheck: /health
+
+# ── Env vars ─────────────────────────────────────────────────────────────────
+# Set these in Dokploy → App → Environment. See dokploy/env-template.txt.
+env:
+  - NODE_ENV
+  - DATABASE_URL
+  - REDIS_URL
+  - SYM_ENCRYPTION_KEY
+  - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+  - CLERK_SECRET_KEY
+  - NEXT_PUBLIC_CLERK_SIGN_IN_URL
+  - NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL
+  - DASHBOARD_URL
+
+# ── Hooks ─────────────────────────────────────────────────────────────────────
+hooks:
+  pre_deploy: sh dokploy/deploy-hooks/pre-deploy.sh
+  post_deploy: sh dokploy/deploy-hooks/post-deploy.sh
