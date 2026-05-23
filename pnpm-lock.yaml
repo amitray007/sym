@@ -82,7 +82,7 @@ importers:
         version: link:../../packages/secrets
       drizzle-orm:
         specifier: ^0.44.2
-        version: 0.44.7(postgres@3.4.9)
+        version: 0.44.7(@opentelemetry/api@1.9.1)(postgres@3.4.9)
       hono:
         specifier: ^4.6.14
         version: 4.12.22
@@ -107,6 +107,25 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.19)
 
+  packages/audit:
+    dependencies:
+      '@opentelemetry/api':
+        specifier: ^1.9.0
+        version: 1.9.1
+      '@sym/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@sym/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: ^0.44.2
+        version: 0.44.7(@opentelemetry/api@1.9.1)(postgres@3.4.9)
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
   packages/contracts:
     devDependencies:
       vitest:
@@ -120,7 +139,7 @@ importers:
         version: link:../secrets
       drizzle-orm:
         specifier: ^0.44.2
-        version: 0.44.7(postgres@3.4.9)
+        version: 0.44.7(@opentelemetry/api@1.9.1)(postgres@3.4.9)
       postgres:
         specifier: ^3.4.5
         version: 3.4.9
@@ -174,7 +193,7 @@ importers:
         version: link:../secrets
       drizzle-orm:
         specifier: ^0.44.2
-        version: 0.44.7(postgres@3.4.9)
+        version: 0.44.7(@opentelemetry/api@1.9.1)(postgres@3.4.9)
       hono:
         specifier: ^4.6.0
         version: 4.12.22
@@ -965,6 +984,10 @@ packages:
   '@nolyfill/is-core-module@1.0.39':
     resolution: {integrity: sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA==}
     engines: {node: '>=12.4.0'}
+
+  '@opentelemetry/api@1.9.1':
+    resolution: {integrity: sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==}
+    engines: {node: '>=8.0.0'}
 
   '@rollup/rollup-android-arm-eabi@4.60.4':
     resolution: {integrity: sha512-F5QXMSiFebS9hKZj02XhWLLnRpJ3B3AROP0tWbFBSj+6kCbg5m9j5JoHKd4mmSVy5mS/IMQloYgYxCuJC0fxEQ==}
@@ -3509,6 +3532,8 @@ snapshots:
 
   '@nolyfill/is-core-module@1.0.39': {}
 
+  '@opentelemetry/api@1.9.1': {}
+
   '@rollup/rollup-android-arm-eabi@4.60.4':
     optional: true
 
@@ -4116,8 +4141,9 @@ snapshots:
       esbuild: 0.25.12
       tsx: 4.22.3
 
-  drizzle-orm@0.44.7(postgres@3.4.9):
+  drizzle-orm@0.44.7(@opentelemetry/api@1.9.1)(postgres@3.4.9):
     optionalDependencies:
+      '@opentelemetry/api': 1.9.1
       postgres: 3.4.9
 
   dunder-proto@1.0.1:
