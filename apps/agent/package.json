@@ -1,0 +1,30 @@
+{
+  "name": "@sym/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@sym/adapter-slack": "workspace:*",
+    "@sym/contracts": "workspace:*",
+    "@sym/db": "workspace:*",
+    "@sym/kernel": "workspace:*",
+    "@sym/provider-fireworks": "workspace:*",
+    "@sym/secrets": "workspace:*",
+    "drizzle-orm": "^0.44.2",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.7",
+    "tsx": "^4.19.2",
+    "vitest": "^2.1.8"
+  }
+}

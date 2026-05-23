@@ -27,10 +27,11 @@ export default {
         'db',
         'contracts',
         'secrets',
-        // Streams
+        // Streams + apps
         'slack',
         'kernel',
         'fireworks',
+        'agent',
         'dashboard',
         'onboarding',
         'mcp',
