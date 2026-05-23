@@ -26,8 +26,8 @@ export interface SlackTurnInput {
   threadTs?: SlackThreadTs;
   /** Plain text of the triggering message (mentions stripped by the adapter). */
   text: string;
-  /** Slack `ts` of the triggering message. */
-  ts: SlackThreadTs;
+  /** Slack `ts` of the triggering message; absent for slash commands (no message ts). */
+  ts?: SlackThreadTs;
 }
 
 /** A diagnostic footer rendered as a Slack `context` block (outbound contract §3). */

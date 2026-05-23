@@ -133,19 +133,17 @@ export function normalizeSlackEvent(opts: NormalizeOpts): SlackTurnInput | null 
     };
   }
 
-  // --- Slash command ---
+  // --- Slash command (no message ts; SlackTurnInput.ts is optional) ---
   if (raw.type === 'slash_command' && raw.command !== undefined) {
     if (!raw.user_id || !raw.channel_id) return null;
-    // Slash commands have no ts — use empty string (noted as @sym/contracts gap)
     return {
       workspaceId,
       eventId: (raw.trigger_id ?? '') as SlackEventId,
       entrySurface: 'slash_command',
       requester: raw.user_id as SlackUserId,
       channelId: raw.channel_id as SlackChannelId,
-      ts: '' as SlackThreadTs,
       text: raw.text ?? '',
-      // no threadTs — slash commands are always top-level
+      // no ts (slash commands have none) and no threadTs (always top-level)
     };
   }
 
