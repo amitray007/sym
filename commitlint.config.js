@@ -13,6 +13,11 @@ export default {
   rules: {
     'header-max-length': [2, 'always', 100],
     'subject-case': [0],
+    // We embed structured "Cross-unit impact" sections (lists, em-dashes,
+    // URLs) in commit bodies per the cross-unit-impact discipline. Those lines
+    // run long by design — keep the header limit, drop the body/footer limits.
+    'body-max-line-length': [0],
+    'footer-max-line-length': [0],
     'scope-enum': [
       1,
       'always',
