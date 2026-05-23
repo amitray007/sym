@@ -65,6 +65,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@sym/secrets':
+        specifier: workspace:*
+        version: link:../secrets
       drizzle-orm:
         specifier: ^0.44.2
         version: 0.44.7(postgres@3.4.9)
@@ -81,6 +84,22 @@ importers:
       drizzle-kit:
         specifier: ^0.31.1
         version: 0.31.10
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
+  packages/secrets:
+    dependencies:
+      libsodium-wrappers:
+        specifier: ^0.7.15
+        version: 0.7.16
+    devDependencies:
+      '@types/libsodium-wrappers':
+        specifier: ^0.7.14
+        version: 0.7.14
       tsx:
         specifier: ^4.19.2
         version: 4.22.3
@@ -1028,6 +1047,9 @@ packages:
 
   '@types/json5@0.0.29':
     resolution: {integrity: sha512-dRLjCWHYg4oaA77cxO64oO+7JwCwnIzkZPdrrC71jQmQtlhM556pwKo5bUzqvZndkVbeFLIIi+9TC40JNF5hNQ==}
+
+  '@types/libsodium-wrappers@0.7.14':
+    resolution: {integrity: sha512-5Kv68fXuXK0iDuUir1WPGw2R9fOZUlYlSAa0ztMcL0s0BfIDTqg9GXz8K30VJpPP3sxWhbolnQma2x+/TfkzDQ==}
 
   '@types/node@22.19.19':
     resolution: {integrity: sha512-dyh/xO2Fh5bYrfWaaqGrRQQGkNdmYw6AmaAUvYeUMNTWQtvb796ikLdmTchRmOlOiIJ1TDXfWgVx1QkUlQ6Hew==}
@@ -2166,6 +2188,12 @@ packages:
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
+
+  libsodium-wrappers@0.7.16:
+    resolution: {integrity: sha512-Gtr/WBx4dKjvRL1pvfwZqu7gO6AfrQ0u9vFL+kXihtHf6NfkROR8pjYWn98MFDI3jN19Ii1ZUfPR9afGiPyfHg==}
+
+  libsodium@0.7.16:
+    resolution: {integrity: sha512-3HrzSPuzm6Yt9aTYCDxYEG8x8/6C0+ag655Y7rhhWZM9PT4NpdnbqlzXhGZlDnkgR6MeSTnOt/VIyHLs9aSf+Q==}
 
   lilconfig@3.1.3:
     resolution: {integrity: sha512-/vlFKAoH5Cgt3Ie+JLhRbwOsCQePABiU3tJ1egGvyQ+33R/vcwM2Zl2QR/LzjsBeItPt3oSVXapn+m4nQDvpzw==}
@@ -3475,6 +3503,8 @@ snapshots:
 
   '@types/json5@0.0.29': {}
 
+  '@types/libsodium-wrappers@0.7.14': {}
+
   '@types/node@22.19.19':
     dependencies:
       undici-types: 6.21.0
@@ -4682,6 +4712,12 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
       type-check: 0.4.0
+
+  libsodium-wrappers@0.7.16:
+    dependencies:
+      libsodium: 0.7.16
+
+  libsodium@0.7.16: {}
 
   lilconfig@3.1.3: {}
 

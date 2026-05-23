@@ -17,8 +17,11 @@ async function main(): Promise<void> {
 
   const { db, close } = createDb(loadDatabaseUrl(), { max: 1 });
 
-  console.warn('[db:reset] DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
+  console.warn('[db:reset] dropping public + drizzle (migration journal) schemas');
   await db.execute(sql`DROP SCHEMA IF EXISTS public CASCADE;`);
+  // The migrator tracks applied migrations in `drizzle.__drizzle_migrations`;
+  // drop it too or the re-migrate sees 0000 as applied and creates nothing.
+  await db.execute(sql`DROP SCHEMA IF EXISTS drizzle CASCADE;`);
   await db.execute(sql`CREATE SCHEMA public;`);
 
   const migrationsFolder = fileURLToPath(new URL('../migrations', import.meta.url));

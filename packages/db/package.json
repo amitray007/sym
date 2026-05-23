@@ -31,6 +31,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@sym/secrets": "workspace:*",
     "drizzle-orm": "^0.44.2",
     "postgres": "^3.4.5",
     "uuidv7": "^1.0.2"

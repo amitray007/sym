@@ -1,3 +1,4 @@
+import { initSecrets } from '@sym/secrets';
 import { eq } from 'drizzle-orm';
 
 import { loadDatabaseUrl } from './cli-env.js';
@@ -9,10 +10,13 @@ const TEST_TEAM_ID = 'T_SYM_DEV';
 /**
  * Inserts a single dev workspace with an owner admin, a (fake) Slack install,
  * and default ACL modes (slack=open, dashboard=allowlist). Idempotent — safe
- * to run repeatedly.
+ * to run repeatedly. The Slack bot token is encrypted via `encryptedText`, so
+ * we init the key ring first.
  */
 async function main(): Promise<void> {
-  const { db, close } = createDb(loadDatabaseUrl(), { max: 1 });
+  const databaseUrl = loadDatabaseUrl();
+  await initSecrets();
+  const { db, close } = createDb(databaseUrl, { max: 1 });
 
   const existing = await db
     .select()
