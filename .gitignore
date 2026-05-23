@@ -46,6 +46,9 @@ Thumbs.db
 !.vscode/settings.json
 !.vscode/extensions.json
 
+# Transient agent worktrees (parallel stream builds)
+.claude/worktrees/
+
 # Drizzle
 drizzle/.snapshots
 drizzle-meta

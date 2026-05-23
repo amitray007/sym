@@ -4,6 +4,7 @@ build
 out
 .next
 .turbo
+.claude
 coverage
 pnpm-lock.yaml
 *.tsbuildinfo
