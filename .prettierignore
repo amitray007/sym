@@ -1,0 +1,24 @@
+node_modules
+dist
+build
+out
+.next
+.turbo
+coverage
+pnpm-lock.yaml
+*.tsbuildinfo
+*.min.js
+*.min.css
+
+# Drizzle generated
+drizzle/.snapshots
+drizzle-meta
+**/drizzle/**/*.json
+
+# Specs + standalone HTML are authored artifacts — don't reflow
+docs/specs/**
+docs/db-schema-draft.md
+docs/implementation-ideology-plan.md
+docs/build-flow.md
+docs/files-to-care-about.md
+docs/ideation.html

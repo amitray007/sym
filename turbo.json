@@ -1,0 +1,79 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "stream",
+  "globalDependencies": [
+    "tsconfig.base.json",
+    ".env",
+    ".env.*",
+    "!.env.example",
+    "!.env.*.example"
+  ],
+  "globalEnv": ["NODE_ENV", "CI"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "package.json",
+        "tsconfig.json",
+        "tsconfig.*.json",
+        "next.config.*",
+        "drizzle.config.*"
+      ],
+      "outputs": ["dist/**", "build/**", ".next/**", "!.next/cache/**", "*.tsbuildinfo"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "test/**",
+        "tests/**",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "**/*.spec.ts",
+        "vitest.config.*",
+        "package.json"
+      ],
+      "outputs": ["coverage/**"]
+    },
+    "lint": {
+      "inputs": [
+        "src/**",
+        "test/**",
+        "**/*.{ts,tsx,js,jsx,mjs,cjs}",
+        "eslint.config.*",
+        "package.json"
+      ],
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "src/**",
+        "test/**",
+        "**/*.{ts,tsx}",
+        "tsconfig.json",
+        "tsconfig.*.json",
+        "package.json"
+      ],
+      "outputs": ["*.tsbuildinfo"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "db:migrate": {
+      "cache": false,
+      "inputs": ["src/schema/**", "migrations/**", "drizzle.config.*"]
+    },
+    "db:seed": {
+      "cache": false
+    },
+    "db:reset": {
+      "cache": false
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

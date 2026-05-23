@@ -1,0 +1,26 @@
+{
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit",
+    "source.organizeImports": "never"
+  },
+  "eslint.useFlatConfig": true,
+  "eslint.workingDirectories": [{ "mode": "auto" }],
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "files.trimFinalNewlines": true,
+  "[markdown]": {
+    "files.trimTrailingWhitespace": false
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.turbo": true,
+    "**/dist": true,
+    "**/.next": true,
+    "**/pnpm-lock.yaml": true
+  }
+}

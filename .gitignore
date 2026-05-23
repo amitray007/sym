@@ -1,0 +1,65 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build output
+dist
+build
+out
+.next
+.turbo
+*.tsbuildinfo
+
+# Coverage
+coverage
+.nyc_output
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment — NEVER commit. Dokploy injects in prod.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Secrets
+*.pem
+*.key
+*.crt
+*-private.pem
+sym-encryption-key*
+
+# Editor + OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea
+*.iml
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Drizzle
+drizzle/.snapshots
+drizzle-meta
+
+# Local dev databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Test artifacts
+.vitest-cache
+test-results
+
+# Misc
+.cache
+.parcel-cache
+.eslintcache
