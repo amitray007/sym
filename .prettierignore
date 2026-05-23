@@ -10,10 +10,11 @@ pnpm-lock.yaml
 *.min.js
 *.min.css
 
-# Drizzle generated
+# Drizzle generated (migrations + meta snapshots are tool-owned)
 drizzle/.snapshots
 drizzle-meta
 **/drizzle/**/*.json
+**/migrations/**
 
 # Specs + standalone HTML are authored artifacts — don't reflow
 docs/specs/**

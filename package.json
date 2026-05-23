@@ -19,6 +19,12 @@
     "dev": "turbo run dev",
     "format": "prettier --write .",
     "clean": "turbo run clean && rm -rf node_modules .turbo",
+    "db:generate": "pnpm --filter @sym/db db:generate",
+    "db:migrate": "pnpm --filter @sym/db db:migrate",
+    "db:seed": "pnpm --filter @sym/db db:seed",
+    "db:check": "pnpm --filter @sym/db db:check",
+    "db:reset": "pnpm --filter @sym/db db:reset",
+    "db:studio": "pnpm --filter @sym/db db:studio",
     "prepare": "husky"
   },
   "devDependencies": {
