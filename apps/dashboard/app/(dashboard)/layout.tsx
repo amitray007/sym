@@ -37,6 +37,17 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
     }
   }
 
+  // Re-entry guard: until setup is complete (installed + provider configured),
+  // force the first-run wizard. Gated on DATABASE_URL so build/dev without a DB
+  // still renders. /setup lives outside this group, so there's no redirect loop.
+  if (process.env.DATABASE_URL) {
+    const { getSetupStatus } = await import('@/lib/setup');
+    const status = await getSetupStatus();
+    if (!status.complete) {
+      redirect('/setup');
+    }
+  }
+
   const workspace = await getWorkspace();
 
   return (

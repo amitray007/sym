@@ -111,6 +111,9 @@ importers:
       '@sym/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@sym/secrets':
+        specifier: workspace:*
+        version: link:../../packages/secrets
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
