@@ -4,8 +4,9 @@ An AI teammate that lives in a single team's Slack workspace, configured and
 observed through its own dashboard. Joins channels, holds opinions, remembers
 what matters, owns tasks, is accountable for everything it does.
 
-> Status: pre-implementation. The chassis (Sp1) is in place; spine and streams
-> are being built per the build plan.
+> Status: built. Spine (Sp1–Sp4) and all streams (S1–S8), plus the agent and
+> dashboard apps, are implemented, wired, and green (typecheck · lint · test ·
+> build). The system runs end-to-end — see "Run it live" below.
 
 ## Repository layout
 
@@ -75,8 +76,41 @@ pnpm test
 pnpm build
 ```
 
-These all pass on the empty chassis. As packages land they wire into the
-turbo pipeline automatically.
+### Run it live (local)
+
+One-time bootstrap (assumes Postgres + Redis are installed and running — see
+`scripts/setup-macos.sh` / `scripts/setup-linux.sh`):
+
+```sh
+sh scripts/dev-setup.sh   # creates sym_dev, writes .env + SYM_ENCRYPTION_KEY, migrates
+```
+
+Then fill the remaining secrets in `.env` (the bootstrap leaves these blank):
+
+- **Clerk** — `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` (enable
+  Google + Slack sign-in in the Clerk dashboard).
+- **Slack app** — `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`.
+  Set the app's OAuth redirect URL to `${AGENT_URL}/slack/oauth/callback` and its
+  Event request URL to the agent.
+- **URLs** — `AGENT_URL` (default `http://localhost:3001`) and `DASHBOARD_URL`
+  (default `http://localhost:3000`).
+- **First admin** — `SYM_BOOTSTRAP_ADMIN_EMAILS=you@example.com` (your Clerk
+  email). This is how you claim owner of a fresh instance.
+
+> Do **not** run `pnpm db:seed` for a real Slack workspace — the seed inserts a
+> fake workspace whose team id would block the real install (single-tenant).
+> Seed only for dashboard-only dev without a real Slack connection.
+
+Run both services:
+
+```sh
+pnpm dev            # agent on :3001, dashboard on :3000 (turbo, watch mode)
+```
+
+Open the dashboard, sign in with your allowlisted email, and walk the `/setup`
+wizard: **Install** (Slack OAuth — creates the workspace and makes you owner on
+return) → **Provider** (Fireworks API key + models) → **Access** (Slack ACL
+mode). Once complete, DM or @mention the bot in Slack and it replies.
 
 ## License
 
