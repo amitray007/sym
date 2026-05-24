@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation';
 
 import { Sidebar } from '@/components/sidebar';
 import { Topbar } from '@/components/topbar';
-import { isAdmin, getWorkspace } from '@/lib/admin-check';
+import { resolveAccess } from '@/lib/access';
+import { getWorkspace } from '@/lib/admin-check';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -29,10 +30,12 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
 
     // Fail CLOSED: a signed-in non-admin (or an unverifiable check when the DB
     // is unreachable) never sees the dashboard. Build/dev without Clerk keys is
-    // already handled by the `hasClerkKey` guard above.
-    const adminOk = await isAdmin(userId);
+    // already handled by the `hasClerkKey` guard above. resolveAccess also lets
+    // an allowlisted bootstrap user through (pre-install) so they can reach the
+    // setup wizard via the re-entry guard below.
+    const access = await resolveAccess(userId);
 
-    if (!adminOk) {
+    if (!access.allowed) {
       redirect('/request-access');
     }
   }

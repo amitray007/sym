@@ -2,7 +2,8 @@ import { providerConfigs, workspaces } from '@sym/db';
 import { and, eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 
-import { isAdmin, getWorkspace } from '@/lib/admin-check';
+import { resolveAccess } from '@/lib/access';
+import { getWorkspace } from '@/lib/admin-check';
 import { getDb } from '@/lib/db';
 import { getSetupStatus } from '@/lib/setup';
 
@@ -43,7 +44,9 @@ export default async function SetupPage() {
     const { auth } = await import('@clerk/nextjs/server');
     const { userId } = await auth();
     if (!userId) redirect('/sign-in');
-    if (!(await isAdmin(userId))) redirect('/request-access');
+    // Bootstrap-aware: an allowlisted user is let in here and promoted to owner
+    // once the install creates the workspace. See lib/access.ts.
+    if (!(await resolveAccess(userId)).allowed) redirect('/request-access');
   }
 
   const [status, workspace, provider] = await Promise.all([

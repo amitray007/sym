@@ -4,7 +4,7 @@ import { aclModes, providerConfigs, uuidv7, workspaces } from '@sym/db';
 import { and, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 
-import { isAdmin } from '@/lib/admin-check';
+import { resolveAccess } from '@/lib/access';
 import { getDb } from '@/lib/db';
 import { ensureSecrets } from '@/lib/ensure-secrets';
 
@@ -23,7 +23,7 @@ async function requireAdmin(): Promise<boolean> {
   const { auth } = await import('@clerk/nextjs/server');
   const { userId } = await auth();
   if (!userId) return false;
-  return isAdmin(userId);
+  return (await resolveAccess(userId)).allowed;
 }
 
 async function workspaceId(): Promise<{ db: ReturnType<typeof getDb>; id: string } | null> {

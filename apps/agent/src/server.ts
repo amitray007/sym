@@ -160,7 +160,10 @@ export function createServer(deps: ServerDeps): Hono {
       } catch (auditErr) {
         console.error('[agent] install audit append failed', auditErr);
       }
-      return c.redirect(config.dashboardUrl ?? '/');
+      // Back to the dashboard setup wizard — the install step is now done, and
+      // the wizard promotes the (allowlisted) installer to owner on this return.
+      const base = (config.dashboardUrl ?? '').replace(/\/$/, '');
+      return c.redirect(base ? `${base}/setup` : '/setup');
     } catch (err) {
       if (err instanceof SingleTenantError) {
         return c.json({ error: 'single_tenant', message: err.message }, 409);
