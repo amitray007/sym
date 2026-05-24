@@ -3,14 +3,24 @@ import {
   slackTurnInputToTurn,
   verifySlackSignature,
 } from '@sym/adapter-slack';
+import { append } from '@sym/audit';
 import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import { handleTurn } from './handle-turn.js';
+import { SingleTenantError, installWorkspace } from './install.js';
+import {
+  buildAuthorizeUrl,
+  exchangeCode,
+  isOAuthConfigured,
+  signState,
+  verifyState,
+} from './slack-oauth.js';
 import { loadWorkspaceContext } from './workspace-context.js';
 
 import type { AgentConfig } from './config.js';
 import type { RawSlackEvent } from '@sym/adapter-slack';
+import type { WorkspaceId } from '@sym/contracts';
 import type { Database } from '@sym/db';
 
 export interface ServerDeps {
@@ -104,6 +114,60 @@ export function createServer(deps: ServerDeps): Hono {
       });
     }
     return c.json({ ok: true });
+  });
+
+  // --- Slack workspace install (OAuth v2) -----------------------------------
+  // Two Slack OAuth surfaces exist; this is the WORKSPACE BOT INSTALL (persists
+  // the bot token), distinct from the Clerk admin sign-in Slack OAuth.
+
+  // Kick off the install: redirect to Slack's authorize screen with a signed state.
+  app.get('/slack/install', (c) => {
+    if (!isOAuthConfigured(config)) {
+      return c.json({ error: 'oauth_not_configured' }, 503);
+    }
+    const state = signState(config.slackSigningSecret);
+    return c.redirect(buildAuthorizeUrl(config, state));
+  });
+
+  // OAuth callback: verify state (CSRF), exchange the code, persist the install,
+  // then return the browser to the dashboard.
+  app.get('/slack/oauth/callback', async (c) => {
+    if (!isOAuthConfigured(config)) {
+      return c.json({ error: 'oauth_not_configured' }, 503);
+    }
+    const code = c.req.query('code');
+    const state = c.req.query('state') ?? '';
+    if (!code) {
+      return c.json({ error: 'missing_code' }, 400);
+    }
+    if (!verifyState(config.slackSigningSecret, state)) {
+      return c.json({ error: 'bad_state' }, 400);
+    }
+    try {
+      const result = await exchangeCode(config, code);
+      const install = await installWorkspace(db, result);
+      // Audit the install (best-effort — a failed audit must not fail the install).
+      try {
+        await append(db, {
+          workspaceId: install.workspaceId as WorkspaceId,
+          kind: 'app.install',
+          actorKind: 'slack_user',
+          actorId: result.installerUserId,
+          targetKind: 'workspace',
+          targetId: install.workspaceId,
+          payload: { teamId: install.teamId, reinstalled: install.reinstalled },
+        });
+      } catch (auditErr) {
+        console.error('[agent] install audit append failed', auditErr);
+      }
+      return c.redirect(config.dashboardUrl ?? '/');
+    } catch (err) {
+      if (err instanceof SingleTenantError) {
+        return c.json({ error: 'single_tenant', message: err.message }, 409);
+      }
+      console.error('[agent] install failed', err);
+      return c.json({ error: 'install_failed' }, 500);
+    }
   });
 
   app.get('/health', async (c) => {
