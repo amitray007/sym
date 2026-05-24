@@ -56,9 +56,12 @@ export function ActivityFeed({ initialEvents }: ActivityFeedProps) {
   const [error, setError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
+  // Seed cursor captured once at mount (a ref, so the connect-once effect has
+  // no reactive dependency). New events arrive via the functional setState.
+  const seedCursorRef = useRef<number | undefined>(initialEvents[0]?.id);
 
   useEffect(() => {
-    const lastId = events[0]?.id;
+    const lastId = seedCursorRef.current;
     const url = lastId ? `/api/activity?cursor=${lastId}` : '/api/activity';
 
     const es = new EventSource(url);
@@ -90,7 +93,7 @@ export function ActivityFeed({ initialEvents }: ActivityFeedProps) {
     return () => {
       es.close();
     };
-  }, []); // intentionally empty: SSE connects once on mount
+  }, []);
 
   return (
     <div className="p-6 space-y-4 animate-fade-in">

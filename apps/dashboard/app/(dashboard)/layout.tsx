@@ -27,9 +27,12 @@ export default async function DashboardLayout({ children }: DashboardLayoutProps
       redirect('/sign-in');
     }
 
+    // Fail CLOSED: a signed-in non-admin (or an unverifiable check when the DB
+    // is unreachable) never sees the dashboard. Build/dev without Clerk keys is
+    // already handled by the `hasClerkKey` guard above.
     const adminOk = await isAdmin(userId);
 
-    if (!adminOk && process.env.DATABASE_URL) {
+    if (!adminOk) {
       redirect('/request-access');
     }
   }
