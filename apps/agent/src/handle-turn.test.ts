@@ -322,6 +322,47 @@ describe('handleTurn', () => {
     expect(messages.at(-1)?.role).toBe('user');
   });
 
+  it('wired round-trip: builtin get_current_time dispatched, final text streamed without error', async () => {
+    // Call-counter provider: call 1 emits a tool_call, call 2 emits final text.
+    let providerCallCount = 0;
+    const twoStepProvider: ProviderInterface = {
+      id: 'two-step',
+      async *complete(): AsyncIterable<CompletionChunk> {
+        providerCallCount++;
+        if (providerCallCount === 1) {
+          yield {
+            delta: {
+              toolCalls: [{ index: 0, id: 'tc1', name: 'get_current_time', argumentsDelta: '{}' }],
+            },
+          };
+          yield { delta: {}, finishReason: 'tool_calls' };
+        } else {
+          yield { delta: { content: 'The time is now.' }, finishReason: 'stop' };
+        }
+      },
+    };
+
+    const slack = new MockSlackClient();
+    await handleTurn(makeTurn({ entrySurface: 'dm', threadTs: '500.0' as SlackThreadTs }), {
+      db: stubDb(),
+      provider: twoStepProvider,
+      model: 'test-model',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+    });
+
+    // Provider was called twice (tool loop ran).
+    expect(providerCallCount).toBe(2);
+
+    // Final reply text is from step 2.
+    expect(slack.appendedText).toContain('The time is now.');
+
+    // No errors — streaming completed normally (stopStream was called).
+    expect(slack.stopStreamCalls).toHaveLength(1);
+    expect(slack.posts).toHaveLength(0);
+  });
+
   it('prepends viewed-channel background context as the first history message for DM turns', async () => {
     const slack = new MockSlackClient();
     // The channel the user is viewing has these recent messages (oldest-first).

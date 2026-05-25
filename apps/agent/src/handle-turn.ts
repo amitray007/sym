@@ -1,6 +1,7 @@
 import { markdownBlock, receiptToContextBlock, threadToHistory } from '@sym/adapter-slack';
 import { ToolRegistry, buildDefaultSoulCascade, runLoop } from '@sym/kernel';
 
+import { createBuiltinDispatcher } from './builtin-tools.js';
 import {
   ensureConversation,
   loadHistory,
@@ -246,7 +247,7 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   await persist('recordUserMessage', () => recordUserMessage(deps.db, turn));
 
   const cascade = buildDefaultSoulCascade();
-  const registry = new ToolRegistry();
+  const registry = new ToolRegistry(createBuiltinDispatcher());
 
   // Threaded turns: try streaming; fall through to postMessage only if it fails.
   if (turn.threadTs !== undefined) {
