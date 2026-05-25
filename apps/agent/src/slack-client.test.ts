@@ -106,6 +106,103 @@ describe('WebApiSlackClient.conversationsReplies', () => {
   });
 });
 
+describe('WebApiSlackClient.conversationsHistory', () => {
+  it('fetches a single page, reverses newest-first to oldest-first', async () => {
+    const fetchFn = mockFetch([
+      {
+        ok: true,
+        messages: [
+          { user: 'U2', text: 'newer message', ts: '200.2' },
+          { user: 'U1', text: 'older message', ts: '200.1' },
+        ],
+      },
+    ]);
+
+    const client = new WebApiSlackClient('xoxb-test');
+    const { messages } = await client.conversationsHistory({ channel: CHANNEL });
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    // Slack returned newest-first; impl must reverse to oldest-first.
+    expect(messages.map((m) => m.text)).toEqual(['older message', 'newer message']);
+    // Channel is passed; no ts field (unlike replies).
+    const body = callBody(fetchFn, 0);
+    expect(body['channel']).toBe('C1');
+    expect(body['ts']).toBeUndefined();
+    expect(body['cursor']).toBeUndefined();
+  });
+
+  it('paginates via next_cursor and returns all messages oldest-first', async () => {
+    const fetchFn = mockFetch([
+      {
+        ok: true,
+        messages: [
+          { user: 'U1', text: 'newest page1', ts: '300.3' },
+          { user: 'U1', text: 'newer page1', ts: '300.2' },
+        ],
+        response_metadata: { next_cursor: 'CURSOR2' },
+      },
+      {
+        ok: true,
+        messages: [{ user: 'U1', text: 'older page2', ts: '300.1' }],
+      },
+    ]);
+
+    const client = new WebApiSlackClient('xoxb-test');
+    const { messages } = await client.conversationsHistory({ channel: CHANNEL });
+
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    // Second call should carry the cursor.
+    expect(callBody(fetchFn, 1)['cursor']).toBe('CURSOR2');
+    // After collecting both pages (interleaved newest-first), reversed to oldest-first.
+    // Page 1 had ts 300.3, 300.2 and page 2 had 300.1; all collected then reversed.
+    expect(messages.map((m) => m.ts)).toEqual(['300.1', '300.2', '300.3']);
+  });
+
+  it('maps user vs bot messages correctly', async () => {
+    mockFetch([
+      {
+        ok: true,
+        messages: [
+          { bot_id: 'B1', text: 'bot msg', ts: '400.2', subtype: 'bot_message' },
+          { user: 'U1', text: 'user msg', ts: '400.1' },
+        ],
+      },
+    ]);
+
+    const client = new WebApiSlackClient('xoxb-test');
+    const { messages } = await client.conversationsHistory({ channel: CHANNEL });
+
+    // Reversed: user msg first, then bot msg.
+    expect(messages[0]).toEqual({ user: 'U1', text: 'user msg', ts: '400.1' });
+    expect(messages[1]).toEqual({
+      botId: 'B1',
+      text: 'bot msg',
+      ts: '400.2',
+      subtype: 'bot_message',
+    });
+  });
+
+  it('stops paginating once the limit ceiling is met', async () => {
+    const fetchFn = mockFetch([
+      {
+        ok: true,
+        messages: [
+          { user: 'U1', text: 'a', ts: '1' },
+          { user: 'U2', text: 'b', ts: '2' },
+        ],
+        response_metadata: { next_cursor: 'CURSOR2' },
+      },
+    ]);
+
+    const client = new WebApiSlackClient('xoxb-test');
+    const { messages } = await client.conversationsHistory({ channel: CHANNEL, limit: 2 });
+
+    // Ceiling reached after page 1 → no second fetch despite next_cursor.
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(messages).toHaveLength(2);
+  });
+});
+
 describe('WebApiSlackClient assistant + streaming methods', () => {
   it('startStream returns the stream handle and omits recipient_* for DMs', async () => {
     const fetchFn = mockFetch([{ ok: true, channel: 'D1', ts: '500.1' }]);

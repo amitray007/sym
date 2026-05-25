@@ -67,6 +67,17 @@ export interface ConversationsRepliesResult {
   messages: SlackThreadMessage[];
 }
 
+export interface ConversationsHistoryParams {
+  channel: SlackChannelId;
+  /** Hard ceiling on messages fetched across pagination (impl default applies). */
+  limit?: number;
+}
+
+export interface ConversationsHistoryResult {
+  /** Channel messages oldest-first (chronological), reversed from Slack's newest-first. */
+  messages: SlackThreadMessage[];
+}
+
 // --- Assistant container (Agents & AI Apps) --------------------------------
 
 export interface SuggestedPrompt {
@@ -137,6 +148,8 @@ export interface SlackClient {
   assistantThreadsSetStatus(params: SetStatusParams): Promise<void>;
   /** Read a thread (root + replies), oldest-first, for in-thread context. */
   conversationsReplies(params: ConversationsRepliesParams): Promise<ConversationsRepliesResult>;
+  /** Read a channel's recent messages (oldest-first) for viewed-channel context. */
+  conversationsHistory(params: ConversationsHistoryParams): Promise<ConversationsHistoryResult>;
   /** Set the assistant thread's suggested prompts (shown when the panel opens). */
   assistantThreadsSetSuggestedPrompts(params: SetSuggestedPromptsParams): Promise<void>;
   /** Set the assistant thread's title. */

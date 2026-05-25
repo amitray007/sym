@@ -225,11 +225,15 @@ export function slackTurnInputToTurn(input: SlackTurnInput): Turn {
 // Assistant container lifecycle events (Agents & AI Apps)
 // ---------------------------------------------------------------------------
 
-/** A user opened Sym's assistant panel — time to greet them. */
+/**
+ * Shared shape for both `assistant_thread_started` and
+ * `assistant_thread_context_changed` lifecycle events — both carry the same
+ * assistant-thread identity and optional viewed-channel context.
+ */
 export interface AssistantThreadStarted {
   channelId: SlackChannelId;
   threadTs: SlackThreadTs;
-  /** The channel the user was viewing when they opened the panel, if any. */
+  /** The channel the user was viewing when they opened/navigated the panel, if any. */
   contextChannelId?: SlackChannelId;
 }
 
@@ -239,6 +243,24 @@ export interface AssistantThreadStarted {
  */
 export function assistantThreadStarted(raw: RawSlackEvent): AssistantThreadStarted | null {
   if (raw.type !== 'event_callback' || raw.event?.type !== 'assistant_thread_started') return null;
+  const at = raw.event.assistant_thread;
+  if (!at) return null;
+  const ctxChannel = at.context?.channel_id;
+  return {
+    channelId: at.channel_id as SlackChannelId,
+    threadTs: at.thread_ts as SlackThreadTs,
+    ...(ctxChannel !== undefined ? { contextChannelId: ctxChannel as SlackChannelId } : {}),
+  };
+}
+
+/**
+ * Extract the assistant thread from an `assistant_thread_context_changed` event.
+ * Returns `null` for any other event — this is a lifecycle signal, not a Turn.
+ * Reuses the `AssistantThreadStarted` interface — both lifecycle events share the same shape.
+ */
+export function assistantThreadContextChanged(raw: RawSlackEvent): AssistantThreadStarted | null {
+  if (raw.type !== 'event_callback' || raw.event?.type !== 'assistant_thread_context_changed')
+    return null;
   const at = raw.event.assistant_thread;
   if (!at) return null;
   const ctxChannel = at.context?.channel_id;

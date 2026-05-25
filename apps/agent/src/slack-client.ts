@@ -1,5 +1,7 @@
 import type {
   AppendStreamParams,
+  ConversationsHistoryParams,
+  ConversationsHistoryResult,
   ConversationsRepliesParams,
   ConversationsRepliesResult,
   PostMessageParams,
@@ -24,6 +26,8 @@ const SLACK_API = 'https://slack.com/api';
 const SLACK_PAGE_LIMIT = 200;
 /** Default ceiling on messages fetched across pagination for one thread. */
 const THREAD_FETCH_CEILING = 200;
+/** Default ceiling on channel history messages for viewed-channel context. */
+const CHANNEL_HISTORY_CEILING = 30;
 
 /** Error matching the adapter's `SlackApiError` shape so `withSlackRetries` can read it. */
 class SlackWebApiError extends Error implements SlackApiError {
@@ -159,6 +163,40 @@ export class WebApiSlackClient implements SlackClient {
     } while (cursor !== undefined && messages.length < ceiling);
 
     return { messages };
+  }
+
+  async conversationsHistory(
+    params: ConversationsHistoryParams,
+  ): Promise<ConversationsHistoryResult> {
+    const ceiling = params.limit ?? CHANNEL_HISTORY_CEILING;
+    const collected: SlackThreadMessage[] = [];
+    let cursor: string | undefined;
+
+    // Page through the channel (Slack returns newest-first) until we hit the
+    // ceiling or run out of messages — whichever comes first.
+    do {
+      const json = await this.call<RepliesResponse>('conversations.history', {
+        channel: params.channel,
+        limit: Math.min(SLACK_PAGE_LIMIT, ceiling - collected.length),
+        ...(cursor !== undefined ? { cursor } : {}),
+      });
+
+      for (const m of json.messages ?? []) {
+        collected.push({
+          ...(m.user !== undefined ? { user: m.user as SlackUserId } : {}),
+          ...(m.bot_id !== undefined ? { botId: m.bot_id } : {}),
+          text: m.text ?? '',
+          ts: (m.ts ?? '') as SlackThreadTs,
+          ...(m.subtype !== undefined ? { subtype: m.subtype } : {}),
+        });
+      }
+
+      cursor = json.response_metadata?.next_cursor || undefined;
+    } while (cursor !== undefined && collected.length < ceiling);
+
+    // Slack returns newest-first; reverse to chronological (oldest-first).
+    collected.reverse();
+    return { messages: collected };
   }
 
   async assistantThreadsSetSuggestedPrompts(params: SetSuggestedPromptsParams): Promise<void> {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  assistantThreadContextChanged,
   assistantThreadStarted,
   normalizeSlackEvent,
   slackTurnInputToTurn,
@@ -275,5 +276,72 @@ describe('assistantThreadStarted', () => {
 
   it('returns null for non-assistant events (e.g. app_mention)', () => {
     expect(assistantThreadStarted(appMentionEvent())).toBeNull();
+  });
+});
+
+describe('assistantThreadContextChanged', () => {
+  const contextChangedEvent: RawSlackEvent = {
+    type: 'event_callback',
+    event_id: 'Ev200',
+    team_id: 'T001',
+    event: {
+      type: 'assistant_thread_context_changed',
+      ts: '1700000030.000001',
+      channel: '',
+      text: '',
+      assistant_thread: {
+        user_id: 'U001',
+        channel_id: 'D999',
+        thread_ts: '1700000020.000001',
+        context: { channel_id: 'C888', team_id: 'T001' },
+      },
+    },
+  };
+
+  it('extracts the assistant channel, thread, and viewed-channel context', () => {
+    expect(assistantThreadContextChanged(contextChangedEvent)).toEqual({
+      channelId: 'D999',
+      threadTs: '1700000020.000001',
+      contextChannelId: 'C888',
+    });
+  });
+
+  it('omits contextChannelId when there is no context channel', () => {
+    const noContext: RawSlackEvent = {
+      ...contextChangedEvent,
+      event: {
+        ...contextChangedEvent.event!,
+        assistant_thread: { channel_id: 'D999', thread_ts: '1700000020.000001' },
+      },
+    };
+    expect(assistantThreadContextChanged(noContext)).toEqual({
+      channelId: 'D999',
+      threadTs: '1700000020.000001',
+    });
+  });
+
+  it('returns null for non-context-changed events (e.g. app_mention)', () => {
+    expect(assistantThreadContextChanged(appMentionEvent())).toBeNull();
+  });
+
+  it('returns null for assistant_thread_started (different event type)', () => {
+    const startedEvent: RawSlackEvent = {
+      type: 'event_callback',
+      event_id: 'Ev100',
+      team_id: 'T001',
+      event: {
+        type: 'assistant_thread_started',
+        ts: '1700000020.000001',
+        channel: '',
+        text: '',
+        assistant_thread: {
+          user_id: 'U001',
+          channel_id: 'D999',
+          thread_ts: '1700000020.000001',
+          context: { channel_id: 'C777', team_id: 'T001' },
+        },
+      },
+    };
+    expect(assistantThreadContextChanged(startedEvent)).toBeNull();
   });
 });
