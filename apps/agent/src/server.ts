@@ -69,6 +69,7 @@ export function createServer(deps: ServerDeps): Hono {
     if (!input) return; // an event we don't act on
     const turn = slackTurnInputToTurn(input);
     await handleTurn(turn, {
+      db,
       provider: ctx.provider,
       model: ctx.model,
       slackClient: ctx.slackClient,

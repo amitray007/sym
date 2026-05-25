@@ -13,6 +13,30 @@ import type {
   TurnId,
   WorkspaceId,
 } from '@sym/contracts';
+import type { Database } from '@sym/db';
+
+/**
+ * Minimal chainable no-op `Database` stub. Persistence is exercised against real
+ * Postgres in integration tests; here it must satisfy the type and stay out of
+ * the way of the reply assertions (every query resolves to an empty result).
+ */
+function stubDb(): Database {
+  const h = {
+    insert: () => h,
+    values: () => h,
+    onConflictDoNothing: () => h,
+    select: () => h,
+    from: () => h,
+    where: () => h,
+    orderBy: () => h,
+    limit: () => Promise.resolve([]),
+    update: () => h,
+    set: () => h,
+    then: (onF: (v: unknown[]) => unknown, onR?: (e: unknown) => unknown) =>
+      Promise.resolve([]).then(onF, onR),
+  };
+  return h as unknown as Database;
+}
 
 class MockSlackClient implements SlackClient {
   readonly posts: PostMessageParams[] = [];
@@ -62,6 +86,7 @@ describe('handleTurn', () => {
   it('runs the loop and posts the reply with a markdown block + receipt footer', async () => {
     const slack = new MockSlackClient();
     await handleTurn(makeTurn(), {
+      db: stubDb(),
       provider: fakeProvider,
       model: 'test-model',
       slackClient: slack,
@@ -81,6 +106,7 @@ describe('handleTurn', () => {
   it('replies in-thread when the turn is threaded', async () => {
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
+      db: stubDb(),
       provider: fakeProvider,
       model: 'test-model',
       slackClient: slack,
@@ -91,6 +117,7 @@ describe('handleTurn', () => {
   it('skips posting when the turn has no channel', async () => {
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ channelId: undefined }), {
+      db: stubDb(),
       provider: fakeProvider,
       model: 'test-model',
       slackClient: slack,
