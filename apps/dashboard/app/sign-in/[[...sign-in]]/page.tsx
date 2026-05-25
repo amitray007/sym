@@ -1,7 +1,14 @@
+import { redirect } from 'next/navigation';
+
+import { authMode } from '@/lib/auth';
+
+import { PasswordForm } from '../password-form';
+
 export const metadata = { title: 'Sign in · Sym' };
 
 export default async function SignInPage() {
-  const hasClerkKey = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+  const mode = authMode();
+  if (mode === 'open') redirect('/'); // no auth configured — nothing to sign into
 
   return (
     <div className="min-h-screen bg-surface-0 flex flex-col items-center justify-center p-6">
@@ -33,33 +40,25 @@ export default async function SignInPage() {
           </div>
         </div>
 
-        {/* Clerk component or placeholder */}
-        <div className="w-full">
-          {hasClerkKey ? (
-            <ClerkSignIn />
-          ) : (
-            <div className="card p-6 flex flex-col items-center gap-3 text-center">
-              <p className="text-ink-secondary text-sm">Sign-in requires Clerk to be configured.</p>
-              <p className="text-ink-tertiary text-xs">
-                Set{' '}
-                <code className="font-mono text-accent text-xs">
-                  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
-                </code>{' '}
-                to enable authentication.
-              </p>
-            </div>
-          )}
-        </div>
+        {/* Password form (password mode) or Clerk sign-in (clerk mode) */}
+        <div className="w-full">{mode === 'password' ? <PasswordForm /> : <ClerkSignIn />}</div>
 
         {/* Fine print */}
-        <p className="text-ink-muted text-[11px] text-center">
-          Access is restricted to approved admins.
-          <br />
-          Not an admin?{' '}
-          <a href="/request-access" className="text-accent hover:text-accent-400 transition-colors">
-            Request access
-          </a>
-        </p>
+        {mode === 'clerk' ? (
+          <p className="text-ink-muted text-[11px] text-center">
+            Access is restricted to approved admins.
+            <br />
+            Not an admin?{' '}
+            <a
+              href="/request-access"
+              className="text-accent hover:text-accent-400 transition-colors"
+            >
+              Request access
+            </a>
+          </p>
+        ) : (
+          <p className="text-ink-muted text-[11px] text-center">Single-tenant dashboard access.</p>
+        )}
       </div>
     </div>
   );

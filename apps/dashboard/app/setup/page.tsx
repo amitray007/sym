@@ -2,8 +2,8 @@ import { providerConfigs, workspaces } from '@sym/db';
 import { and, eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 
-import { resolveAccess } from '@/lib/access';
 import { getWorkspace } from '@/lib/admin-check';
+import { dashboardGate } from '@/lib/auth';
 import { getDb } from '@/lib/db';
 import { getSetupStatus } from '@/lib/setup';
 
@@ -39,15 +39,12 @@ async function loadProvider(): Promise<ProviderPrefill | null> {
 }
 
 export default async function SetupPage() {
-  // Admin gate — /setup lives outside the (dashboard) group, so gate it here too.
-  if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-    if (!userId) redirect('/sign-in');
-    // Bootstrap-aware: an allowlisted user is let in here and promoted to owner
-    // once the install creates the workspace. See lib/access.ts.
-    if (!(await resolveAccess(userId)).allowed) redirect('/request-access');
-  }
+  // Auth gate — /setup lives outside the (dashboard) group, so gate it here too.
+  // In Clerk mode this is bootstrap-aware (allowlisted user promoted to owner on
+  // return from install); in password mode a valid session = owner.
+  const gate = await dashboardGate();
+  if (gate === 'sign-in') redirect('/sign-in');
+  if (gate === 'request-access') redirect('/request-access');
 
   const [status, workspace, provider] = await Promise.all([
     getSetupStatus(),

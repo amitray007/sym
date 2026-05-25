@@ -1,4 +1,7 @@
-import { Bell, Search, User } from 'lucide-react';
+import { Bell, LogOut, Search, User } from 'lucide-react';
+
+import { signOut } from '@/app/sign-in/actions';
+import { authMode } from '@/lib/auth';
 
 interface TopbarProps {
   pageTitle: string;
@@ -33,34 +36,44 @@ export function Topbar({ pageTitle }: TopbarProps) {
 }
 
 /**
- * Server component: renders Clerk UserButton when keys are present,
- * or a placeholder user icon when building without credentials.
+ * Account control, per auth mode: Clerk UserButton (clerk), a sign-out button
+ * (password), or a placeholder icon (open dev / build without credentials).
  */
 async function UserButtonOrFallback() {
-  const hasClerkKey = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+  const mode = authMode();
 
-  if (!hasClerkKey) {
+  if (mode === 'password') {
     return (
-      <div className="w-6 h-6 rounded-full bg-surface-5 border border-border flex items-center justify-center">
-        <User className="w-3.5 h-3.5 text-ink-tertiary" />
-      </div>
+      <form action={signOut}>
+        <button type="submit" className="btn-ghost p-1.5" aria-label="Sign out" title="Sign out">
+          <LogOut className="w-3.5 h-3.5" />
+        </button>
+      </form>
     );
   }
 
-  const { UserButton } = await import('@clerk/nextjs');
+  if (mode === 'clerk') {
+    const { UserButton } = await import('@clerk/nextjs');
+
+    return (
+      <UserButton
+        appearance={{
+          variables: {
+            colorBackground: '#14171e',
+            colorText: '#f0f2f7',
+            colorPrimary: '#7c6af0',
+          },
+          elements: {
+            avatarBox: 'w-6 h-6',
+          },
+        }}
+      />
+    );
+  }
 
   return (
-    <UserButton
-      appearance={{
-        variables: {
-          colorBackground: '#14171e',
-          colorText: '#f0f2f7',
-          colorPrimary: '#7c6af0',
-        },
-        elements: {
-          avatarBox: 'w-6 h-6',
-        },
-      }}
-    />
+    <div className="w-6 h-6 rounded-full bg-surface-5 border border-border flex items-center justify-center">
+      <User className="w-3.5 h-3.5 text-ink-tertiary" />
+    </div>
   );
 }

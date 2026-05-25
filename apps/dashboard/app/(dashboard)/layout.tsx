@@ -2,42 +2,27 @@ import { redirect } from 'next/navigation';
 
 import { Sidebar } from '@/components/sidebar';
 import { Topbar } from '@/components/topbar';
-import { resolveAccess } from '@/lib/access';
 import { getWorkspace } from '@/lib/admin-check';
+import { dashboardGate } from '@/lib/auth';
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
 /**
- * Dashboard layout — server-side admin gate.
+ * Dashboard layout — server-side auth gate, fail CLOSED.
  *
- * When Clerk keys are absent (build/test time without live credentials),
- * we skip the auth check and render the shell so `next build` stays green.
- * In production DATABASE_URL + Clerk keys are always injected.
+ * dashboardGate covers all three modes (password / clerk / open): 'sign-in'
+ * when unauthenticated, 'request-access' for a signed-in Clerk non-admin, 'ok'
+ * otherwise (incl. open dev mode where nothing is configured).
  */
 export default async function DashboardLayout({ children }: DashboardLayoutProps) {
-  const hasClerkKey = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
-
-  if (hasClerkKey) {
-    // Dynamic import so the module only loads when keys are present
-    const { auth } = await import('@clerk/nextjs/server');
-    const { userId } = await auth();
-
-    if (!userId) {
-      redirect('/sign-in');
-    }
-
-    // Fail CLOSED: a signed-in non-admin (or an unverifiable check when the DB
-    // is unreachable) never sees the dashboard. Build/dev without Clerk keys is
-    // already handled by the `hasClerkKey` guard above. resolveAccess also lets
-    // an allowlisted bootstrap user through (pre-install) so they can reach the
-    // setup wizard via the re-entry guard below.
-    const access = await resolveAccess(userId);
-
-    if (!access.allowed) {
-      redirect('/request-access');
-    }
+  const gate = await dashboardGate();
+  if (gate === 'sign-in') {
+    redirect('/sign-in');
+  }
+  if (gate === 'request-access') {
+    redirect('/request-access');
   }
 
   // Re-entry guard: until setup is complete (installed + provider configured),

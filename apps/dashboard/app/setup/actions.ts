@@ -4,7 +4,7 @@ import { aclModes, providerConfigs, uuidv7, workspaces } from '@sym/db';
 import { and, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 
-import { resolveAccess } from '@/lib/access';
+import { dashboardGate } from '@/lib/auth';
 import { getDb } from '@/lib/db';
 import { ensureSecrets } from '@/lib/ensure-secrets';
 
@@ -14,16 +14,12 @@ export interface ActionResult {
 }
 
 /**
- * Server actions are a public surface — gate every mutation on admin, not just
- * the UI. Without Clerk keys (dev) there's no auth, so allow. Fails closed
- * (denies) when the admin check can't be satisfied.
+ * Server actions are a public surface — gate every mutation, not just the UI.
+ * dashboardGate handles all modes (password session / Clerk admin / open dev);
+ * only 'ok' may write. Fails closed.
  */
 async function requireAdmin(): Promise<boolean> {
-  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) return true;
-  const { auth } = await import('@clerk/nextjs/server');
-  const { userId } = await auth();
-  if (!userId) return false;
-  return (await resolveAccess(userId)).allowed;
+  return (await dashboardGate()) === 'ok';
 }
 
 async function workspaceId(): Promise<{ db: ReturnType<typeof getDb>; id: string } | null> {
