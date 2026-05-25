@@ -1,4 +1,5 @@
 import {
+  assistantThreadStarted,
   normalizeSlackEvent,
   slackTurnInputToTurn,
   verifySlackSignature,
@@ -7,6 +8,7 @@ import { append } from '@sym/audit';
 import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 
+import { handleAssistantThreadStarted } from './assistant.js';
 import { handleTurn } from './handle-turn.js';
 import { SingleTenantError, installWorkspace } from './install.js';
 import {
@@ -61,6 +63,14 @@ export function createServer(deps: ServerDeps): Hono {
       console.warn(`[agent] no installed/configured workspace for team ${teamId}`);
       return;
     }
+
+    // Assistant container lifecycle: greet a freshly opened panel. Not a Turn.
+    const assistantStart = assistantThreadStarted(raw);
+    if (assistantStart) {
+      await handleAssistantThreadStarted(ctx.slackClient, assistantStart);
+      return;
+    }
+
     const input = normalizeSlackEvent({
       event: raw,
       workspaceId: ctx.workspaceId,

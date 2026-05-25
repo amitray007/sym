@@ -15,6 +15,20 @@ import type {
 // Raw Slack payload shapes (minimal — only what we read)
 // ---------------------------------------------------------------------------
 
+/** The `assistant_thread` object on assistant_thread_started/context_changed. */
+export interface SlackAssistantThread {
+  user_id?: string;
+  /** The DM-style channel the assistant container lives in. */
+  channel_id: string;
+  thread_ts: string;
+  /** Where the user currently is in Slack (the channel they're viewing). */
+  context?: {
+    channel_id?: string;
+    team_id?: string;
+    enterprise_id?: string;
+  };
+}
+
 interface SlackEventPayload {
   type: string;
   channel_type?: string;
@@ -23,6 +37,8 @@ interface SlackEventPayload {
   channel: string;
   thread_ts?: string;
   text: string;
+  /** Present on assistant_thread_started / assistant_thread_context_changed. */
+  assistant_thread?: SlackAssistantThread;
 }
 
 export interface RawSlackEvent {
@@ -202,5 +218,33 @@ export function slackTurnInputToTurn(input: SlackTurnInput): Turn {
     receivedAt: new Date(),
     ...(thread !== undefined ? { threadTs: thread } : {}),
     ...(input.ts !== undefined ? { ts: input.ts } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Assistant container lifecycle events (Agents & AI Apps)
+// ---------------------------------------------------------------------------
+
+/** A user opened Sym's assistant panel — time to greet them. */
+export interface AssistantThreadStarted {
+  channelId: SlackChannelId;
+  threadTs: SlackThreadTs;
+  /** The channel the user was viewing when they opened the panel, if any. */
+  contextChannelId?: SlackChannelId;
+}
+
+/**
+ * Extract the assistant thread from an `assistant_thread_started` event.
+ * Returns `null` for any other event — this is a lifecycle signal, not a Turn.
+ */
+export function assistantThreadStarted(raw: RawSlackEvent): AssistantThreadStarted | null {
+  if (raw.type !== 'event_callback' || raw.event?.type !== 'assistant_thread_started') return null;
+  const at = raw.event.assistant_thread;
+  if (!at) return null;
+  const ctxChannel = at.context?.channel_id;
+  return {
+    channelId: at.channel_id as SlackChannelId,
+    threadTs: at.thread_ts as SlackThreadTs,
+    ...(ctxChannel !== undefined ? { contextChannelId: ctxChannel as SlackChannelId } : {}),
   };
 }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { normalizeSlackEvent, slackTurnInputToTurn, type RawSlackEvent } from '../normalize.js';
+import {
+  assistantThreadStarted,
+  normalizeSlackEvent,
+  slackTurnInputToTurn,
+  type RawSlackEvent,
+} from '../normalize.js';
 
 import type { SlackUserId, WorkspaceId } from '@sym/contracts';
 
@@ -230,5 +235,45 @@ describe('reply threading (Sym answers in-thread, never at channel level)', () =
       },
     });
     expect(top.conversationId).toBe(reply.conversationId);
+  });
+});
+
+describe('assistantThreadStarted', () => {
+  const startedEvent: RawSlackEvent = {
+    type: 'event_callback',
+    event_id: 'Ev100',
+    team_id: 'T001',
+    event: {
+      type: 'assistant_thread_started',
+      ts: '1700000020.000001',
+      channel: '',
+      text: '',
+      assistant_thread: {
+        user_id: 'U001',
+        channel_id: 'D999',
+        thread_ts: '1700000020.000001',
+        context: { channel_id: 'C777', team_id: 'T001' },
+      },
+    },
+  };
+
+  it('extracts the assistant channel, thread, and viewed-channel context', () => {
+    expect(assistantThreadStarted(startedEvent)).toEqual({
+      channelId: 'D999',
+      threadTs: '1700000020.000001',
+      contextChannelId: 'C777',
+    });
+  });
+
+  it('omits contextChannelId when the user is not viewing a channel', () => {
+    const noContext: RawSlackEvent = {
+      ...startedEvent,
+      event: { ...startedEvent.event!, assistant_thread: { channel_id: 'D999', thread_ts: '1.1' } },
+    };
+    expect(assistantThreadStarted(noContext)).toEqual({ channelId: 'D999', threadTs: '1.1' });
+  });
+
+  it('returns null for non-assistant events (e.g. app_mention)', () => {
+    expect(assistantThreadStarted(appMentionEvent())).toBeNull();
   });
 });
