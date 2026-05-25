@@ -9,6 +9,10 @@ const ACCESS_URL = 'https://slack.com/api/oauth.v2.access';
 export const BOT_SCOPES = [
   'app_mentions:read',
   'chat:write',
+  // Read thread history for in-thread context (conversations.replies):
+  // channels:history = public channels, groups:history = private channels.
+  'channels:history',
+  'groups:history',
   'im:history',
   'im:read',
   'commands',
