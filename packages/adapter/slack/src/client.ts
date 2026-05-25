@@ -1,4 +1,4 @@
-import type { SlackActionError, SlackChannelId, SlackThreadTs } from '@sym/contracts';
+import type { SlackActionError, SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
 
 // ---------------------------------------------------------------------------
 // Slack API payload types
@@ -39,6 +39,34 @@ export interface SetStatusParams {
   status: string;
 }
 
+export interface ConversationsRepliesParams {
+  channel: SlackChannelId;
+  /** Thread root `ts` (the message that opened the thread). */
+  ts: SlackThreadTs;
+  /**
+   * Hard ceiling on how many messages to fetch across pagination. The impl
+   * applies a sensible default; the model-side budget trim lives in the mapper.
+   */
+  limit?: number;
+}
+
+/** A single Slack thread message, normalized to the fields Sym reads. */
+export interface SlackThreadMessage {
+  /** Author's Slack user id. Absent when the message came from a bot/app. */
+  user?: SlackUserId;
+  /** Bot id, present when the message came from a bot/app rather than a user. */
+  botId?: string;
+  text: string;
+  ts: SlackThreadTs;
+  /** Slack message subtype (e.g. `channel_join`, `bot_message`); absent for plain messages. */
+  subtype?: string;
+}
+
+export interface ConversationsRepliesResult {
+  /** Thread messages oldest-first (root first), as Slack returns them. */
+  messages: SlackThreadMessage[];
+}
+
 // ---------------------------------------------------------------------------
 // SlackClient interface
 // ---------------------------------------------------------------------------
@@ -53,6 +81,8 @@ export interface SlackClient {
   chatUpdate(params: UpdateMessageParams): Promise<void>;
   reactionsAdd(params: ReactionsAddParams): Promise<void>;
   assistantThreadsSetStatus(params: SetStatusParams): Promise<void>;
+  /** Read a thread (root + replies), oldest-first, for in-thread context. */
+  conversationsReplies(params: ConversationsRepliesParams): Promise<ConversationsRepliesResult>;
 }
 
 // ---------------------------------------------------------------------------

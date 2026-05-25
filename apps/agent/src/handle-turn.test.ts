@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import { handleTurn } from './handle-turn.js';
 
-import type { PostMessageParams, PostMessageResult, SlackClient } from '@sym/adapter-slack';
+import type {
+  ConversationsRepliesResult,
+  PostMessageParams,
+  PostMessageResult,
+  SlackClient,
+} from '@sym/adapter-slack';
 import type {
   CompletionChunk,
   ProviderInterface,
@@ -52,6 +57,9 @@ class MockSlackClient implements SlackClient {
   }
   async assistantThreadsSetStatus(): Promise<void> {
     /* no-op mock */
+  }
+  async conversationsReplies(): Promise<ConversationsRepliesResult> {
+    return { messages: [] };
   }
 }
 
