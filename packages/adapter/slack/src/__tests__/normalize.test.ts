@@ -70,6 +70,23 @@ function slashCommandEvent(): RawSlackEvent {
   };
 }
 
+/** app_mention posted at channel top level (no thread_ts). */
+function topLevelMentionEvent(): RawSlackEvent {
+  return {
+    type: 'event_callback',
+    event_id: 'Ev003',
+    team_id: 'T001',
+    event: {
+      type: 'app_mention',
+      ts: '1700000010.000001',
+      user: 'U001',
+      channel: 'C001',
+      text: '<@UBOT001> hi there',
+      // no thread_ts — posted at channel top level
+    },
+  };
+}
+
 // ---- tests -----------------------------------------------------------------
 
 describe('normalizeSlackEvent', () => {
@@ -171,5 +188,46 @@ describe('slackTurnInputToTurn', () => {
     expect(typeof turn.id).toBe('string');
     expect(turn.id.length).toBeGreaterThan(0);
     expect(turn.receivedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe('reply threading (Sym answers in-thread, never at channel level)', () => {
+  function toTurn(event: RawSlackEvent) {
+    const input = normalizeSlackEvent({
+      event,
+      workspaceId: WORKSPACE_ID,
+      botUserId: BOT_USER_ID,
+    })!;
+    return slackTurnInputToTurn(input);
+  }
+
+  it('roots a thread on a top-level mention (threadTs = the message ts)', () => {
+    expect(toTurn(topLevelMentionEvent()).threadTs).toBe('1700000010.000001');
+  });
+
+  it('replies in the existing thread for an already-threaded mention', () => {
+    expect(toTurn(appMentionEvent()).threadTs).toBe('1700000000.000001');
+  });
+
+  it('leaves DMs flat (no thread) so DM memory stays keyed per-channel', () => {
+    expect(toTurn(dmEvent()).threadTs).toBeUndefined();
+  });
+
+  it('a top-level mention and its threaded replies resolve to one conversationId', () => {
+    const top = toTurn(topLevelMentionEvent());
+    const reply = toTurn({
+      type: 'event_callback',
+      event_id: 'Ev004',
+      team_id: 'T001',
+      event: {
+        type: 'app_mention',
+        ts: '1700000011.000001',
+        user: 'U001',
+        channel: 'C001',
+        thread_ts: '1700000010.000001', // inside the thread Sym opened
+        text: '<@UBOT001> follow-up',
+      },
+    });
+    expect(top.conversationId).toBe(reply.conversationId);
   });
 });

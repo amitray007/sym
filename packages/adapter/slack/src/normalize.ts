@@ -155,13 +155,27 @@ export function normalizeSlackEvent(opts: NormalizeOpts): SlackTurnInput | null 
 // ---------------------------------------------------------------------------
 
 /**
- * Derive a stable `conversationId` from workspace + channel (+ thread when
- * present). This is a best-effort client-side key; `@sym/kernel` (S2) may
- * canonicalize it against DB state.
+ * The thread Sym replies in. A channel `app_mention` ALWAYS gets a thread —
+ * rooted at the triggering message's `ts` when it isn't already threaded — so
+ * Sym never answers at channel level. DMs stay flat (the conversation is the im
+ * channel itself), which also keeps DM memory keyed per-channel, not per-message.
+ */
+function effectiveThreadTs(input: SlackTurnInput): SlackThreadTs | undefined {
+  if (input.threadTs !== undefined) return input.threadTs;
+  if (input.entrySurface === 'app_mention') return input.ts;
+  return undefined;
+}
+
+/**
+ * Derive a stable `conversationId` from workspace + channel (+ effective thread).
+ * Uses {@link effectiveThreadTs} so a top-level mention and its threaded replies
+ * resolve to the SAME conversation (the thread Sym opened). Best-effort
+ * client-side key; `@sym/kernel` (S2) may canonicalize it against DB state.
  */
 function deriveConversationId(input: SlackTurnInput): ConversationId {
   const base = `${input.workspaceId}:${input.channelId}`;
-  const key = input.threadTs ? `${base}:${input.threadTs}` : base;
+  const thread = effectiveThreadTs(input);
+  const key = thread ? `${base}:${thread}` : base;
   return key as ConversationId;
 }
 
@@ -176,6 +190,7 @@ function generateTurnId(): TurnId {
  * The kernel (S2) should validate and persist the resulting Turn.
  */
 export function slackTurnInputToTurn(input: SlackTurnInput): Turn {
+  const thread = effectiveThreadTs(input);
   return {
     id: generateTurnId(),
     workspaceId: input.workspaceId,
@@ -185,6 +200,6 @@ export function slackTurnInputToTurn(input: SlackTurnInput): Turn {
     channelId: input.channelId,
     text: input.text,
     receivedAt: new Date(),
-    ...optionalThreadTs(input.threadTs),
+    ...(thread !== undefined ? { threadTs: thread } : {}),
   };
 }
