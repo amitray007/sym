@@ -74,6 +74,9 @@ importers:
       '@sym/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@sym/ext-mcp':
+        specifier: workspace:*
+        version: link:../../packages/ext/mcp
       '@sym/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel

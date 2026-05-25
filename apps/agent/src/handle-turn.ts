@@ -2,6 +2,7 @@ import { markdownBlock, receiptToContextBlock, threadToHistory } from '@sym/adap
 import { ToolRegistry, buildDefaultSoulCascade, runLoop } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
+import { compositeDispatcher, loadConnectorRegistry } from './connectors.js';
 import {
   ensureConversation,
   loadHistory,
@@ -283,44 +284,55 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   await persist('recordUserMessage', () => recordUserMessage(deps.db, turn));
 
   const cascade = buildDefaultSoulCascade();
-  const registry = new ToolRegistry(
-    createBuiltinDispatcher({
-      slackClient: deps.slackClient,
-      botUserId: deps.botUserId,
-      ...(deps.audit !== undefined ? { audit: deps.audit } : {}),
-    }),
-  );
-
-  // Threaded turns: try streaming; fall through to postMessage only if it fails.
-  if (turn.threadTs !== undefined) {
-    const streamed = await streamReply(turn, deps, { history, cascade, registry });
-    if (streamed) return;
-  }
-
-  // Non-threaded or stream fallback: run the loop and post normally.
-  const reply = await runLoop(turn, deps.provider, registry, cascade, {
-    model: deps.model,
-    history,
+  const builtin = createBuiltinDispatcher({
+    slackClient: deps.slackClient,
+    botUserId: deps.botUserId,
+    ...(deps.audit !== undefined ? { audit: deps.audit } : {}),
   });
-
-  const blocks = [markdownBlock(reply.markdown), receiptToContextBlock(reply.receipt)];
-  const posted = await deps.slackClient.chatPostMessage({
-    channel: turn.channelId,
-    text: reply.markdown,
-    blocks,
-    // Reply in-thread when the turn is already threaded; top-level otherwise.
-    ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),
+  const mcp = await loadConnectorRegistry({
+    db: deps.db,
+    workspaceId: turn.workspaceId,
+    requester: turn.requester,
+    ...(deps.audit !== undefined ? { audit: deps.audit } : {}),
   });
+  const registry = new ToolRegistry(compositeDispatcher(builtin, mcp));
 
-  await persist('recordAssistantMessage', () =>
-    recordAssistantMessage(deps.db, {
-      workspaceId: turn.workspaceId,
-      conversationId: turn.conversationId,
-      markdown: reply.markdown,
+  try {
+    // Threaded turns: try streaming; fall through to postMessage only if it fails.
+    if (turn.threadTs !== undefined) {
+      const streamed = await streamReply(turn, deps, { history, cascade, registry });
+      if (streamed) return;
+    }
+
+    // Non-threaded or stream fallback: run the loop and post normally.
+    const reply = await runLoop(turn, deps.provider, registry, cascade, {
+      model: deps.model,
+      history,
+    });
+
+    const blocks = [markdownBlock(reply.markdown), receiptToContextBlock(reply.receipt)];
+    const posted = await deps.slackClient.chatPostMessage({
+      channel: turn.channelId,
+      text: reply.markdown,
       blocks,
-      slackTs: posted.ts,
-    }),
-  );
+      // Reply in-thread when the turn is already threaded; top-level otherwise.
+      ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),
+    });
 
-  await auditTurnComplete(deps.audit, turn, reply.receipt);
+    await persist('recordAssistantMessage', () =>
+      recordAssistantMessage(deps.db, {
+        workspaceId: turn.workspaceId,
+        conversationId: turn.conversationId,
+        markdown: reply.markdown,
+        blocks,
+        slackTs: posted.ts,
+      }),
+    );
+
+    await auditTurnComplete(deps.audit, turn, reply.receipt);
+  } finally {
+    await mcp?.close().catch(() => {
+      /* best-effort: connector close errors must not surface */
+    });
+  }
 }
