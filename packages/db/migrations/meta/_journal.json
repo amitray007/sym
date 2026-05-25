@@ -8,6 +8,13 @@
       "when": 1779563854494,
       "tag": "0000_daffy_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779724598451,
+      "tag": "0001_hot_gateway",
+      "breakpoints": true
     }
   ]
 }

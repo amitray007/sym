@@ -18,6 +18,9 @@ import { workspaces } from './workspaces.js';
 
 export const mcpTransportEnum = pgEnum('mcp_transport', ['http', 'stdio']);
 
+/** How a connector authenticates: open / workspace-shared token / per-user OAuth. */
+export const connectorAuthModeEnum = pgEnum('connector_auth_mode', ['none', 'static', 'oauth']);
+
 /**
  * Per-workspace tunables. Key-value to avoid migration churn on every new
  * toggle (D-DB-3: dotted keys, e.g. `memory.retention_days.channel`). Values
@@ -92,6 +95,8 @@ export const mcpConfigs = pgTable(
       .default(sql`'{}'::text[]`),
     envJson: encryptedText('env_json'),
     oauthConfigJson: jsonb('oauth_config_json'),
+    /** Auth strategy for this connector (none | static workspace token | per-user oauth). */
+    authMode: connectorAuthModeEnum('auth_mode').notNull().default('none'),
     enabled: boolean('enabled').notNull().default(true),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
