@@ -247,7 +247,9 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   await persist('recordUserMessage', () => recordUserMessage(deps.db, turn));
 
   const cascade = buildDefaultSoulCascade();
-  const registry = new ToolRegistry(createBuiltinDispatcher());
+  const registry = new ToolRegistry(
+    createBuiltinDispatcher({ slackClient: deps.slackClient, botUserId: deps.botUserId }),
+  );
 
   // Threaded turns: try streaming; fall through to postMessage only if it fails.
   if (turn.threadTs !== undefined) {
