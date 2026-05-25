@@ -8,6 +8,8 @@ import type {
   PostMessageResult,
   SlackClient,
   SlackThreadMessage,
+  StartStreamParams,
+  StreamHandle,
 } from '@sym/adapter-slack';
 import type {
   ChatMessage,
@@ -67,6 +69,21 @@ class MockSlackClient implements SlackClient {
   }
   async conversationsReplies(): Promise<ConversationsRepliesResult> {
     return { messages: this.replies };
+  }
+  async assistantThreadsSetSuggestedPrompts(): Promise<void> {
+    /* no-op mock */
+  }
+  async assistantThreadsSetTitle(): Promise<void> {
+    /* no-op mock */
+  }
+  async chatStartStream(params: StartStreamParams): Promise<StreamHandle> {
+    return { channel: params.channel, ts: '111.stream' as SlackThreadTs };
+  }
+  async chatAppendStream(): Promise<void> {
+    /* no-op mock */
+  }
+  async chatStopStream(): Promise<void> {
+    /* no-op mock */
   }
 }
 

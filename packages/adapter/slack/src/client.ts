@@ -67,6 +67,60 @@ export interface ConversationsRepliesResult {
   messages: SlackThreadMessage[];
 }
 
+// --- Assistant container (Agents & AI Apps) --------------------------------
+
+export interface SuggestedPrompt {
+  /** Label shown on the prompt button. */
+  title: string;
+  /** Message sent as the user when the prompt is clicked. */
+  message: string;
+}
+
+export interface SetSuggestedPromptsParams {
+  channelId: SlackChannelId;
+  threadTs: SlackThreadTs;
+  prompts: SuggestedPrompt[];
+  /** Optional heading shown above the prompts. */
+  title?: string;
+}
+
+export interface SetTitleParams {
+  channelId: SlackChannelId;
+  threadTs: SlackThreadTs;
+  title: string;
+}
+
+// --- Response streaming (chat.startStream family) --------------------------
+
+export interface StartStreamParams {
+  channel: SlackChannelId;
+  threadTs: SlackThreadTs;
+  /** Required when streaming into a channel (not a DM / assistant thread). */
+  recipientUserId?: SlackUserId;
+  recipientTeamId?: string;
+  /** Optional text to seed the stream with. */
+  markdownText?: string;
+}
+
+/** Handle to an in-flight stream — pass to append/stop. */
+export interface StreamHandle {
+  channel: SlackChannelId;
+  ts: SlackThreadTs;
+}
+
+export interface AppendStreamParams {
+  channel: SlackChannelId;
+  ts: SlackThreadTs;
+  markdownText: string;
+}
+
+export interface StopStreamParams {
+  channel: SlackChannelId;
+  ts: SlackThreadTs;
+  /** Block Kit rendered at the bottom once the stream finalizes (e.g. receipt). */
+  blocks?: unknown[];
+}
+
 // ---------------------------------------------------------------------------
 // SlackClient interface
 // ---------------------------------------------------------------------------
@@ -83,6 +137,16 @@ export interface SlackClient {
   assistantThreadsSetStatus(params: SetStatusParams): Promise<void>;
   /** Read a thread (root + replies), oldest-first, for in-thread context. */
   conversationsReplies(params: ConversationsRepliesParams): Promise<ConversationsRepliesResult>;
+  /** Set the assistant thread's suggested prompts (shown when the panel opens). */
+  assistantThreadsSetSuggestedPrompts(params: SetSuggestedPromptsParams): Promise<void>;
+  /** Set the assistant thread's title. */
+  assistantThreadsSetTitle(params: SetTitleParams): Promise<void>;
+  /** Begin a streamed reply; returns a handle for append/stop. */
+  chatStartStream(params: StartStreamParams): Promise<StreamHandle>;
+  /** Append a markdown chunk to an in-flight stream. */
+  chatAppendStream(params: AppendStreamParams): Promise<void>;
+  /** Finalize a stream, optionally adding Block Kit at the bottom. */
+  chatStopStream(params: StopStreamParams): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------

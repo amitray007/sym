@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { WebApiSlackClient } from './slack-client.js';
 
-import type { SlackChannelId, SlackThreadTs } from '@sym/contracts';
+import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
 
 const CHANNEL = 'C1' as SlackChannelId;
 const ROOT = '100.1' as SlackThreadTs;
@@ -103,5 +103,88 @@ describe('WebApiSlackClient.conversationsReplies', () => {
     await expect(client.conversationsReplies({ channel: CHANNEL, ts: ROOT })).rejects.toThrow(
       'missing_scope',
     );
+  });
+});
+
+describe('WebApiSlackClient assistant + streaming methods', () => {
+  it('startStream returns the stream handle and omits recipient_* for DMs', async () => {
+    const fetchFn = mockFetch([{ ok: true, channel: 'D1', ts: '500.1' }]);
+    const client = new WebApiSlackClient('xoxb-test');
+
+    const handle = await client.chatStartStream({
+      channel: 'D1' as SlackChannelId,
+      threadTs: ROOT,
+    });
+
+    expect(handle).toEqual({ channel: 'D1', ts: '500.1' });
+    const body = callBody(fetchFn, 0);
+    expect(body['thread_ts']).toBe('100.1');
+    expect(body['recipient_user_id']).toBeUndefined();
+    expect(body['recipient_team_id']).toBeUndefined();
+  });
+
+  it('startStream forwards recipient_* when streaming to a channel', async () => {
+    const fetchFn = mockFetch([{ ok: true, channel: 'C1', ts: '500.2' }]);
+    const client = new WebApiSlackClient('xoxb-test');
+
+    await client.chatStartStream({
+      channel: CHANNEL,
+      threadTs: ROOT,
+      recipientUserId: 'U1' as SlackUserId,
+      recipientTeamId: 'T1',
+    });
+
+    const body = callBody(fetchFn, 0);
+    expect(body['recipient_user_id']).toBe('U1');
+    expect(body['recipient_team_id']).toBe('T1');
+  });
+
+  it('appendStream sends ts + markdown_text', async () => {
+    const fetchFn = mockFetch([{ ok: true }]);
+    const client = new WebApiSlackClient('xoxb-test');
+
+    await client.chatAppendStream({
+      channel: CHANNEL,
+      ts: '500.1' as SlackThreadTs,
+      markdownText: 'chunk',
+    });
+
+    expect(callBody(fetchFn, 0)).toMatchObject({ ts: '500.1', markdown_text: 'chunk' });
+  });
+
+  it('stopStream attaches bottom blocks when provided', async () => {
+    const fetchFn = mockFetch([{ ok: true }]);
+    const client = new WebApiSlackClient('xoxb-test');
+
+    await client.chatStopStream({
+      channel: CHANNEL,
+      ts: '500.1' as SlackThreadTs,
+      blocks: [{ type: 'context' }],
+    });
+
+    expect(callBody(fetchFn, 0)['blocks']).toEqual([{ type: 'context' }]);
+  });
+
+  it('setSuggestedPrompts and setTitle use channel_id/thread_ts', async () => {
+    const fetchFn = mockFetch([{ ok: true }, { ok: true }]);
+    const client = new WebApiSlackClient('xoxb-test');
+
+    await client.assistantThreadsSetSuggestedPrompts({
+      channelId: 'D1' as SlackChannelId,
+      threadTs: ROOT,
+      prompts: [{ title: 'Catch me up', message: 'Summarize this thread' }],
+    });
+    await client.assistantThreadsSetTitle({
+      channelId: 'D1' as SlackChannelId,
+      threadTs: ROOT,
+      title: 'Migration risks',
+    });
+
+    expect(callBody(fetchFn, 0)).toMatchObject({
+      channel_id: 'D1',
+      thread_ts: '100.1',
+      prompts: [{ title: 'Catch me up', message: 'Summarize this thread' }],
+    });
+    expect(callBody(fetchFn, 1)).toMatchObject({ channel_id: 'D1', title: 'Migration risks' });
   });
 });

@@ -17,6 +17,9 @@ export const BOT_SCOPES = [
   'im:read',
   'commands',
   'users:read',
+  // Agents & AI Apps: assistant container (suggested prompts, title, status).
+  // Streaming (chat.startStream family) rides on chat:write above.
+  'assistant:write',
 ];
 
 /** CSRF state token validity. */

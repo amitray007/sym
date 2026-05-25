@@ -1,13 +1,19 @@
 import type {
+  AppendStreamParams,
   ConversationsRepliesParams,
   ConversationsRepliesResult,
   PostMessageParams,
   PostMessageResult,
   ReactionsAddParams,
   SetStatusParams,
+  SetSuggestedPromptsParams,
+  SetTitleParams,
   SlackApiError,
   SlackClient,
   SlackThreadMessage,
+  StartStreamParams,
+  StopStreamParams,
+  StreamHandle,
   UpdateMessageParams,
 } from '@sym/adapter-slack';
 import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
@@ -153,5 +159,56 @@ export class WebApiSlackClient implements SlackClient {
     } while (cursor !== undefined && messages.length < ceiling);
 
     return { messages };
+  }
+
+  async assistantThreadsSetSuggestedPrompts(params: SetSuggestedPromptsParams): Promise<void> {
+    await this.call('assistant.threads.setSuggestedPrompts', {
+      channel_id: params.channelId,
+      thread_ts: params.threadTs,
+      prompts: params.prompts,
+      ...(params.title !== undefined ? { title: params.title } : {}),
+    });
+  }
+
+  async assistantThreadsSetTitle(params: SetTitleParams): Promise<void> {
+    await this.call('assistant.threads.setTitle', {
+      channel_id: params.channelId,
+      thread_ts: params.threadTs,
+      title: params.title,
+    });
+  }
+
+  async chatStartStream(params: StartStreamParams): Promise<StreamHandle> {
+    const json = await this.call('chat.startStream', {
+      channel: params.channel,
+      thread_ts: params.threadTs,
+      ...(params.recipientUserId !== undefined
+        ? { recipient_user_id: params.recipientUserId }
+        : {}),
+      ...(params.recipientTeamId !== undefined
+        ? { recipient_team_id: params.recipientTeamId }
+        : {}),
+      ...(params.markdownText !== undefined ? { markdown_text: params.markdownText } : {}),
+    });
+    return {
+      channel: (json.channel ?? params.channel) as SlackChannelId,
+      ts: (json.ts ?? '') as SlackThreadTs,
+    };
+  }
+
+  async chatAppendStream(params: AppendStreamParams): Promise<void> {
+    await this.call('chat.appendStream', {
+      channel: params.channel,
+      ts: params.ts,
+      markdown_text: params.markdownText,
+    });
+  }
+
+  async chatStopStream(params: StopStreamParams): Promise<void> {
+    await this.call('chat.stopStream', {
+      channel: params.channel,
+      ts: params.ts,
+      ...(params.blocks !== undefined ? { blocks: params.blocks } : {}),
+    });
   }
 }
