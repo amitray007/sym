@@ -15,6 +15,14 @@ export const workspaces = pgTable('workspaces', {
   id: text('id').primaryKey().$defaultFn(uuidv7),
   slackTeamId: text('slack_team_id').notNull().unique(),
   name: text('name').notNull(),
+  /**
+   * The single human this Sym works for — the Slack user who first installed it
+   * (captured from OAuth `authed_user.id`). Set once on first install, never
+   * overwritten on re-auth. Nullable only so the backfill migration can run; the
+   * agent's owner gate fails closed (ignores every turn) if it's ever null.
+   * Source of truth for "Sym acts only on the owner's requests".
+   */
+  ownerSlackUserId: text('owner_slack_user_id'),
   timezone: text('timezone'),
   status: workspaceStatusEnum('status').notNull().default('active'),
   createdAt: createdAt(),

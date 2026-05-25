@@ -13,6 +13,7 @@ import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { handleTurn } from './handle-turn.js';
 import { SingleTenantError, installWorkspace } from './install.js';
+import { OWNER_DECLINE_MESSAGE, checkOwnerAccess, denyReason } from './owner-gate.js';
 import {
   buildAuthorizeUrl,
   exchangeCode,
@@ -97,6 +98,51 @@ export function createServer(deps: ServerDeps): Hono {
     });
     if (!input) return; // an event we don't act on
     const turn = slackTurnInputToTurn(input);
+
+    // Single-owner gate: Sym acts only on its owner's requests. Non-owner turns
+    // are dropped — silently in channels (Sym stays invisible to the rest of the
+    // team), with one polite line in a DM (silence in a 1:1 just looks broken).
+    if (checkOwnerAccess(turn.requester, ctx.ownerSlackUserId) === 'deny') {
+      try {
+        await append(db, {
+          workspaceId: ctx.workspaceId,
+          kind: 'app.turn.denied',
+          actorKind: 'slack_user',
+          actorId: turn.requester,
+          targetKind: 'workspace',
+          targetId: ctx.workspaceId,
+          payload: {
+            entrySurface: turn.entrySurface,
+            reason: denyReason(ctx.ownerSlackUserId),
+            ...(turn.channelId !== undefined ? { channelId: turn.channelId } : {}),
+          },
+        });
+      } catch (auditErr) {
+        console.error('[agent] denied-turn audit append failed', auditErr);
+      }
+
+      if (
+        turn.entrySurface === 'dm' &&
+        ctx.ownerSlackUserId !== null &&
+        turn.channelId !== undefined
+      ) {
+        try {
+          await ctx.slackClient.chatPostMessage({
+            channel: turn.channelId,
+            text: OWNER_DECLINE_MESSAGE,
+            ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),
+          });
+        } catch (postErr) {
+          console.warn('[agent] owner-gate decline post failed (continuing):', postErr);
+        }
+      } else if (ctx.ownerSlackUserId === null) {
+        console.warn(
+          `[agent] owner gate: no owner set for workspace ${ctx.workspaceId}; ignoring turn from ${turn.requester}`,
+        );
+      }
+      return;
+    }
+
     const viewedChannelId =
       turn.channelId !== undefined && turn.threadTs !== undefined
         ? assistantContext.lookup(turn.channelId, turn.threadTs)

@@ -15,6 +15,11 @@ export interface WorkspaceContext {
   workspaceId: WorkspaceId;
   botUserId: SlackUserId;
   slackTeamId: string;
+  /**
+   * The Slack user Sym works for. Null only if an install predates the owner
+   * backfill — the owner gate treats null as "deny everyone" (fail closed).
+   */
+  ownerSlackUserId: SlackUserId | null;
   provider: ProviderInterface;
   model: string;
   slackClient: SlackClient;
@@ -63,6 +68,7 @@ export async function loadWorkspaceContext(
     workspaceId: workspace.id as WorkspaceId,
     botUserId: install.botUserId as SlackUserId,
     slackTeamId: workspace.slackTeamId,
+    ownerSlackUserId: workspace.ownerSlackUserId as SlackUserId | null,
     provider,
     model: config.modelChat,
     slackClient: new WebApiSlackClient(install.botAccessToken),

@@ -15,6 +15,13 @@
       "when": 1779724598451,
       "tag": "0001_hot_gateway",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779731704700,
+      "tag": "0002_pretty_morph",
+      "breakpoints": true
     }
   ]
 }

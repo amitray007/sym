@@ -60,6 +60,10 @@ export async function installWorkspace(
         id: workspaceId,
         slackTeamId: result.teamId,
         name: result.teamName,
+        // The first installer is the owner. Captured once here and never
+        // overwritten on re-auth — a re-install (even by a different user) must
+        // not silently hand over ownership of a single-owner Sym.
+        ownerSlackUserId: result.installerUserId,
       });
     }
 
