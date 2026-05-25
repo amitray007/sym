@@ -44,7 +44,7 @@ const NAV: NavSection[] = [
       { href: '/install', label: 'Install', icon: Plug },
       { href: '/acl', label: 'Access Control', icon: Lock },
       { href: '/provider', label: 'Provider', icon: Cpu },
-      { href: '/mcp', label: 'MCP', icon: Globe },
+      { href: '/connectors', label: 'Connectors', icon: Globe },
       { href: '/skills', label: 'Skills', icon: Zap },
     ],
   },
