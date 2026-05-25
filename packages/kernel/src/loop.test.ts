@@ -260,6 +260,76 @@ describe('runLoop', () => {
     });
   });
 
+  describe('onDelta callback', () => {
+    it('calls onDelta with each content delta in order, and reply.markdown equals concatenation', async () => {
+      const provider = new FakeProvider([
+        makeContentChunk('Hello'),
+        makeContentChunk(', '),
+        makeFinalChunk('world!'),
+      ]);
+
+      const deltas: string[] = [];
+      const reply = await runLoop(
+        makeTurn(),
+        provider,
+        new ToolRegistry(),
+        buildDefaultSoulCascade(),
+        {
+          model: 'test-model',
+          onDelta: (delta) => {
+            deltas.push(delta);
+          },
+        },
+      );
+
+      expect(deltas).toEqual(['Hello', ', ', 'world!']);
+      expect(reply.markdown).toBe(deltas.join(''));
+    });
+
+    it('does not call onDelta for chunks without content', async () => {
+      const provider = new FakeProvider([
+        makeContentChunk('text'),
+        // chunk with no content (e.g. finish chunk)
+        {
+          delta: {},
+          finishReason: 'stop',
+          usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        },
+      ]);
+
+      const deltas: string[] = [];
+      const reply = await runLoop(
+        makeTurn(),
+        provider,
+        new ToolRegistry(),
+        buildDefaultSoulCascade(),
+        {
+          model: 'test-model',
+          onDelta: (delta) => {
+            deltas.push(delta);
+          },
+        },
+      );
+
+      expect(deltas).toEqual(['text']);
+      expect(reply.markdown).toBe('text');
+    });
+
+    it('existing callers without onDelta are unaffected', async () => {
+      const provider = new FakeProvider([makeContentChunk('Hello'), makeFinalChunk(' world')]);
+
+      const reply = await runLoop(
+        makeTurn(),
+        provider,
+        new ToolRegistry(),
+        buildDefaultSoulCascade(),
+        { model: 'test-model' },
+      );
+
+      expect(reply.markdown).toBe('Hello world');
+    });
+  });
+
   describe('AbortSignal propagation', () => {
     it('propagates the signal to the provider', async () => {
       let capturedSignal: AbortSignal | undefined;

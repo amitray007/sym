@@ -26,6 +26,12 @@ export interface LoopOptions {
   history?: ChatMessage[];
   /** AbortSignal to propagate cancellation to the provider. */
   signal?: AbortSignal;
+  /**
+   * Called with each text delta as it streams, for live output (e.g. Slack streaming).
+   * NOTE: `applyToneRewrite` is currently a no-op stub, so the streamed draft equals
+   * the final `reply.markdown` — callers can concatenate deltas to reconstruct it.
+   */
+  onDelta?: (delta: string) => void | Promise<void>;
 }
 
 /**
@@ -121,6 +127,9 @@ export async function runLoop(
 
   for await (const chunk of provider.complete(completionReq, opts.signal)) {
     applyChunk(acc, chunk);
+    if (chunk.delta.content) {
+      await opts.onDelta?.(chunk.delta.content);
+    }
   }
 
   const draftMarkdown = acc.textParts.join('');
