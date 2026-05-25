@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
 
@@ -9,6 +9,7 @@ import type {
   SlackThreadMessage,
   SlackThreadTs,
 } from '@sym/adapter-slack';
+import type { AppendInput } from '@sym/audit';
 import type {
   ConversationId,
   SlackChannelId,
@@ -362,6 +363,54 @@ describe('createBuiltinDispatcher', () => {
       if (result.ok) throw new Error('expected failure');
       expect(result.error.code).toBe('execution_failed');
       expect(result.error.message).toContain('thread_not_found');
+    });
+  });
+
+  describe('audit sink', () => {
+    it('emits app.tool.call then app.tool.result for get_current_time', async () => {
+      const auditCalls: AppendInput[] = [];
+      const audit = vi.fn((input: AppendInput) => {
+        auditCalls.push(input);
+        return Promise.resolve();
+      });
+
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+        audit,
+      });
+
+      const ctx = makeCtx();
+      const call = makeCall('get_current_time', {}, 'tc_test');
+      await dispatcher.dispatch(call, ctx);
+
+      // Two audit calls: one call event, one result event.
+      expect(audit).toHaveBeenCalledTimes(2);
+
+      const callEvent = auditCalls[0]!;
+      expect(callEvent.kind).toBe('app.tool.call');
+      expect(callEvent.workspaceId).toBe(ctx.workspaceId);
+      expect(callEvent.actorKind).toBe('slack_user');
+      expect(callEvent.actorId).toBe(ctx.requester);
+      expect(callEvent.targetKind).toBe('tool');
+      expect(callEvent.payload['toolName']).toBe('get_current_time');
+      expect(callEvent.payload['callId']).toBe('tc_test');
+
+      const resultEvent = auditCalls[1]!;
+      expect(resultEvent.kind).toBe('app.tool.result');
+      expect(resultEvent.payload['toolName']).toBe('get_current_time');
+      expect(resultEvent.payload['callId']).toBe('tc_test');
+      expect(resultEvent.payload['ok']).toBe(true);
+    });
+
+    it('does not call audit when audit dep is absent (existing tests stay green)', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+        // no audit
+      });
+      const result = await dispatcher.dispatch(makeCall('get_current_time'), makeCtx());
+      expect(result.ok).toBe(true);
     });
   });
 });

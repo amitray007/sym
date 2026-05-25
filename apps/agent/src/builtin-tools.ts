@@ -1,6 +1,7 @@
 import { threadToHistory } from '@sym/adapter-slack';
 
 import type { SlackClient, SlackThreadMessage } from '@sym/adapter-slack';
+import type { AppendInput } from '@sym/audit';
 import type {
   JsonSchema,
   SlackChannelId,
@@ -92,6 +93,8 @@ function formatTranscript(messages: SlackThreadMessage[], botUserId: SlackUserId
 export interface BuiltinToolDeps {
   slackClient: SlackClient;
   botUserId: SlackUserId;
+  /** Optional audit sink — best-effort; a failure must never block the tool. */
+  audit?: (input: AppendInput) => Promise<void>;
 }
 
 /**
@@ -107,81 +110,109 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
       return [GET_CURRENT_TIME_DESCRIPTOR, READ_CHANNEL_DESCRIPTOR, READ_THREAD_DESCRIPTOR];
     },
 
-    async dispatch(call: ToolCall, _ctx: ToolRuntimeContext): Promise<ToolResult> {
-      if (call.name === 'get_current_time') {
-        return { callId: call.id, ok: true, content: new Date().toISOString() };
-      }
+    async dispatch(call: ToolCall, ctx: ToolRuntimeContext): Promise<ToolResult> {
+      // Emit app.tool.call BEFORE execution — best-effort, never blocks dispatch.
+      deps
+        .audit?.({
+          workspaceId: ctx.workspaceId,
+          kind: 'app.tool.call',
+          actorKind: 'slack_user',
+          actorId: ctx.requester,
+          targetKind: 'tool',
+          payload: { toolName: call.name, callId: call.id },
+        })
+        .catch((_err: unknown) => {
+          /* swallow audit errors */
+        });
 
-      if (call.name === 'read_channel') {
+      let result: ToolResult;
+
+      if (call.name === 'get_current_time') {
+        result = { callId: call.id, ok: true, content: new Date().toISOString() };
+      } else if (call.name === 'read_channel') {
         const channelIdArg = call.arguments['channel_id'];
         if (typeof channelIdArg !== 'string' || channelIdArg.length === 0) {
-          return {
+          result = {
             callId: call.id,
             ok: false,
             error: { code: 'invalid_arguments', message: 'channel_id must be a non-empty string' },
           };
-        }
-        const limitArg = call.arguments['limit'];
-        const rawLimit = typeof limitArg === 'number' ? limitArg : 30;
-        const limit = Math.max(1, Math.min(100, rawLimit));
+        } else {
+          const limitArg = call.arguments['limit'];
+          const rawLimit = typeof limitArg === 'number' ? limitArg : 30;
+          const limit = Math.max(1, Math.min(100, rawLimit));
 
-        try {
-          const { messages } = await deps.slackClient.conversationsHistory({
-            channel: channelIdArg as SlackChannelId,
-            limit,
-          });
-          const transcript = formatTranscript(messages, deps.botUserId);
-          return { callId: call.id, ok: true, content: transcript };
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          return {
-            callId: call.id,
-            ok: false,
-            error: { code: 'execution_failed', message },
-          };
+          try {
+            const { messages } = await deps.slackClient.conversationsHistory({
+              channel: channelIdArg as SlackChannelId,
+              limit,
+            });
+            const transcript = formatTranscript(messages, deps.botUserId);
+            result = { callId: call.id, ok: true, content: transcript };
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            result = {
+              callId: call.id,
+              ok: false,
+              error: { code: 'execution_failed', message },
+            };
+          }
         }
-      }
-
-      if (call.name === 'read_thread') {
+      } else if (call.name === 'read_thread') {
         const channelIdArg = call.arguments['channel_id'];
         const threadTsArg = call.arguments['thread_ts'];
         if (typeof channelIdArg !== 'string' || channelIdArg.length === 0) {
-          return {
+          result = {
             callId: call.id,
             ok: false,
             error: { code: 'invalid_arguments', message: 'channel_id must be a non-empty string' },
           };
-        }
-        if (typeof threadTsArg !== 'string' || threadTsArg.length === 0) {
-          return {
+        } else if (typeof threadTsArg !== 'string' || threadTsArg.length === 0) {
+          result = {
             callId: call.id,
             ok: false,
             error: { code: 'invalid_arguments', message: 'thread_ts must be a non-empty string' },
           };
+        } else {
+          try {
+            const { messages } = await deps.slackClient.conversationsReplies({
+              channel: channelIdArg as SlackChannelId,
+              ts: threadTsArg as SlackThreadTs,
+            });
+            const transcript = formatTranscript(messages, deps.botUserId);
+            result = { callId: call.id, ok: true, content: transcript };
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            result = {
+              callId: call.id,
+              ok: false,
+              error: { code: 'execution_failed', message },
+            };
+          }
         }
-
-        try {
-          const { messages } = await deps.slackClient.conversationsReplies({
-            channel: channelIdArg as SlackChannelId,
-            ts: threadTsArg as SlackThreadTs,
-          });
-          const transcript = formatTranscript(messages, deps.botUserId);
-          return { callId: call.id, ok: true, content: transcript };
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          return {
-            callId: call.id,
-            ok: false,
-            error: { code: 'execution_failed', message },
-          };
-        }
+      } else {
+        result = {
+          callId: call.id,
+          ok: false,
+          error: { code: 'not_found', message: `Unknown tool: ${call.name}` },
+        };
       }
 
-      return {
-        callId: call.id,
-        ok: false,
-        error: { code: 'not_found', message: `Unknown tool: ${call.name}` },
-      };
+      // Emit app.tool.result AFTER execution — best-effort, never blocks dispatch.
+      deps
+        .audit?.({
+          workspaceId: ctx.workspaceId,
+          kind: 'app.tool.result',
+          actorKind: 'slack_user',
+          actorId: ctx.requester,
+          targetKind: 'tool',
+          payload: { toolName: call.name, callId: call.id, ok: result.ok },
+        })
+        .catch((_err: unknown) => {
+          /* swallow audit errors */
+        });
+
+      return result;
     },
   };
 }

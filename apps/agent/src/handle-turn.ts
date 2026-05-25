@@ -10,9 +10,11 @@ import {
 } from './persistence.js';
 
 import type { AppendStreamParams, SlackClient, StartStreamParams } from '@sym/adapter-slack';
+import type { AppendInput } from '@sym/audit';
 import type {
   ChatMessage,
   ProviderInterface,
+  Reply,
   SlackChannelId,
   SlackThreadTs,
   SlackUserId,
@@ -32,6 +34,8 @@ export interface HandleTurnDeps {
   slackTeamId: string;
   /** The channel the user is currently viewing in Slack's assistant panel, if known. */
   viewedChannelId?: string;
+  /** Optional audit sink — best-effort; a failure must never block the turn. */
+  audit?: (input: AppendInput) => Promise<void>;
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
@@ -84,6 +88,35 @@ async function persist(label: string, fn: () => Promise<void>): Promise<void> {
     await fn();
   } catch (err) {
     console.warn(`[agent] persist ${label} failed (continuing):`, err);
+  }
+}
+
+/** Emit a turn-completion audit event — best-effort; never throws into the turn path. */
+async function auditTurnComplete(
+  audit: HandleTurnDeps['audit'],
+  turn: Turn,
+  receipt: Reply['receipt'],
+): Promise<void> {
+  if (!audit) return;
+  try {
+    await audit({
+      workspaceId: turn.workspaceId,
+      kind: 'app.turn.complete',
+      actorKind: 'slack_user',
+      actorId: turn.requester,
+      targetKind: 'conversation',
+      targetId: turn.conversationId,
+      payload: {
+        model: receipt.model,
+        toolsInvoked: receipt.toolsInvoked,
+        ...(receipt.usage !== undefined ? { usage: receipt.usage } : {}),
+        ...(receipt.durationMs !== undefined ? { durationMs: receipt.durationMs } : {}),
+        entrySurface: turn.entrySurface,
+        ...(turn.channelId !== undefined ? { channelId: turn.channelId } : {}),
+      },
+    });
+  } catch (err) {
+    console.warn('[agent] turn audit failed (continuing):', err);
   }
 }
 
@@ -183,6 +216,9 @@ async function streamReply(
       slackTs: streamTs,
     }),
   );
+
+  await auditTurnComplete(deps.audit, turn, reply.receipt);
+
   return true;
 }
 
@@ -248,7 +284,11 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
 
   const cascade = buildDefaultSoulCascade();
   const registry = new ToolRegistry(
-    createBuiltinDispatcher({ slackClient: deps.slackClient, botUserId: deps.botUserId }),
+    createBuiltinDispatcher({
+      slackClient: deps.slackClient,
+      botUserId: deps.botUserId,
+      ...(deps.audit !== undefined ? { audit: deps.audit } : {}),
+    }),
   );
 
   // Threaded turns: try streaming; fall through to postMessage only if it fails.
@@ -281,4 +321,6 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
       slackTs: posted.ts,
     }),
   );
+
+  await auditTurnComplete(deps.audit, turn, reply.receipt);
 }
