@@ -37,6 +37,10 @@ interface SlackEventPayload {
   channel: string;
   thread_ts?: string;
   text: string;
+  /** Set when the message was posted by a bot/app (incl. Sym itself). */
+  bot_id?: string;
+  /** Slack message subtype (e.g. `bot_message`, `message_changed`); absent for plain user messages. */
+  subtype?: string;
   /** Present on assistant_thread_started / assistant_thread_context_changed. */
   assistant_thread?: SlackAssistantThread;
 }
@@ -96,7 +100,7 @@ function optionalThreadTs(
  * Returns `null` for payloads we do not act on (e.g. `reaction_added`).
  */
 export function normalizeSlackEvent(opts: NormalizeOpts): SlackTurnInput | null {
-  const { event: raw, workspaceId } = opts;
+  const { event: raw, workspaceId, botUserId } = opts;
 
   // --- event_callback: app_mention or DM message ---
   if (raw.type === 'event_callback' && raw.event) {
@@ -117,11 +121,17 @@ export function normalizeSlackEvent(opts: NormalizeOpts): SlackTurnInput | null 
     }
 
     if (e.type === 'message' && e.channel_type === 'im') {
+      // Ignore the bot's OWN messages (and Slack edit/delete subtypes). Without
+      // this, Sym's posted/streamed reply re-enters as a new message.im event and
+      // it replies to itself forever (the event_id dedup can't catch it — each
+      // echo is a distinct event). Canonical Slack rule: skip your own bot events.
+      if (e.bot_id !== undefined || e.subtype !== undefined) return null;
+      if (e.user === undefined || e.user === botUserId) return null;
       return {
         workspaceId,
         eventId,
         entrySurface: 'dm',
-        requester: (e.user ?? '') as SlackUserId,
+        requester: e.user as SlackUserId,
         channelId: e.channel as SlackChannelId,
         ts: e.ts as SlackThreadTs,
         text: e.text,
