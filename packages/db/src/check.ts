@@ -36,7 +36,7 @@ async function main(): Promise<void> {
       .where(eq(slackInstalls.workspaceId, w.id));
     console.info(
       `  • ${w.name} (${w.slackTeamId}) id=${w.id} status=${w.status} ` +
-        `admins=${admins.length} aclModes=${modes.length}`,
+        `owner=${w.ownerSlackUserId ?? '(unset)'} admins=${admins.length} aclModes=${modes.length}`,
     );
     for (const install of installs) {
       // botAccessToken is decrypted by encryptedText.fromDriver on read.
