@@ -8,10 +8,11 @@ import { SingleTenantError, installWorkspace } from './install.js';
 import type { SlackOAuthResult } from './slack-oauth.js';
 import type { Database } from '@sym/db';
 
-// DB-gated. Single-tenant means one workspace, so this suite OWNS the workspace
-// table: it clears it on entry and exit. Re-run `pnpm db:seed` afterward to
-// restore the dev fixture.
-const databaseUrl = process.env['DATABASE_URL'];
+// DESTRUCTIVE + DB-gated. Single-tenant means one workspace, so this suite OWNS
+// (and unconditionally wipes) the workspace table. It therefore runs ONLY
+// against a dedicated, disposable database named in TEST_DATABASE_URL — never
+// the dev/prod DATABASE_URL (running it there destroys the live install).
+const databaseUrl = process.env['TEST_DATABASE_URL'];
 const suite = databaseUrl ? describe : describe.skip;
 
 function makeResult(over: Partial<SlackOAuthResult> = {}): SlackOAuthResult {

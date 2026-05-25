@@ -13,7 +13,7 @@ import { CURRENT_CHECKPOINT_VERSION, restoreCheckpoint, saveCheckpoint } from '.
 import type { ConversationId, SliceId, WorkspaceId } from '@sym/contracts';
 import type { Database } from '@sym/db';
 
-const databaseUrl = process.env['DATABASE_URL'];
+const databaseUrl = process.env['TEST_DATABASE_URL'];
 const suite = databaseUrl ? describe : describe.skip;
 
 suite('@sym/tasks checkpoint save/restore (integration)', () => {
