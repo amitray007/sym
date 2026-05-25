@@ -7,14 +7,20 @@ import type {
   ChatMessage,
   CompletionChunk,
   FinishReason,
+  JsonObject,
   ProviderInterface,
   Reply,
   SoulCascade,
   SoulLayerKind,
+  ToolCall,
   ToolCallDelta,
+  ToolResult,
+  ToolRuntimeContext,
   Turn,
   Usage,
 } from '@sym/contracts';
+
+const MAX_TOOL_STEPS = 8;
 
 /**
  * Options for a single kernel loop invocation.
@@ -36,8 +42,7 @@ export interface LoopOptions {
 
 /**
  * Internal: accumulate streaming `CompletionChunk`s into a finalized text +
- * usage summary. Follows the turn-loop: for now no tools, so we collect text
- * only. When tools are wired (S5) this expands into a multi-step loop.
+ * usage summary.
  */
 interface StreamAccumulator {
   textParts: string[];
@@ -90,18 +95,66 @@ function applyToolCallDelta(acc: StreamAccumulator, delta: ToolCallDelta): void 
   if (delta.argumentsDelta !== undefined) b.argumentsParts.push(delta.argumentsDelta);
 }
 
+function parseArgs(s: string): JsonObject {
+  try {
+    const v: unknown = JSON.parse(s || '{}');
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      return v as JsonObject;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Finalize buffered tool call deltas into resolved ToolCall objects.
+ * Entries with an empty name are skipped (incomplete/malformed deltas).
+ */
+function finalizeToolCalls(acc: StreamAccumulator): ToolCall[] {
+  const calls: ToolCall[] = [];
+  // Iterate in index order (Map preserves insertion order).
+  for (const [, buf] of acc.toolCallBuffers) {
+    if (!buf.name) continue;
+    calls.push({
+      id: buf.id ?? '',
+      name: buf.name,
+      arguments: parseArgs(buf.argumentsParts.join('')),
+    });
+  }
+  return calls;
+}
+
+/**
+ * Serialize a ToolResult to a string for the `tool` role message content.
+ */
+function toolResultContent(result: ToolResult): string {
+  if (result.ok) {
+    return typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
+  }
+  return `Error [${result.error.code}]: ${result.error.message}`;
+}
+
+function addUsage(totals: Usage, step: Usage): void {
+  totals.promptTokens += step.promptTokens;
+  totals.completionTokens += step.completionTokens;
+  totals.totalTokens += step.totalTokens;
+}
+
 /**
  * `runLoop` — the thin agent loop.
  *
  * Ingest a `Turn`:
  *   1. Assemble `ChatMessage[]` (system + history + user turn with context prefix)
- *   2. Call `provider.complete()` and consume the stream
- *   3. Apply the tone-rewrite stub
- *   4. Build and return a `Reply` (with `Receipt`)
+ *   2. Run the provider in a bounded multi-step loop (up to MAX_TOOL_STEPS)
+ *   3. On each step: stream text deltas, detect tool calls, dispatch and feed results
+ *   4. Apply the tone-rewrite stub
+ *   5. Build and return a `Reply` (with `Receipt`)
  *
- * Tool calls in this version: with an empty registry, the provider receives
- * no tool schemas, so the model emits no tool calls. Any tool call deltas in
- * the stream are buffered but not dispatched (fail-closed per spec).
+ * Backward-compatible: when the registry is empty (`tools.length === 0`), the
+ * provider receives no tool schemas so the model cannot emit tool calls. The
+ * loop runs exactly one step and behaves identically to the prior single-pass
+ * implementation.
  *
  * Memory context: not yet wired (S7a stub — 0 memory hits).
  */
@@ -116,23 +169,80 @@ export async function runLoop(
   const history = opts.history ?? [];
 
   const systemContent = buildSystemPrompt(cascade);
-  const messages = assembleTurnMessages(systemContent, history, turn);
+  const messages: ChatMessage[] = assembleTurnMessages(systemContent, history, turn);
 
   const tools = registry.listTools();
+  const dispatcher = registry.getDispatcher();
 
-  const acc = makeAccumulator();
+  const draftParts: string[] = [];
+  const toolsInvoked: string[] = [];
+  const usageTotals: Usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  let sawUsage = false;
 
-  const completionReq =
-    tools.length > 0 ? { model: opts.model, messages, tools } : { model: opts.model, messages };
+  let step = 0;
+  while (true) {
+    const acc = makeAccumulator();
+    const req =
+      tools.length > 0 ? { model: opts.model, messages, tools } : { model: opts.model, messages };
 
-  for await (const chunk of provider.complete(completionReq, opts.signal)) {
-    applyChunk(acc, chunk);
-    if (chunk.delta.content) {
-      await opts.onDelta?.(chunk.delta.content);
+    for await (const chunk of provider.complete(req, opts.signal)) {
+      applyChunk(acc, chunk);
+      if (chunk.delta.content) {
+        draftParts.push(chunk.delta.content);
+        await opts.onDelta?.(chunk.delta.content);
+      }
     }
+
+    if (acc.usage !== undefined) {
+      addUsage(usageTotals, acc.usage);
+      sawUsage = true;
+    }
+
+    const stepText = acc.textParts.join('');
+    const calls = finalizeToolCalls(acc);
+    const wantsTools = acc.finishReason === 'tool_calls' || calls.length > 0;
+
+    if (!wantsTools || !dispatcher || step >= MAX_TOOL_STEPS) break;
+
+    // Append the assistant message that made the calls.
+    messages.push({
+      role: 'assistant',
+      content: stepText.length > 0 ? stepText : null,
+      toolCalls: calls,
+    });
+
+    const ctx: ToolRuntimeContext = {
+      workspaceId: turn.workspaceId,
+      conversationId: turn.conversationId,
+      ...(turn.channelId !== undefined ? { channelId: turn.channelId } : {}),
+      requester: turn.requester,
+      turnId: turn.id,
+    };
+
+    for (const call of calls) {
+      toolsInvoked.push(call.name);
+      let result: ToolResult;
+      try {
+        result = await dispatcher.dispatch(call, ctx);
+      } catch (err) {
+        result = {
+          callId: call.id,
+          ok: false,
+          error: { code: 'execution_failed', message: String(err) },
+        };
+      }
+      messages.push({
+        role: 'tool',
+        toolCallId: call.id,
+        name: call.name,
+        content: toolResultContent(result),
+      });
+    }
+
+    step++;
   }
 
-  const draftMarkdown = acc.textParts.join('');
+  const draftMarkdown = draftParts.join('');
   const durationMs = Date.now() - startMs;
 
   const toneResult = applyToneRewrite(cascade, draftMarkdown);
@@ -144,9 +254,9 @@ export async function runLoop(
     turn,
     model: opts.model,
     durationMs,
-    toolsInvoked: [] as string[],
+    toolsInvoked,
     soulLayersApplied,
-    ...(acc.usage !== undefined ? { usage: acc.usage } : {}),
+    ...(sawUsage ? { usage: usageTotals } : {}),
   };
   const receipt = buildReceipt(receiptParams);
 
