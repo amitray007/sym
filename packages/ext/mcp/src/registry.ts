@@ -4,16 +4,16 @@
  *
  * Responsibilities:
  *  - list(): aggregate all tools from configured MCP servers into ToolDescriptors.
- *  - dispatch(): route a ToolCall to the correct MCP server, execute via the
- *    sandbox SandboxContext, and audit every list + call.
+ *  - dispatch(): route a ToolCall to the correct MCP server, execute it, and
+ *    audit every list + call.
  *
  * Dispatch routing through the sandbox:
- *   The `ctx` (SandboxContext) carries the workspace identity and sandbox JWT.
- *   The actual MCP tool call runs here (host-side) — the sandbox runner is
- *   invoked when the MCP server requires a sandboxed process (stdio transport).
- *   For HTTP-transport MCP servers the request goes through the egress proxy
- *   that injects credentials; the SandboxContext is used to derive the actor
- *   ID for audit purposes.
+ *   The `ctx` (ToolRuntimeContext) carries the workspace + requester and, for
+ *   sandboxed tools, the sandbox identity (`ctx.sandbox`). The actual MCP tool
+ *   call runs here (host-side) — the sandbox runner is invoked when the MCP
+ *   server requires a sandboxed process (stdio transport). For HTTP-transport
+ *   MCP servers the request goes through the egress proxy that injects
+ *   credentials; `ctx` derives the actor ID for audit purposes.
  *
  * Audit events emitted:
  *   `app.tool.call`  — on every dispatch() call (before execution).
@@ -29,12 +29,12 @@ import type { McpServerConfig, McpToolInfo, McpTransport } from './types.js';
 import type { AppendInput } from '@sym/audit';
 import type {
   AuditEvent,
-  SandboxContext,
   ToolCall,
   ToolDescriptor,
   ToolDispatcher,
   ToolError,
   ToolResult,
+  ToolRuntimeContext,
 } from '@sym/contracts';
 
 // ---------------------------------------------------------------------------
@@ -109,11 +109,11 @@ export class McpToolRegistry implements ToolDispatcher {
    * slug from the call name, find the matching server, and forward to that
    * server's McpClient.
    *
-   * The SandboxContext is used for audit actor information.  All provider
-   * HTTP traffic is routed through the sandbox egress proxy (which handles
-   * credential injection) when the sandbox network policy is active.
+   * `ctx` carries audit actor info (requester + optional sandbox identity). All
+   * provider HTTP traffic is routed through the sandbox egress proxy (which
+   * handles credential injection) when the sandbox network policy is active.
    */
-  async dispatch(call: ToolCall, ctx: SandboxContext): Promise<ToolResult> {
+  async dispatch(call: ToolCall, ctx: ToolRuntimeContext): Promise<ToolResult> {
     // Emit app.tool.call audit event before execution.
     void this.emitAudit(ctx, 'app.tool.call', {
       toolName: call.name,
@@ -186,7 +186,7 @@ export class McpToolRegistry implements ToolDispatcher {
   }
 
   private async emitAudit(
-    ctx: SandboxContext,
+    ctx: ToolRuntimeContext,
     kind: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
@@ -194,9 +194,10 @@ export class McpToolRegistry implements ToolDispatcher {
       await this.auditFn(this.db, {
         workspaceId: ctx.workspaceId,
         kind,
-        actorKind: 'sandbox',
-        actorId: ctx.identity.sandboxId,
-        onBehalfOf: ctx.identity.requester,
+        // Sandboxed tools are attributed to the sandbox; in-process tools to the requester.
+        actorKind: ctx.sandbox ? 'sandbox' : 'slack_user',
+        actorId: ctx.sandbox?.sandboxId ?? ctx.requester,
+        onBehalfOf: ctx.requester,
         targetKind: 'tool',
         payload,
       });

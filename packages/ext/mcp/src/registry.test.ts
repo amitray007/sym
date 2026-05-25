@@ -11,6 +11,15 @@ import { McpToolRegistry } from './registry.js';
 import { StubMcpTransport } from './stub-server.js';
 
 import type { McpServerConfig } from './types.js';
+import type {
+  ConversationId,
+  SandboxId,
+  SandboxJwtId,
+  SlackUserId,
+  ToolRuntimeContext,
+  TurnId,
+  WorkspaceId,
+} from '@sym/contracts';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -31,14 +40,17 @@ const fakeDb = {} as Parameters<(typeof McpToolRegistry)['prototype']['connect']
   ? never
   : any;
 
-function makeSandboxCtx() {
+function makeRuntimeCtx(): ToolRuntimeContext {
   return {
-    workspaceId: 'ws-1' as `ws-${string}`,
-    identity: {
-      sandboxId: 'sbx-1' as `sbx-${string}`,
-      jti: 'jti-1' as `jti-${string}`,
-      requester: 'U123' as `U${string}`,
-      turnId: 'turn-1' as `turn-${string}`,
+    workspaceId: 'ws-1' as WorkspaceId,
+    conversationId: 'ws-1:C1' as ConversationId,
+    requester: 'U123' as SlackUserId,
+    turnId: 'turn-1' as TurnId,
+    sandbox: {
+      sandboxId: 'sbx-1' as SandboxId,
+      jti: 'jti-1' as SandboxJwtId,
+      requester: 'U123' as SlackUserId,
+      turnId: 'turn-1' as TurnId,
       nbf: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 300,
     },
@@ -94,7 +106,7 @@ describe('McpToolRegistry', () => {
 
     const result = await registry.dispatch(
       { id: 'call-1', name: 'mcp__test__search', arguments: { q: 'hello' } },
-      makeSandboxCtx(),
+      makeRuntimeCtx(),
     );
 
     expect(result.ok).toBe(true);
@@ -110,7 +122,7 @@ describe('McpToolRegistry', () => {
 
     const result = await registry.dispatch(
       { id: 'call-1', name: 'some_unknown_tool', arguments: {} },
-      makeSandboxCtx(),
+      makeRuntimeCtx(),
     );
 
     expect(result.ok).toBe(false);
@@ -126,7 +138,7 @@ describe('McpToolRegistry', () => {
 
     const result = await registry.dispatch(
       { id: 'call-1', name: 'mcp__unknown_slug__search', arguments: {} },
-      makeSandboxCtx(),
+      makeRuntimeCtx(),
     );
 
     expect(result.ok).toBe(false);
@@ -147,7 +159,7 @@ describe('McpToolRegistry', () => {
 
     const result = await registry.dispatch(
       { id: 'call-1', name: 'mcp__test__search', arguments: {} },
-      makeSandboxCtx(),
+      makeRuntimeCtx(),
     );
 
     expect(result.ok).toBe(false);
@@ -200,7 +212,7 @@ describe('McpToolRegistry', () => {
 
     await registry.dispatch(
       { id: 'call-1', name: 'mcp__test__search', arguments: { q: 'test' } },
-      makeSandboxCtx(),
+      makeRuntimeCtx(),
     );
 
     // Wait for async audit fire-and-forget

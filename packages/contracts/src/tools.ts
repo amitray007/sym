@@ -1,5 +1,6 @@
+import type { ConversationId, SlackChannelId, SlackUserId, TurnId, WorkspaceId } from './ids.js';
 import type { JsonObject, JsonSchema, JsonValue } from './json.js';
-import type { SandboxContext } from './sandbox.js';
+import type { SandboxIdentity } from './sandbox.js';
 
 /**
  * A function-tool the model may call. OpenAI-compatible shape. The exact
@@ -11,6 +12,10 @@ export interface ToolDescriptor {
   name: string;
   description: string;
   parameters: JsonSchema;
+  /** Tool only reads — no side effects. Advisor-eligible; never needs confirmation. */
+  readOnlyHint?: boolean;
+  /** Tool performs a destructive/irreversible action — requires user confirmation. */
+  destructiveHint?: boolean;
 }
 
 /** A resolved tool invocation handed to the dispatcher (arguments parsed). */
@@ -49,11 +54,28 @@ export interface ToolFailure {
 export type ToolResult = ToolSuccess | ToolFailure;
 
 /**
- * The tool registry + dispatcher the kernel (S2) calls. Implemented by S5,
- * which runs the call inside the S6 sandbox via `ctx`. An empty registry
- * fails calls closed until S5 ships.
+ * Harness-owned execution context passed to every tool dispatch. Targeting for
+ * context-bound side-effect tools comes from HERE — `channelId`, `conversationId`
+ * — never from model-provided arguments (harness-tool-context-spec). `sandbox` is
+ * present only for tools that execute inside the S6 sandbox (egress credentials).
+ */
+export interface ToolRuntimeContext {
+  workspaceId: WorkspaceId;
+  conversationId: ConversationId;
+  /** Active Slack channel for context-bound tools; absent for non-Slack turns. */
+  channelId?: SlackChannelId;
+  requester: SlackUserId;
+  turnId: TurnId;
+  /** Sandbox identity for sandboxed tools; absent for in-process harness tools. */
+  sandbox?: SandboxIdentity;
+}
+
+/**
+ * The tool registry + dispatcher the kernel (S2) calls. Implemented by S5.
+ * Built-in harness tools run in-process; MCP/skills tools run via the S6 sandbox
+ * (using `ctx.sandbox`). An empty registry fails calls closed.
  */
 export interface ToolDispatcher {
   list(): ToolDescriptor[];
-  dispatch(call: ToolCall, ctx: SandboxContext): Promise<ToolResult>;
+  dispatch(call: ToolCall, ctx: ToolRuntimeContext): Promise<ToolResult>;
 }
