@@ -109,6 +109,7 @@ export function createServer(deps: ServerDeps): Hono {
       botUserId: ctx.botUserId,
       slackTeamId: ctx.slackTeamId,
       ...(viewedChannelId !== undefined ? { viewedChannelId } : {}),
+      audit: (input) => append(db, input).then(() => undefined),
     });
   }
 

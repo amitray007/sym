@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { handleTurn } from './handle-turn.js';
 
@@ -15,6 +15,7 @@ import type {
   StopStreamParams,
   StreamHandle,
 } from '@sym/adapter-slack';
+import type { AppendInput } from '@sym/audit';
 import type {
   ChatMessage,
   CompletionChunk,
@@ -398,5 +399,87 @@ describe('handleTurn', () => {
     );
     expect(backgroundMsg?.content).toContain('deploy went out');
     expect(backgroundMsg?.content).toContain('looks good to me');
+  });
+
+  it('calls the audit sink with app.turn.complete after the reply is delivered (stream path)', async () => {
+    const auditCalls: AppendInput[] = [];
+    const audit = vi.fn((input: AppendInput) => {
+      auditCalls.push(input);
+      return Promise.resolve();
+    });
+
+    const slack = new MockSlackClient();
+    const turn = makeTurn({ entrySurface: 'dm', threadTs: '500.0' as SlackThreadTs });
+
+    await handleTurn(turn, {
+      db: stubDb(),
+      provider: fakeProvider,
+      model: 'test-model',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      audit,
+    });
+
+    // Audit must be called exactly once (stream path).
+    expect(audit).toHaveBeenCalledTimes(1);
+
+    const call = auditCalls[0]!;
+    expect(call.kind).toBe('app.turn.complete');
+    expect(call.workspaceId).toBe(turn.workspaceId);
+    expect(call.actorKind).toBe('slack_user');
+    expect(call.actorId).toBe(turn.requester);
+    expect(call.targetKind).toBe('conversation');
+    expect(call.targetId).toBe(turn.conversationId);
+
+    // Payload must contain model + toolsInvoked.
+    expect(typeof call.payload['model']).toBe('string');
+    expect(Array.isArray(call.payload['toolsInvoked'])).toBe(true);
+  });
+
+  it('calls the audit sink with app.turn.complete after the reply is delivered (post path)', async () => {
+    const auditCalls: AppendInput[] = [];
+    const audit = vi.fn((input: AppendInput) => {
+      auditCalls.push(input);
+      return Promise.resolve();
+    });
+
+    const slack = new MockSlackClient();
+    // No threadTs → postMessage path (no streaming).
+    const turn = makeTurn({ entrySurface: 'app_mention' });
+
+    await handleTurn(turn, {
+      db: stubDb(),
+      provider: fakeProvider,
+      model: 'test-model',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      audit,
+    });
+
+    expect(slack.posts).toHaveLength(1);
+
+    expect(audit).toHaveBeenCalledTimes(1);
+    const call = auditCalls[0]!;
+    expect(call.kind).toBe('app.turn.complete');
+    expect(Array.isArray(call.payload['toolsInvoked'])).toBe(true);
+  });
+
+  it('does not call audit when audit dep is absent (existing tests stay green)', async () => {
+    // Simply running without an audit dep must not throw.
+    const slack = new MockSlackClient();
+    await expect(
+      handleTurn(makeTurn(), {
+        db: stubDb(),
+        provider: fakeProvider,
+        model: 'test-model',
+        slackClient: slack,
+        botUserId: BOT,
+        slackTeamId: 'T-TEST',
+        // no audit
+      }),
+    ).resolves.toBeUndefined();
+    expect(slack.posts).toHaveLength(1);
   });
 });
