@@ -201,5 +201,6 @@ export function slackTurnInputToTurn(input: SlackTurnInput): Turn {
     text: input.text,
     receivedAt: new Date(),
     ...(thread !== undefined ? { threadTs: thread } : {}),
+    ...(input.ts !== undefined ? { ts: input.ts } : {}),
   };
 }

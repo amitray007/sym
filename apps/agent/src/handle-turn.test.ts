@@ -7,9 +7,12 @@ import type {
   PostMessageParams,
   PostMessageResult,
   SlackClient,
+  SlackThreadMessage,
 } from '@sym/adapter-slack';
 import type {
+  ChatMessage,
   CompletionChunk,
+  CompletionRequest,
   ProviderInterface,
   SlackChannelId,
   SlackThreadTs,
@@ -19,6 +22,8 @@ import type {
   WorkspaceId,
 } from '@sym/contracts';
 import type { Database } from '@sym/db';
+
+const BOT = 'UBOT' as SlackUserId;
 
 /**
  * Minimal chainable no-op `Database` stub. Persistence is exercised against real
@@ -45,6 +50,8 @@ function stubDb(): Database {
 
 class MockSlackClient implements SlackClient {
   readonly posts: PostMessageParams[] = [];
+  /** Thread the mock returns from conversationsReplies (set per test). */
+  replies: SlackThreadMessage[] = [];
   async chatPostMessage(params: PostMessageParams): Promise<PostMessageResult> {
     this.posts.push(params);
     return { ts: '111.222' as SlackThreadTs, channel: params.channel };
@@ -59,8 +66,26 @@ class MockSlackClient implements SlackClient {
     /* no-op mock */
   }
   async conversationsReplies(): Promise<ConversationsRepliesResult> {
-    return { messages: [] };
+    return { messages: this.replies };
   }
+}
+
+/** A provider that records the messages it was asked to complete. */
+function capturingProvider(): { provider: ProviderInterface; captured: () => ChatMessage[] } {
+  let seen: ChatMessage[] = [];
+  const provider: ProviderInterface = {
+    id: 'capture',
+    async *complete(req: CompletionRequest): AsyncIterable<CompletionChunk> {
+      seen = req.messages;
+      yield { delta: { content: 'ok' } };
+      yield {
+        delta: {},
+        finishReason: 'stop',
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      };
+    },
+  };
+  return { provider, captured: () => seen };
 }
 
 const fakeProvider: ProviderInterface = {
@@ -98,6 +123,7 @@ describe('handleTurn', () => {
       provider: fakeProvider,
       model: 'test-model',
       slackClient: slack,
+      botUserId: BOT,
     });
 
     expect(slack.posts).toHaveLength(1);
@@ -118,6 +144,7 @@ describe('handleTurn', () => {
       provider: fakeProvider,
       model: 'test-model',
       slackClient: slack,
+      botUserId: BOT,
     });
     expect(slack.posts[0]?.thread_ts).toBe('900.1');
   });
@@ -129,7 +156,54 @@ describe('handleTurn', () => {
       provider: fakeProvider,
       model: 'test-model',
       slackClient: slack,
+      botUserId: BOT,
     });
     expect(slack.posts).toHaveLength(0);
+  });
+
+  it('feeds the live Slack thread as history on a channel mention, excluding the trigger', async () => {
+    const slack = new MockSlackClient();
+    slack.replies = [
+      {
+        user: 'U1' as SlackUserId,
+        text: 'we should migrate to PG16',
+        ts: '900.1' as SlackThreadTs,
+      },
+      { user: BOT, text: 'here were the tradeoffs', ts: '900.2' as SlackThreadTs },
+      {
+        user: 'U2' as SlackUserId,
+        text: '<@UBOT> summarize the risks',
+        ts: '900.3' as SlackThreadTs,
+      },
+    ];
+    const cap = capturingProvider();
+
+    await handleTurn(
+      makeTurn({
+        threadTs: '900.1' as SlackThreadTs,
+        ts: '900.3' as SlackThreadTs, // the triggering mention
+        text: 'summarize the risks',
+      }),
+      {
+        db: stubDb(),
+        provider: cap.provider,
+        model: 'test-model',
+        slackClient: slack,
+        botUserId: BOT,
+      },
+    );
+
+    const messages = cap.captured();
+    const history = messages.slice(1, -1); // drop the system prompt + the final turn
+
+    // Earlier human + Sym messages become labelled history; Sym's is assistant.
+    expect(history).toEqual([
+      { role: 'user', content: 'U1: we should migrate to PG16' },
+      { role: 'assistant', content: 'here were the tradeoffs' },
+    ]);
+    // The triggering message appears once — as the current turn, not in history.
+    const mentions = messages.filter((m) => m.content?.includes('summarize the risks'));
+    expect(mentions).toHaveLength(1);
+    expect(messages.at(-1)?.role).toBe('user');
   });
 });

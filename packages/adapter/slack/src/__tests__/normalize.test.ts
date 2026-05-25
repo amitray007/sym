@@ -185,6 +185,7 @@ describe('slackTurnInputToTurn', () => {
     expect(turn.requester).toBe('U001');
     expect(turn.channelId).toBe('C001');
     expect(turn.text).toBe('hello world');
+    expect(turn.ts).toBe(input.ts); // triggering message ts propagates to the Turn
     expect(typeof turn.id).toBe('string');
     expect(turn.id.length).toBeGreaterThan(0);
     expect(turn.receivedAt).toBeInstanceOf(Date);

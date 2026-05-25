@@ -29,6 +29,8 @@ export interface Turn {
   requester: SlackUserId;
   channelId?: SlackChannelId;
   threadTs?: SlackThreadTs;
+  /** Slack `ts` of the triggering message (absent for slash commands / tasks). */
+  ts?: SlackThreadTs;
   text: string;
   receivedAt: Date;
 }
