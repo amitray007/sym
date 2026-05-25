@@ -1,4 +1,5 @@
 import {
+  assistantThreadContextChanged,
   assistantThreadStarted,
   normalizeSlackEvent,
   slackTurnInputToTurn,
@@ -8,6 +9,7 @@ import { append } from '@sym/audit';
 import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 
+import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { handleTurn } from './handle-turn.js';
 import { SingleTenantError, installWorkspace } from './install.js';
@@ -56,6 +58,7 @@ export function createServer(deps: ServerDeps): Hono {
   const { db, config } = deps;
   const app = new Hono();
   const alreadySeen = createDedup();
+  const assistantContext = createAssistantContextStore();
 
   async function processEvent(raw: RawSlackEvent, teamId: string): Promise<void> {
     const ctx = await loadWorkspaceContext(db, teamId);
@@ -64,9 +67,25 @@ export function createServer(deps: ServerDeps): Hono {
       return;
     }
 
+    // Assistant container lifecycle: track context changes before anything else.
+    const ctxChanged = assistantThreadContextChanged(raw);
+    if (ctxChanged) {
+      assistantContext.remember(
+        ctxChanged.channelId,
+        ctxChanged.threadTs,
+        ctxChanged.contextChannelId,
+      );
+      return;
+    }
+
     // Assistant container lifecycle: greet a freshly opened panel. Not a Turn.
     const assistantStart = assistantThreadStarted(raw);
     if (assistantStart) {
+      assistantContext.remember(
+        assistantStart.channelId,
+        assistantStart.threadTs,
+        assistantStart.contextChannelId,
+      );
       await handleAssistantThreadStarted(ctx.slackClient, assistantStart);
       return;
     }
@@ -78,6 +97,10 @@ export function createServer(deps: ServerDeps): Hono {
     });
     if (!input) return; // an event we don't act on
     const turn = slackTurnInputToTurn(input);
+    const viewedChannelId =
+      turn.channelId !== undefined && turn.threadTs !== undefined
+        ? assistantContext.lookup(turn.channelId, turn.threadTs)
+        : undefined;
     await handleTurn(turn, {
       db,
       provider: ctx.provider,
@@ -85,6 +108,7 @@ export function createServer(deps: ServerDeps): Hono {
       slackClient: ctx.slackClient,
       botUserId: ctx.botUserId,
       slackTeamId: ctx.slackTeamId,
+      ...(viewedChannelId !== undefined ? { viewedChannelId } : {}),
     });
   }
 

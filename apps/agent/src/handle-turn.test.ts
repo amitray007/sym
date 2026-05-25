@@ -4,6 +4,7 @@ import { handleTurn } from './handle-turn.js';
 
 import type {
   AppendStreamParams,
+  ConversationsHistoryResult,
   ConversationsRepliesResult,
   PostMessageParams,
   PostMessageResult,
@@ -57,6 +58,8 @@ class MockSlackClient implements SlackClient {
   readonly posts: PostMessageParams[] = [];
   /** Thread the mock returns from conversationsReplies (set per test). */
   replies: SlackThreadMessage[] = [];
+  /** Channel history the mock returns from conversationsHistory (set per test). */
+  historyMessages: SlackThreadMessage[] = [];
 
   /** Captured chatStartStream calls. */
   readonly startStreamCalls: StartStreamParams[] = [];
@@ -85,6 +88,9 @@ class MockSlackClient implements SlackClient {
   }
   async conversationsReplies(): Promise<ConversationsRepliesResult> {
     return { messages: this.replies };
+  }
+  async conversationsHistory(): Promise<ConversationsHistoryResult> {
+    return { messages: this.historyMessages };
   }
   async assistantThreadsSetSuggestedPrompts(): Promise<void> {
     /* no-op mock */
@@ -314,5 +320,42 @@ describe('handleTurn', () => {
     const mentions = messages.filter((m) => m.content?.includes('summarize the risks'));
     expect(mentions).toHaveLength(1);
     expect(messages.at(-1)?.role).toBe('user');
+  });
+
+  it('prepends viewed-channel background context as the first history message for DM turns', async () => {
+    const slack = new MockSlackClient();
+    // The channel the user is viewing has these recent messages (oldest-first).
+    slack.historyMessages = [
+      { user: 'U1' as SlackUserId, text: 'deploy went out', ts: '800.1' as SlackThreadTs },
+      { user: 'U2' as SlackUserId, text: 'looks good to me', ts: '800.2' as SlackThreadTs },
+    ];
+    const cap = capturingProvider();
+
+    await handleTurn(
+      makeTurn({
+        entrySurface: 'dm',
+        channelId: 'D1' as SlackChannelId,
+        threadTs: '500.0' as SlackThreadTs,
+        text: 'summarize this channel',
+      }),
+      {
+        db: stubDb(),
+        provider: cap.provider,
+        model: 'test-model',
+        slackClient: slack,
+        botUserId: BOT,
+        slackTeamId: 'T-TEST',
+        viewedChannelId: 'C-VIEWED',
+      },
+    );
+
+    const messages = cap.captured();
+    // The background context block must be the FIRST history message (after system prompt).
+    const backgroundMsg = messages[1];
+    expect(backgroundMsg?.content).toMatch(
+      /^Background — the user is currently viewing channel C-VIEWED in Slack\./,
+    );
+    expect(backgroundMsg?.content).toContain('deploy went out');
+    expect(backgroundMsg?.content).toContain('looks good to me');
   });
 });

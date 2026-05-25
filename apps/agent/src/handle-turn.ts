@@ -29,6 +29,8 @@ export interface HandleTurnDeps {
   botUserId: SlackUserId;
   /** Slack team id — required as `recipientTeamId` when streaming into channels. */
   slackTeamId: string;
+  /** The channel the user is currently viewing in Slack's assistant panel, if known. */
+  viewedChannelId?: string;
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
@@ -184,6 +186,38 @@ async function streamReply(
 }
 
 /**
+ * Fetch the viewed channel's recent messages as a background `ChatMessage` for
+ * assistant-panel turns. Returns `null` if the feature is not applicable (not a
+ * DM/assistant turn, no viewed channel known, or viewed channel is the same as
+ * the panel channel). Best-effort — any error is logged and swallowed.
+ */
+async function loadViewedChannelContext(
+  turn: Turn,
+  deps: HandleTurnDeps,
+): Promise<ChatMessage | null> {
+  const viewed = deps.viewedChannelId;
+  if (turn.entrySurface !== 'dm' || viewed === undefined || viewed === turn.channelId) return null;
+  try {
+    const { messages } = await deps.slackClient.conversationsHistory({
+      channel: viewed as SlackChannelId,
+      limit: 30,
+    });
+    const mapped = threadToHistory(messages, { botUserId: deps.botUserId });
+    if (mapped.length === 0) return null;
+    const transcript = mapped
+      .map((m) => (m.role === 'assistant' ? `Sym: ${m.content ?? ''}` : (m.content ?? '')))
+      .join('\n');
+    return {
+      role: 'user',
+      content: `Background — the user is currently viewing channel ${viewed} in Slack. Recent messages there:\n${transcript}`,
+    };
+  } catch (err) {
+    console.warn('[agent] viewed-channel context fetch failed (continuing):', err);
+    return null;
+  }
+}
+
+/**
  * The turn path: persist the inbound message, run the kernel loop with prior
  * thread history for context, post the reply to Slack, and persist the reply.
  *
@@ -205,7 +239,9 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   // DB path reflects turns BEFORE this one; the live-thread path excludes it by ts).
   await persist('ensureConversation', () => ensureConversation(deps.db, turn));
 
-  const history = await loadTurnHistory(turn, deps);
+  const baseHistory = await loadTurnHistory(turn, deps);
+  const viewedContext = await loadViewedChannelContext(turn, deps);
+  const history = viewedContext ? [viewedContext, ...baseHistory] : baseHistory;
 
   await persist('recordUserMessage', () => recordUserMessage(deps.db, turn));
 
