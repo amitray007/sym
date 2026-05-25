@@ -8,7 +8,7 @@ import {
   recordUserMessage,
 } from './persistence.js';
 
-import type { SlackClient } from '@sym/adapter-slack';
+import type { AppendStreamParams, SlackClient, StartStreamParams } from '@sym/adapter-slack';
 import type {
   ChatMessage,
   ProviderInterface,
@@ -27,7 +27,12 @@ export interface HandleTurnDeps {
   slackClient: SlackClient;
   /** Sym's own bot user id — lets thread history mark its posts as assistant. */
   botUserId: SlackUserId;
+  /** Slack team id — required as `recipientTeamId` when streaming into channels. */
+  slackTeamId: string;
 }
+
+/** Flush a chunk to the stream when the buffer reaches this many characters. */
+const FLUSH_CHARS = 60;
 
 /** A channel thread (not a DM) — read the live Slack thread for full context. */
 function isChannelThread(
@@ -80,12 +85,115 @@ async function persist(label: string, fn: () => Promise<void>): Promise<void> {
 }
 
 /**
+ * Attempt a streamed reply via chat.startStream / appendStream / stopStream.
+ * Returns `true` if delivery succeeded, `false` if we should fall back to a
+ * normal chat.postMessage (e.g. startStream rejected).
+ *
+ * The model is run INSIDE this helper — never before — so that on failure we
+ * can fall through and let the caller run it on the plain-post path.
+ */
+async function streamReply(
+  turn: Turn,
+  deps: HandleTurnDeps,
+  ctx: {
+    history: ChatMessage[];
+    cascade: ReturnType<typeof buildDefaultSoulCascade>;
+    registry: ToolRegistry;
+  },
+): Promise<boolean> {
+  const channel = turn.channelId as SlackChannelId;
+  const threadTs = turn.threadTs as SlackThreadTs;
+  const isAssistant = turn.entrySurface === 'dm';
+
+  // Live status — assistant thread only (setStatus requires an assistant thread).
+  if (isAssistant) {
+    try {
+      await deps.slackClient.assistantThreadsSetStatus({
+        channelId: channel,
+        threadTs,
+        status: 'is thinking…',
+      });
+    } catch (err) {
+      console.warn('[agent] setStatus failed (continuing):', err);
+    }
+  }
+
+  // Open the stream. If this fails, fall back to a normal post (return false) —
+  // do NOT run the model twice.
+  const startParams: StartStreamParams = {
+    channel,
+    threadTs,
+    ...(isAssistant ? {} : { recipientUserId: turn.requester, recipientTeamId: deps.slackTeamId }),
+  };
+  let handle;
+  try {
+    handle = await deps.slackClient.chatStartStream(startParams);
+  } catch (err) {
+    console.warn('[agent] startStream failed; falling back to chat.postMessage:', err);
+    return false;
+  }
+
+  const streamTs = handle.ts;
+  let buffer = '';
+  const onDelta = async (delta: string): Promise<void> => {
+    buffer += delta;
+    if (buffer.length >= FLUSH_CHARS) {
+      const chunk = buffer;
+      buffer = '';
+      const appendParams: AppendStreamParams = { channel, ts: streamTs, markdownText: chunk };
+      try {
+        await deps.slackClient.chatAppendStream(appendParams);
+      } catch (err) {
+        console.warn('[agent] appendStream failed (continuing):', err);
+      }
+    }
+  };
+
+  const reply = await runLoop(turn, deps.provider, ctx.registry, ctx.cascade, {
+    model: deps.model,
+    history: ctx.history,
+    onDelta,
+  });
+
+  if (buffer.length > 0) {
+    const appendParams: AppendStreamParams = { channel, ts: streamTs, markdownText: buffer };
+    try {
+      await deps.slackClient.chatAppendStream(appendParams);
+    } catch (err) {
+      console.warn('[agent] appendStream (final) failed:', err);
+    }
+  }
+
+  const receipt = receiptToContextBlock(reply.receipt);
+  try {
+    await deps.slackClient.chatStopStream({ channel, ts: streamTs, blocks: [receipt] });
+  } catch (err) {
+    console.warn('[agent] stopStream failed:', err);
+  }
+
+  await persist('recordAssistantMessage', () =>
+    recordAssistantMessage(deps.db, {
+      workspaceId: turn.workspaceId,
+      conversationId: turn.conversationId,
+      markdown: reply.markdown,
+      blocks: [markdownBlock(reply.markdown), receipt],
+      slackTs: streamTs,
+    }),
+  );
+  return true;
+}
+
+/**
  * The turn path: persist the inbound message, run the kernel loop with prior
  * thread history for context, post the reply to Slack, and persist the reply.
  *
  * Persistence is best-effort — a DB hiccup degrades memory/transcript but never
  * blocks the reply. No tools yet (empty registry), L0 default soul. Deps are
  * injected so this is unit-testable with a fake provider + mock Slack client.
+ *
+ * Delivery strategy:
+ *  - Threaded turns (threadTs defined): attempt streaming; fall back to postMessage.
+ *  - Unthreaded turns (slash commands etc.): always postMessage.
  */
 export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void> {
   if (!turn.channelId) {
@@ -103,6 +211,14 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
 
   const cascade = buildDefaultSoulCascade();
   const registry = new ToolRegistry();
+
+  // Threaded turns: try streaming; fall through to postMessage only if it fails.
+  if (turn.threadTs !== undefined) {
+    const streamed = await streamReply(turn, deps, { history, cascade, registry });
+    if (streamed) return;
+  }
+
+  // Non-threaded or stream fallback: run the loop and post normally.
   const reply = await runLoop(turn, deps.provider, registry, cascade, {
     model: deps.model,
     history,

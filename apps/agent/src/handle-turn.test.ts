@@ -3,12 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { handleTurn } from './handle-turn.js';
 
 import type {
+  AppendStreamParams,
   ConversationsRepliesResult,
   PostMessageParams,
   PostMessageResult,
+  SetStatusParams,
   SlackClient,
   SlackThreadMessage,
   StartStreamParams,
+  StopStreamParams,
   StreamHandle,
 } from '@sym/adapter-slack';
 import type {
@@ -54,6 +57,19 @@ class MockSlackClient implements SlackClient {
   readonly posts: PostMessageParams[] = [];
   /** Thread the mock returns from conversationsReplies (set per test). */
   replies: SlackThreadMessage[] = [];
+
+  /** Captured chatStartStream calls. */
+  readonly startStreamCalls: StartStreamParams[] = [];
+  /** All appended markdown text, concatenated in order. */
+  appendedText = '';
+  /** Captured chatStopStream calls. */
+  readonly stopStreamCalls: StopStreamParams[] = [];
+  /** Captured assistantThreadsSetStatus calls. */
+  readonly setStatusCalls: SetStatusParams[] = [];
+
+  /** When truthy, chatStartStream rejects with this error. */
+  startStreamError: Error | undefined = undefined;
+
   async chatPostMessage(params: PostMessageParams): Promise<PostMessageResult> {
     this.posts.push(params);
     return { ts: '111.222' as SlackThreadTs, channel: params.channel };
@@ -64,8 +80,8 @@ class MockSlackClient implements SlackClient {
   async reactionsAdd(): Promise<void> {
     /* no-op mock */
   }
-  async assistantThreadsSetStatus(): Promise<void> {
-    /* no-op mock */
+  async assistantThreadsSetStatus(params: SetStatusParams): Promise<void> {
+    this.setStatusCalls.push(params);
   }
   async conversationsReplies(): Promise<ConversationsRepliesResult> {
     return { messages: this.replies };
@@ -77,13 +93,17 @@ class MockSlackClient implements SlackClient {
     /* no-op mock */
   }
   async chatStartStream(params: StartStreamParams): Promise<StreamHandle> {
+    this.startStreamCalls.push(params);
+    if (this.startStreamError !== undefined) {
+      throw this.startStreamError;
+    }
     return { channel: params.channel, ts: '111.stream' as SlackThreadTs };
   }
-  async chatAppendStream(): Promise<void> {
-    /* no-op mock */
+  async chatAppendStream(params: AppendStreamParams): Promise<void> {
+    this.appendedText += params.markdownText;
   }
-  async chatStopStream(): Promise<void> {
-    /* no-op mock */
+  async chatStopStream(params: StopStreamParams): Promise<void> {
+    this.stopStreamCalls.push(params);
   }
 }
 
@@ -141,6 +161,7 @@ describe('handleTurn', () => {
       model: 'test-model',
       slackClient: slack,
       botUserId: BOT,
+      slackTeamId: 'T-TEST',
     });
 
     expect(slack.posts).toHaveLength(1);
@@ -154,7 +175,7 @@ describe('handleTurn', () => {
     expect(blocks[1]?.type).toBe('context'); // receipt footer
   });
 
-  it('replies in-thread when the turn is threaded', async () => {
+  it('streams (not chatPostMessage) when the turn is threaded (app_mention)', async () => {
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
       db: stubDb(),
@@ -162,8 +183,77 @@ describe('handleTurn', () => {
       model: 'test-model',
       slackClient: slack,
       botUserId: BOT,
+      slackTeamId: 'T-TEST',
     });
-    expect(slack.posts[0]?.thread_ts).toBe('900.1');
+
+    // Streaming path was taken — no chatPostMessage.
+    expect(slack.posts).toHaveLength(0);
+
+    // chatStartStream was called with the thread ts.
+    expect(slack.startStreamCalls).toHaveLength(1);
+    const start = slack.startStreamCalls[0]!;
+    expect(start.threadTs).toBe('900.1');
+
+    // app_mention is NOT a DM, so recipient ids are set.
+    expect(start.recipientUserId).toBe('U1');
+    expect(start.recipientTeamId).toBe('T-TEST');
+  });
+
+  it('streams a DM turn, calls setStatus, and startStream has no recipient ids', async () => {
+    const slack = new MockSlackClient();
+    await handleTurn(makeTurn({ entrySurface: 'dm', threadTs: '500.0' as SlackThreadTs }), {
+      db: stubDb(),
+      provider: fakeProvider,
+      model: 'test-model',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+    });
+
+    // setStatus was called for DM/assistant thread.
+    expect(slack.setStatusCalls).toHaveLength(1);
+    expect(slack.setStatusCalls[0]?.status).toBe('is thinking…');
+
+    // startStream was called WITHOUT recipient ids (DM/assistant thread).
+    expect(slack.startStreamCalls).toHaveLength(1);
+    const start = slack.startStreamCalls[0]!;
+    expect('recipientUserId' in start).toBe(false);
+    expect('recipientTeamId' in start).toBe(false);
+
+    // Appended text equals the full model output.
+    expect(slack.appendedText).toBe('Hello world');
+
+    // stopStream was called with a receipt block.
+    expect(slack.stopStreamCalls).toHaveLength(1);
+    const stop = slack.stopStreamCalls[0]!;
+    expect(stop.blocks).toHaveLength(1);
+    expect((stop.blocks as { type: string }[])[0]?.type).toBe('context');
+
+    // No chatPostMessage.
+    expect(slack.posts).toHaveLength(0);
+  });
+
+  it('falls back to chatPostMessage when chatStartStream rejects', async () => {
+    const slack = new MockSlackClient();
+    slack.startStreamError = new Error('stream_unavailable');
+
+    await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
+      db: stubDb(),
+      provider: fakeProvider,
+      model: 'test-model',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+    });
+
+    // Fell back to postMessage.
+    expect(slack.posts).toHaveLength(1);
+    expect(slack.posts[0]?.text).toBe('Hello world');
+
+    // startStream was attempted once then failed; no appendStream / stopStream.
+    expect(slack.startStreamCalls).toHaveLength(1);
+    expect(slack.appendedText).toBe('');
+    expect(slack.stopStreamCalls).toHaveLength(0);
   });
 
   it('skips posting when the turn has no channel', async () => {
@@ -174,6 +264,7 @@ describe('handleTurn', () => {
       model: 'test-model',
       slackClient: slack,
       botUserId: BOT,
+      slackTeamId: 'T-TEST',
     });
     expect(slack.posts).toHaveLength(0);
   });
@@ -207,6 +298,7 @@ describe('handleTurn', () => {
         model: 'test-model',
         slackClient: slack,
         botUserId: BOT,
+        slackTeamId: 'T-TEST',
       },
     );
 

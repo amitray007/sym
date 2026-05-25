@@ -14,6 +14,7 @@ const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
 export interface WorkspaceContext {
   workspaceId: WorkspaceId;
   botUserId: SlackUserId;
+  slackTeamId: string;
   provider: ProviderInterface;
   model: string;
   slackClient: SlackClient;
@@ -61,6 +62,7 @@ export async function loadWorkspaceContext(
   return {
     workspaceId: workspace.id as WorkspaceId,
     botUserId: install.botUserId as SlackUserId,
+    slackTeamId: workspace.slackTeamId,
     provider,
     model: config.modelChat,
     slackClient: new WebApiSlackClient(install.botAccessToken),

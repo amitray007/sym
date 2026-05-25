@@ -84,6 +84,7 @@ export function createServer(deps: ServerDeps): Hono {
       model: ctx.model,
       slackClient: ctx.slackClient,
       botUserId: ctx.botUserId,
+      slackTeamId: ctx.slackTeamId,
     });
   }
 
