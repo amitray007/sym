@@ -9,6 +9,8 @@ import {
   recordAssistantMessage,
   recordUserMessage,
 } from './persistence.js';
+import { runLoopPi } from './pi/loop.js';
+import { buildFireworksModel } from './pi/model.js';
 
 import type { AppendStreamParams, SlackClient, StartStreamParams } from '@sym/adapter-slack';
 import type { AppendInput } from '@sym/audit';
@@ -37,10 +39,55 @@ export interface HandleTurnDeps {
   viewedChannelId?: string;
   /** Optional audit sink — best-effort; a failure must never block the turn. */
   audit?: (input: AppendInput) => Promise<void>;
+  /**
+   * Raw Fireworks credentials for the Pi loop path (`SYM_PI_LOOP=1`).
+   * Absent on the kernel path; `runLoopPi` is never called without it.
+   */
+  fireworks?: { baseUrl: string; apiKey: string };
 }
+
+/** `true` when the Pi loop is enabled via env flag. Read once at module load. */
+const PI_LOOP_ENABLED = process.env['SYM_PI_LOOP'] === '1';
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
 const FLUSH_CHARS = 60;
+
+/**
+ * Dispatch to the kernel loop or the Pi loop depending on `SYM_PI_LOOP`.
+ *
+ * Both paths return the same `Reply` shape. `onDelta` and `history` are
+ * forwarded identically so the streaming / postMessage pipeline above is
+ * completely unchanged.
+ */
+async function runTurnLoop(
+  turn: Turn,
+  deps: HandleTurnDeps,
+  registry: ToolRegistry,
+  history: ChatMessage[],
+  onDelta?: (delta: string) => void | Promise<void>,
+): Promise<Reply> {
+  if (PI_LOOP_ENABLED && deps.fireworks !== undefined) {
+    const model = buildFireworksModel({
+      baseUrl: deps.fireworks.baseUrl,
+      modelId: deps.model,
+    });
+    return runLoopPi(
+      turn,
+      { baseUrl: deps.fireworks.baseUrl, apiKey: deps.fireworks.apiKey, model },
+      registry,
+      {
+        history,
+        ...(onDelta !== undefined ? { onDelta } : {}),
+      },
+    );
+  }
+
+  return runLoop(turn, deps.provider, registry, {
+    model: deps.model,
+    history,
+    ...(onDelta !== undefined ? { onDelta } : {}),
+  });
+}
 
 /** A channel thread (not a DM) — read the live Slack thread for full context. */
 function isChannelThread(
@@ -185,11 +232,7 @@ async function streamReply(
     }
   };
 
-  const reply = await runLoop(turn, deps.provider, ctx.registry, {
-    model: deps.model,
-    history: ctx.history,
-    onDelta,
-  });
+  const reply = await runTurnLoop(turn, deps, ctx.registry, ctx.history, onDelta);
 
   if (buffer.length > 0) {
     const appendParams: AppendStreamParams = { channel, ts: streamTs, markdownText: buffer };
@@ -303,10 +346,7 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
     }
 
     // Non-threaded or stream fallback: run the loop and post normally.
-    const reply = await runLoop(turn, deps.provider, registry, {
-      model: deps.model,
-      history,
-    });
+    const reply = await runTurnLoop(turn, deps, registry, history);
 
     const blocks = [markdownBlock(reply.markdown), receiptToContextBlock(reply.receipt)];
     const posted = await deps.slackClient.chatPostMessage({

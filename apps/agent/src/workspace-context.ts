@@ -23,6 +23,14 @@ export interface WorkspaceContext {
   provider: ProviderInterface;
   model: string;
   slackClient: SlackClient;
+  /**
+   * Raw Fireworks credentials — consumed by `runLoopPi` when `SYM_PI_LOOP=1`.
+   * Kept alongside `provider` so the existing kernel path is untouched.
+   */
+  fireworks: {
+    baseUrl: string;
+    apiKey: string;
+  };
 }
 
 /**
@@ -64,6 +72,8 @@ export async function loadWorkspaceContext(
     apiKey: config.apiKey,
   });
 
+  const fireworksBaseUrl = config.baseUrl ?? DEFAULT_FIREWORKS_BASE_URL;
+
   return {
     workspaceId: workspace.id as WorkspaceId,
     botUserId: install.botUserId as SlackUserId,
@@ -72,5 +82,9 @@ export async function loadWorkspaceContext(
     provider,
     model: config.modelChat,
     slackClient: new WebApiSlackClient(install.botAccessToken),
+    fireworks: {
+      baseUrl: fireworksBaseUrl,
+      apiKey: config.apiKey,
+    },
   };
 }

@@ -13,6 +13,7 @@
     "spike:pi": "tsx src/spike/pi-spike.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.75.5",
     "@earendil-works/pi-ai": "0.75.5",
     "@hono/node-server": "^1.13.7",
     "@sym/adapter-slack": "workspace:*",

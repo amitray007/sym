@@ -23,7 +23,9 @@ import { initSecrets } from '@sym/secrets';
 import { config as loadDotenv } from 'dotenv';
 import { and, eq } from 'drizzle-orm';
 
-import type { Model, UserMessage } from '@earendil-works/pi-ai';
+import { buildFireworksModel } from '../pi/model.js';
+
+import type { UserMessage } from '@earendil-works/pi-ai';
 
 // ---------------------------------------------------------------------------
 // Bootstrap: load .env (dev convenience — prod injects env directly)
@@ -107,26 +109,9 @@ async function main(): Promise<void> {
   console.info('[pi-spike] prompt:', TEST_PROMPT);
   console.info('---');
 
-  // Build a Pi Model object for Fireworks (OpenAI-compatible completions endpoint).
-  // The model-level baseUrl field routes all requests to our Fireworks endpoint.
-  // The apiKey is passed in StreamOptions so Pi attaches it as Authorization: Bearer.
-  //
-  // compat.supportsStore=false: Fireworks doesn't support the OpenAI `store` field.
-  const model: Model<'openai-completions'> = {
-    id: fwConfig.modelId,
-    name: 'Fireworks (Sym)',
-    api: 'openai-completions',
-    provider: 'fireworks',
-    baseUrl: fwConfig.baseUrl,
-    reasoning: false,
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 131072,
-    maxTokens: 4096,
-    compat: {
-      supportsStore: false,
-    },
-  };
+  // Build a Pi Model object for Fireworks via the shared builder (DRY — same
+  // config used by the Pi turn loop in apps/agent/src/pi/model.ts).
+  const model = buildFireworksModel({ baseUrl: fwConfig.baseUrl, modelId: fwConfig.modelId });
 
   // Sym's full persona — imported from the kernel, not duplicated here.
   const systemPrompt = buildSystemPrompt();
