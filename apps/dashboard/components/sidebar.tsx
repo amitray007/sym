@@ -2,7 +2,6 @@
 
 import {
   Activity,
-  Brain,
   ChevronRight,
   Cpu,
   Globe,
@@ -48,10 +47,7 @@ const NAV: NavSection[] = [
   },
   {
     label: 'Intelligence',
-    items: [
-      { href: '/soul', label: 'Soul', icon: Sparkles },
-      { href: '/memory', label: 'Memory', icon: Brain },
-    ],
+    items: [{ href: '/soul', label: 'Soul', icon: Sparkles }],
   },
 ];
 

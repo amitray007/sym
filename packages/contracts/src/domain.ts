@@ -6,7 +6,6 @@ import type {
   TurnId,
   WorkspaceId,
 } from './ids.js';
-import type { MemoryScope } from './memory.js';
 import type { Usage } from './provider.js';
 import type { SlackEntrySurface, SlackTurnInput } from './slack.js';
 import type { SoulLayerKind } from './soul.js';
@@ -18,8 +17,8 @@ export type Event =
   | { kind: 'resume'; conversationId: ConversationId; sliceId: string };
 
 /**
- * The unit the kernel processes. Assembled from an `Event` (+ ACL + memory +
- * soul). One Turn produces at most one user-visible `Reply`.
+ * The unit the kernel processes. Assembled from an `Event` (+ ACL + soul).
+ * One Turn produces at most one user-visible `Reply`.
  */
 export interface Turn {
   id: TurnId;
@@ -59,8 +58,6 @@ export interface Receipt {
   usage?: Usage;
   durationMs?: number;
   toolsInvoked: string[];
-  memoryHits: number;
-  memoryScopesUsed: MemoryScope[];
   soulLayersApplied: SoulLayerKind[];
   /** Set when the turn acted through a cross-user grant. */
   onBehalfOf?: SlackUserId;

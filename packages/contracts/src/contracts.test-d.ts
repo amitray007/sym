@@ -4,7 +4,6 @@ import type { AuditEvent } from './audit.js';
 import type { Receipt, Reply } from './domain.js';
 import type { Result, SymError } from './errors.js';
 import type { AuditEventId, SlackUserId, WorkspaceId } from './ids.js';
-import type { MemoryScope } from './memory.js';
 import type { CompletionChunk, ProviderInterface } from './provider.js';
 import type { ToolResult } from './tools.js';
 
@@ -20,12 +19,6 @@ describe('@sym/contracts type invariants', () => {
   it('distinct brands are not interchangeable', () => {
     expectTypeOf<WorkspaceId>().not.toEqualTypeOf<SlackUserId>();
     expectTypeOf<AuditEventId>().toMatchTypeOf<number>();
-  });
-
-  it('MemoryScope is the five-scope union', () => {
-    expectTypeOf<MemoryScope>().toEqualTypeOf<
-      'workspace' | 'channel' | 'thread' | 'dm' | 'custom_relational'
-    >();
   });
 
   it('ToolResult is a discriminated union on ok', () => {

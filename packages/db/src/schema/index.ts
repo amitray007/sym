@@ -14,9 +14,6 @@ export * from './config.js';
 // Voice
 export * from './soul.js';
 
-// Memory
-export * from './memory.js';
-
 // Per-user auth
 export * from './oauth.js';
 

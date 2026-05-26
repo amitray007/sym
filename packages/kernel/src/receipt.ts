@@ -11,16 +11,12 @@ export interface ReceiptParams {
 
 /**
  * Build a `Receipt` from kernel execution metadata.
- *
- * `memoryHits` and `memoryScopesUsed` are zeroed until S7a (memory) ships.
  */
 export function buildReceipt(params: ReceiptParams): Receipt {
   const receipt: Receipt = {
     turnId: params.turn.id,
     model: params.model,
     toolsInvoked: params.toolsInvoked,
-    memoryHits: 0,
-    memoryScopesUsed: [],
     soulLayersApplied: params.soulLayersApplied,
   };
 

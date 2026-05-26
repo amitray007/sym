@@ -36,6 +36,13 @@
       "when": 1779774287491,
       "tag": "0004_hesitant_loners",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779774983391,
+      "tag": "0005_nebulous_ares",
+      "breakpoints": true
     }
   ]
 }

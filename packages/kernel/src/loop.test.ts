@@ -163,23 +163,6 @@ describe('runLoop', () => {
 
       expect(reply.receipt.toolsInvoked).toEqual([]);
     });
-
-    it('records zero memoryHits (stub until S7a)', async () => {
-      const provider = new FakeProvider([makeContentChunk('ok')]);
-
-      const reply = await runLoop(
-        makeTurn(),
-        provider,
-        new ToolRegistry(),
-        buildDefaultSoulCascade(),
-        {
-          model: 'test-model',
-        },
-      );
-
-      expect(reply.receipt.memoryHits).toBe(0);
-      expect(reply.receipt.memoryScopesUsed).toEqual([]);
-    });
   });
 
   describe('empty stream', () => {
