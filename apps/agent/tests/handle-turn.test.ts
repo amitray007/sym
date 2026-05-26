@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { handleTurn } from './handle-turn.js';
+import { handleTurn } from '../src/handle-turn.js';
 
 // ---------------------------------------------------------------------------
 // Mock the Pi loop so tests are hermetic (no real HTTP calls to Fireworks).
@@ -8,12 +8,12 @@ import { handleTurn } from './handle-turn.js';
 // inside the factory — instead we export a ref from the mock that tests drive.
 // ---------------------------------------------------------------------------
 
-vi.mock('./pi/loop.js', () => {
+vi.mock('../src/pi/loop.js', () => {
   const mockFn = vi.fn();
   return { runLoopPi: mockFn, __mockRunLoopPi: mockFn };
 });
 
-import * as piLoopModule from './pi/loop.js';
+import * as piLoopModule from '../src/pi/loop.js';
 
 // Typed handle to the hoisted mock — cast through unknown to reach the hidden export.
 const mockRunLoopPi = (piLoopModule as unknown as { __mockRunLoopPi: ReturnType<typeof vi.fn> })
@@ -129,17 +129,19 @@ class MockSlackClient implements SlackClient {
 }
 
 function makeTurn(overrides: Partial<Turn> = {}): Turn {
-  return {
-    id: 'turn-1' as TurnId,
-    workspaceId: 'ws-1' as WorkspaceId,
-    conversationId: 'ws-1:C1' as Turn['conversationId'],
-    entrySurface: 'app_mention',
-    requester: 'U1' as SlackUserId,
-    channelId: 'C1' as SlackChannelId,
-    text: 'hi sym',
-    receivedAt: new Date(),
-    ...overrides,
-  };
+  return Object.assign(
+    {
+      id: 'turn-1' as TurnId,
+      workspaceId: 'ws-1' as WorkspaceId,
+      conversationId: 'ws-1:C1' as Turn['conversationId'],
+      entrySurface: 'app_mention' as const,
+      requester: 'U1' as SlackUserId,
+      channelId: 'C1' as SlackChannelId,
+      text: 'hi sym',
+      receivedAt: new Date(),
+    },
+    overrides,
+  ) as Turn;
 }
 
 describe('handleTurn', () => {
@@ -271,7 +273,9 @@ describe('handleTurn', () => {
 
   it('skips posting when the turn has no channel', async () => {
     const slack = new MockSlackClient();
-    await handleTurn(makeTurn({ channelId: undefined }), {
+    const noChannelTurn = makeTurn();
+    delete (noChannelTurn as Partial<Turn>).channelId;
+    await handleTurn(noChannelTurn, {
       fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,

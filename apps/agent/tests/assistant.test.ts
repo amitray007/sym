@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { handleAssistantThreadStarted } from './assistant.js';
+import { handleAssistantThreadStarted } from '../src/assistant.js';
 
 import type {
   AssistantThreadStarted,

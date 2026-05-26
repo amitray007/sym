@@ -1,17 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import { createBuiltinDispatcher } from './builtin-tools.js';
+import { createBuiltinDispatcher } from '../src/builtin-tools.js';
 
 import type {
   ConversationsHistoryResult,
   ConversationsRepliesResult,
   SlackClient,
   SlackThreadMessage,
-  SlackThreadTs,
 } from '@sym/adapter-slack';
 import type {
   ConversationId,
+  JsonObject,
   SlackChannelId,
+  SlackThreadTs,
   SlackUserId,
   ToolCall,
   ToolRuntimeContext,
@@ -31,7 +32,7 @@ function makeCtx(): ToolRuntimeContext {
   };
 }
 
-function makeCall(name: string, args: Record<string, unknown> = {}, id = 'call_01'): ToolCall {
+function makeCall(name: string, args: JsonObject = {}, id = 'call_01'): ToolCall {
   return { id, name, arguments: args };
 }
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { WebApiSlackClient } from './slack-client.js';
+import { WebApiSlackClient } from '../src/slack-client.js';
 
 import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
 

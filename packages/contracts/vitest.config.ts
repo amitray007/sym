@@ -8,8 +8,8 @@ export default defineConfig({
     include: [],
     typecheck: {
       enabled: true,
-      include: ['src/**/*.test-d.ts'],
-      tsconfig: './tsconfig.json',
+      include: ['tests/**/*.test-d.ts'],
+      tsconfig: './tsconfig.test.json',
     },
   },
 });

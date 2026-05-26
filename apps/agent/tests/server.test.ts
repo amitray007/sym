@@ -2,9 +2,9 @@ import { createHmac } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { createServer } from './server.js';
+import { createServer } from '../src/server.js';
 
-import type { AgentConfig } from './config.js';
+import type { AgentConfig } from '../src/config.js';
 
 const SIGNING_SECRET = 'test-signing-secret';
 
@@ -26,11 +26,13 @@ function sign(ts: string, body: string): string {
 
 function post(body: string, headers: Record<string, string>): Promise<Response> {
   const app = createServer({ config });
-  return app.request('/slack/events', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...headers },
-    body,
-  });
+  return Promise.resolve(
+    app.request('/slack/events', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body,
+    }),
+  );
 }
 
 describe('agent server /slack/events', () => {

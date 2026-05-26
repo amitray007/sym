@@ -1,11 +1,11 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { AuditEvent } from './audit.js';
-import type { Receipt, Reply } from './domain.js';
-import type { Result, SymError } from './errors.js';
-import type { AuditEventId, SlackUserId, WorkspaceId } from './ids.js';
-import type { CompletionChunk, ProviderInterface } from './provider.js';
-import type { ToolResult } from './tools.js';
+import type { AuditEvent } from '../src/audit.js';
+import type { Receipt, Reply } from '../src/domain.js';
+import type { Result, SymError } from '../src/errors.js';
+import type { AuditEventId, SlackUserId, WorkspaceId } from '../src/ids.js';
+import type { CompletionChunk, ProviderInterface } from '../src/provider.js';
+import type { ToolResult } from '../src/tools.js';
 
 // Type-only assertions, checked by `vitest run --typecheck`. They prove the
 // contract surface composes and that brands are nominal.

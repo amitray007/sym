@@ -9,7 +9,7 @@ import {
   mrkdwnElement,
   plainTextElement,
   sectionBlock,
-} from '../blocks.js';
+} from '../src/blocks.js';
 
 describe('markdownBlock', () => {
   it('produces correct shape', () => {

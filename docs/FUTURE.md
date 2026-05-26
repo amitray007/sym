@@ -21,5 +21,7 @@ The following were removed and can be restored from git history if revisited:
 - **Memory engine** — five-scope semantic memory (`packages/memory`)
 - **Soul engine** — configurable voice/personality cascade (`packages/soul`)
 - **Sandbox** — Docker+gVisor per-turn isolation (`packages/sandbox`)
-- **Kernel package** — thin agent loop abstraction (`packages/kernel`);
-  replaced by the Pi agent SDK directly in `apps/agent`
+
+Still present (the 4 kept packages): `apps/agent`, `packages/adapter/slack`,
+`packages/kernel` (prompt builders + `ToolRegistry`; its old runLoop is retired,
+Pi is the only turn path), and `packages/contracts`.

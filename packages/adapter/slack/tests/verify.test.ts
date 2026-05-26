@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
-import { verifySlackSignature } from '../verify.js';
+import { verifySlackSignature } from '../src/verify.js';
 
 // ---- helpers ---------------------------------------------------------------
 

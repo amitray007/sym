@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { receiptToContextBlock, receiptToFooterFields } from '../receipt.js';
+import { receiptToContextBlock, receiptToFooterFields } from '../src/receipt.js';
 
 import type { Receipt, SlackUserId, TurnId } from '@sym/contracts';
 

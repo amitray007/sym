@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createAssistantContextStore } from './assistant-context.js';
+import { createAssistantContextStore } from '../src/assistant-context.js';
 
 describe('createAssistantContextStore', () => {
   it('remember and lookup a viewed channel', () => {

@@ -6,7 +6,7 @@ import {
   normalizeSlackEvent,
   slackTurnInputToTurn,
   type RawSlackEvent,
-} from '../normalize.js';
+} from '../src/normalize.js';
 
 import type { SlackUserId, WorkspaceId } from '@sym/contracts';
 
@@ -115,7 +115,7 @@ describe('normalizeSlackEvent', () => {
 
   it('strips mention with extra whitespace', () => {
     const e = appMentionEvent();
-    (e.event as Record<string, unknown>).text = '<@UBOT001>   trimmed text';
+    (e.event as unknown as Record<string, unknown>)['text'] = '<@UBOT001>   trimmed text';
     const result = normalizeSlackEvent({
       event: e,
       workspaceId: WORKSPACE_ID,
@@ -140,8 +140,8 @@ describe('normalizeSlackEvent', () => {
   // Self-reply guard: Sym's own messages must NOT become turns, or it loops forever.
   it("ignores the bot's own DM messages (bot_id present)", () => {
     const e = dmEvent();
-    delete (e.event as Record<string, unknown>)['user'];
-    (e.event as Record<string, unknown>)['bot_id'] = 'B0SYM';
+    delete (e.event as unknown as Record<string, unknown>)['user'];
+    (e.event as unknown as Record<string, unknown>)['bot_id'] = 'B0SYM';
     expect(
       normalizeSlackEvent({ event: e, workspaceId: WORKSPACE_ID, botUserId: BOT_USER_ID }),
     ).toBeNull();
@@ -149,7 +149,7 @@ describe('normalizeSlackEvent', () => {
 
   it('ignores DM messages with a subtype (e.g. message_changed from streaming edits)', () => {
     const e = dmEvent();
-    (e.event as Record<string, unknown>)['subtype'] = 'message_changed';
+    (e.event as unknown as Record<string, unknown>)['subtype'] = 'message_changed';
     expect(
       normalizeSlackEvent({ event: e, workspaceId: WORKSPACE_ID, botUserId: BOT_USER_ID }),
     ).toBeNull();
@@ -157,7 +157,7 @@ describe('normalizeSlackEvent', () => {
 
   it('ignores a DM message authored by the bot user id', () => {
     const e = dmEvent();
-    (e.event as Record<string, unknown>)['user'] = BOT_USER_ID;
+    (e.event as unknown as Record<string, unknown>)['user'] = BOT_USER_ID;
     expect(
       normalizeSlackEvent({ event: e, workspaceId: WORKSPACE_ID, botUserId: BOT_USER_ID }),
     ).toBeNull();

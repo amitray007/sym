@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkOwnerAccess, denyReason } from './owner-gate.js';
+import { checkOwnerAccess, denyReason } from '../src/owner-gate.js';
 
 import type { SlackUserId } from '@sym/contracts';
 

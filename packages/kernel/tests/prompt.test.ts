@@ -1,21 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildSystemPrompt, buildTurnContextPrompt, buildUserTurnContent } from './prompt.js';
+import { buildSystemPrompt, buildTurnContextPrompt, buildUserTurnContent } from '../src/prompt.js';
 
-import type { Turn } from '@sym/contracts';
+import type { SlackThreadTs, Turn } from '@sym/contracts';
 
 function makeTurn(overrides: Partial<Turn> = {}): Turn {
-  return {
-    id: 'turn_01' as Turn['id'],
-    workspaceId: 'ws_01' as Turn['workspaceId'],
-    conversationId: 'conv_01' as Turn['conversationId'],
-    entrySurface: 'app_mention',
-    requester: 'U_alice' as Turn['requester'],
-    channelId: 'C_general' as Turn['channelId'],
-    text: 'Hello, Sym!',
-    receivedAt: new Date('2026-05-24T00:00:00Z'),
-    ...overrides,
-  };
+  return Object.assign(
+    {
+      id: 'turn_01',
+      workspaceId: 'ws_01',
+      conversationId: 'conv_01',
+      entrySurface: 'app_mention' as const,
+      requester: 'U_alice',
+      channelId: 'C_general',
+      text: 'Hello, Sym!',
+      receivedAt: new Date('2026-05-24T00:00:00Z'),
+    },
+    overrides,
+  ) as Turn;
 }
 
 describe('buildSystemPrompt', () => {
@@ -50,13 +52,14 @@ describe('buildTurnContextPrompt', () => {
   });
 
   it('includes threadTs when present', () => {
-    const turn = makeTurn({ threadTs: '12345.6789' as Turn['threadTs'] });
+    const turn = makeTurn({ threadTs: '12345.6789' as SlackThreadTs });
     const ctx = buildTurnContextPrompt(turn);
     expect(ctx).toContain('12345.6789');
   });
 
   it('omits threadTs when absent', () => {
-    const turn = makeTurn({ threadTs: undefined });
+    const turn = makeTurn();
+    delete (turn as Partial<Turn>).threadTs;
     const ctx = buildTurnContextPrompt(turn);
     expect(ctx).not.toContain('thread');
   });
