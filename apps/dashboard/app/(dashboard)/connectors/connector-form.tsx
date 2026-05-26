@@ -1,9 +1,22 @@
 'use client';
 
-import { Pencil, Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { Pencil, Plus, Trash2, Unplug } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
 
-import { createConnector, deleteConnector, setConnectorEnabled, updateConnector } from './actions';
+import {
+  createConnector,
+  deleteConnector,
+  disconnectConnector,
+  setConnectorEnabled,
+  updateConnector,
+} from './actions';
+
+export interface OAuthStatus {
+  connected: boolean;
+  accountHandle?: string | null;
+  expiresAt?: Date | null;
+}
 
 export interface ConnectorRow {
   id: string;
@@ -12,10 +25,22 @@ export interface ConnectorRow {
   url: string | null;
   authMode: 'none' | 'static' | 'oauth';
   enabled: boolean;
+  /** For oauth mode: display-only OAuth config (no secret). */
+  oauthConfig?: {
+    authorizeUrl: string;
+    tokenUrl: string;
+    clientId: string;
+    scopes: string[];
+  } | null;
+  /** Whether an OAuth client secret is already stored (edit hint). */
+  hasExistingSecret?: boolean;
+  /** Current OAuth connection status for the workspace owner. */
+  oauthStatus?: OAuthStatus | null;
 }
 
 interface ConnectorFormProps {
   connectors: ConnectorRow[];
+  agentUrl: string | null;
 }
 
 const labelCls = 'block text-ink-secondary text-xs font-medium mb-1';
@@ -37,6 +62,15 @@ interface ConnectorFormFields {
   authMode: ConnectorAuthMode;
   /** Whether this is an edit of an existing static connector (affects token hint). */
   hasExistingToken: boolean;
+  /** For oauth mode on edit: pre-populate public fields (no secret). */
+  oauthConfig?: {
+    authorizeUrl: string;
+    tokenUrl: string;
+    clientId: string;
+    scopes: string[];
+  } | null;
+  /** Whether the oauth client secret is already stored (shows keep-hint). */
+  hasExistingSecret?: boolean;
 }
 
 function ConnectorFormFields({
@@ -57,6 +91,12 @@ function ConnectorFormFields({
   const [url, setUrl] = useState(initial.url);
   const [authMode, setAuthMode] = useState<ConnectorAuthMode>(initial.authMode);
   const [slugEdited, setSlugEdited] = useState(initial.slug !== '');
+
+  // OAuth field state — pre-populated on edit from the stored (non-secret) config.
+  const [authorizeUrl, setAuthorizeUrl] = useState(initial.oauthConfig?.authorizeUrl ?? '');
+  const [oauthTokenUrl, setOauthTokenUrl] = useState(initial.oauthConfig?.tokenUrl ?? '');
+  const [clientId, setClientId] = useState(initial.oauthConfig?.clientId ?? '');
+  const [scopes, setScopes] = useState(initial.oauthConfig?.scopes?.join(' ') ?? '');
 
   function handleNameChange(v: string) {
     setName(v);
@@ -173,10 +213,96 @@ function ConnectorFormFields({
       )}
 
       {authMode === 'oauth' && (
-        <div className="card px-4 py-3">
-          <p className="text-ink-secondary text-xs">
-            Each user connects their own account — connect flow coming soon.
-          </p>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls} htmlFor="connector-authorize-url">
+                Authorize URL
+              </label>
+              <input
+                id="connector-authorize-url"
+                name="authorizeUrl"
+                type="url"
+                required
+                className="input font-mono"
+                placeholder="https://provider.example.com/oauth/authorize"
+                value={authorizeUrl}
+                onChange={(e) => setAuthorizeUrl(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="connector-token-url">
+                Token URL
+              </label>
+              <input
+                id="connector-token-url"
+                name="tokenUrl"
+                type="url"
+                required
+                className="input font-mono"
+                placeholder="https://provider.example.com/oauth/token"
+                value={oauthTokenUrl}
+                onChange={(e) => setOauthTokenUrl(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls} htmlFor="connector-client-id">
+              Client ID
+            </label>
+            <input
+              id="connector-client-id"
+              name="clientId"
+              type="text"
+              required
+              className="input font-mono"
+              placeholder="your-client-id"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className={labelCls} htmlFor="connector-scopes">
+              Scopes
+              <span className="ml-1 text-ink-muted font-normal">(space or comma-separated)</span>
+            </label>
+            <input
+              id="connector-scopes"
+              name="scopes"
+              type="text"
+              className="input font-mono"
+              placeholder="read write offline_access"
+              value={scopes}
+              onChange={(e) => setScopes(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className={labelCls} htmlFor="connector-client-secret">
+              Client secret
+              {initial.hasExistingSecret && (
+                <span className="ml-1 text-ink-muted font-normal">
+                  — leave blank to keep current
+                </span>
+              )}
+            </label>
+            <input
+              id="connector-client-secret"
+              name="clientSecret"
+              type="password"
+              autoComplete="new-password"
+              required={!initial.hasExistingSecret}
+              className="input font-mono"
+              placeholder={initial.hasExistingSecret ? '••••••••' : 'Paste client secret…'}
+            />
+            {initial.hasExistingSecret && (
+              <p className="mt-1 text-ink-muted text-xs font-mono">
+                Secret set — leave blank to keep the current value.
+              </p>
+            )}
+          </div>
         </div>
       )}
 
@@ -215,14 +341,18 @@ function AuthModeBadge({ mode }: { mode: ConnectorAuthMode }) {
 
 function ConnectorRow({
   connector,
+  agentUrl,
   onEdit,
   onDeleted,
   onToggled,
+  onDisconnected,
 }: {
   connector: ConnectorRow;
+  agentUrl: string | null;
   onEdit: () => void;
   onDeleted: (err: string | null) => void;
   onToggled: (err: string | null) => void;
+  onDisconnected: (err: string | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -241,55 +371,156 @@ function ConnectorRow({
     onDeleted(res.ok ? null : (res.error ?? 'Failed.'));
   }
 
+  async function handleDisconnect() {
+    if (!confirm(`Disconnect your ${connector.name} account? You can reconnect at any time.`))
+      return;
+    setBusy(true);
+    const res = await disconnectConnector(connector.slug);
+    setBusy(false);
+    onDisconnected(res.ok ? null : (res.error ?? 'Failed.'));
+  }
+
+  const oauthStatus = connector.oauthStatus;
+  const isOauth = connector.authMode === 'oauth';
+
   return (
-    <div className="flex items-center gap-3 px-4 py-3 border-b border-border-subtle last:border-0">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-ink-primary text-sm font-medium truncate">{connector.name}</span>
-          <span className="font-mono text-ink-muted text-[10px]">{connector.slug}</span>
-          <AuthModeBadge mode={connector.authMode} />
-          <EnabledBadge enabled={connector.enabled} />
+    <div className="px-4 py-3 border-b border-border-subtle last:border-0">
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-ink-primary text-sm font-medium truncate">{connector.name}</span>
+            <span className="font-mono text-ink-muted text-[10px]">{connector.slug}</span>
+            <AuthModeBadge mode={connector.authMode} />
+            <EnabledBadge enabled={connector.enabled} />
+            {isOauth && oauthStatus?.connected && (
+              <span className="badge badge-success">Connected</span>
+            )}
+          </div>
+          <span className="text-ink-tertiary text-[10px] font-mono truncate block mt-0.5">
+            {connector.url ?? '—'}
+          </span>
+          {isOauth && oauthStatus?.connected && (
+            <div className="mt-1 flex items-center gap-2 flex-wrap">
+              {oauthStatus.accountHandle && (
+                <span className="text-ink-secondary text-[10px] font-mono">
+                  {oauthStatus.accountHandle}
+                </span>
+              )}
+              {oauthStatus.expiresAt && (
+                <span className="text-ink-muted text-[10px] font-mono">
+                  expires{' '}
+                  {oauthStatus.expiresAt.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })}
+                </span>
+              )}
+            </div>
+          )}
         </div>
-        <span className="text-ink-tertiary text-[10px] font-mono truncate block mt-0.5">
-          {connector.url ?? '—'}
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isOauth && oauthStatus?.connected ? (
+            <button
+              type="button"
+              disabled={busy}
+              className="btn-ghost text-[11px] py-1 px-2 text-danger border-danger/30 hover:border-danger/50"
+              onClick={handleDisconnect}
+              title="Disconnect"
+            >
+              <Unplug className="w-3 h-3" />
+              Disconnect
+            </button>
+          ) : isOauth ? (
+            agentUrl ? (
+              <a
+                href={`${agentUrl}/connectors/oauth/start?slug=${connector.slug}`}
+                className="btn-primary text-[11px] py-1 px-2"
+              >
+                Connect
+              </a>
+            ) : (
+              <span className="text-ink-muted text-[10px] font-mono">AGENT_URL not set</span>
+            )
+          ) : null}
+          <button
+            type="button"
+            disabled={busy}
+            className="btn-ghost text-[11px] py-1 px-2"
+            onClick={handleToggle}
+            title={connector.enabled ? 'Disable' : 'Enable'}
+          >
+            {connector.enabled ? 'Disable' : 'Enable'}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            className="btn-ghost text-[11px] py-1 px-2"
+            onClick={onEdit}
+            title="Edit"
+          >
+            <Pencil className="w-3 h-3" />
+            Edit
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            className="btn-ghost text-[11px] py-1 px-2 text-danger border-danger/30 hover:border-danger/50"
+            onClick={handleDelete}
+            title="Delete"
+          >
+            <Trash2 className="w-3 h-3" />
+            Delete
+          </button>
+        </div>
       </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        <button
-          type="button"
-          disabled={busy}
-          className="btn-ghost text-[11px] py-1 px-2"
-          onClick={handleToggle}
-          title={connector.enabled ? 'Disable' : 'Enable'}
-        >
-          {connector.enabled ? 'Disable' : 'Enable'}
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          className="btn-ghost text-[11px] py-1 px-2"
-          onClick={onEdit}
-          title="Edit"
-        >
-          <Pencil className="w-3 h-3" />
-          Edit
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          className="btn-ghost text-[11px] py-1 px-2 text-danger border-danger/30 hover:border-danger/50"
-          onClick={handleDelete}
-          title="Delete"
-        >
-          <Trash2 className="w-3 h-3" />
-          Delete
-        </button>
-      </div>
+      {isOauth && (
+        <div className="mt-2 pt-2 border-t border-border-subtle">
+          <p className="text-ink-muted text-[10px] font-mono">
+            Redirect URI:{' '}
+            {agentUrl
+              ? (() => {
+                  try {
+                    return new URL(agentUrl).origin + '/connectors/oauth/callback';
+                  } catch {
+                    return 'invalid AGENT_URL';
+                  }
+                })()
+              : 'set AGENT_URL to see redirect URI'}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
 
-export function ConnectorForm({ connectors }: ConnectorFormProps) {
+function ConnectBanner() {
+  const params = useSearchParams();
+  const status = params.get('connect');
+  if (!status) return null;
+
+  if (status === 'ok') {
+    return (
+      <div className="rounded border border-success/20 bg-success/10 px-4 py-2">
+        <p className="text-success text-xs font-mono">Connected.</p>
+      </div>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <div className="rounded border border-danger/20 bg-danger/10 px-4 py-2">
+        <p className="text-danger text-xs font-mono">
+          Connect failed — check the OAuth config and try again.
+        </p>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+export function ConnectorForm({ connectors, agentUrl }: ConnectorFormProps) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -356,6 +587,11 @@ export function ConnectorForm({ connectors }: ConnectorFormProps) {
         )}
       </div>
 
+      {/* OAuth connect/error banner (from redirect query param). useSearchParams needs Suspense. */}
+      <Suspense fallback={null}>
+        <ConnectBanner />
+      </Suspense>
+
       {flashError && (
         <div className="rounded border border-danger/20 bg-danger/10 px-4 py-2">
           <p className="text-danger text-xs font-mono">{flashError}</p>
@@ -367,7 +603,15 @@ export function ConnectorForm({ connectors }: ConnectorFormProps) {
         <section className="card p-5 space-y-4">
           <p className="section-heading">New connector</p>
           <ConnectorFormFields
-            initial={{ name: '', slug: '', url: '', authMode: 'none', hasExistingToken: false }}
+            initial={{
+              name: '',
+              slug: '',
+              url: '',
+              authMode: 'none',
+              hasExistingToken: false,
+              oauthConfig: null,
+              hasExistingSecret: false,
+            }}
             onSave={handleCreate}
             onCancel={() => {
               setShowAdd(false);
@@ -400,6 +644,8 @@ export function ConnectorForm({ connectors }: ConnectorFormProps) {
                     url: editingConnector.url ?? '',
                     authMode: editingConnector.authMode,
                     hasExistingToken: editingConnector.authMode === 'static',
+                    oauthConfig: editingConnector.oauthConfig ?? null,
+                    hasExistingSecret: editingConnector.hasExistingSecret ?? false,
                   }}
                   onSave={(fd) => handleUpdate(connector.id, fd)}
                   onCancel={() => {
@@ -414,6 +660,7 @@ export function ConnectorForm({ connectors }: ConnectorFormProps) {
               <ConnectorRow
                 key={connector.id}
                 connector={connector}
+                agentUrl={agentUrl}
                 onEdit={() => {
                   setEditingId(connector.id);
                   setShowAdd(false);
@@ -421,6 +668,7 @@ export function ConnectorForm({ connectors }: ConnectorFormProps) {
                 }}
                 onDeleted={handleFlash}
                 onToggled={handleFlash}
+                onDisconnected={handleFlash}
               />
             ),
           )

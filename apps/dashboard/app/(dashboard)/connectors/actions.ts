@@ -1,11 +1,12 @@
 'use server';
 
-import { dashboardAdmins, mcpConfigs, uuidv7, workspaces } from '@sym/db';
+import { dashboardAdmins, mcpConfigs, oauthTokens, uuidv7, workspaces } from '@sym/db';
 import { and, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 
 import { authMode, dashboardGate } from '@/lib/auth';
 import { getDb } from '@/lib/db';
+import { ensureSecrets } from '@/lib/ensure-secrets';
 
 export interface ActionResult {
   ok: boolean;
@@ -122,6 +123,13 @@ export async function createConnector(formData: FormData): Promise<ActionResult>
   const authModeRaw = String(formData.get('authMode') ?? 'none').trim();
   const token = String(formData.get('token') ?? '').trim();
 
+  // OAuth fields
+  const authorizeUrl = String(formData.get('authorizeUrl') ?? '').trim();
+  const tokenUrl = String(formData.get('tokenUrl') ?? '').trim();
+  const clientId = String(formData.get('clientId') ?? '').trim();
+  const scopesRaw = String(formData.get('scopes') ?? '').trim();
+  const clientSecret = String(formData.get('clientSecret') ?? '').trim();
+
   if (!name) return { ok: false, error: 'Name is required.' };
   const slugErr = validateSlug(slug);
   if (slugErr) return { ok: false, error: slugErr };
@@ -135,6 +143,13 @@ export async function createConnector(formData: FormData): Promise<ActionResult>
     return { ok: false, error: 'A token is required for Static auth mode.' };
   }
 
+  if (resolvedAuthMode === 'oauth') {
+    if (!authorizeUrl) return { ok: false, error: 'Authorize URL is required for OAuth mode.' };
+    if (!tokenUrl) return { ok: false, error: 'Token URL is required for OAuth mode.' };
+    if (!clientId) return { ok: false, error: 'Client ID is required for OAuth mode.' };
+    if (!clientSecret) return { ok: false, error: 'Client secret is required for OAuth mode.' };
+  }
+
   if (await isSlugTaken(ctx.db, ctx.workspaceId, slug)) {
     return {
       ok: false,
@@ -144,8 +159,24 @@ export async function createConnector(formData: FormData): Promise<ActionResult>
 
   const adminId = await resolveActingAdminId(ctx.workspaceId);
 
-  // envJson is an encryptedText column — pass the JSON string; encryption is automatic.
-  const envJson = resolvedAuthMode === 'static' && token ? JSON.stringify({ token }) : null;
+  // Build envJson and oauthConfigJson based on auth mode.
+  let envJson: string | null = null;
+  let oauthConfigJson: unknown = null;
+
+  if (resolvedAuthMode === 'static' && token) {
+    // envJson is an encryptedText column — pass the JSON string; encryption is automatic.
+    await ensureSecrets();
+    envJson = JSON.stringify({ token });
+  } else if (resolvedAuthMode === 'oauth') {
+    // The client secret goes into envJson (encrypted); public config into oauthConfigJson (jsonb).
+    const scopes = scopesRaw
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    oauthConfigJson = { authorizeUrl, tokenUrl, clientId, scopes };
+    await ensureSecrets();
+    envJson = JSON.stringify({ clientSecret });
+  }
 
   await ctx.db.db.insert(mcpConfigs).values({
     id: uuidv7(),
@@ -156,6 +187,7 @@ export async function createConnector(formData: FormData): Promise<ActionResult>
     url,
     authMode: resolvedAuthMode,
     envJson,
+    oauthConfigJson,
     enabled: true,
     updatedByAdminId: adminId,
   });
@@ -175,6 +207,13 @@ export async function updateConnector(id: string, formData: FormData): Promise<A
   const authModeRaw = String(formData.get('authMode') ?? 'none').trim();
   const token = String(formData.get('token') ?? '').trim();
 
+  // OAuth fields
+  const authorizeUrl = String(formData.get('authorizeUrl') ?? '').trim();
+  const tokenUrl = String(formData.get('tokenUrl') ?? '').trim();
+  const clientId = String(formData.get('clientId') ?? '').trim();
+  const scopesRaw = String(formData.get('scopes') ?? '').trim();
+  const clientSecret = String(formData.get('clientSecret') ?? '').trim();
+
   if (!name) return { ok: false, error: 'Name is required.' };
   const slugErr = validateSlug(slug);
   if (slugErr) return { ok: false, error: slugErr };
@@ -183,6 +222,12 @@ export async function updateConnector(id: string, formData: FormData): Promise<A
 
   const resolvedAuthMode = validateAuthMode(authModeRaw);
   if (!resolvedAuthMode) return { ok: false, error: 'Invalid auth mode.' };
+
+  if (resolvedAuthMode === 'oauth') {
+    if (!authorizeUrl) return { ok: false, error: 'Authorize URL is required for OAuth mode.' };
+    if (!tokenUrl) return { ok: false, error: 'Token URL is required for OAuth mode.' };
+    if (!clientId) return { ok: false, error: 'Client ID is required for OAuth mode.' };
+  }
 
   // Confirm the row belongs to this workspace before updating.
   const existing = (
@@ -203,42 +248,58 @@ export async function updateConnector(id: string, formData: FormData): Promise<A
 
   const adminId = await resolveActingAdminId(ctx.workspaceId);
 
-  // For static mode: if no new token is provided, keep the existing envJson.
-  // If switching away from static, clear envJson.
+  // Determine envJson and oauthConfigJson update strategy.
+  // - static: if new token provided → encrypt fresh; if blank → keep existing (omit column).
+  // - oauth: if new clientSecret provided → encrypt fresh; if blank → keep existing (omit column).
+  //          oauthConfigJson is always updated from the public fields.
+  // - none: clear both.
   let envJson: string | null | undefined;
+  let oauthConfigJson: unknown | undefined;
+
   if (resolvedAuthMode === 'static') {
     if (token) {
-      // New token provided — encrypt fresh.
+      await ensureSecrets();
       envJson = JSON.stringify({ token });
     } else {
-      // Blank token = keep existing. Pass undefined so Drizzle omits the column from SET.
+      // Blank = keep existing secret. Pass undefined so Drizzle omits the column from SET.
+      envJson = undefined;
+    }
+    // Clear any stale oauth config.
+    oauthConfigJson = null;
+  } else if (resolvedAuthMode === 'oauth') {
+    const scopes = scopesRaw
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    // Public config always updated.
+    oauthConfigJson = { authorizeUrl, tokenUrl, clientId, scopes };
+    if (clientSecret) {
+      // New secret provided — encrypt fresh.
+      await ensureSecrets();
+      envJson = JSON.stringify({ clientSecret });
+    } else {
+      // Blank = keep existing encrypted secret. Omit from SET.
       envJson = undefined;
     }
   } else {
-    // Switched to none/oauth — clear any stored token.
+    // Switched to none — clear both stored secret and oauth config.
     envJson = null;
+    oauthConfigJson = null;
   }
 
   // Build the update set conditionally to avoid overwriting envJson when unchanged.
-  const setValues =
-    envJson !== undefined
-      ? {
-          name,
-          slug,
-          url,
-          authMode: resolvedAuthMode,
-          envJson,
-          updatedAt: new Date(),
-          updatedByAdminId: adminId,
-        }
-      : {
-          name,
-          slug,
-          url,
-          authMode: resolvedAuthMode,
-          updatedAt: new Date(),
-          updatedByAdminId: adminId,
-        };
+  // oauthConfigJson is a plain jsonb column so undefined means "omit from SET".
+  const baseSet = {
+    name,
+    slug,
+    url,
+    authMode: resolvedAuthMode,
+    updatedAt: new Date(),
+    updatedByAdminId: adminId,
+    ...(oauthConfigJson !== undefined ? { oauthConfigJson } : {}),
+  };
+
+  const setValues = envJson !== undefined ? { ...baseSet, envJson } : baseSet;
 
   await ctx.db.db.update(mcpConfigs).set(setValues).where(eq(mcpConfigs.id, id));
 
@@ -288,6 +349,47 @@ export async function setConnectorEnabled(id: string, enabled: boolean): Promise
     .update(mcpConfigs)
     .set({ enabled, updatedAt: new Date(), updatedByAdminId: adminId })
     .where(eq(mcpConfigs.id, id));
+
+  revalidatePath('/connectors');
+  return { ok: true };
+}
+
+/**
+ * Revoke the workspace owner's active OAuth token for a connector.
+ * The connector config (mcpConfigs row) is preserved; only the per-user
+ * credential is revoked so the owner can re-connect at any time.
+ */
+export async function disconnectConnector(slug: string): Promise<ActionResult> {
+  if (!(await requireAdmin())) return { ok: false, error: 'Forbidden.' };
+  const ctx = await resolveContext();
+  if (!ctx?.db) return { ok: false, error: 'Workspace not installed yet.' };
+
+  // Resolve the workspace owner so we revoke the correct token.
+  const ws = (
+    await ctx.db.db
+      .select({ ownerSlackUserId: workspaces.ownerSlackUserId })
+      .from(workspaces)
+      .where(eq(workspaces.id, ctx.workspaceId))
+      .limit(1)
+  )[0];
+
+  if (!ws?.ownerSlackUserId) {
+    return { ok: false, error: 'Workspace owner not set.' };
+  }
+
+  // Mark the active token as revoked. The unique partial index
+  // (workspaceId, slackUserId, provider) WHERE status='active' ensures at most one.
+  await ctx.db.db
+    .update(oauthTokens)
+    .set({ status: 'revoked', revokedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(oauthTokens.workspaceId, ctx.workspaceId),
+        eq(oauthTokens.slackUserId, ws.ownerSlackUserId),
+        eq(oauthTokens.provider, slug),
+        eq(oauthTokens.status, 'active'),
+      ),
+    );
 
   revalidatePath('/connectors');
   return { ok: true };
