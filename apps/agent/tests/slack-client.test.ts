@@ -295,3 +295,46 @@ describe('WebApiSlackClient assistant + streaming methods', () => {
     expect(callBody(fetchFn, 1)).toMatchObject({ channel_id: 'D1', title: 'Migration risks' });
   });
 });
+
+describe('WebApiSlackClient retry layer', () => {
+  it('retries on HTTP 429 then succeeds (automatic, no per-call opt-in)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchFn = vi.fn();
+      fetchFn.mockResolvedValueOnce({
+        status: 429,
+        headers: { get: () => '0' },
+        json: async () => ({}),
+      });
+      fetchFn.mockResolvedValueOnce({
+        status: 200,
+        json: async () => ({ ok: true, ts: '9.9', channel: 'C1' }),
+      });
+      vi.stubGlobal('fetch', fetchFn);
+
+      const client = new WebApiSlackClient('xoxb-test');
+      const promise = client.chatPostMessage({ channel: CHANNEL, text: 'hi' });
+      await vi.runAllTimersAsync(); // drive the backoff sleep + the retry
+      const result = await promise;
+
+      expect(fetchFn).toHaveBeenCalledTimes(2);
+      expect(result.ts).toBe('9.9');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces a terminal Slack error as an Error, without retrying', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({ ok: false, error: 'channel_not_found' }),
+    });
+    vi.stubGlobal('fetch', fetchFn);
+
+    const client = new WebApiSlackClient('xoxb-test');
+    await expect(client.chatPostMessage({ channel: CHANNEL, text: 'hi' })).rejects.toThrow(
+      'channel_not_found',
+    );
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+});

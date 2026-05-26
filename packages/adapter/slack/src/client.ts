@@ -178,6 +178,28 @@ function isSlackApiError(e: unknown): e is SlackApiError {
 }
 
 /**
+ * A terminal Slack failure as a real `Error` that also carries the structured
+ * `SlackActionError` fields. Being an `Error` keeps `instanceof Error` + `.message`
+ * working for callers that log it; the fields are there for structured handling.
+ */
+class SlackError extends Error implements SlackActionError {
+  readonly domain = 'slack';
+  readonly code: SlackActionError['code'];
+  readonly retryable: boolean;
+  constructor(
+    code: SlackActionError['code'],
+    message: string,
+    retryable: boolean,
+    cause?: unknown,
+  ) {
+    super(message, cause !== undefined ? { cause } : undefined);
+    this.name = 'SlackError';
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
+/**
  * Wraps a Slack API call with exponential backoff on 429 rate-limits.
  * Non-rate-limit errors surface immediately as `SlackActionError`.
  *
@@ -222,12 +244,7 @@ export async function withSlackRetries<T>(fn: () => Promise<T>, maxRetries = 3):
   }
 
   /* istanbul ignore next — unreachable after exhausting retries */
-  throw {
-    domain: 'slack',
-    code: 'rate_limited',
-    message: 'Exceeded retry budget',
-    retryable: true,
-  } satisfies SlackActionError;
+  throw new SlackError('rate_limited', 'Exceeded retry budget', true);
 }
 
 /** Convert a raw Slack API error into a typed `SlackActionError`. */
@@ -246,13 +263,7 @@ export function mapSlackError(err: SlackApiError): SlackActionError {
 
   const code: SlackActionError['code'] = codeMap[slackError] ?? 'api_error';
 
-  return {
-    domain: 'slack',
-    code,
-    message: slackError ?? err.message,
-    retryable: code === 'rate_limited',
-    cause: err,
-  };
+  return new SlackError(code, slackError ?? err.message, code === 'rate_limited', err);
 }
 
 function sleep(ms: number): Promise<void> {

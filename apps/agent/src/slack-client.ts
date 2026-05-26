@@ -1,3 +1,5 @@
+import { withSlackRetries } from '@sym/adapter-slack';
+
 import type {
   AppendStreamParams,
   ConversationsHistoryParams,
@@ -68,32 +70,42 @@ interface RepliesResponse extends SlackOkResponse {
 export class WebApiSlackClient implements SlackClient {
   constructor(private readonly botToken: string) {}
 
-  /** Shared transport: POST to a Slack method, handle 429 + the `ok` envelope. */
-  private async dispatch<T extends SlackOkResponse = SlackOkResponse>(
+  /**
+   * Shared transport: POST to a Slack method. Wrapped in the retry layer so
+   * EVERY call (read + write) automatically backs off on 429 — no per-method
+   * opt-in. Terminal Slack errors surface as a `SlackError` (an `Error` that
+   * also carries the structured `SlackActionError` fields).
+   */
+  private dispatch<T extends SlackOkResponse = SlackOkResponse>(
     method: string,
     contentType: string,
     body: string,
   ): Promise<T> {
-    const res = await fetch(`${SLACK_API}/${method}`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${this.botToken}`,
-        'content-type': contentType,
-      },
-      body,
+    return withSlackRetries(async () => {
+      const res = await fetch(`${SLACK_API}/${method}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.botToken}`,
+          'content-type': contentType,
+        },
+        body,
+      });
+
+      if (res.status === 429) {
+        const retryAfter = Number(res.headers.get('retry-after') ?? '1');
+        throw new SlackWebApiError('ratelimited', {
+          error: 'ratelimited',
+          retry_after: retryAfter,
+        });
+      }
+
+      const json = (await res.json()) as T;
+      if (!json.ok) {
+        const errorCode = json.error ?? 'unknown_error';
+        throw new SlackWebApiError(errorCode, { error: errorCode });
+      }
+      return json;
     });
-
-    if (res.status === 429) {
-      const retryAfter = Number(res.headers.get('retry-after') ?? '1');
-      throw new SlackWebApiError('ratelimited', { error: 'ratelimited', retry_after: retryAfter });
-    }
-
-    const json = (await res.json()) as T;
-    if (!json.ok) {
-      const errorCode = json.error ?? 'unknown_error';
-      throw new SlackWebApiError(errorCode, { error: errorCode });
-    }
-    return json;
   }
 
   /** JSON-body call — for write methods (chat.*, assistant.*) that accept it. */
