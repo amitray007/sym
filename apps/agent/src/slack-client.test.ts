@@ -22,6 +22,16 @@ function callBody(fn: ReturnType<typeof vi.fn>, n: number): Record<string, unkno
   return JSON.parse((fn.mock.calls[n]![1] as { body: string }).body) as Record<string, unknown>;
 }
 
+/**
+ * Parse the form-urlencoded request body of the Nth fetch call. Slack read
+ * methods (conversations.replies / conversations.history) send
+ * `application/x-www-form-urlencoded`, so every value comes back as a string.
+ */
+function callFormBody(fn: ReturnType<typeof vi.fn>, n: number): Record<string, string> {
+  const body = (fn.mock.calls[n]![1] as { body: string }).body;
+  return Object.fromEntries(new URLSearchParams(body));
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -47,7 +57,7 @@ describe('WebApiSlackClient.conversationsReplies', () => {
       { botId: 'B9', text: 'beep', ts: '100.2', subtype: 'bot_message' },
     ]);
     // First page request carries channel + ts and no cursor.
-    const body = callBody(fetchFn, 0);
+    const body = callFormBody(fetchFn, 0);
     expect(body['channel']).toBe('C1');
     expect(body['ts']).toBe('100.1');
     expect(body['cursor']).toBeUndefined();
@@ -69,7 +79,7 @@ describe('WebApiSlackClient.conversationsReplies', () => {
     expect(fetchFn).toHaveBeenCalledTimes(2);
     expect(messages.map((m) => m.text)).toEqual(['a', 'b']);
     // Second page forwards the cursor Slack handed back.
-    expect(callBody(fetchFn, 1)['cursor']).toBe('CURSOR2');
+    expect(callFormBody(fetchFn, 1)['cursor']).toBe('CURSOR2');
   });
 
   it('stops paginating once the limit ceiling is met, even if more remain', async () => {
@@ -94,7 +104,7 @@ describe('WebApiSlackClient.conversationsReplies', () => {
     // Ceiling reached after page 1 → no second fetch despite next_cursor.
     expect(fetchFn).toHaveBeenCalledTimes(1);
     expect(messages).toHaveLength(2);
-    expect(callBody(fetchFn, 0)['limit']).toBe(2);
+    expect(callFormBody(fetchFn, 0)['limit']).toBe('2');
   });
 
   it('throws on a Slack error (e.g. missing_scope) so the caller can fall back', async () => {
@@ -125,7 +135,7 @@ describe('WebApiSlackClient.conversationsHistory', () => {
     // Slack returned newest-first; impl must reverse to oldest-first.
     expect(messages.map((m) => m.text)).toEqual(['older message', 'newer message']);
     // Channel is passed; no ts field (unlike replies).
-    const body = callBody(fetchFn, 0);
+    const body = callFormBody(fetchFn, 0);
     expect(body['channel']).toBe('C1');
     expect(body['ts']).toBeUndefined();
     expect(body['cursor']).toBeUndefined();
@@ -152,7 +162,7 @@ describe('WebApiSlackClient.conversationsHistory', () => {
 
     expect(fetchFn).toHaveBeenCalledTimes(2);
     // Second call should carry the cursor.
-    expect(callBody(fetchFn, 1)['cursor']).toBe('CURSOR2');
+    expect(callFormBody(fetchFn, 1)['cursor']).toBe('CURSOR2');
     // After collecting both pages (interleaved newest-first), reversed to oldest-first.
     // Page 1 had ts 300.3, 300.2 and page 2 had 300.1; all collected then reversed.
     expect(messages.map((m) => m.ts)).toEqual(['300.1', '300.2', '300.3']);
