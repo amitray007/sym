@@ -17,7 +17,6 @@ export type AclUserRuleId = Brand<string, 'AclUserRuleId'>;
 export type ProviderConfigId = Brand<string, 'ProviderConfigId'>;
 export type McpConfigId = Brand<string, 'McpConfigId'>;
 export type SkillId = Brand<string, 'SkillId'>;
-export type SoulLayerId = Brand<string, 'SoulLayerId'>;
 export type OAuthTokenId = Brand<string, 'OAuthTokenId'>;
 export type GrantId = Brand<string, 'GrantId'>;
 export type ConversationId = Brand<string, 'ConversationId'>;

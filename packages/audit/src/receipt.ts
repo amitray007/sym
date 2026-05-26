@@ -15,8 +15,6 @@
  *   toolsInvoked   — deduplicated list of `payload.toolName` strings across
  *                    events whose kind is `app.tool.invoke` or any kind
  *                    containing `execute_tool`.
- *   soulLayersApplied — deduplicated `payload.layer` strings from
- *                    `app.soul.update` events (cast to SoulLayerKind).
  *   onBehalfOf     — taken from the first event that has a non-null
  *                    `onBehalfOf` column value.
  *   turnId         — caller-supplied (not in every audit row).
@@ -25,14 +23,7 @@
  * be unit-tested without infrastructure.
  */
 
-import type {
-  AuditActorKind,
-  Receipt,
-  SlackUserId,
-  SoulLayerKind,
-  TurnId,
-  WorkspaceId,
-} from '@sym/contracts';
+import type { AuditActorKind, Receipt, SlackUserId, TurnId, WorkspaceId } from '@sym/contracts';
 
 /** Minimal row shape accepted by the receipt formatter (a subset of AuditEvent). */
 export interface AuditEventRow {
@@ -63,7 +54,6 @@ export function auditEventsToReceipt(turnId: TurnId, events: AuditEventRow[]): R
       turnId,
       model: 'unknown',
       toolsInvoked: [],
-      soulLayersApplied: [],
     };
   }
 
@@ -79,7 +69,6 @@ export function auditEventsToReceipt(turnId: TurnId, events: AuditEventRow[]): R
   let totalTokens = 0;
   let hasUsage = false;
   const toolsSet = new Set<string>();
-  const soulLayersSet = new Set<string>();
   let onBehalfOf: SlackUserId | undefined;
 
   for (const ev of events) {
@@ -110,13 +99,6 @@ export function auditEventsToReceipt(turnId: TurnId, events: AuditEventRow[]): R
       }
     }
 
-    // soul layers
-    if (ev.kind === 'app.soul.update') {
-      if (typeof p['layer'] === 'string') {
-        soulLayersSet.add(p['layer']);
-      }
-    }
-
     // onBehalfOf — first non-null wins
     if (onBehalfOf === undefined && ev.onBehalfOf != null) {
       onBehalfOf = ev.onBehalfOf;
@@ -129,7 +111,6 @@ export function auditEventsToReceipt(turnId: TurnId, events: AuditEventRow[]): R
     turnId,
     model: model ?? 'unknown',
     toolsInvoked: [...toolsSet],
-    soulLayersApplied: [...soulLayersSet] as SoulLayerKind[],
   };
 
   if (hasUsage) {

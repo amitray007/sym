@@ -1,4 +1,4 @@
-import type { Receipt, SoulLayerKind, Turn, Usage } from '@sym/contracts';
+import type { Receipt, Turn, Usage } from '@sym/contracts';
 
 export interface ReceiptParams {
   turn: Turn;
@@ -6,7 +6,6 @@ export interface ReceiptParams {
   usage?: Usage;
   durationMs?: number;
   toolsInvoked: string[];
-  soulLayersApplied: SoulLayerKind[];
 }
 
 /**
@@ -17,7 +16,6 @@ export function buildReceipt(params: ReceiptParams): Receipt {
     turnId: params.turn.id,
     model: params.model,
     toolsInvoked: params.toolsInvoked,
-    soulLayersApplied: params.soulLayersApplied,
   };
 
   // Omit optional fields rather than setting them to `undefined`

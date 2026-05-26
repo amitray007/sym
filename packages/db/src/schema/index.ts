@@ -11,9 +11,6 @@ export * from './admins.js';
 // Configuration
 export * from './config.js';
 
-// Voice
-export * from './soul.js';
-
 // Per-user auth
 export * from './oauth.js';
 

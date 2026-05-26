@@ -5,8 +5,6 @@ export type AuditActorKind = 'slack_user' | 'admin' | 'system' | 'sandbox';
 
 /** Well-known kinds for convention + reference. The namespace itself is open. */
 export type WellKnownAuditEventKind =
-  | 'app.soul.update'
-  | 'app.lease.issue'
   | 'app.grant.create'
   | 'app.grant.revoke'
   | 'gen_ai.completion'

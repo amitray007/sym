@@ -1,5 +1,5 @@
 import { markdownBlock, receiptToContextBlock, threadToHistory } from '@sym/adapter-slack';
-import { ToolRegistry, buildDefaultSoulCascade, runLoop } from '@sym/kernel';
+import { ToolRegistry, runLoop } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
 import { compositeDispatcher, loadConnectorRegistry } from './connectors.js';
@@ -134,7 +134,6 @@ async function streamReply(
   deps: HandleTurnDeps,
   ctx: {
     history: ChatMessage[];
-    cascade: ReturnType<typeof buildDefaultSoulCascade>;
     registry: ToolRegistry;
   },
 ): Promise<boolean> {
@@ -186,7 +185,7 @@ async function streamReply(
     }
   };
 
-  const reply = await runLoop(turn, deps.provider, ctx.registry, ctx.cascade, {
+  const reply = await runLoop(turn, deps.provider, ctx.registry, {
     model: deps.model,
     history: ctx.history,
     onDelta,
@@ -283,7 +282,6 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
 
   await persist('recordUserMessage', () => recordUserMessage(deps.db, turn));
 
-  const cascade = buildDefaultSoulCascade();
   const builtin = createBuiltinDispatcher({
     slackClient: deps.slackClient,
     botUserId: deps.botUserId,
@@ -300,12 +298,12 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   try {
     // Threaded turns: try streaming; fall through to postMessage only if it fails.
     if (turn.threadTs !== undefined) {
-      const streamed = await streamReply(turn, deps, { history, cascade, registry });
+      const streamed = await streamReply(turn, deps, { history, registry });
       if (streamed) return;
     }
 
     // Non-threaded or stream fallback: run the loop and post normally.
-    const reply = await runLoop(turn, deps.provider, registry, cascade, {
+    const reply = await runLoop(turn, deps.provider, registry, {
       model: deps.model,
       history,
     });

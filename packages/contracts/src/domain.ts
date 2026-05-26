@@ -8,7 +8,6 @@ import type {
 } from './ids.js';
 import type { Usage } from './provider.js';
 import type { SlackEntrySurface, SlackTurnInput } from './slack.js';
-import type { SoulLayerKind } from './soul.js';
 
 /** What woke the kernel. v1 surfaces are Slack-driven plus internal tasks. */
 export type Event =
@@ -58,7 +57,6 @@ export interface Receipt {
   usage?: Usage;
   durationMs?: number;
   toolsInvoked: string[];
-  soulLayersApplied: SoulLayerKind[];
   /** Set when the turn acted through a cross-user grant. */
   onBehalfOf?: SlackUserId;
 }

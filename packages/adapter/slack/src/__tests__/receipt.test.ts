@@ -9,7 +9,6 @@ function makeReceipt(overrides: Partial<Receipt> = {}): Receipt {
     turnId: 'turn-001' as TurnId,
     model: 'accounts/fireworks/models/llama-v3p1-70b-instruct',
     toolsInvoked: [],
-    soulLayersApplied: [],
     ...overrides,
   };
 }

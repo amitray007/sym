@@ -26,7 +26,6 @@ describe('auditEventsToReceipt', () => {
     expect(r.turnId).toBe(TURN_ID);
     expect(r.model).toBe('unknown');
     expect(r.toolsInvoked).toEqual([]);
-    expect(r.soulLayersApplied).toEqual([]);
     expect(r.usage).toBeUndefined();
     expect(r.durationMs).toBeUndefined();
   });
@@ -98,13 +97,6 @@ describe('auditEventsToReceipt', () => {
     const ev = makeEvent({ kind: 'gen_ai.execute_tool', payload: { toolName: 'gh' } });
     const r = auditEventsToReceipt(TURN_ID, [ev]);
     expect(r.toolsInvoked).toEqual(['gh']);
-  });
-
-  it('collects soul layers from app.soul.update events', () => {
-    const ev1 = makeEvent({ id: 1, kind: 'app.soul.update', payload: { layer: 'l1_workspace' } });
-    const ev2 = makeEvent({ id: 2, kind: 'app.soul.update', payload: { layer: 'l2_channel' } });
-    const r = auditEventsToReceipt(TURN_ID, [ev1, ev2]);
-    expect(r.soulLayersApplied.sort()).toEqual(['l1_workspace', 'l2_channel']);
   });
 
   it('picks up onBehalfOf from the first event that has it', () => {

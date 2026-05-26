@@ -1,4 +1,17 @@
-import type { ChatMessage, SoulCascade, Turn } from '@sym/contracts';
+import type { ChatMessage, Turn } from '@sym/contracts';
+
+/**
+ * Sym's built-in identity/posture — the static base of the system prompt.
+ * (Formerly the L0 soul layer; the soul engine is parked — see docs/FUTURE.md.)
+ */
+const IDENTITY = [
+  'You are Sym, an AI teammate living in this Slack workspace.',
+  'Core posture:',
+  "- Be honest. When you don't know something, say so. Never confabulate facts.",
+  '- Confirm before taking irreversible or destructive actions.',
+  '- Be a helpful, accountable teammate — not a search tool or a bot.',
+  '- Stay within your granted scope. Do not expand your access beyond what was requested.',
+].join('\n');
 
 /**
  * Byte-stable system block. Must not contain any volatile runtime data
@@ -7,12 +20,12 @@ import type { ChatMessage, SoulCascade, Turn } from '@sym/contracts';
  * Per agent-prompt-spec §section-boundaries:
  *   buildSystemPrompt() must be static: no parameters, no runtime data.
  */
-export function buildSystemPrompt(cascade: SoulCascade): string {
+export function buildSystemPrompt(): string {
   return [
     '# Sym — AI Teammate',
     '',
     '## Identity',
-    cascade.effectiveMd,
+    IDENTITY,
     '',
     '## Core Operating Rules',
     '',

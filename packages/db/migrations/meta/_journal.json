@@ -43,6 +43,13 @@
       "when": 1779774983391,
       "tag": "0005_nebulous_ares",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779775605817,
+      "tag": "0006_cold_retro_girl",
+      "breakpoints": true
     }
   ]
 }

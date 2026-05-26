@@ -3,7 +3,7 @@
  * tagged value, not a thrown exception, so callers handle it explicitly.
  * Domain-internal throws are fine; what crosses a package boundary is typed.
  */
-export type SymErrorDomain = 'provider' | 'tool' | 'soul' | 'slack' | 'acl' | 'config' | 'audit';
+export type SymErrorDomain = 'provider' | 'tool' | 'slack' | 'acl' | 'config' | 'audit';
 
 export interface SymErrorBase<D extends SymErrorDomain, C extends string> {
   domain: D;
