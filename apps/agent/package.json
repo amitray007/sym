@@ -10,7 +10,8 @@
     "test": "vitest run",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "spike:pi": "tsx src/spike/pi-spike.ts"
+    "spike:pi": "tsx src/spike/pi-spike.ts",
+    "spike:toolsearch": "tsx src/spike/tool-search-spike.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.75.5",
