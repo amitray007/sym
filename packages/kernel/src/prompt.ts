@@ -67,50 +67,56 @@ export function buildSystemPrompt(): string {
 }
 
 /**
- * Per-turn volatile context block. Attached to the current user message.
- * Contains requester identity and thread context — must NOT be stored in
- * durable conversation history (per agent-prompt-spec §section-boundaries).
+ * Per-turn volatile metadata, rendered as ONE terse line. `buildUserTurnContent`
+ * wraps it in a clearly-labeled "context only" frame so the model never mistakes
+ * it for the message. Internal UUIDs (workspace_id, conversation_id) are
+ * intentionally omitted — they are noise to the model and leak internal
+ * structure. channel_id / thread_ts are kept: the model uses them as arguments
+ * to read the current channel/thread.
  */
 export function buildTurnContextPrompt(turn: Turn): string {
-  const lines = [
-    '## Turn Context',
-    `requester_id: ${turn.requester}`,
-    `workspace_id: ${turn.workspaceId}`,
-    `conversation_id: ${turn.conversationId}`,
-    `entry_surface: ${turn.entrySurface}`,
-    `received_at: ${turn.receivedAt.toISOString()}`,
-  ];
-
+  const parts = [`from ${turn.requester}`, `via ${turn.entrySurface}`];
   if (turn.channelId !== undefined) {
-    lines.push(`channel_id: ${turn.channelId}`);
+    parts.push(`in channel ${turn.channelId}`);
   }
   if (turn.threadTs !== undefined) {
-    lines.push(`thread_ts: ${turn.threadTs}`);
+    parts.push(`thread ${turn.threadTs}`);
   }
+  parts.push(`at ${turn.receivedAt.toISOString()}`);
+  return parts.join(', ');
+}
 
-  return lines.join('\n');
+/**
+ * Build the current user-turn message content.
+ *
+ * The user's actual text IS the message; turn metadata sits on a single line
+ * above it, explicitly labeled context-only. This stops the model from treating
+ * routing details as the content — e.g. "summarize it" must refer to the
+ * surrounding Slack conversation (carried in history), never to this block.
+ */
+export function buildUserTurnContent(turn: Turn): string {
+  return [
+    `[turn metadata — context only, NOT the message to act on or summarize: ${buildTurnContextPrompt(turn)}]`,
+    '',
+    turn.text,
+  ].join('\n');
 }
 
 /**
  * Assemble the full `ChatMessage[]` array for a single turn.
  *
- * Shape:
- *   [system] [history...] [user turn w/ context prefix]
- *
- * The context prefix is prepended to the user text so it stays out of the
- * system prompt and is not replayed in future turns' durable history.
+ * Shape: `[system] [history...] [user turn]`. The metadata line lives inside the
+ * user turn (not the system prompt) so it is not replayed in future turns'
+ * durable history, and is framed so it is never confused for the content.
  */
 export function assembleTurnMessages(
   systemContent: string,
   history: ChatMessage[],
   turn: Turn,
 ): ChatMessage[] {
-  const contextBlock = buildTurnContextPrompt(turn);
-  const userContent = `${contextBlock}\n\n---\n\n${turn.text}`;
-
   return [
     { role: 'system', content: systemContent },
     ...history,
-    { role: 'user', content: userContent },
+    { role: 'user', content: buildUserTurnContent(turn) },
   ];
 }

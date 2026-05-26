@@ -13,7 +13,7 @@
 
 import { Agent } from '@earendil-works/pi-agent-core';
 import { matchSkills, buildSkillContext } from '@sym/ext-skills';
-import { buildReceipt, buildSystemPrompt, buildTurnContextPrompt } from '@sym/kernel';
+import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
 import { bridgeTools } from './tools.js';
@@ -230,10 +230,10 @@ export async function runLoopPi(
     }
   }
 
-  // Construct the turn-context prefix and prepend to the user's text, exactly
-  // as assembleTurnMessages does today.
-  const contextBlock = buildTurnContextPrompt(turn);
-  const userText = `${contextBlock}\n\n---\n\n${turn.text}`;
+  // The user's message, with turn metadata framed as context-only so "summarize
+  // it" refers to the conversation (in history), not the metadata. Same builder
+  // as the kernel's assembleTurnMessages.
+  const userText = buildUserTurnContent(turn);
 
   // Assemble all tools via the bridge.
   const agentTools = bridgeTools(registry, ctx);
