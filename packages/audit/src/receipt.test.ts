@@ -26,9 +26,6 @@ describe('auditEventsToReceipt', () => {
     expect(r.turnId).toBe(TURN_ID);
     expect(r.model).toBe('unknown');
     expect(r.toolsInvoked).toEqual([]);
-    expect(r.memoryHits).toBe(0);
-    expect(r.memoryScopesUsed).toEqual([]);
-    expect(r.soulLayersApplied).toEqual([]);
     expect(r.usage).toBeUndefined();
     expect(r.durationMs).toBeUndefined();
   });
@@ -48,7 +45,7 @@ describe('auditEventsToReceipt', () => {
   });
 
   it('defaults model to "unknown" when no gen_ai.completion event', () => {
-    const ev = makeEvent({ kind: 'app.memory.read', payload: {} });
+    const ev = makeEvent({ kind: 'app.turn.complete', payload: {} });
     const r = auditEventsToReceipt(TURN_ID, [ev]);
     expect(r.model).toBe('unknown');
   });
@@ -75,7 +72,7 @@ describe('auditEventsToReceipt', () => {
   it('computes durationMs from first to last event timestamp', () => {
     const ev1 = makeEvent({
       id: 1,
-      kind: 'app.memory.read',
+      kind: 'app.turn.complete',
       ts: new Date('2026-01-01T00:00:00.000Z'),
     });
     const ev2 = makeEvent({
@@ -86,15 +83,6 @@ describe('auditEventsToReceipt', () => {
     });
     const r = auditEventsToReceipt(TURN_ID, [ev2, ev1]); // out of order input
     expect(r.durationMs).toBe(5250);
-  });
-
-  it('counts memory hits and deduplicates scopes', () => {
-    const ev1 = makeEvent({ id: 1, kind: 'app.memory.read', payload: { scope: 'workspace' } });
-    const ev2 = makeEvent({ id: 2, kind: 'app.memory.read', payload: { scope: 'thread' } });
-    const ev3 = makeEvent({ id: 3, kind: 'app.memory.read', payload: { scope: 'workspace' } }); // duplicate scope
-    const r = auditEventsToReceipt(TURN_ID, [ev1, ev2, ev3]);
-    expect(r.memoryHits).toBe(3);
-    expect(r.memoryScopesUsed.sort()).toEqual(['thread', 'workspace']);
   });
 
   it('collects tools invoked from app.tool.invoke events', () => {
@@ -111,15 +99,8 @@ describe('auditEventsToReceipt', () => {
     expect(r.toolsInvoked).toEqual(['gh']);
   });
 
-  it('collects soul layers from app.soul.update events', () => {
-    const ev1 = makeEvent({ id: 1, kind: 'app.soul.update', payload: { layer: 'l1_workspace' } });
-    const ev2 = makeEvent({ id: 2, kind: 'app.soul.update', payload: { layer: 'l2_channel' } });
-    const r = auditEventsToReceipt(TURN_ID, [ev1, ev2]);
-    expect(r.soulLayersApplied.sort()).toEqual(['l1_workspace', 'l2_channel']);
-  });
-
   it('picks up onBehalfOf from the first event that has it', () => {
-    const ev1 = makeEvent({ id: 1, kind: 'app.memory.read', payload: {} });
+    const ev1 = makeEvent({ id: 1, kind: 'app.turn.complete', payload: {} });
     const ev2 = makeEvent({ id: 2, kind: 'gen_ai.completion', payload: { model: 'm' } });
     (ev2 as AuditEventRow).onBehalfOf = 'U_delegate' as AuditEventRow['onBehalfOf'];
     const r = auditEventsToReceipt(TURN_ID, [ev1, ev2]);

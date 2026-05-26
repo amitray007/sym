@@ -1,6 +1,5 @@
 import { assembleTurnMessages, buildSystemPrompt } from './prompt.js';
 import { buildReceipt } from './receipt.js';
-import { applyToneRewrite } from './tone.js';
 
 import type { ToolRegistry } from './tools.js';
 import type {
@@ -10,8 +9,6 @@ import type {
   JsonObject,
   ProviderInterface,
   Reply,
-  SoulCascade,
-  SoulLayerKind,
   ToolCall,
   ToolCallDelta,
   ToolResult,
@@ -34,8 +31,8 @@ export interface LoopOptions {
   signal?: AbortSignal;
   /**
    * Called with each text delta as it streams, for live output (e.g. Slack streaming).
-   * NOTE: `applyToneRewrite` is currently a no-op stub, so the streamed draft equals
-   * the final `reply.markdown` — callers can concatenate deltas to reconstruct it.
+   * The streamed draft equals the final `reply.markdown` — callers can concatenate
+   * deltas to reconstruct it.
    */
   onDelta?: (delta: string) => void | Promise<void>;
 }
@@ -148,27 +145,23 @@ function addUsage(totals: Usage, step: Usage): void {
  *   1. Assemble `ChatMessage[]` (system + history + user turn with context prefix)
  *   2. Run the provider in a bounded multi-step loop (up to MAX_TOOL_STEPS)
  *   3. On each step: stream text deltas, detect tool calls, dispatch and feed results
- *   4. Apply the tone-rewrite stub
- *   5. Build and return a `Reply` (with `Receipt`)
+ *   4. Build and return a `Reply` (with `Receipt`)
  *
  * Backward-compatible: when the registry is empty (`tools.length === 0`), the
  * provider receives no tool schemas so the model cannot emit tool calls. The
  * loop runs exactly one step and behaves identically to the prior single-pass
  * implementation.
- *
- * Memory context: not yet wired (S7a stub — 0 memory hits).
  */
 export async function runLoop(
   turn: Turn,
   provider: ProviderInterface,
   registry: ToolRegistry,
-  cascade: SoulCascade,
   opts: LoopOptions,
 ): Promise<Reply> {
   const startMs = Date.now();
   const history = opts.history ?? [];
 
-  const systemContent = buildSystemPrompt(cascade);
+  const systemContent = buildSystemPrompt();
   const messages: ChatMessage[] = assembleTurnMessages(systemContent, history, turn);
 
   const tools = registry.listTools();
@@ -242,20 +235,14 @@ export async function runLoop(
     step++;
   }
 
-  const draftMarkdown = draftParts.join('');
+  const finalMarkdown = draftParts.join('');
   const durationMs = Date.now() - startMs;
-
-  const toneResult = applyToneRewrite(cascade, draftMarkdown);
-  const finalMarkdown = toneResult.accepted ? toneResult.rewrittenMarkdown : draftMarkdown;
-
-  const soulLayersApplied: SoulLayerKind[] = cascade.layers.map((l) => l.kind);
 
   const receiptParams = {
     turn,
     model: opts.model,
     durationMs,
     toolsInvoked,
-    soulLayersApplied,
     ...(sawUsage ? { usage: usageTotals } : {}),
   };
   const receipt = buildReceipt(receiptParams);

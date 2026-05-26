@@ -12,8 +12,5 @@ export type * from './domain.js';
 export type * from './provider.js';
 export type * from './tools.js';
 export type * from './connectors.js';
-export type * from './memory.js';
-export type * from './soul.js';
-export type * from './sandbox.js';
 export type * from './audit.js';
 export type * from './errors.js';

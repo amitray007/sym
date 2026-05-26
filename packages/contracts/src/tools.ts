@@ -1,6 +1,5 @@
 import type { ConversationId, SlackChannelId, SlackUserId, TurnId, WorkspaceId } from './ids.js';
 import type { JsonObject, JsonSchema, JsonValue } from './json.js';
-import type { SandboxIdentity } from './sandbox.js';
 
 /**
  * A function-tool the model may call. OpenAI-compatible shape. The exact
@@ -56,8 +55,7 @@ export type ToolResult = ToolSuccess | ToolFailure;
 /**
  * Harness-owned execution context passed to every tool dispatch. Targeting for
  * context-bound side-effect tools comes from HERE — `channelId`, `conversationId`
- * — never from model-provided arguments (harness-tool-context-spec). `sandbox` is
- * present only for tools that execute inside the S6 sandbox (egress credentials).
+ * — never from model-provided arguments (harness-tool-context-spec).
  */
 export interface ToolRuntimeContext {
   workspaceId: WorkspaceId;
@@ -66,14 +64,12 @@ export interface ToolRuntimeContext {
   channelId?: SlackChannelId;
   requester: SlackUserId;
   turnId: TurnId;
-  /** Sandbox identity for sandboxed tools; absent for in-process harness tools. */
-  sandbox?: SandboxIdentity;
 }
 
 /**
  * The tool registry + dispatcher the kernel (S2) calls. Implemented by S5.
- * Built-in harness tools run in-process; MCP/skills tools run via the S6 sandbox
- * (using `ctx.sandbox`). An empty registry fails calls closed.
+ * Built-in harness tools run in-process; MCP/skills tools run over HTTP. An
+ * empty registry fails calls closed.
  */
 export interface ToolDispatcher {
   list(): ToolDescriptor[];

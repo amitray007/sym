@@ -17,15 +17,12 @@ export type AclUserRuleId = Brand<string, 'AclUserRuleId'>;
 export type ProviderConfigId = Brand<string, 'ProviderConfigId'>;
 export type McpConfigId = Brand<string, 'McpConfigId'>;
 export type SkillId = Brand<string, 'SkillId'>;
-export type SoulLayerId = Brand<string, 'SoulLayerId'>;
-export type MemoryId = Brand<string, 'MemoryId'>;
 export type OAuthTokenId = Brand<string, 'OAuthTokenId'>;
 export type GrantId = Brand<string, 'GrantId'>;
 export type ConversationId = Brand<string, 'ConversationId'>;
 export type MessageId = Brand<string, 'MessageId'>;
 export type TaskId = Brand<string, 'TaskId'>;
 export type CheckpointId = Brand<string, 'CheckpointId'>;
-export type LeaseId = Brand<string, 'LeaseId'>;
 
 // --- Audit (bigserial) ---
 export type AuditEventId = Brand<number, 'AuditEventId'>;
@@ -42,8 +39,3 @@ export type ClerkUserId = Brand<string, 'ClerkUserId'>;
 // --- Kernel-generated runtime ids ---
 export type TurnId = Brand<string, 'TurnId'>;
 export type SliceId = Brand<string, 'SliceId'>;
-
-// --- Sandbox ---
-export type SandboxId = Brand<string, 'SandboxId'>;
-/** `jti` of the short-lived sandbox JWT. */
-export type SandboxJwtId = Brand<string, 'SandboxJwtId'>;

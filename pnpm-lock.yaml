@@ -296,62 +296,12 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
 
-  packages/memory:
-    dependencies:
-      '@sym/audit':
-        specifier: workspace:*
-        version: link:../audit
-      '@sym/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@sym/db':
-        specifier: workspace:*
-        version: link:../db
-      drizzle-orm:
-        specifier: ^0.44.2
-        version: 0.44.7(@opentelemetry/api@1.9.1)(postgres@3.4.9)
-    devDependencies:
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
-
   packages/provider/fireworks:
     dependencies:
       '@sym/contracts':
         specifier: workspace:*
         version: link:../../contracts
     devDependencies:
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
-
-  packages/sandbox:
-    dependencies:
-      '@sym/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@sym/db':
-        specifier: workspace:*
-        version: link:../db
-      '@sym/secrets':
-        specifier: workspace:*
-        version: link:../secrets
-      drizzle-orm:
-        specifier: ^0.44.2
-        version: 0.44.7(@opentelemetry/api@1.9.1)(postgres@3.4.9)
-      hono:
-        specifier: ^4.6.0
-        version: 4.12.22
-      jose:
-        specifier: ^5.9.6
-        version: 5.10.0
-      uuidv7:
-        specifier: ^1.0.2
-        version: 1.2.1
-    devDependencies:
-      '@types/node':
-        specifier: ^22.10.5
-        version: 22.19.19
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
@@ -368,25 +318,6 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.22.3
-      vitest:
-        specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
-
-  packages/soul:
-    dependencies:
-      '@sym/audit':
-        specifier: workspace:*
-        version: link:../audit
-      '@sym/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@sym/db':
-        specifier: workspace:*
-        version: link:../db
-      drizzle-orm:
-        specifier: ^0.44.2
-        version: 0.44.7(@opentelemetry/api@1.9.1)(postgres@3.4.9)
-    devDependencies:
       vitest:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
@@ -2982,9 +2913,6 @@ packages:
   jiti@2.6.1:
     resolution: {integrity: sha512-ekilCSN1jwRvIbgeg/57YFh8qQDNbwDb9xT/qu2DAHbFFZUicIl4ygVaAvzveMhMVr3LnpSKTNnwt8PoOfmKhQ==}
     hasBin: true
-
-  jose@5.10.0:
-    resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
 
   js-cookie@3.0.7:
     resolution: {integrity: sha512-z/wZZgDrkNV1eA0ULjM/F9/50Ya8fbzgKneSpoPsXSGd0KnpdtHfOZWK+GcwLk+EZbS4F9RBhU+K2RgzuDaItw==}
@@ -6230,8 +6158,6 @@ snapshots:
       set-function-name: 2.0.2
 
   jiti@2.6.1: {}
-
-  jose@5.10.0: {}
 
   js-cookie@3.0.7: {}
 

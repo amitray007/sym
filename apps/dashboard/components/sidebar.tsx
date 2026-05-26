@@ -1,17 +1,6 @@
 'use client';
 
-import {
-  Activity,
-  Brain,
-  ChevronRight,
-  Cpu,
-  Globe,
-  LayoutGrid,
-  Plug,
-  Shield,
-  Sparkles,
-  Zap,
-} from 'lucide-react';
+import { Activity, ChevronRight, Cpu, Globe, LayoutGrid, Plug, Shield, Zap } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
@@ -44,13 +33,6 @@ const NAV: NavSection[] = [
       { href: '/provider', label: 'Provider', icon: Cpu },
       { href: '/connectors', label: 'Connectors', icon: Globe },
       { href: '/skills', label: 'Skills', icon: Zap },
-    ],
-  },
-  {
-    label: 'Intelligence',
-    items: [
-      { href: '/soul', label: 'Soul', icon: Sparkles },
-      { href: '/memory', label: 'Memory', icon: Brain },
     ],
   },
 ];

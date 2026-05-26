@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { runLoop } from './loop.js';
-import { buildDefaultSoulCascade } from './soul.js';
 import { ToolRegistry } from './tools.js';
 
 import type {
@@ -82,9 +81,8 @@ describe('runLoop', () => {
 
       const turn = makeTurn();
       const registry = new ToolRegistry();
-      const cascade = buildDefaultSoulCascade();
 
-      const reply: Reply = await runLoop(turn, provider, registry, cascade, {
+      const reply: Reply = await runLoop(turn, provider, registry, {
         model: 'test-model',
       });
 
@@ -103,15 +101,9 @@ describe('runLoop', () => {
         },
       ]);
 
-      const reply = await runLoop(
-        makeTurn(),
-        provider,
-        new ToolRegistry(),
-        buildDefaultSoulCascade(),
-        {
-          model: 'test-model',
-        },
-      );
+      const reply = await runLoop(makeTurn(), provider, new ToolRegistry(), {
+        model: 'test-model',
+      });
 
       expect(reply.receipt.usage).toEqual({
         promptTokens: 20,
@@ -123,62 +115,22 @@ describe('runLoop', () => {
     it('includes durationMs in the receipt', async () => {
       const provider = new FakeProvider([makeContentChunk('quick')]);
 
-      const reply = await runLoop(
-        makeTurn(),
-        provider,
-        new ToolRegistry(),
-        buildDefaultSoulCascade(),
-        {
-          model: 'test-model',
-        },
-      );
+      const reply = await runLoop(makeTurn(), provider, new ToolRegistry(), {
+        model: 'test-model',
+      });
 
       expect(typeof reply.receipt.durationMs).toBe('number');
       expect(reply.receipt.durationMs).toBeGreaterThanOrEqual(0);
     });
 
-    it('populates soulLayersApplied from the cascade', async () => {
-      const provider = new FakeProvider([makeContentChunk('ok')]);
-      const cascade = buildDefaultSoulCascade();
-
-      const reply = await runLoop(makeTurn(), provider, new ToolRegistry(), cascade, {
-        model: 'test-model',
-      });
-
-      expect(reply.receipt.soulLayersApplied).toContain('l0_global');
-    });
-
     it('records empty toolsInvoked when no tools registered', async () => {
       const provider = new FakeProvider([makeContentChunk('ok')]);
 
-      const reply = await runLoop(
-        makeTurn(),
-        provider,
-        new ToolRegistry(),
-        buildDefaultSoulCascade(),
-        {
-          model: 'test-model',
-        },
-      );
+      const reply = await runLoop(makeTurn(), provider, new ToolRegistry(), {
+        model: 'test-model',
+      });
 
       expect(reply.receipt.toolsInvoked).toEqual([]);
-    });
-
-    it('records zero memoryHits (stub until S7a)', async () => {
-      const provider = new FakeProvider([makeContentChunk('ok')]);
-
-      const reply = await runLoop(
-        makeTurn(),
-        provider,
-        new ToolRegistry(),
-        buildDefaultSoulCascade(),
-        {
-          model: 'test-model',
-        },
-      );
-
-      expect(reply.receipt.memoryHits).toBe(0);
-      expect(reply.receipt.memoryScopesUsed).toEqual([]);
     });
   });
 
@@ -186,15 +138,9 @@ describe('runLoop', () => {
     it('returns empty markdown for a provider that yields nothing', async () => {
       const provider = new FakeProvider([]);
 
-      const reply = await runLoop(
-        makeTurn(),
-        provider,
-        new ToolRegistry(),
-        buildDefaultSoulCascade(),
-        {
-          model: 'test-model',
-        },
-      );
+      const reply = await runLoop(makeTurn(), provider, new ToolRegistry(), {
+        model: 'test-model',
+      });
 
       expect(reply.markdown).toBe('');
     });
@@ -216,15 +162,9 @@ describe('runLoop', () => {
         },
       ]);
 
-      const reply = await runLoop(
-        makeTurn(),
-        provider,
-        new ToolRegistry(),
-        buildDefaultSoulCascade(),
-        {
-          model: 'test-model',
-        },
-      );
+      const reply = await runLoop(makeTurn(), provider, new ToolRegistry(), {
+        model: 'test-model',
+      });
 
       // No tool was dispatched, so toolsInvoked is empty.
       expect(reply.receipt.toolsInvoked).toEqual([]);
@@ -250,7 +190,7 @@ describe('runLoop', () => {
         { role: 'assistant' as const, content: 'first reply' },
       ];
 
-      await runLoop(makeTurn(), provider, new ToolRegistry(), buildDefaultSoulCascade(), {
+      await runLoop(makeTurn(), provider, new ToolRegistry(), {
         model: 'test-model',
         history,
       });
@@ -274,18 +214,12 @@ describe('runLoop', () => {
       ]);
 
       const deltas: string[] = [];
-      const reply = await runLoop(
-        makeTurn(),
-        provider,
-        new ToolRegistry(),
-        buildDefaultSoulCascade(),
-        {
-          model: 'test-model',
-          onDelta: (delta) => {
-            deltas.push(delta);
-          },
+      const reply = await runLoop(makeTurn(), provider, new ToolRegistry(), {
+        model: 'test-model',
+        onDelta: (delta) => {
+          deltas.push(delta);
         },
-      );
+      });
 
       expect(deltas).toEqual(['Hello', ', ', 'world!']);
       expect(reply.markdown).toBe(deltas.join(''));
@@ -303,18 +237,12 @@ describe('runLoop', () => {
       ]);
 
       const deltas: string[] = [];
-      const reply = await runLoop(
-        makeTurn(),
-        provider,
-        new ToolRegistry(),
-        buildDefaultSoulCascade(),
-        {
-          model: 'test-model',
-          onDelta: (delta) => {
-            deltas.push(delta);
-          },
+      const reply = await runLoop(makeTurn(), provider, new ToolRegistry(), {
+        model: 'test-model',
+        onDelta: (delta) => {
+          deltas.push(delta);
         },
-      );
+      });
 
       expect(deltas).toEqual(['text']);
       expect(reply.markdown).toBe('text');
@@ -323,13 +251,9 @@ describe('runLoop', () => {
     it('existing callers without onDelta are unaffected', async () => {
       const provider = new FakeProvider([makeContentChunk('Hello'), makeFinalChunk(' world')]);
 
-      const reply = await runLoop(
-        makeTurn(),
-        provider,
-        new ToolRegistry(),
-        buildDefaultSoulCascade(),
-        { model: 'test-model' },
-      );
+      const reply = await runLoop(makeTurn(), provider, new ToolRegistry(), {
+        model: 'test-model',
+      });
 
       expect(reply.markdown).toBe('Hello world');
     });
@@ -348,7 +272,7 @@ describe('runLoop', () => {
       };
 
       const controller = new AbortController();
-      await runLoop(makeTurn(), provider, new ToolRegistry(), buildDefaultSoulCascade(), {
+      await runLoop(makeTurn(), provider, new ToolRegistry(), {
         model: 'test-model',
         signal: controller.signal,
       });
@@ -369,7 +293,7 @@ describe('runLoop', () => {
         },
       };
 
-      await runLoop(makeTurn(), provider, new ToolRegistry(), buildDefaultSoulCascade(), {
+      await runLoop(makeTurn(), provider, new ToolRegistry(), {
         model: 'test-model',
       });
 
@@ -438,15 +362,9 @@ describe('runLoop', () => {
       const registry = new ToolRegistry(fakeDispatcher);
       const turn = makeTurn();
 
-      const reply: Reply = await runLoop(
-        turn,
-        multiStepProvider,
-        registry,
-        buildDefaultSoulCascade(),
-        {
-          model: 'test-model',
-        },
-      );
+      const reply: Reply = await runLoop(turn, multiStepProvider, registry, {
+        model: 'test-model',
+      });
 
       // dispatch was called exactly once with the parsed call + correct ctx.
       expect(dispatchFn).toHaveBeenCalledOnce();
@@ -505,15 +423,9 @@ describe('runLoop', () => {
         }),
       };
 
-      await runLoop(
-        makeTurn(),
-        spyProvider,
-        new ToolRegistry(fakeDispatcher),
-        buildDefaultSoulCascade(),
-        {
-          model: 'test-model',
-        },
-      );
+      await runLoop(makeTurn(), spyProvider, new ToolRegistry(fakeDispatcher), {
+        model: 'test-model',
+      });
 
       // Second call messages should include a role:'tool' message.
       const toolMsg = secondCallMessages.find((m) => m.role === 'tool');
