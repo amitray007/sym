@@ -10,8 +10,11 @@ import type { Database } from '@sym/db';
 export type ConnectorAuth =
   /** Open server, no header needed. */
   | { kind: 'none' }
-  /** Ready Bearer header value. */
-  | { kind: 'token'; authorization: string }
+  /**
+   * Ready auth header. `header` is the header name (e.g. `Authorization` or `x-api-key`);
+   * `value` is the raw header value (e.g. `Bearer <tok>` or the bare key).
+   */
+  | { kind: 'token'; header: string; value: string }
   /** OAuth mode and the user has not connected (or token is expired with no refresh). */
   | { kind: 'needs_auth' }
   /** No enabled connector row found for the given (workspaceId, slug). */
@@ -83,7 +86,16 @@ export async function resolveConnectorAuth(p: ResolveConnectorAuthParams): Promi
     const env = parseEnvJson(connector.envJson);
     const token = env['token'];
     if (typeof token === 'string' && token.length > 0) {
-      return { kind: 'token', authorization: `Bearer ${token}` };
+      const authHeader =
+        typeof env['authHeader'] === 'string' && env['authHeader'].length > 0
+          ? env['authHeader']
+          : null;
+      if (authHeader !== null) {
+        // Custom header (e.g. x-api-key for Composio) — send the raw value, no Bearer prefix.
+        return { kind: 'token', header: authHeader, value: token };
+      }
+      // Default: standard Authorization: Bearer <token>.
+      return { kind: 'token', header: 'Authorization', value: `Bearer ${token}` };
     }
     return { kind: 'needs_auth' };
   }
@@ -124,7 +136,7 @@ export async function resolveConnectorAuth(p: ResolveConnectorAuthParams): Promi
     return refreshed;
   }
 
-  return { kind: 'token', authorization: `Bearer ${tokenRow.accessToken}` };
+  return { kind: 'token', header: 'Authorization', value: `Bearer ${tokenRow.accessToken}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +214,7 @@ async function attemptTokenRefresh(p: {
         ),
       );
 
-    return { kind: 'token', authorization: `Bearer ${refreshed.accessToken}` };
+    return { kind: 'token', header: 'Authorization', value: `Bearer ${refreshed.accessToken}` };
   } catch (err) {
     // Refresh failed — require re-auth. Never propagate into the turn path.
     console.warn('[connector-auth] token refresh failed, requiring re-auth:', err);

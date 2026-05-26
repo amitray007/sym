@@ -13,6 +13,20 @@ export interface ActionResult {
   error?: string;
 }
 
+/** Parse envJson from an mcp_configs row (mirrors the agent-side helper). */
+function parseEnvJson(raw: string | null): Record<string, unknown> {
+  if (raw === null || raw === '') return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
 const VALID_AUTH_MODES = ['none', 'static', 'oauth'] as const;
 type ConnectorAuthMode = (typeof VALID_AUTH_MODES)[number];
 
@@ -122,6 +136,12 @@ export async function createConnector(formData: FormData): Promise<ActionResult>
   const url = String(formData.get('url') ?? '').trim();
   const authModeRaw = String(formData.get('authMode') ?? 'none').trim();
   const token = String(formData.get('token') ?? '').trim();
+  // authHeader is the header NAME only (non-secret); stored only when non-empty and not default.
+  const authHeaderRaw = String(formData.get('authHeader') ?? '').trim();
+  const authHeader =
+    authHeaderRaw.length > 0 && authHeaderRaw.toLowerCase() !== 'authorization'
+      ? authHeaderRaw
+      : null;
 
   // OAuth fields
   const authorizeUrl = String(formData.get('authorizeUrl') ?? '').trim();
@@ -165,8 +185,9 @@ export async function createConnector(formData: FormData): Promise<ActionResult>
 
   if (resolvedAuthMode === 'static' && token) {
     // envJson is an encryptedText column — pass the JSON string; encryption is automatic.
+    // authHeader (header name, non-secret) is stored alongside so resolveConnectorAuth can use it.
     await ensureSecrets();
-    envJson = JSON.stringify({ token });
+    envJson = JSON.stringify({ token, ...(authHeader !== null ? { authHeader } : {}) });
   } else if (resolvedAuthMode === 'oauth') {
     // The client secret goes into envJson (encrypted); public config into oauthConfigJson (jsonb).
     const scopes = scopesRaw
@@ -206,6 +227,12 @@ export async function updateConnector(id: string, formData: FormData): Promise<A
   const url = String(formData.get('url') ?? '').trim();
   const authModeRaw = String(formData.get('authMode') ?? 'none').trim();
   const token = String(formData.get('token') ?? '').trim();
+  // authHeader is the header NAME only (non-secret); stored only when non-empty and not default.
+  const authHeaderRaw = String(formData.get('authHeader') ?? '').trim();
+  const authHeader =
+    authHeaderRaw.length > 0 && authHeaderRaw.toLowerCase() !== 'authorization'
+      ? authHeaderRaw
+      : null;
 
   // OAuth fields
   const authorizeUrl = String(formData.get('authorizeUrl') ?? '').trim();
@@ -258,10 +285,24 @@ export async function updateConnector(id: string, formData: FormData): Promise<A
 
   if (resolvedAuthMode === 'static') {
     if (token) {
+      // New token provided — re-encrypt with (possibly updated) authHeader.
       await ensureSecrets();
-      envJson = JSON.stringify({ token });
+      envJson = JSON.stringify({ token, ...(authHeader !== null ? { authHeader } : {}) });
+    } else if (authHeader !== null) {
+      // No new token but authHeader changed — merge into existing envJson.
+      // We must read + re-encrypt the existing token with the new header name.
+      // If existing.envJson is present, parse it; otherwise keep existing envJson unchanged.
+      const existingEnv = parseEnvJson(existing.envJson);
+      const existingToken = typeof existingEnv['token'] === 'string' ? existingEnv['token'] : '';
+      if (existingToken) {
+        await ensureSecrets();
+        envJson = JSON.stringify({ token: existingToken, authHeader });
+      } else {
+        // No existing token either — keep existing (omit column).
+        envJson = undefined;
+      }
     } else {
-      // Blank = keep existing secret. Pass undefined so Drizzle omits the column from SET.
+      // Both blank — keep existing secret. Pass undefined so Drizzle omits the column from SET.
       envJson = undefined;
     }
     // Clear any stale oauth config.

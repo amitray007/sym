@@ -106,6 +106,24 @@ async function loadConnectors(): Promise<{
           : null,
         // hasExistingSecret: true if envJson is a non-empty string (encrypted value present).
         hasExistingSecret: typeof row.envJson === 'string' && row.envJson.length > 0,
+        // authHeader: the header NAME is non-secret; extract it so the form can pre-fill it.
+        // The token value itself is never surfaced to the client (envJson is write-only from the
+        // client's perspective — we only derive the boolean hasExistingSecret from it).
+        authHeader: (() => {
+          if (row.authMode !== 'static' || typeof row.envJson !== 'string' || !row.envJson) {
+            return undefined;
+          }
+          try {
+            const parsed: unknown = JSON.parse(row.envJson);
+            if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              const h = (parsed as Record<string, unknown>)['authHeader'];
+              return typeof h === 'string' && h.length > 0 ? h : undefined;
+            }
+          } catch {
+            /* ignore */
+          }
+          return undefined;
+        })(),
         oauthStatus,
       };
     });

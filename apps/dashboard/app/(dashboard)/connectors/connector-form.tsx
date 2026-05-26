@@ -25,6 +25,11 @@ export interface ConnectorRow {
   url: string | null;
   authMode: 'none' | 'static' | 'oauth';
   enabled: boolean;
+  /**
+   * For static mode: the auth header name stored for this connector (non-secret; safe to display).
+   * Undefined / empty = default Authorization header.
+   */
+  authHeader?: string;
   /** For oauth mode: display-only OAuth config (no secret). */
   oauthConfig?: {
     authorizeUrl: string;
@@ -62,6 +67,11 @@ interface ConnectorFormFields {
   authMode: ConnectorAuthMode;
   /** Whether this is an edit of an existing static connector (affects token hint). */
   hasExistingToken: boolean;
+  /**
+   * The auth header name stored for this static connector (non-secret; safe to pre-fill).
+   * Empty string / undefined = default Authorization header.
+   */
+  authHeader?: string;
   /** For oauth mode on edit: pre-populate public fields (no secret). */
   oauthConfig?: {
     authorizeUrl: string;
@@ -91,6 +101,7 @@ function ConnectorFormFields({
   const [url, setUrl] = useState(initial.url);
   const [authMode, setAuthMode] = useState<ConnectorAuthMode>(initial.authMode);
   const [slugEdited, setSlugEdited] = useState(initial.slug !== '');
+  const [authHeader, setAuthHeader] = useState(initial.authHeader ?? '');
 
   // OAuth field state — pre-populated on edit from the stored (non-secret) config.
   const [authorizeUrl, setAuthorizeUrl] = useState(initial.oauthConfig?.authorizeUrl ?? '');
@@ -186,29 +197,52 @@ function ConnectorFormFields({
       </div>
 
       {authMode === 'static' && (
-        <div>
-          <label className={labelCls} htmlFor="connector-token">
-            Token
-            {initial.hasExistingToken && (
-              <span className="ml-1 text-ink-muted font-normal">
-                — leave blank to keep existing
-              </span>
-            )}
-          </label>
-          <input
-            id="connector-token"
-            name="token"
-            type="password"
-            autoComplete="new-password"
-            className="input font-mono"
-            placeholder={initial.hasExistingToken ? '••••••••' : 'Paste token…'}
-            // Write-only: never pre-fill with the stored value.
-          />
-          {initial.hasExistingToken && (
-            <p className="mt-1 text-ink-muted text-xs font-mono">
-              Token set — leave blank to keep the current value.
-            </p>
-          )}
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls} htmlFor="connector-auth-header">
+                Auth header
+                <span className="ml-1 text-ink-muted font-normal">(optional)</span>
+              </label>
+              <input
+                id="connector-auth-header"
+                name="authHeader"
+                type="text"
+                className="input font-mono"
+                placeholder="Authorization"
+                value={authHeader}
+                onChange={(e) => setAuthHeader(e.target.value)}
+              />
+              <p className="mt-1 text-ink-muted text-xs font-mono">
+                Use <code>x-api-key</code> for Composio; leave blank for{' '}
+                <code>Authorization: Bearer</code>.
+              </p>
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="connector-token">
+                Token
+                {initial.hasExistingToken && (
+                  <span className="ml-1 text-ink-muted font-normal">
+                    — leave blank to keep existing
+                  </span>
+                )}
+              </label>
+              <input
+                id="connector-token"
+                name="token"
+                type="password"
+                autoComplete="new-password"
+                className="input font-mono"
+                placeholder={initial.hasExistingToken ? '••••••••' : 'Paste token…'}
+                // Write-only: never pre-fill with the stored value.
+              />
+              {initial.hasExistingToken && (
+                <p className="mt-1 text-ink-muted text-xs font-mono">
+                  Token set — leave blank to keep the current value.
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -644,6 +678,7 @@ export function ConnectorForm({ connectors, agentUrl }: ConnectorFormProps) {
                     url: editingConnector.url ?? '',
                     authMode: editingConnector.authMode,
                     hasExistingToken: editingConnector.authMode === 'static',
+                    authHeader: editingConnector.authHeader ?? '',
                     oauthConfig: editingConnector.oauthConfig ?? null,
                     hasExistingSecret: editingConnector.hasExistingSecret ?? false,
                   }}

@@ -248,7 +248,7 @@ describe('buildConnectorConfigs', () => {
     expect(cfg.headers).toBeUndefined();
   });
 
-  it('returns a config with Authorization header for auth=static (token)', async () => {
+  it('returns a config with Authorization header for auth=static (token, default header)', async () => {
     const row = connectorRow({
       authMode: 'static',
       envJson: JSON.stringify({ token: 'secret-42' }),
@@ -259,6 +259,20 @@ describe('buildConnectorConfigs', () => {
     expect(configs).toHaveLength(1);
     const cfg = configs[0] as McpServerConfig;
     expect(cfg.headers).toEqual({ Authorization: 'Bearer secret-42' });
+  });
+
+  it('returns a config with custom header for auth=static when authHeader is set (e.g. x-api-key)', async () => {
+    const row = connectorRow({
+      authMode: 'static',
+      envJson: JSON.stringify({ token: 'composio_key_abc', authHeader: 'x-api-key' }),
+    });
+    const db = mockDb([row], [row]);
+    const configs = await buildConnectorConfigs({ ...baseDeps, db });
+
+    expect(configs).toHaveLength(1);
+    const cfg = configs[0] as McpServerConfig;
+    // Custom header: raw value, no Bearer prefix.
+    expect(cfg.headers).toEqual({ 'x-api-key': 'composio_key_abc' });
   });
 
   it('skips connectors when auth=needs_auth (static token missing)', async () => {
@@ -378,7 +392,7 @@ describe('loadConnectorRegistry', () => {
     expect(instance?.close).toHaveBeenCalled();
   });
 
-  it('passes Authorization header to HttpMcpTransport for token auth', async () => {
+  it('passes Authorization header to HttpMcpTransport for token auth (default header)', async () => {
     const { McpToolRegistry, HttpMcpTransport } = await import('@sym/ext-mcp');
     vi.mocked(McpToolRegistry).mockClear();
     vi.mocked(HttpMcpTransport).mockClear();

@@ -42,6 +42,8 @@ export class HttpMcpTransport implements McpTransport {
   private readonly timeoutMs: number;
   private readonly fetchFn: FetchFn;
   private closed = false;
+  /** Mcp-Session-Id captured from the server; echoed on all subsequent requests. */
+  private sessionId: string | null = null;
 
   constructor(opts: HttpTransportOptions) {
     this.url = opts.url;
@@ -58,6 +60,10 @@ export class HttpMcpTransport implements McpTransport {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), this.timeoutMs);
 
+    // Echo the session-id when we have one (MCP spec §session continuity).
+    const sessionHeader: Record<string, string> =
+      this.sessionId !== null ? { 'Mcp-Session-Id': this.sessionId } : {};
+
     let res: Response;
     try {
       res = await this.fetchFn(this.url, {
@@ -66,6 +72,7 @@ export class HttpMcpTransport implements McpTransport {
           'Content-Type': 'application/json',
           Accept: 'application/json, text/event-stream',
           ...this.headers,
+          ...sessionHeader,
         },
         body: JSON.stringify(req),
         signal: ac.signal,
@@ -84,6 +91,13 @@ export class HttpMcpTransport implements McpTransport {
 
     if (!res.ok) {
       throw new McpTransportError(`MCP server returned HTTP ${res.status.toString()}`, 'network');
+    }
+
+    // Capture Mcp-Session-Id from the response (notably on `initialize`).
+    // Once set, it is echoed on all subsequent requests for session continuity.
+    const sid = res.headers.get('mcp-session-id');
+    if (sid !== null && sid.length > 0) {
+      this.sessionId = sid;
     }
 
     const contentType = res.headers.get('content-type') ?? '';

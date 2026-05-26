@@ -115,11 +115,29 @@ describe('resolveConnectorAuth', () => {
   });
 
   describe('authMode = static', () => {
-    it('returns token with Bearer header when envJson has a token', async () => {
+    it('returns token with Bearer Authorization header when envJson has a token (default)', async () => {
       const row = connectorRow('static', { envJson: JSON.stringify({ token: 'secret_key_42' }) });
       const db = mockDb([row]);
       const result: ConnectorAuth = await resolveConnectorAuth({ ...baseParams, db });
-      expect(result).toEqual({ kind: 'token', authorization: 'Bearer secret_key_42' });
+      expect(result).toEqual({
+        kind: 'token',
+        header: 'Authorization',
+        value: 'Bearer secret_key_42',
+      });
+    });
+
+    it('returns token with custom header when authHeader is set (e.g. x-api-key for Composio)', async () => {
+      const row = connectorRow('static', {
+        envJson: JSON.stringify({ token: 'composio_api_key_xyz', authHeader: 'x-api-key' }),
+      });
+      const db = mockDb([row]);
+      const result: ConnectorAuth = await resolveConnectorAuth({ ...baseParams, db });
+      // Custom header: raw value, no Bearer prefix.
+      expect(result).toEqual({
+        kind: 'token',
+        header: 'x-api-key',
+        value: 'composio_api_key_xyz',
+      });
     });
 
     it('returns needs_auth when envJson has a blank token', async () => {
@@ -152,17 +170,25 @@ describe('resolveConnectorAuth', () => {
   });
 
   describe('authMode = oauth', () => {
-    it('returns token with Bearer header for an active non-expiring token', async () => {
+    it('returns token with Authorization: Bearer for an active non-expiring token', async () => {
       const db = mockDb([connectorRow('oauth')], [tokenRow()]);
       const result: ConnectorAuth = await resolveConnectorAuth({ ...baseParams, db });
-      expect(result).toEqual({ kind: 'token', authorization: 'Bearer tok_live_abc' });
+      expect(result).toEqual({
+        kind: 'token',
+        header: 'Authorization',
+        value: 'Bearer tok_live_abc',
+      });
     });
 
-    it('returns token with Bearer header for an active token with future expiresAt', async () => {
+    it('returns token with Authorization: Bearer for an active token with future expiresAt', async () => {
       const future = new Date(Date.now() + 60_000);
       const db = mockDb([connectorRow('oauth')], [tokenRow({ expiresAt: future })]);
       const result: ConnectorAuth = await resolveConnectorAuth({ ...baseParams, db });
-      expect(result).toEqual({ kind: 'token', authorization: 'Bearer tok_live_abc' });
+      expect(result).toEqual({
+        kind: 'token',
+        header: 'Authorization',
+        value: 'Bearer tok_live_abc',
+      });
     });
 
     it('returns needs_auth when the oauth token is expired', async () => {

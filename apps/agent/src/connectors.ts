@@ -128,7 +128,7 @@ export async function buildConnectorConfigs(
     };
 
     if (auth.kind === 'token') {
-      configs.push({ ...base, headers: { Authorization: auth.authorization } });
+      configs.push({ ...base, headers: { [auth.header]: auth.value } });
     } else {
       // auth.kind === 'none' — open server, no auth header needed
       configs.push(base);
