@@ -9,9 +9,11 @@
     "lint": "eslint .",
     "test": "vitest run",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "spike:pi": "tsx src/spike/pi-spike.ts"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "0.75.5",
     "@hono/node-server": "^1.13.7",
     "@sym/adapter-slack": "workspace:*",
     "@sym/audit": "workspace:*",
