@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 
 import { dashboardGate } from '@/lib/auth';
 import { getDb } from '@/lib/db';
+import { ensureSecrets } from '@/lib/ensure-secrets';
 
 import { ConnectorForm } from './connector-form';
 
@@ -31,7 +32,12 @@ async function loadConnectors(): Promise<{
     )[0];
     if (!ws) return { connectors: [], agentUrl };
 
-    // Fetch all connector rows (never select envJson — keep secrets server-only).
+    // Load the secrets key ring so the encrypted envJson column decrypts on read.
+    // Without this the decrypt throws and the silent catch below hides every
+    // connector behind an empty "No connectors configured yet." list.
+    await ensureSecrets();
+
+    // Fetch all connector rows; envJson is decrypted to derive hasExistingSecret + authHeader.
     const rows = await handle.db
       .select({
         id: mcpConfigs.id,
@@ -129,7 +135,8 @@ async function loadConnectors(): Promise<{
     });
 
     return { connectors, agentUrl };
-  } catch {
+  } catch (err) {
+    console.error('[connectors] loadConnectors failed (showing empty list):', err);
     return { connectors: [], agentUrl };
   }
 }

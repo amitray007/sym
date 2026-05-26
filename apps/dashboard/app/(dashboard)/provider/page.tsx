@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 
 import { dashboardGate } from '@/lib/auth';
 import { getDb } from '@/lib/db';
+import { ensureSecrets } from '@/lib/ensure-secrets';
 
 import { ProviderForm } from './provider-form';
 
@@ -24,6 +25,9 @@ async function loadProviderConfig(): Promise<ProviderFormProps> {
     if (!ws) {
       return { modelChat: null, baseUrl: null, enabled: true, hasKey: false, updatedAt: null };
     }
+
+    // Load the key ring so the encrypted apiKey column decrypts on read.
+    await ensureSecrets();
 
     const row = (
       await handle.db
@@ -56,7 +60,8 @@ async function loadProviderConfig(): Promise<ProviderFormProps> {
       hasKey: typeof row.apiKey === 'string' && row.apiKey.length > 0,
       updatedAt: row.updatedAt,
     };
-  } catch {
+  } catch (err) {
+    console.error('[provider] loadProviderConfig failed (showing empty):', err);
     return { modelChat: null, baseUrl: null, enabled: true, hasKey: false, updatedAt: null };
   }
 }
