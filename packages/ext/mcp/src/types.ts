@@ -49,11 +49,25 @@ export function isJsonRpcError(r: JsonRpcResponse): r is JsonRpcErrorResponse {
 // MCP tool shapes (subset of MCP spec)
 // ---------------------------------------------------------------------------
 
+/**
+ * MCP tool annotations (MCP 2025-03-26 spec, §6.3).
+ *
+ * All fields are optional; absent means "unknown / not specified".
+ *   readOnlyHint   – true when the tool has no side-effects.
+ *   destructiveHint – true when the tool may perform irreversible actions.
+ */
+export interface McpToolAnnotations {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+}
+
 /** A raw MCP tool descriptor returned by `tools/list`. */
 export interface McpToolInfo {
   name: string;
   description?: string;
   inputSchema: JsonObject;
+  /** Optional tool-behaviour hints from the MCP server. */
+  annotations?: McpToolAnnotations;
 }
 
 /** Result of `tools/call`. */

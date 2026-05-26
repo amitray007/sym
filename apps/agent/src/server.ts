@@ -13,6 +13,7 @@ import { Hono } from 'hono';
 
 import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
+import { resolveConfirmation } from './confirmations.js';
 import {
   buildConnectorAuthorizeUrl,
   exchangeConnectorCode,
@@ -209,6 +210,125 @@ export function createServer(deps: ServerDeps): Hono {
         console.error('[agent] processEvent failed', err);
       });
     }
+    return c.json({ ok: true });
+  });
+
+  // --- Slack Interactivity (button clicks for confirmations) ----------------
+  // Slack posts a `application/x-www-form-urlencoded` body with a `payload`
+  // field that contains URL-encoded JSON. We verify the Slack signature EXACTLY
+  // as we do for /slack/events (same signing secret, raw body, timestamp window)
+  // and then owner-gate the click before resolving the confirmation.
+  //
+  // Interactivity Request URL: <AGENT_URL>/slack/interactivity
+  // Set this in your Slack app's "Interactivity & Shortcuts" settings.
+  app.post('/slack/interactivity', async (c) => {
+    // Read the raw body — must happen before any parsing so we can verify the
+    // Slack signature over the exact bytes Slack sent.
+    const rawBody = await c.req.text();
+
+    const verification = verifySlackSignature({
+      signingSecret: config.slackSigningSecret,
+      headers: {
+        'x-slack-request-timestamp': c.req.header('x-slack-request-timestamp') ?? '',
+        'x-slack-signature': c.req.header('x-slack-signature') ?? '',
+      },
+      rawBody,
+    });
+    if (!verification.ok) {
+      return c.json({ error: verification.reason }, 401);
+    }
+
+    // Parse `application/x-www-form-urlencoded` → extract `payload` field.
+    let payloadJson: string;
+    try {
+      const params = new URLSearchParams(rawBody);
+      const raw = params.get('payload');
+      if (!raw) {
+        return c.json({ error: 'missing_payload' }, 400);
+      }
+      payloadJson = raw;
+    } catch {
+      return c.json({ error: 'invalid_form' }, 400);
+    }
+
+    // Parse the block_actions payload.
+    let payload: {
+      type?: string;
+      user?: { id?: string };
+      team?: { id?: string };
+      actions?: { action_id?: string }[];
+      response_url?: string;
+    };
+    try {
+      payload = JSON.parse(payloadJson) as typeof payload;
+    } catch {
+      return c.json({ error: 'invalid_payload_json' }, 400);
+    }
+
+    if (payload.type !== 'block_actions') {
+      // We only handle block_actions; ACK other interaction types without error.
+      return c.json({ ok: true });
+    }
+
+    const clickerId = payload.user?.id;
+    const teamId = payload.team?.id;
+    const actionId = payload.actions?.[0]?.action_id ?? '';
+    const responseUrl = payload.response_url;
+
+    if (!clickerId || !teamId) {
+      return c.json({ error: 'missing_user_or_team' }, 400);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Owner gate — only the workspace owner's click resolves a confirmation.
+    // Non-owner clicks are silently ACK'd to avoid Slack showing an error.
+    // ---------------------------------------------------------------------------
+    const wsRows = await db
+      .select({ ownerSlackUserId: workspaces.ownerSlackUserId })
+      .from(workspaces)
+      .where(eq(workspaces.slackTeamId, teamId))
+      .limit(1);
+
+    const ws = wsRows[0];
+    if (!ws) {
+      // Unknown workspace — ACK but do nothing.
+      return c.json({ ok: true });
+    }
+
+    if (ws.ownerSlackUserId === null || clickerId !== ws.ownerSlackUserId) {
+      // Non-owner click — ACK silently; do NOT resolve any confirmation.
+      return c.json({ ok: true });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Parse action_id: `sym_confirm:<id>:approve|deny`
+    // ---------------------------------------------------------------------------
+    const match = /^sym_confirm:([^:]+):(approve|deny)$/.exec(actionId);
+    if (!match) {
+      // Not a sym_confirm action — ACK without processing.
+      return c.json({ ok: true });
+    }
+
+    const confirmationId = match[1] ?? '';
+    const verdict = match[2] ?? '';
+    const approved = verdict === 'approve';
+
+    resolveConfirmation(confirmationId, approved);
+
+    // ACK Slack immediately (already done implicitly by returning below).
+    // Best-effort: update the interactive message via response_url so the
+    // buttons are replaced with a status line. Never block the ACK on this.
+    if (responseUrl) {
+      const statusText = approved ? 'Approved ✅' : 'Cancelled ✋';
+      void fetch(responseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ replace_original: true, text: statusText }),
+      }).catch((err: unknown) => {
+        console.warn('[agent] interactivity response_url update failed (non-blocking):', err);
+      });
+    }
+
     return c.json({ ok: true });
   });
 

@@ -214,14 +214,24 @@ export class McpToolRegistry implements ToolDispatcher {
 /**
  * Convert an MCP tool info to a ToolDescriptor.
  * Canonical name: `mcp__<slug>__<tool>`.
+ *
+ * MCP tool annotations (readOnlyHint, destructiveHint) are forwarded onto the
+ * descriptor when present so the Pi loop's `beforeToolCall` can gate on them.
  */
 function mcpToolToDescriptor(slug: string, tool: McpToolInfo): ToolDescriptor {
-  return {
+  const descriptor: ToolDescriptor = {
     type: 'function',
     name: `mcp__${slug}__${tool.name}`,
     description: tool.description ?? `MCP tool ${tool.name} from server ${slug}`,
     parameters: tool.inputSchema,
   };
+  if (tool.annotations?.readOnlyHint !== undefined) {
+    descriptor.readOnlyHint = tool.annotations.readOnlyHint;
+  }
+  if (tool.annotations?.destructiveHint !== undefined) {
+    descriptor.destructiveHint = tool.annotations.destructiveHint;
+  }
+  return descriptor;
 }
 
 interface ParsedToolName {

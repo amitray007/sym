@@ -80,6 +80,7 @@ async function runTurnLoop(
       {
         history,
         skills,
+        slackClient: deps.slackClient,
         ...(onDelta !== undefined ? { onDelta } : {}),
       },
     );

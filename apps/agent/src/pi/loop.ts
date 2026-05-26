@@ -15,11 +15,26 @@ import { Agent } from '@earendil-works/pi-agent-core';
 import { matchSkills, buildSkillContext } from '@sym/ext-skills';
 import { buildReceipt, buildSystemPrompt, buildTurnContextPrompt } from '@sym/kernel';
 
+import { requestConfirmation } from '../confirmations.js';
 import { bridgeTools } from './tools.js';
 
-import type { AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
+import type {
+  BeforeToolCallContext,
+  AgentEvent,
+  AgentMessage,
+} from '@earendil-works/pi-agent-core';
 import type { AssistantMessage, UserMessage, Model } from '@earendil-works/pi-ai';
-import type { ChatMessage, Reply, ToolRuntimeContext, Turn, Usage } from '@sym/contracts';
+import type { SlackClient } from '@sym/adapter-slack';
+import type {
+  ChatMessage,
+  Reply,
+  SlackChannelId,
+  SlackThreadTs,
+  ToolDescriptor,
+  ToolRuntimeContext,
+  Turn,
+  Usage,
+} from '@sym/contracts';
 import type { Skill } from '@sym/ext-skills';
 import type { ToolRegistry } from '@sym/kernel';
 
@@ -48,6 +63,12 @@ export interface PiLoopOptions {
    * into the system prompt via `buildSkillContext`.
    */
   skills?: Skill[];
+  /**
+   * Slack client for posting confirmation messages when a destructive tool is
+   * about to run. Required for the confirm-before-destructive feature; when
+   * absent, destructive tools are blocked (fail closed).
+   */
+  slackClient?: SlackClient;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,10 +238,63 @@ export async function runLoopPi(
   // Assemble all tools via the bridge.
   const agentTools = bridgeTools(registry, ctx);
 
+  // Build a name → ToolDescriptor map so beforeToolCall can look up hints.
+  const descriptorMap = new Map<string, ToolDescriptor>(
+    registry.listTools().map((d) => [d.name, d]),
+  );
+
   // Accumulate streaming text deltas.
   const draftParts: string[] = [];
   // Track tool invocations for the receipt.
   const toolsInvoked: string[] = [];
+
+  // ---------------------------------------------------------------------------
+  // Confirm-before-destructive hook
+  //
+  // For any tool whose descriptor carries `destructiveHint: true`, pause and ask
+  // the owner to approve via Slack before executing. Fail CLOSED when the
+  // confirmation channel is unavailable.
+  // ---------------------------------------------------------------------------
+  const beforeToolCall = async (
+    context: BeforeToolCallContext,
+    signal?: AbortSignal,
+  ): Promise<{ block: true; reason?: string } | undefined> => {
+    const toolName = context.toolCall.name;
+    const descriptor = descriptorMap.get(toolName);
+
+    if (descriptor?.destructiveHint !== true) {
+      // Non-destructive or unknown — allow through immediately.
+      return undefined;
+    }
+
+    // Honor abort — treat as deny.
+    if (signal?.aborted) {
+      return { block: true, reason: 'The run was cancelled before the tool could be approved.' };
+    }
+
+    const channelId = turn.channelId;
+    if (!channelId || !opts.slackClient) {
+      // Fail closed: no channel or no Slack client → cannot prompt → block.
+      console.warn(`[pi] destructive tool '${toolName}' blocked: confirmation channel unavailable`);
+      return { block: true, reason: 'Confirmation channel unavailable.' };
+    }
+
+    const argsPreview = JSON.stringify(context.args ?? {});
+
+    const approved = await requestConfirmation({
+      slackClient: opts.slackClient,
+      channel: channelId as SlackChannelId,
+      ...(turn.threadTs !== undefined ? { threadTs: turn.threadTs as SlackThreadTs } : {}),
+      toolName,
+      argsPreview,
+    });
+
+    if (!approved) {
+      return { block: true, reason: 'The owner did not approve this action.' };
+    }
+
+    return undefined;
+  };
 
   // Construct the Agent.
   const agent = new Agent({
@@ -231,6 +305,7 @@ export async function runLoopPi(
       messages: historyMessages,
     },
     getApiKey: (_provider: string) => modelCfg.apiKey,
+    beforeToolCall,
   });
 
   // Subscribe to events for streaming + tool tracking.
