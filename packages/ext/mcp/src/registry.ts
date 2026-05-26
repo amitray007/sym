@@ -194,9 +194,8 @@ export class McpToolRegistry implements ToolDispatcher {
       await this.auditFn(this.db, {
         workspaceId: ctx.workspaceId,
         kind,
-        // Sandboxed tools are attributed to the sandbox; in-process tools to the requester.
-        actorKind: ctx.sandbox ? 'sandbox' : 'slack_user',
-        actorId: ctx.sandbox?.sandboxId ?? ctx.requester,
+        actorKind: 'slack_user',
+        actorId: ctx.requester,
         onBehalfOf: ctx.requester,
         targetKind: 'tool',
         payload,

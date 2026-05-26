@@ -28,6 +28,3 @@ export * from './queue.js';
 
 // Audit
 export * from './audit.js';
-
-// Sandbox
-export * from './leases.js';
