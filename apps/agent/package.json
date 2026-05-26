@@ -21,6 +21,7 @@
     "@sym/contracts": "workspace:*",
     "@sym/db": "workspace:*",
     "@sym/ext-mcp": "workspace:*",
+    "@sym/ext-skills": "workspace:*",
     "@sym/kernel": "workspace:*",
     "@sym/provider-fireworks": "workspace:*",
     "@sym/secrets": "workspace:*",

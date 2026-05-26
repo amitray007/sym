@@ -11,6 +11,7 @@ import {
 } from './persistence.js';
 import { runLoopPi } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
+import { loadEnabledSkills } from './skills.js';
 
 import type { AppendStreamParams, SlackClient, StartStreamParams } from '@sym/adapter-slack';
 import type { AppendInput } from '@sym/audit';
@@ -71,12 +72,14 @@ async function runTurnLoop(
       baseUrl: deps.fireworks.baseUrl,
       modelId: deps.model,
     });
+    const skills = await loadEnabledSkills(deps.db, turn.workspaceId);
     return runLoopPi(
       turn,
       { baseUrl: deps.fireworks.baseUrl, apiKey: deps.fireworks.apiKey, model },
       registry,
       {
         history,
+        skills,
         ...(onDelta !== undefined ? { onDelta } : {}),
       },
     );

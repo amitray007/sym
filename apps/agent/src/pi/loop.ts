@@ -12,6 +12,7 @@
  */
 
 import { Agent } from '@earendil-works/pi-agent-core';
+import { matchSkills, buildSkillContext } from '@sym/ext-skills';
 import { buildReceipt, buildSystemPrompt, buildTurnContextPrompt } from '@sym/kernel';
 
 import { bridgeTools } from './tools.js';
@@ -19,6 +20,7 @@ import { bridgeTools } from './tools.js';
 import type { AgentEvent, AgentMessage } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage, UserMessage, Model } from '@earendil-works/pi-ai';
 import type { ChatMessage, Reply, ToolRuntimeContext, Turn, Usage } from '@sym/contracts';
+import type { Skill } from '@sym/ext-skills';
 import type { ToolRegistry } from '@sym/kernel';
 
 // ---------------------------------------------------------------------------
@@ -40,6 +42,12 @@ export interface PiLoopOptions {
   onDelta?: (delta: string) => void | Promise<void>;
   /** Propagate cancellation into the Pi Agent. */
   signal?: AbortSignal;
+  /**
+   * Pre-loaded enabled skills for this workspace.  When provided, the Pi loop
+   * runs `matchSkills` against the turn text and injects matched skill content
+   * into the system prompt via `buildSkillContext`.
+   */
+  skills?: Skill[];
 }
 
 // ---------------------------------------------------------------------------
@@ -189,8 +197,17 @@ export async function runLoopPi(
   // Pi receives the system prompt via AgentState.systemPrompt).
   const historyMessages = toAgentMessages(opts.history);
 
-  // Build the system prompt (identical bytes to the kernel loop — static).
-  const systemPrompt = buildSystemPrompt();
+  // Build the system prompt: start with the static base, then inject any
+  // skills whose activationPattern matches the current turn text.
+  const basePrompt = buildSystemPrompt();
+  let systemPrompt = basePrompt;
+  if (opts.skills && opts.skills.length > 0) {
+    const matched = matchSkills(turn.text, opts.skills);
+    if (matched.length > 0) {
+      const skillBlocks = matched.map(buildSkillContext).join('\n\n');
+      systemPrompt = `${basePrompt}\n\n${skillBlocks}`;
+    }
+  }
 
   // Construct the turn-context prefix and prepend to the user's text, exactly
   // as assembleTurnMessages does today.

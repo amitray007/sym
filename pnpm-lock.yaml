@@ -83,6 +83,9 @@ importers:
       '@sym/ext-mcp':
         specifier: workspace:*
         version: link:../../packages/ext/mcp
+      '@sym/ext-skills':
+        specifier: workspace:*
+        version: link:../../packages/ext/skills
       '@sym/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
