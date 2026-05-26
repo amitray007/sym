@@ -37,7 +37,12 @@ export async function getWorkspace() {
 
   try {
     const rows = await handle.db
-      .select({ id: workspaces.id, name: workspaces.name, status: workspaces.status })
+      .select({
+        id: workspaces.id,
+        name: workspaces.name,
+        status: workspaces.status,
+        ownerSlackUserId: workspaces.ownerSlackUserId,
+      })
       .from(workspaces)
       .limit(1);
     return rows[0] ?? null;

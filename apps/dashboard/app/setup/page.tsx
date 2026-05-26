@@ -56,6 +56,7 @@ export default async function SetupPage() {
     <SetupWizard
       status={status}
       workspaceName={workspace?.name ?? null}
+      ownerSlackUserId={workspace?.ownerSlackUserId ?? null}
       agentInstallUrl={process.env.AGENT_URL ?? null}
       provider={provider}
     />

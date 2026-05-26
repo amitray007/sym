@@ -1,6 +1,6 @@
 'use server';
 
-import { aclModes, providerConfigs, uuidv7, workspaces } from '@sym/db';
+import { providerConfigs, uuidv7, workspaces } from '@sym/db';
 import { and, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 
@@ -80,33 +80,6 @@ export async function saveProviderConfig(formData: FormData): Promise<ActionResu
       ...values,
     });
   }
-
-  revalidatePath('/setup');
-  return { ok: true };
-}
-
-/** Save the Slack-surface ACL mode (minimal first-run editor). */
-export async function saveAcl(formData: FormData): Promise<ActionResult> {
-  if (!(await requireAdmin())) return { ok: false, error: 'Forbidden.' };
-  const ctx = await workspaceId();
-  if (!ctx?.db) return { ok: false, error: 'Workspace not installed yet.' };
-
-  type AclMode = 'open' | 'allowlist' | 'workspace_minus_blocked';
-  const validModes: AclMode[] = ['open', 'allowlist', 'workspace_minus_blocked'];
-  const raw = String(formData.get('slackMode') ?? 'open');
-  if (!validModes.includes(raw as AclMode)) {
-    return { ok: false, error: 'Invalid ACL mode.' };
-  }
-  const mode = raw as AclMode;
-  const { db } = ctx.db;
-
-  await db
-    .insert(aclModes)
-    .values({ workspaceId: ctx.id, surface: 'slack', mode })
-    .onConflictDoUpdate({
-      target: [aclModes.workspaceId, aclModes.surface],
-      set: { mode, updatedAt: new Date() },
-    });
 
   revalidatePath('/setup');
   return { ok: true };
