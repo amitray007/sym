@@ -8,9 +8,6 @@
 export * from './workspaces.js';
 export * from './admins.js';
 
-// Access control
-export * from './acl.js';
-
 // Configuration
 export * from './config.js';
 
