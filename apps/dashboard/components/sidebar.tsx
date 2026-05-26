@@ -47,22 +47,16 @@ export function Sidebar({ workspaceName }: SidebarProps) {
   return (
     <aside className="w-56 flex-shrink-0 bg-surface-1 border-r border-border flex flex-col h-screen sticky top-0 overflow-y-auto">
       {/* Logo + workspace */}
-      <div className="px-4 py-4 border-b border-border">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-accent-400 to-accent-700 flex items-center justify-center flex-shrink-0 shadow-glow-accent">
-            <span className="text-white font-bold text-sm">S</span>
-          </div>
-          <div className="min-w-0">
-            <p className="text-ink-primary font-semibold text-sm leading-none tracking-tight">
-              Sym
-            </p>
-            {workspaceName && (
-              <p className="text-ink-tertiary text-[10px] mt-0.5 truncate leading-none">
-                {workspaceName}
-              </p>
-            )}
-          </div>
+      <div className="px-4 py-5 border-b border-border">
+        <div className="flex items-center gap-2">
+          <span className="wordmark text-[15px] leading-none">SYM</span>
+          <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
         </div>
+        {workspaceName && (
+          <p className="text-ink-tertiary text-[11px] mt-2 truncate leading-none font-mono">
+            {workspaceName}
+          </p>
+        )}
       </div>
 
       {/* Nav */}
