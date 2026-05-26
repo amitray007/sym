@@ -256,6 +256,10 @@ export async function updateConnector(id: string, formData: FormData): Promise<A
     if (!clientId) return { ok: false, error: 'Client ID is required for OAuth mode.' };
   }
 
+  // Load the key ring up-front: the row we read below includes the encrypted
+  // envJson column, which decrypts on read (needed for the authHeader merge).
+  await ensureSecrets();
+
   // Confirm the row belongs to this workspace before updating.
   const existing = (
     await ctx.db.db
