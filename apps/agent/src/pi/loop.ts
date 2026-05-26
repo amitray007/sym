@@ -1,32 +1,24 @@
 /**
- * Pi-backed turn loop for Sym.
+ * Pi-backed turn loop for Sym — the only turn path.
  *
- * Runs a single Slack turn through Pi's `Agent` class instead of the kernel's
- * `runLoop`. The seam is identical: same `Reply` return type, same `onDelta`
- * callback, same `history: ChatMessage[]` input. The surrounding pipeline
- * (ingress, owner-gate, context load, Slack streaming, persistence, audit) is
- * completely untouched.
- *
- * Gated behind `SYM_PI_LOOP=1` — the live path uses `runLoop` when the flag is
- * unset.
+ * Runs a single Slack turn through Pi's `Agent` class. The seam: a `Reply`
+ * return type, an `onDelta` callback for streaming, and `history: ChatMessage[]`
+ * input. The surrounding pipeline (ingress, owner-gate, context load, Slack
+ * streaming) is unchanged.
  */
 
 import { Agent } from '@earendil-works/pi-agent-core';
-import { buildSkillContext } from '@sym/ext-skills';
 import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
-import { buildDiscoveryTools } from './discovery.js';
 import { bridgeTools } from './tools.js';
 
 import type {
-  AgentTool,
-  AgentToolResult,
   BeforeToolCallContext,
   AgentEvent,
   AgentMessage,
 } from '@earendil-works/pi-agent-core';
-import type { AssistantMessage, UserMessage, Model, TSchema } from '@earendil-works/pi-ai';
+import type { AssistantMessage, UserMessage, Model } from '@earendil-works/pi-ai';
 import type { SlackClient } from '@sym/adapter-slack';
 import type {
   ChatMessage,
@@ -38,7 +30,6 @@ import type {
   Turn,
   Usage,
 } from '@sym/contracts';
-import type { Skill } from '@sym/ext-skills';
 import type { ToolRegistry } from '@sym/kernel';
 
 // ---------------------------------------------------------------------------
@@ -60,13 +51,6 @@ export interface PiLoopOptions {
   onDelta?: (delta: string) => void | Promise<void>;
   /** Propagate cancellation into the Pi Agent. */
   signal?: AbortSignal;
-  /**
-   * Pre-loaded enabled skills for this workspace.  When provided, the Pi loop
-   * appends a `## Available skills` index (slug + description only) to the
-   * system prompt, and exposes a `load_skill(slug)` tool so the model can
-   * fetch full skill instructions on demand.
-   */
-  skills?: Skill[];
   /**
    * Slack client for posting confirmation messages when a destructive tool is
    * about to run. Required for the confirm-before-destructive feature; when
@@ -222,112 +206,20 @@ export async function runLoopPi(
   // Pi receives the system prompt via AgentState.systemPrompt).
   const historyMessages = toAgentMessages(opts.history);
 
-  // Build the system prompt: start with the static base, then append a cheap
-  // index of all enabled skills (slug + description only — no bodies).
-  // The model fetches full instructions on demand via the `load_skill` tool.
-  const basePrompt = buildSystemPrompt();
-  let systemPrompt = basePrompt;
-  if (opts.skills && opts.skills.length > 0) {
-    const indexLines = opts.skills.map((s) => `- ${s.slug}: ${s.description}`).join('\n');
-    systemPrompt = `${basePrompt}\n\n## Available skills\n${indexLines}`;
-  }
+  // The static base system prompt — byte-stable for provider prompt caching.
+  const systemPrompt = buildSystemPrompt();
 
   // The user's message, with turn metadata framed as context-only so "summarize
   // it" refers to the conversation (in history), not the metadata. Same builder
   // as the kernel's assembleTurnMessages.
   const userText = buildUserTurnContent(turn);
 
-  // ---------------------------------------------------------------------------
-  // load_skill tool — progressive disclosure of skill bodies.
-  //
-  // The system prompt lists only slug + description for each enabled skill.
-  // When the model determines a skill is relevant, it calls load_skill(slug)
-  // to fetch the full instructions. This keeps the initial context window small
-  // and avoids injecting bodies that aren't needed for the current turn.
-  // ---------------------------------------------------------------------------
-  const skillsList = opts.skills ?? [];
-  const loadSkillTool: AgentTool = {
-    name: 'load_skill',
-    label: 'load_skill',
-    description:
-      "Load the full instructions for a skill by its slug. Call this when a skill listed under 'Available skills' fits the task, then follow the returned instructions.",
-    parameters: {
-      type: 'object',
-      properties: {
-        slug: {
-          type: 'string',
-          description: 'The skill slug from the Available skills list',
-        },
-      },
-      required: ['slug'],
-      additionalProperties: false,
-    } as unknown as TSchema,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prepareArguments: (args: unknown) => args as any,
-    execute: async (_toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
-      const { slug } = params as { slug: string };
-      const skill = skillsList.find((s) => s.slug === slug);
-      if (skill) {
-        return {
-          content: [{ type: 'text', text: buildSkillContext(skill) }],
-          details: { slug },
-        };
-      }
-      const validSlugs = skillsList.map((s) => s.slug).join(', ');
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `No skill with slug "${slug}". Available: ${validSlugs || '(none)'}`,
-          },
-        ],
-        details: { slug, found: false },
-      };
-    },
-  };
+  // Bridge the built-in tools as native Pi tools (full schemas visible up front).
+  const descriptors = registry.listTools();
+  const agentTools = bridgeTools(registry, ctx, descriptors);
 
-  // ---------------------------------------------------------------------------
-  // Eager / connector split
-  //
-  // EAGER: built-in tools whose names do NOT start with "mcp__" → bridged as
-  //        native Pi tools with full schemas visible to the model up front.
-  // CONNECTOR: MCP-backed tools whose names start with "mcp__" → hidden behind
-  //            search_tools + call_tool (the DISPATCH pattern). Pi snapshots
-  //            state.tools at run-start so mid-run tool mutation does NOT work;
-  //            the dispatch pattern is the only reliable path.
-  // ---------------------------------------------------------------------------
-  const allDescriptors = registry.listTools();
-  const eagerDescriptors = allDescriptors.filter((d) => !d.name.startsWith('mcp__'));
-  const connectorDescriptors = allDescriptors.filter((d) => d.name.startsWith('mcp__'));
-
-  // Bridge only the EAGER descriptors as native Pi tools.
-  const eagerTools = bridgeTools(registry, ctx, eagerDescriptors);
-
-  // Build discovery meta-tools only when connector tools exist.
-  const discoveryTools =
-    connectorDescriptors.length > 0
-      ? buildDiscoveryTools({
-          connectorDescriptors,
-          registry,
-          ctx,
-          ...(turn.channelId !== undefined ? { channelId: turn.channelId } : {}),
-          ...(turn.threadTs !== undefined ? { threadTs: turn.threadTs } : {}),
-          ...(opts.slackClient !== undefined ? { slackClient: opts.slackClient } : {}),
-        })
-      : [];
-
-  // Assemble all tools: eager built-ins + optional discovery pair + load_skill.
-  const agentTools = [
-    ...eagerTools,
-    ...discoveryTools,
-    ...(skillsList.length > 0 ? [loadSkillTool] : []),
-  ];
-
-  // Build a name → ToolDescriptor map so beforeToolCall can look up hints.
-  // Only eager descriptors are in the native tool list; connector confirm lives
-  // inside call_tool. We include all descriptors here for safety, but
-  // beforeToolCall will only fire for eagerly registered tool names.
-  const descriptorMap = new Map<string, ToolDescriptor>(allDescriptors.map((d) => [d.name, d]));
+  // Build a name → ToolDescriptor map so beforeToolCall can look up destructive hints.
+  const descriptorMap = new Map<string, ToolDescriptor>(descriptors.map((d) => [d.name, d]));
 
   // Accumulate streaming text deltas.
   const draftParts: string[] = [];

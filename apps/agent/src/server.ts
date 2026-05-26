@@ -6,23 +6,16 @@ import {
   verifySlackSignature,
 } from '@sym/adapter-slack';
 import { append } from '@sym/audit';
-import { mcpConfigs, oauthTokens, uuidv7, workspaces } from '@sym/db';
-import { InMemoryMcpAuthStore } from '@sym/ext-mcp';
-import { and, eq, sql } from 'drizzle-orm';
+import { workspaces } from '@sym/db';
+import { eq, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { resolveConfirmation } from './confirmations.js';
-import {
-  buildConnectorAuthorizeUrl,
-  exchangeConnectorCode,
-  generatePkce,
-  generateState,
-} from './connector-oauth.js';
 import { handleTurn } from './handle-turn.js';
 import { SingleTenantError, installWorkspace } from './install.js';
-import { OWNER_DECLINE_MESSAGE, checkOwnerAccess, denyReason } from './owner-gate.js';
+import { OWNER_DECLINE_MESSAGE, checkOwnerAccess } from './owner-gate.js';
 import {
   buildAuthorizeUrl,
   exchangeCode,
@@ -34,11 +27,8 @@ import { loadWorkspaceContext } from './workspace-context.js';
 
 import type { AgentConfig } from './config.js';
 import type { RawSlackEvent } from '@sym/adapter-slack';
-import type { ConnectorOAuthConfig, SlackUserId, WorkspaceId } from '@sym/contracts';
+import type { WorkspaceId } from '@sym/contracts';
 import type { Database } from '@sym/db';
-
-/** Module-level store for in-flight connector OAuth sessions. One-time-use by state key. */
-const connectorAuthStore = new InMemoryMcpAuthStore();
 
 export interface ServerDeps {
   db: Database;
@@ -115,24 +105,6 @@ export function createServer(deps: ServerDeps): Hono {
     // are dropped — silently in channels (Sym stays invisible to the rest of the
     // team), with one polite line in a DM (silence in a 1:1 just looks broken).
     if (checkOwnerAccess(turn.requester, ctx.ownerSlackUserId) === 'deny') {
-      try {
-        await append(db, {
-          workspaceId: ctx.workspaceId,
-          kind: 'app.turn.denied',
-          actorKind: 'slack_user',
-          actorId: turn.requester,
-          targetKind: 'workspace',
-          targetId: ctx.workspaceId,
-          payload: {
-            entrySurface: turn.entrySurface,
-            reason: denyReason(ctx.ownerSlackUserId),
-            ...(turn.channelId !== undefined ? { channelId: turn.channelId } : {}),
-          },
-        });
-      } catch (auditErr) {
-        console.error('[agent] denied-turn audit append failed', auditErr);
-      }
-
       if (
         turn.entrySurface === 'dm' &&
         ctx.ownerSlackUserId !== null &&
@@ -160,14 +132,12 @@ export function createServer(deps: ServerDeps): Hono {
         ? assistantContext.lookup(turn.channelId, turn.threadTs)
         : undefined;
     await handleTurn(turn, {
-      db,
       fireworks: ctx.fireworks,
       model: ctx.model,
       slackClient: ctx.slackClient,
       botUserId: ctx.botUserId,
       slackTeamId: ctx.slackTeamId,
       ...(viewedChannelId !== undefined ? { viewedChannelId } : {}),
-      audit: (input) => append(db, input).then(() => undefined),
     });
   }
 
@@ -386,252 +356,6 @@ export function createServer(deps: ServerDeps): Hono {
       console.error('[agent] install failed', err);
       return c.json({ error: 'install_failed' }, 500);
     }
-  });
-
-  // --- Connector OAuth (per-connector "Connect a provider" flow) ---------------
-  // GET /connectors/oauth/start?slug=<slug>
-  //   Validates the connector, generates PKCE + state, stores the session,
-  //   and redirects the browser to the provider's authorize URL.
-  //
-  // GET /connectors/oauth/callback?code=<code>&state=<state>
-  //   Verifies state (one-time), exchanges the code, upserts the token row,
-  //   appends an audit event, and redirects back to the dashboard.
-
-  app.get('/connectors/oauth/start', async (c) => {
-    const dashBase = (config.dashboardUrl ?? '').replace(/\/$/, '');
-    const errorRedirect = `${dashBase}/connectors?connect=error`;
-
-    // Derive the connector OAuth redirect_uri from the Slack OAuth redirect_uri
-    // base (same origin), so we don't need a second env var.
-    if (!config.oauthRedirectUri) {
-      console.error('[connector-oauth] oauthRedirectUri is not configured');
-      return c.text('connector_oauth_not_configured', 503);
-    }
-    const callbackUri = new URL(config.oauthRedirectUri).origin + '/connectors/oauth/callback';
-
-    const slug = c.req.query('slug');
-    if (!slug) {
-      return c.redirect(errorRedirect);
-    }
-
-    // Load the single-tenant workspace.
-    const wsRows = await db.select().from(workspaces).limit(1);
-    const ws = wsRows[0];
-    if (!ws) {
-      return c.redirect(errorRedirect);
-    }
-    const workspaceId = ws.id as WorkspaceId;
-    const owner = ws.ownerSlackUserId as SlackUserId;
-
-    // Load the connector — must be enabled + oauth mode.
-    const cfgRows = await db
-      .select()
-      .from(mcpConfigs)
-      .where(
-        and(
-          eq(mcpConfigs.workspaceId, workspaceId),
-          eq(mcpConfigs.slug, slug),
-          eq(mcpConfigs.authMode, 'oauth'),
-          eq(mcpConfigs.enabled, true),
-        ),
-      )
-      .limit(1);
-
-    const cfg = cfgRows[0];
-    if (!cfg) {
-      console.warn(`[connector-oauth] no enabled oauth connector for slug="${slug}"`);
-      return c.redirect(errorRedirect);
-    }
-
-    const oauthCfg = cfg.oauthConfigJson as ConnectorOAuthConfig | null;
-    if (
-      !oauthCfg ||
-      typeof oauthCfg !== 'object' ||
-      !oauthCfg.authorizeUrl ||
-      !oauthCfg.clientId ||
-      !oauthCfg.tokenUrl ||
-      !Array.isArray(oauthCfg.scopes)
-    ) {
-      console.error(`[connector-oauth] invalid oauthConfigJson for slug="${slug}"`);
-      return c.redirect(errorRedirect);
-    }
-
-    // Generate PKCE and state.
-    const { codeVerifier, codeChallenge, codeChallengeMethod } = generatePkce();
-    const state = generateState();
-
-    // Persist the session — one-time-use, TTL 600s (10 min).
-    await connectorAuthStore.set(
-      state,
-      { provider: slug, userId: owner, codeVerifier, createdAt: new Date().toISOString() },
-      600_000,
-    );
-
-    const authorizeUrl = buildConnectorAuthorizeUrl({
-      authorizeUrl: oauthCfg.authorizeUrl,
-      clientId: oauthCfg.clientId,
-      redirectUri: callbackUri,
-      scopes: oauthCfg.scopes,
-      state,
-      codeChallenge,
-      codeChallengeMethod,
-    });
-
-    return c.redirect(authorizeUrl);
-  });
-
-  app.get('/connectors/oauth/callback', async (c) => {
-    const dashBase = (config.dashboardUrl ?? '').replace(/\/$/, '');
-    const errorRedirect = `${dashBase}/connectors?connect=error`;
-    const successRedirect = `${dashBase}/connectors?connect=ok`;
-
-    const code = c.req.query('code');
-    const state = c.req.query('state') ?? '';
-
-    if (!code || !state) {
-      return c.redirect(errorRedirect);
-    }
-
-    // Look up + DELETE the session (one-time use).
-    const session = await connectorAuthStore.get(state);
-    await connectorAuthStore.delete(state);
-
-    if (!session) {
-      console.warn('[connector-oauth] unknown or expired state in callback');
-      return c.redirect(errorRedirect);
-    }
-
-    const slug = session.provider;
-    const owner = session.userId as SlackUserId;
-    const codeVerifier = session.codeVerifier ?? '';
-
-    // Derive callback URI (same logic as start route).
-    if (!config.oauthRedirectUri) {
-      console.error('[connector-oauth] oauthRedirectUri is not configured');
-      return c.redirect(errorRedirect);
-    }
-    const callbackUri = new URL(config.oauthRedirectUri).origin + '/connectors/oauth/callback';
-
-    // Load the workspace.
-    const wsRows = await db.select().from(workspaces).limit(1);
-    const ws = wsRows[0];
-    if (!ws) {
-      return c.redirect(errorRedirect);
-    }
-    const workspaceId = ws.id as WorkspaceId;
-
-    // Load the connector (re-validate it still exists + is oauth mode).
-    const cfgRows = await db
-      .select()
-      .from(mcpConfigs)
-      .where(
-        and(
-          eq(mcpConfigs.workspaceId, workspaceId),
-          eq(mcpConfigs.slug, slug),
-          eq(mcpConfigs.authMode, 'oauth'),
-          eq(mcpConfigs.enabled, true),
-        ),
-      )
-      .limit(1);
-
-    const cfg = cfgRows[0];
-    if (!cfg) {
-      console.warn(`[connector-oauth] connector slug="${slug}" not found during callback`);
-      return c.redirect(errorRedirect);
-    }
-
-    const oauthCfg = cfg.oauthConfigJson as ConnectorOAuthConfig | null;
-    if (!oauthCfg?.tokenUrl || !oauthCfg.clientId) {
-      console.error(`[connector-oauth] invalid oauthConfigJson for slug="${slug}" in callback`);
-      return c.redirect(errorRedirect);
-    }
-
-    // Decrypt the client secret from envJson.
-    let clientSecret = '';
-    if (cfg.envJson) {
-      try {
-        const env: unknown = JSON.parse(cfg.envJson);
-        if (env !== null && typeof env === 'object' && !Array.isArray(env)) {
-          const s = (env as Record<string, unknown>)['clientSecret'];
-          if (typeof s === 'string') clientSecret = s;
-        }
-      } catch {
-        // envJson malformed — proceed without secret (public client)
-      }
-    }
-
-    // Exchange the code for tokens.
-    let tokens: Awaited<ReturnType<typeof exchangeConnectorCode>>;
-    try {
-      tokens = await exchangeConnectorCode({
-        tokenUrl: oauthCfg.tokenUrl,
-        clientId: oauthCfg.clientId,
-        clientSecret,
-        code,
-        redirectUri: callbackUri,
-        codeVerifier,
-      });
-    } catch (err) {
-      console.error('[connector-oauth] token exchange failed:', err);
-      return c.redirect(errorRedirect);
-    }
-
-    const expiresAt =
-      typeof tokens.expiresIn === 'number' ? new Date(Date.now() + tokens.expiresIn * 1000) : null;
-    const scopes = tokens.scope
-      ? tokens.scope.split(/[\s,]+/).filter(Boolean)
-      : (oauthCfg.scopes ?? []);
-
-    // Persist in a transaction: revoke any active token → insert new active one.
-    try {
-      await db.transaction(async (tx) => {
-        // Revoke existing active tokens for (workspace, owner, slug).
-        await tx
-          .update(oauthTokens)
-          .set({ status: 'revoked', revokedAt: new Date(), updatedAt: new Date() })
-          .where(
-            and(
-              eq(oauthTokens.workspaceId, workspaceId),
-              eq(oauthTokens.slackUserId, owner),
-              eq(oauthTokens.provider, slug),
-              eq(oauthTokens.status, 'active'),
-            ),
-          );
-
-        // Insert the new active token.
-        await tx.insert(oauthTokens).values({
-          id: uuidv7(),
-          workspaceId,
-          slackUserId: owner,
-          provider: slug,
-          accessToken: tokens.accessToken,
-          ...(tokens.refreshToken !== undefined ? { refreshToken: tokens.refreshToken } : {}),
-          ...(expiresAt !== null ? { expiresAt } : {}),
-          scopes,
-          status: 'active',
-        });
-      });
-    } catch (err) {
-      console.error('[connector-oauth] failed to persist token:', err);
-      return c.redirect(errorRedirect);
-    }
-
-    // Best-effort audit — never fail the flow.
-    try {
-      await append(db, {
-        workspaceId,
-        kind: 'app.connector.connect',
-        actorKind: 'slack_user',
-        actorId: owner,
-        targetKind: 'connector',
-        targetId: slug,
-        payload: { slug },
-      });
-    } catch (auditErr) {
-      console.error('[connector-oauth] audit append failed (continuing):', auditErr);
-    }
-
-    return c.redirect(successRedirect);
   });
 
   app.get('/health', async (c) => {

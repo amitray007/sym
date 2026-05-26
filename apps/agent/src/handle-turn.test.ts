@@ -32,7 +32,6 @@ import type {
   StopStreamParams,
   StreamHandle,
 } from '@sym/adapter-slack';
-import type { AppendInput } from '@sym/audit';
 import type {
   ChatMessage,
   Reply,
@@ -43,7 +42,6 @@ import type {
   TurnId,
   WorkspaceId,
 } from '@sym/contracts';
-import type { Database } from '@sym/db';
 
 // ---------------------------------------------------------------------------
 // Fake Fireworks credentials (value doesn't matter — Pi is mocked).
@@ -70,29 +68,6 @@ function makeReply(overrides: Partial<Reply> = {}): Reply {
 }
 
 const BOT = 'UBOT' as SlackUserId;
-
-/**
- * Minimal chainable no-op `Database` stub. Persistence is exercised against real
- * Postgres in integration tests; here it must satisfy the type and stay out of
- * the way of the reply assertions (every query resolves to an empty result).
- */
-function stubDb(): Database {
-  const h = {
-    insert: () => h,
-    values: () => h,
-    onConflictDoNothing: () => h,
-    select: () => h,
-    from: () => h,
-    where: () => h,
-    orderBy: () => h,
-    limit: () => Promise.resolve([]),
-    update: () => h,
-    set: () => h,
-    then: (onF: (v: unknown[]) => unknown, onR?: (e: unknown) => unknown) =>
-      Promise.resolve([]).then(onF, onR),
-  };
-  return h as unknown as Database;
-}
 
 class MockSlackClient implements SlackClient {
   readonly posts: PostMessageParams[] = [];
@@ -176,7 +151,6 @@ describe('handleTurn', () => {
     mockRunLoopPi.mockResolvedValueOnce(makeReply());
     const slack = new MockSlackClient();
     await handleTurn(makeTurn(), {
-      db: stubDb(),
       fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
@@ -208,7 +182,6 @@ describe('handleTurn', () => {
 
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
-      db: stubDb(),
       fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
@@ -241,7 +214,6 @@ describe('handleTurn', () => {
 
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ entrySurface: 'dm', threadTs: '500.0' as SlackThreadTs }), {
-      db: stubDb(),
       fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
@@ -280,7 +252,6 @@ describe('handleTurn', () => {
     slack.startStreamError = new Error('stream_unavailable');
 
     await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
-      db: stubDb(),
       fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
@@ -301,7 +272,6 @@ describe('handleTurn', () => {
   it('skips posting when the turn has no channel', async () => {
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ channelId: undefined }), {
-      db: stubDb(),
       fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
@@ -344,7 +314,6 @@ describe('handleTurn', () => {
         text: 'summarize the risks',
       }),
       {
-        db: stubDb(),
         fireworks: FAKE_FIREWORKS,
         model: 'test-model',
         slackClient: slack,
@@ -379,7 +348,6 @@ describe('handleTurn', () => {
 
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ entrySurface: 'dm', threadTs: '500.0' as SlackThreadTs }), {
-      db: stubDb(),
       fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
@@ -420,7 +388,6 @@ describe('handleTurn', () => {
         text: 'summarize this channel',
       }),
       {
-        db: stubDb(),
         fireworks: FAKE_FIREWORKS,
         model: 'test-model',
         slackClient: slack,
@@ -437,99 +404,5 @@ describe('handleTurn', () => {
     );
     expect(backgroundMsg?.content).toContain('deploy went out');
     expect(backgroundMsg?.content).toContain('looks good to me');
-  });
-
-  it('calls the audit sink with app.turn.complete after the reply is delivered (stream path)', async () => {
-    mockRunLoopPi.mockImplementationOnce(
-      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
-        const o = opts as { onDelta?: (d: string) => Promise<void> };
-        await o.onDelta?.('reply');
-        return makeReply({ markdown: 'reply' });
-      },
-    );
-
-    const auditCalls: AppendInput[] = [];
-    const audit = vi.fn((input: AppendInput) => {
-      auditCalls.push(input);
-      return Promise.resolve();
-    });
-
-    const slack = new MockSlackClient();
-    const turn = makeTurn({ entrySurface: 'dm', threadTs: '500.0' as SlackThreadTs });
-
-    await handleTurn(turn, {
-      db: stubDb(),
-      fireworks: FAKE_FIREWORKS,
-      model: 'test-model',
-      slackClient: slack,
-      botUserId: BOT,
-      slackTeamId: 'T-TEST',
-      audit,
-    });
-
-    // Audit must be called exactly once (stream path).
-    expect(audit).toHaveBeenCalledTimes(1);
-
-    const call = auditCalls[0]!;
-    expect(call.kind).toBe('app.turn.complete');
-    expect(call.workspaceId).toBe(turn.workspaceId);
-    expect(call.actorKind).toBe('slack_user');
-    expect(call.actorId).toBe(turn.requester);
-    expect(call.targetKind).toBe('conversation');
-    expect(call.targetId).toBe(turn.conversationId);
-
-    // Payload must contain model + toolsInvoked.
-    expect(typeof call.payload['model']).toBe('string');
-    expect(Array.isArray(call.payload['toolsInvoked'])).toBe(true);
-  });
-
-  it('calls the audit sink with app.turn.complete after the reply is delivered (post path)', async () => {
-    mockRunLoopPi.mockResolvedValueOnce(makeReply());
-
-    const auditCalls: AppendInput[] = [];
-    const audit = vi.fn((input: AppendInput) => {
-      auditCalls.push(input);
-      return Promise.resolve();
-    });
-
-    const slack = new MockSlackClient();
-    // No threadTs → postMessage path (no streaming).
-    const turn = makeTurn({ entrySurface: 'app_mention' });
-
-    await handleTurn(turn, {
-      db: stubDb(),
-      fireworks: FAKE_FIREWORKS,
-      model: 'test-model',
-      slackClient: slack,
-      botUserId: BOT,
-      slackTeamId: 'T-TEST',
-      audit,
-    });
-
-    expect(slack.posts).toHaveLength(1);
-
-    expect(audit).toHaveBeenCalledTimes(1);
-    const call = auditCalls[0]!;
-    expect(call.kind).toBe('app.turn.complete');
-    expect(Array.isArray(call.payload['toolsInvoked'])).toBe(true);
-  });
-
-  it('does not call audit when audit dep is absent (existing tests stay green)', async () => {
-    mockRunLoopPi.mockResolvedValueOnce(makeReply());
-
-    // Simply running without an audit dep must not throw.
-    const slack = new MockSlackClient();
-    await expect(
-      handleTurn(makeTurn(), {
-        db: stubDb(),
-        fireworks: FAKE_FIREWORKS,
-        model: 'test-model',
-        slackClient: slack,
-        botUserId: BOT,
-        slackTeamId: 'T-TEST',
-        // no audit
-      }),
-    ).resolves.toBeUndefined();
-    expect(slack.posts).toHaveLength(1);
   });
 });

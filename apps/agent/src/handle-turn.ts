@@ -2,19 +2,10 @@ import { markdownBlock, receiptToContextBlock, threadToHistory } from '@sym/adap
 import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
-import { compositeDispatcher, loadConnectorRegistry } from './connectors.js';
-import {
-  ensureConversation,
-  loadHistory,
-  recordAssistantMessage,
-  recordUserMessage,
-} from './persistence.js';
 import { runLoopPi } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
-import { loadEnabledSkills } from './skills.js';
 
 import type { AppendStreamParams, SlackClient, StartStreamParams } from '@sym/adapter-slack';
-import type { AppendInput } from '@sym/audit';
 import type {
   ChatMessage,
   Reply,
@@ -23,11 +14,9 @@ import type {
   SlackUserId,
   Turn,
 } from '@sym/contracts';
-import type { Database } from '@sym/db';
 
 /** Injected dependencies for processing a turn (the testable seam). */
 export interface HandleTurnDeps {
-  db: Database;
   /** Raw Fireworks credentials — required by the Pi loop. */
   fireworks: { baseUrl: string; apiKey: string };
   model: string;
@@ -38,18 +27,19 @@ export interface HandleTurnDeps {
   slackTeamId: string;
   /** The channel the user is currently viewing in Slack's assistant panel, if known. */
   viewedChannelId?: string;
-  /** Optional audit sink — best-effort; a failure must never block the turn. */
-  audit?: (input: AppendInput) => Promise<void>;
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
 const FLUSH_CHARS = 60;
 
+/** How many recent messages of an un-threaded channel/DM to feed back as history. */
+const HISTORY_LIMIT = 20;
+
 /**
  * Run the turn through the Pi loop.
  *
  * Single path — no fallback. `onDelta` and `history` are forwarded so the
- * streaming / postMessage pipeline above is completely unchanged.
+ * streaming / postMessage pipeline is unchanged.
  */
 async function runTurnLoop(
   turn: Turn,
@@ -62,96 +52,53 @@ async function runTurnLoop(
     baseUrl: deps.fireworks.baseUrl,
     modelId: deps.model,
   });
-  const skills = await loadEnabledSkills(deps.db, turn.workspaceId);
   return runLoopPi(
     turn,
     { baseUrl: deps.fireworks.baseUrl, apiKey: deps.fireworks.apiKey, model },
     registry,
     {
       history,
-      skills,
       slackClient: deps.slackClient,
       ...(onDelta !== undefined ? { onDelta } : {}),
     },
   );
 }
 
-/** A channel thread (not a DM) — read the live Slack thread for full context. */
-function isChannelThread(
-  turn: Turn,
-): turn is Turn & { channelId: SlackChannelId; threadTs: SlackThreadTs } {
-  return turn.channelId !== undefined && turn.threadTs !== undefined && turn.entrySurface !== 'dm';
-}
-
 /**
- * Load the prior context for a turn.
+ * Load the prior conversation as `ChatMessage[]` — read LIVE from Slack, which
+ * is the only source of truth (there is no transcript store).
  *
- * Channel threads read the LIVE Slack thread (via conversations.replies) so Sym
- * sees the whole discussion — including messages where it was never @-tagged —
- * excluding the triggering message (the kernel appends that as the current turn).
- * DMs use the DB transcript: every DM message is already a turn, so `messages`
- * holds the full conversation. Both paths are best-effort: on failure we degrade
- * to less context, never block the reply.
+ * Threaded turns read the thread via `conversations.replies`; un-threaded turns
+ * read recent channel/DM messages via `conversations.history`. Both come back
+ * oldest-first from the adapter. The triggering message is excluded by `ts` (the
+ * loop appends it as the current turn). Best-effort: any failure degrades to no
+ * history, never blocks the reply.
  */
 async function loadTurnHistory(turn: Turn, deps: HandleTurnDeps): Promise<ChatMessage[]> {
-  if (isChannelThread(turn)) {
-    try {
+  const channel = turn.channelId;
+  if (channel === undefined) return [];
+  try {
+    if (turn.threadTs !== undefined) {
       const { messages } = await deps.slackClient.conversationsReplies({
-        channel: turn.channelId,
+        channel,
         ts: turn.threadTs,
       });
       return threadToHistory(messages, {
         botUserId: deps.botUserId,
         ...(turn.ts !== undefined ? { excludeTs: turn.ts } : {}),
       });
-    } catch (err) {
-      console.warn('[agent] thread fetch failed; falling back to DB history:', err);
     }
-  }
-
-  try {
-    return await loadHistory(deps.db, turn.conversationId);
-  } catch (err) {
-    console.warn('[agent] loadHistory failed (continuing with no history):', err);
-    return [];
-  }
-}
-
-/** Run a persistence side-effect without ever failing the turn. */
-async function persist(label: string, fn: () => Promise<void>): Promise<void> {
-  try {
-    await fn();
-  } catch (err) {
-    console.warn(`[agent] persist ${label} failed (continuing):`, err);
-  }
-}
-
-/** Emit a turn-completion audit event — best-effort; never throws into the turn path. */
-async function auditTurnComplete(
-  audit: HandleTurnDeps['audit'],
-  turn: Turn,
-  receipt: Reply['receipt'],
-): Promise<void> {
-  if (!audit) return;
-  try {
-    await audit({
-      workspaceId: turn.workspaceId,
-      kind: 'app.turn.complete',
-      actorKind: 'slack_user',
-      actorId: turn.requester,
-      targetKind: 'conversation',
-      targetId: turn.conversationId,
-      payload: {
-        model: receipt.model,
-        toolsInvoked: receipt.toolsInvoked,
-        ...(receipt.usage !== undefined ? { usage: receipt.usage } : {}),
-        ...(receipt.durationMs !== undefined ? { durationMs: receipt.durationMs } : {}),
-        entrySurface: turn.entrySurface,
-        ...(turn.channelId !== undefined ? { channelId: turn.channelId } : {}),
-      },
+    const { messages } = await deps.slackClient.conversationsHistory({
+      channel,
+      limit: HISTORY_LIMIT,
+    });
+    return threadToHistory(messages, {
+      botUserId: deps.botUserId,
+      ...(turn.ts !== undefined ? { excludeTs: turn.ts } : {}),
     });
   } catch (err) {
-    console.warn('[agent] turn audit failed (continuing):', err);
+    console.warn('[agent] history fetch failed (continuing with no history):', err);
+    return [];
   }
 }
 
@@ -237,18 +184,6 @@ async function streamReply(
     console.warn('[agent] stopStream failed:', err);
   }
 
-  await persist('recordAssistantMessage', () =>
-    recordAssistantMessage(deps.db, {
-      workspaceId: turn.workspaceId,
-      conversationId: turn.conversationId,
-      markdown: reply.markdown,
-      blocks: [markdownBlock(reply.markdown), receipt],
-      slackTs: streamTs,
-    }),
-  );
-
-  await auditTurnComplete(deps.audit, turn, reply.receipt);
-
   return true;
 }
 
@@ -285,12 +220,11 @@ async function loadViewedChannelContext(
 }
 
 /**
- * The turn path: persist the inbound message, run the kernel loop with prior
- * thread history for context, post the reply to Slack, and persist the reply.
+ * The turn path: read live Slack history for context, run the Pi loop with the
+ * built-in tools, and deliver the reply to Slack.
  *
- * Persistence is best-effort — a DB hiccup degrades memory/transcript but never
- * blocks the reply. No tools yet (empty registry), L0 default soul. Deps are
- * injected so this is unit-testable with a fake provider + mock Slack client.
+ * Stateless — Slack is the only memory; nothing is persisted. Deps are injected
+ * so this is unit-testable with a mocked Pi loop + a mock Slack client.
  *
  * Delivery strategy:
  *  - Threaded turns (threadTs defined): attempt streaming; fall back to postMessage.
@@ -302,62 +236,31 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
     return;
   }
 
-  // Record the conversation + inbound message; load prior history first (so the
-  // DB path reflects turns BEFORE this one; the live-thread path excludes it by ts).
-  await persist('ensureConversation', () => ensureConversation(deps.db, turn));
-
   const baseHistory = await loadTurnHistory(turn, deps);
   const viewedContext = await loadViewedChannelContext(turn, deps);
   const history = viewedContext ? [viewedContext, ...baseHistory] : baseHistory;
 
-  await persist('recordUserMessage', () => recordUserMessage(deps.db, turn));
-
   const builtin = createBuiltinDispatcher({
     slackClient: deps.slackClient,
     botUserId: deps.botUserId,
-    ...(deps.audit !== undefined ? { audit: deps.audit } : {}),
   });
-  const mcp = await loadConnectorRegistry({
-    db: deps.db,
-    workspaceId: turn.workspaceId,
-    requester: turn.requester,
-    ...(deps.audit !== undefined ? { audit: deps.audit } : {}),
-  });
-  const registry = new ToolRegistry(compositeDispatcher(builtin, mcp));
+  const registry = new ToolRegistry(builtin);
 
-  try {
-    // Threaded turns: try streaming; fall through to postMessage only if it fails.
-    if (turn.threadTs !== undefined) {
-      const streamed = await streamReply(turn, deps, { history, registry });
-      if (streamed) return;
-    }
-
-    // Non-threaded or stream fallback: run the loop and post normally.
-    const reply = await runTurnLoop(turn, deps, registry, history);
-
-    const blocks = [markdownBlock(reply.markdown), receiptToContextBlock(reply.receipt)];
-    const posted = await deps.slackClient.chatPostMessage({
-      channel: turn.channelId,
-      text: reply.markdown,
-      blocks,
-      // Reply in-thread when the turn is already threaded; top-level otherwise.
-      ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),
-    });
-
-    await persist('recordAssistantMessage', () =>
-      recordAssistantMessage(deps.db, {
-        workspaceId: turn.workspaceId,
-        conversationId: turn.conversationId,
-        markdown: reply.markdown,
-        blocks,
-        slackTs: posted.ts,
-      }),
-    );
-
-    await auditTurnComplete(deps.audit, turn, reply.receipt);
-  } finally {
-    await mcp?.close().catch(() => {
-      /* best-effort: connector close errors must not surface */
-    });
+  // Threaded turns: try streaming; fall through to postMessage only if it fails.
+  if (turn.threadTs !== undefined) {
+    const streamed = await streamReply(turn, deps, { history, registry });
+    if (streamed) return;
   }
+
+  // Non-threaded or stream fallback: run the loop and post normally.
+  const reply = await runTurnLoop(turn, deps, registry, history);
+
+  const blocks = [markdownBlock(reply.markdown), receiptToContextBlock(reply.receipt)];
+  await deps.slackClient.chatPostMessage({
+    channel: turn.channelId,
+    text: reply.markdown,
+    blocks,
+    // Reply in-thread when the turn is already threaded; top-level otherwise.
+    ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),
+  });
 }

@@ -1,7 +1,6 @@
 import { threadToHistory } from '@sym/adapter-slack';
 
 import type { SlackClient, SlackThreadMessage } from '@sym/adapter-slack';
-import type { AppendInput } from '@sym/audit';
 import type {
   JsonSchema,
   SlackChannelId,
@@ -93,8 +92,6 @@ function formatTranscript(messages: SlackThreadMessage[], botUserId: SlackUserId
 export interface BuiltinToolDeps {
   slackClient: SlackClient;
   botUserId: SlackUserId;
-  /** Optional audit sink — best-effort; a failure must never block the tool. */
-  audit?: (input: AppendInput) => Promise<void>;
 }
 
 /**
@@ -110,21 +107,7 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
       return [GET_CURRENT_TIME_DESCRIPTOR, READ_CHANNEL_DESCRIPTOR, READ_THREAD_DESCRIPTOR];
     },
 
-    async dispatch(call: ToolCall, ctx: ToolRuntimeContext): Promise<ToolResult> {
-      // Emit app.tool.call BEFORE execution — best-effort, never blocks dispatch.
-      deps
-        .audit?.({
-          workspaceId: ctx.workspaceId,
-          kind: 'app.tool.call',
-          actorKind: 'slack_user',
-          actorId: ctx.requester,
-          targetKind: 'tool',
-          payload: { toolName: call.name, callId: call.id },
-        })
-        .catch((_err: unknown) => {
-          /* swallow audit errors */
-        });
-
+    async dispatch(call: ToolCall, _ctx: ToolRuntimeContext): Promise<ToolResult> {
       let result: ToolResult;
 
       if (call.name === 'get_current_time') {
@@ -197,20 +180,6 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
           error: { code: 'not_found', message: `Unknown tool: ${call.name}` },
         };
       }
-
-      // Emit app.tool.result AFTER execution — best-effort, never blocks dispatch.
-      deps
-        .audit?.({
-          workspaceId: ctx.workspaceId,
-          kind: 'app.tool.result',
-          actorKind: 'slack_user',
-          actorId: ctx.requester,
-          targetKind: 'tool',
-          payload: { toolName: call.name, callId: call.id, ok: result.ok },
-        })
-        .catch((_err: unknown) => {
-          /* swallow audit errors */
-        });
 
       return result;
     },
