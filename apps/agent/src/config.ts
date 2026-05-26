@@ -1,23 +1,29 @@
 /**
- * Agent runtime config, read from injected env (Dokploy in prod; `.env` in dev
- * via the entrypoint's dotenv load). No secrets are logged.
+ * Agent runtime config — read entirely from injected env (Dokploy in prod; `.env`
+ * in dev via the entrypoint's dotenv load). Single-tenant: one Slack workspace,
+ * one owner, one model provider. No secrets are logged.
  */
 export interface AgentConfig {
   port: number;
-  databaseUrl: string;
   /** App-level Slack signing secret (verifies inbound event signatures). */
   slackSigningSecret: string;
-  /**
-   * Slack OAuth install credentials. Optional — the agent runs for events
-   * without them; the /slack/install routes return 503 until they're set.
-   */
-  slackClientId?: string;
-  slackClientSecret?: string;
-  /** OAuth callback URL registered with the Slack app, e.g. https://agent.example.com/slack/oauth/callback */
-  oauthRedirectUri?: string;
-  /** Where to send the browser after a successful install. */
-  dashboardUrl?: string;
+  /** Bot token (`xoxb-…`) for all outbound Slack Web API calls. */
+  slackBotToken: string;
+  /** Sym's own bot user id (`U…`) — marks its own posts + ignores its own events. */
+  slackBotUserId: string;
+  /** The Slack workspace (team) id Sym serves; events from other teams are ignored. */
+  slackTeamId: string;
+  /** The single Slack user Sym works for — the owner gate allows only them. */
+  ownerSlackUserId: string;
+  /** Fireworks (OpenAI-compatible) API key. */
+  fireworksApiKey: string;
+  /** Fireworks model id, e.g. `accounts/fireworks/models/…`. */
+  fireworksModel: string;
+  /** Fireworks base URL (defaults to the public inference endpoint). */
+  fireworksBaseUrl: string;
 }
+
+const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
 
 function required(name: string): string {
   const value = process.env[name];
@@ -27,23 +33,16 @@ function required(name: string): string {
   return value;
 }
 
-function optional(name: string): string | undefined {
-  return process.env[name] || undefined;
-}
-
 export function loadAgentConfig(): AgentConfig {
-  const config: AgentConfig = {
+  return {
     port: Number(process.env['AGENT_PORT'] ?? '3001'),
-    databaseUrl: required('DATABASE_URL'),
     slackSigningSecret: required('SLACK_SIGNING_SECRET'),
+    slackBotToken: required('SLACK_BOT_TOKEN'),
+    slackBotUserId: required('SLACK_BOT_USER_ID'),
+    slackTeamId: required('SLACK_TEAM_ID'),
+    ownerSlackUserId: required('SYM_OWNER_SLACK_USER_ID'),
+    fireworksApiKey: required('FIREWORKS_API_KEY'),
+    fireworksModel: required('FIREWORKS_MODEL'),
+    fireworksBaseUrl: process.env['FIREWORKS_BASE_URL'] ?? DEFAULT_FIREWORKS_BASE_URL,
   };
-  const slackClientId = optional('SLACK_CLIENT_ID');
-  const slackClientSecret = optional('SLACK_CLIENT_SECRET');
-  const oauthRedirectUri = optional('SLACK_OAUTH_REDIRECT_URI');
-  const dashboardUrl = optional('DASHBOARD_URL');
-  if (slackClientId) config.slackClientId = slackClientId;
-  if (slackClientSecret) config.slackClientSecret = slackClientSecret;
-  if (oauthRedirectUri) config.oauthRedirectUri = oauthRedirectUri;
-  if (dashboardUrl) config.dashboardUrl = dashboardUrl;
-  return config;
 }

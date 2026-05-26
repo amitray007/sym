@@ -1,24 +1,13 @@
 # dokploy/apps/agent.yml
 #
-# Dokploy app configuration skeleton for apps/agent (Hono).
-#
-# TODO(S2): This file is a placeholder. Fill it in once apps/agent exists.
-#           Create apps/agent/Dockerfile using Node 24 or Bun.
-#
-# Deploy order: DB migration → Dashboard → Agent (this app, LAST)
-# See dokploy/deploy-hooks/pre-deploy.sh for the migration gate.
-# Agent deploys after Dashboard so Slack traffic only routes here after
-# the Dashboard config tables are ready.
+# Dokploy app configuration for apps/agent (Hono).
+# The agent is configured entirely by env — no DB, no Redis.
 
 # ── Metadata ──────────────────────────────────────────────────────────────────
 name: sym-agent
-description: 'Sym agent — Hono, Slack adapter, kernel, all background work'
+description: 'Sym agent — Hono, Slack adapter, Pi brain'
 
 # ── Build ─────────────────────────────────────────────────────────────────────
-# TODO(S2): Create apps/agent/Dockerfile.
-# Suggested stages:
-#   1. builder — pnpm install --frozen-lockfile && pnpm --filter @sym/agent build
-#   2. runner  — node:24-slim (or oven/bun:latest), copy dist/, EXPOSE 3001, CMD
 build:
   type: dockerfile
   # TODO: dockerfile: apps/agent/Dockerfile
@@ -27,26 +16,29 @@ build:
 # ── Runtime ───────────────────────────────────────────────────────────────────
 runtime:
   port: 3001
-  # TODO: healthcheck path once /health endpoint exists in apps/agent
-  # healthcheck: /health
+  healthcheck: /health
 
 # ── Env vars ─────────────────────────────────────────────────────────────────
 # Set these in Dokploy → App → Environment. See dokploy/env-template.txt.
 env:
+  # Node
   - NODE_ENV
-  - DATABASE_URL
-  - REDIS_URL
-  - SYM_ENCRYPTION_KEY
-  - SLACK_CLIENT_ID
-  - SLACK_CLIENT_SECRET
+  # Slack (required)
   - SLACK_SIGNING_SECRET
-  - AGENT_URL
-  - SANDBOX_JWT_SECRET
+  - SLACK_BOT_TOKEN
+  - SLACK_BOT_USER_ID
+  - SLACK_TEAM_ID
+  # Owner
+  - SYM_OWNER_SLACK_USER_ID
+  # Fireworks (required)
   - FIREWORKS_API_KEY
+  - FIREWORKS_MODEL
+  # Fireworks (optional — defaults to https://api.fireworks.ai/inference/v1)
+  - FIREWORKS_BASE_URL
+  # Agent (optional — defaults to 3001)
+  - AGENT_PORT
 
 # ── Hooks ─────────────────────────────────────────────────────────────────────
 hooks:
-  # Agent's pre-deploy hook also runs db:migrate as a safety net, but the
-  # Dashboard's hook is expected to have run first (deploy Dashboard before Agent).
   pre_deploy: sh dokploy/deploy-hooks/pre-deploy.sh
   post_deploy: sh dokploy/deploy-hooks/post-deploy.sh

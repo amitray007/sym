@@ -5,33 +5,19 @@ import {
   slackTurnInputToTurn,
   verifySlackSignature,
 } from '@sym/adapter-slack';
-import { append } from '@sym/audit';
-import { workspaces } from '@sym/db';
-import { eq, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { resolveConfirmation } from './confirmations.js';
 import { handleTurn } from './handle-turn.js';
-import { SingleTenantError, installWorkspace } from './install.js';
 import { OWNER_DECLINE_MESSAGE, checkOwnerAccess } from './owner-gate.js';
-import {
-  buildAuthorizeUrl,
-  exchangeCode,
-  isOAuthConfigured,
-  signState,
-  verifyState,
-} from './slack-oauth.js';
 import { loadWorkspaceContext } from './workspace-context.js';
 
 import type { AgentConfig } from './config.js';
 import type { RawSlackEvent } from '@sym/adapter-slack';
-import type { WorkspaceId } from '@sym/contracts';
-import type { Database } from '@sym/db';
 
 export interface ServerDeps {
-  db: Database;
   config: AgentConfig;
 }
 
@@ -58,15 +44,17 @@ function createDedup(max = 10_000): (id: string) => boolean {
  * asynchronously (the reply is delivered via chat.postMessage when ready).
  */
 export function createServer(deps: ServerDeps): Hono {
-  const { db, config } = deps;
+  const { config } = deps;
   const app = new Hono();
   const alreadySeen = createDedup();
   const assistantContext = createAssistantContextStore();
+  // Single-tenant runtime context — resolved once from env config.
+  const ctx = loadWorkspaceContext(config);
 
   async function processEvent(raw: RawSlackEvent, teamId: string): Promise<void> {
-    const ctx = await loadWorkspaceContext(db, teamId);
-    if (!ctx) {
-      console.warn(`[agent] no installed/configured workspace for team ${teamId}`);
+    // Single workspace: ignore events from any other Slack team.
+    if (teamId !== config.slackTeamId) {
+      console.warn(`[agent] ignoring event from foreign team ${teamId}`);
       return;
     }
 
@@ -105,11 +93,7 @@ export function createServer(deps: ServerDeps): Hono {
     // are dropped — silently in channels (Sym stays invisible to the rest of the
     // team), with one polite line in a DM (silence in a 1:1 just looks broken).
     if (checkOwnerAccess(turn.requester, ctx.ownerSlackUserId) === 'deny') {
-      if (
-        turn.entrySurface === 'dm' &&
-        ctx.ownerSlackUserId !== null &&
-        turn.channelId !== undefined
-      ) {
+      if (turn.entrySurface === 'dm' && turn.channelId !== undefined) {
         try {
           await ctx.slackClient.chatPostMessage({
             channel: turn.channelId,
@@ -119,10 +103,6 @@ export function createServer(deps: ServerDeps): Hono {
         } catch (postErr) {
           console.warn('[agent] owner-gate decline post failed (continuing):', postErr);
         }
-      } else if (ctx.ownerSlackUserId === null) {
-        console.warn(
-          `[agent] owner gate: no owner set for workspace ${ctx.workspaceId}; ignoring turn from ${turn.requester}`,
-        );
       }
       return;
     }
@@ -249,23 +229,10 @@ export function createServer(deps: ServerDeps): Hono {
     }
 
     // ---------------------------------------------------------------------------
-    // Owner gate — only the workspace owner's click resolves a confirmation.
-    // Non-owner clicks are silently ACK'd to avoid Slack showing an error.
+    // Owner gate — only the owner's click, from our workspace, resolves a
+    // confirmation. Anything else is silently ACK'd (no Slack error shown).
     // ---------------------------------------------------------------------------
-    const wsRows = await db
-      .select({ ownerSlackUserId: workspaces.ownerSlackUserId })
-      .from(workspaces)
-      .where(eq(workspaces.slackTeamId, teamId))
-      .limit(1);
-
-    const ws = wsRows[0];
-    if (!ws) {
-      // Unknown workspace — ACK but do nothing.
-      return c.json({ ok: true });
-    }
-
-    if (ws.ownerSlackUserId === null || clickerId !== ws.ownerSlackUserId) {
-      // Non-owner click — ACK silently; do NOT resolve any confirmation.
+    if (teamId !== config.slackTeamId || clickerId !== config.ownerSlackUserId) {
       return c.json({ ok: true });
     }
 
@@ -301,71 +268,7 @@ export function createServer(deps: ServerDeps): Hono {
     return c.json({ ok: true });
   });
 
-  // --- Slack workspace install (OAuth v2) -----------------------------------
-  // Two Slack OAuth surfaces exist; this is the WORKSPACE BOT INSTALL (persists
-  // the bot token), distinct from the Clerk admin sign-in Slack OAuth.
-
-  // Kick off the install: redirect to Slack's authorize screen with a signed state.
-  app.get('/slack/install', (c) => {
-    if (!isOAuthConfigured(config)) {
-      return c.json({ error: 'oauth_not_configured' }, 503);
-    }
-    const state = signState(config.slackSigningSecret);
-    return c.redirect(buildAuthorizeUrl(config, state));
-  });
-
-  // OAuth callback: verify state (CSRF), exchange the code, persist the install,
-  // then return the browser to the dashboard.
-  app.get('/slack/oauth/callback', async (c) => {
-    if (!isOAuthConfigured(config)) {
-      return c.json({ error: 'oauth_not_configured' }, 503);
-    }
-    const code = c.req.query('code');
-    const state = c.req.query('state') ?? '';
-    if (!code) {
-      return c.json({ error: 'missing_code' }, 400);
-    }
-    if (!verifyState(config.slackSigningSecret, state)) {
-      return c.json({ error: 'bad_state' }, 400);
-    }
-    try {
-      const result = await exchangeCode(config, code);
-      const install = await installWorkspace(db, result);
-      // Audit the install (best-effort — a failed audit must not fail the install).
-      try {
-        await append(db, {
-          workspaceId: install.workspaceId as WorkspaceId,
-          kind: 'app.install',
-          actorKind: 'slack_user',
-          actorId: result.installerUserId,
-          targetKind: 'workspace',
-          targetId: install.workspaceId,
-          payload: { teamId: install.teamId, reinstalled: install.reinstalled },
-        });
-      } catch (auditErr) {
-        console.error('[agent] install audit append failed', auditErr);
-      }
-      // Back to the dashboard setup wizard — the install step is now done, and
-      // the wizard promotes the (allowlisted) installer to owner on this return.
-      const base = (config.dashboardUrl ?? '').replace(/\/$/, '');
-      return c.redirect(base ? `${base}/setup` : '/setup');
-    } catch (err) {
-      if (err instanceof SingleTenantError) {
-        return c.json({ error: 'single_tenant', message: err.message }, 409);
-      }
-      console.error('[agent] install failed', err);
-      return c.json({ error: 'install_failed' }, 500);
-    }
-  });
-
-  app.get('/health', async (c) => {
-    try {
-      await db.execute(sql`SELECT 1`);
-      return c.json({ ok: true });
-    } catch {
-      return c.json({ ok: false }, 503);
-    }
-  });
+  app.get('/health', (c) => c.json({ ok: true }));
 
   return app;
 }

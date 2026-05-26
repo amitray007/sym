@@ -1,14 +1,8 @@
 # Sym CI — runs on every push and pull request.
 #
-# Mirrors the local pipeline exactly:
-#   pnpm install --frozen-lockfile
-#   → pnpm typecheck
-#   → pnpm lint
-#   → pnpm test       (requires Postgres for @sym/db)
-#   → pnpm build
+# Pipeline: install → typecheck → lint → test → build
 #
-# DB tests need Postgres 16 and a generated SYM_ENCRYPTION_KEY.
-# The db:migrate step runs before the test step to prime the schema.
+# Tests are hermetic — no DB, no Postgres, no Redis required.
 
 name: CI
 
@@ -24,14 +18,6 @@ concurrency:
 
 env:
   NODE_ENV: test
-  # @sym/db — points at the service container below.
-  DATABASE_URL: postgres://sym_ci:sym_ci@localhost:5432/sym_ci
-  # @sym/secrets — 32-byte base64 key; generated fresh per run.
-  # Real production key lives in Dokploy secrets, never in source.
-  SYM_ENCRYPTION_KEY: ${{ secrets.SYM_ENCRYPTION_KEY_CI || '' }}
-  # Redis — used from S1 onward; not yet needed for the existing test suite
-  # but wired now so tests that add Redis deps don't need workflow changes.
-  REDIS_URL: redis://localhost:6379
 
 jobs:
   # ─────────────────────────────────────────────
@@ -41,31 +27,6 @@ jobs:
     name: typecheck · lint · test · build
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: sym_ci
-          POSTGRES_USER: sym_ci
-          POSTGRES_PASSWORD: sym_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U sym_ci"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
 
     steps:
       - name: Checkout
@@ -83,25 +44,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Generate a fresh encryption key if the repo secret is not set.
-      # This lets forks and first-time contributors run CI without secrets.
-      - name: Generate SYM_ENCRYPTION_KEY (if not provided)
-        if: env.SYM_ENCRYPTION_KEY == ''
-        run: |
-          KEY=$(node -e "
-            const { randomBytes } = await import('node:crypto');
-            process.stdout.write(randomBytes(32).toString('base64'));
-          " --input-type=module)
-          echo "SYM_ENCRYPTION_KEY=$KEY" >> "$GITHUB_ENV"
-
       - name: Typecheck
         run: pnpm typecheck
 
       - name: Lint
         run: pnpm lint
-
-      - name: Migrate DB (schema must be current before tests)
-        run: pnpm db:migrate
 
       - name: Test
         run: pnpm test
@@ -129,22 +76,3 @@ jobs:
       # TODO(S7d): pnpm --filter @sym/soul exec promptfoo eval --ci
       - name: Placeholder
         run: echo "No eval sets yet — see TODO above."
-
-  # ─────────────────────────────────────────────
-  # Smoke test stub
-  # TODO(S3/S2): enable once apps/dashboard and apps/agent ship /health.
-  # Deploy order: DB migration → Dashboard → Agent (enforced in Dokploy).
-  # This job must NOT fail CI until both apps exist.
-  # ─────────────────────────────────────────────
-  smoke:
-    name: smoke test (stub — TODO until apps exist)
-    runs-on: ubuntu-latest
-    # Always skipped until apps/dashboard and apps/agent exist.
-    if: false
-    steps:
-      - name: Dashboard /health
-        # TODO(S3): curl --fail https://$DASHBOARD_URL/health
-        run: echo "TODO — apps/dashboard does not exist yet"
-      - name: Agent /health
-        # TODO(S2): curl --fail https://$AGENT_URL/health
-        run: echo "TODO — apps/agent does not exist yet"

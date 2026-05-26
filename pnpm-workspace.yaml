@@ -2,5 +2,3 @@ packages:
   - 'apps/*'
   - 'packages/*'
   - 'packages/adapter/*'
-  - 'packages/provider/*'
-  - 'packages/ext/*'

@@ -5,25 +5,27 @@ import { describe, expect, it } from 'vitest';
 import { createServer } from './server.js';
 
 import type { AgentConfig } from './config.js';
-import type { Database } from '@sym/db';
 
 const SIGNING_SECRET = 'test-signing-secret';
 
 const config: AgentConfig = {
   port: 0,
-  databaseUrl: 'postgres://unused',
   slackSigningSecret: SIGNING_SECRET,
+  slackBotToken: 'xoxb-test',
+  slackBotUserId: 'UBOT',
+  slackTeamId: 'T-TEST',
+  ownerSlackUserId: 'UOWNER',
+  fireworksApiKey: 'fw-key',
+  fireworksModel: 'test-model',
+  fireworksBaseUrl: 'http://fake.fireworks',
 };
-
-// The verify + url_verification paths never touch the DB, so a stub is safe.
-const stubDb = {} as unknown as Database;
 
 function sign(ts: string, body: string): string {
   return `v0=${createHmac('sha256', SIGNING_SECRET).update(`v0:${ts}:${body}`).digest('hex')}`;
 }
 
 function post(body: string, headers: Record<string, string>): Promise<Response> {
-  const app = createServer({ db: stubDb, config });
+  const app = createServer({ config });
   return app.request('/slack/events', {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },

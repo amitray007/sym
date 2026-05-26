@@ -12,14 +12,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": [
-        "src/**",
-        "package.json",
-        "tsconfig.json",
-        "tsconfig.*.json",
-        "next.config.*",
-        "drizzle.config.*"
-      ],
+      "inputs": ["src/**", "package.json", "tsconfig.json", "tsconfig.*.json"],
       "outputs": ["dist/**", "build/**", ".next/**", "!.next/cache/**", "*.tsbuildinfo"]
     },
     "test": {
@@ -61,16 +54,6 @@
     "dev": {
       "cache": false,
       "persistent": true
-    },
-    "db:migrate": {
-      "cache": false,
-      "inputs": ["src/schema/**", "migrations/**", "drizzle.config.*"]
-    },
-    "db:seed": {
-      "cache": false
-    },
-    "db:reset": {
-      "cache": false
     },
     "clean": {
       "cache": false

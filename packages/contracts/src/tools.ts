@@ -67,9 +67,8 @@ export interface ToolRuntimeContext {
 }
 
 /**
- * The tool registry + dispatcher the kernel (S2) calls. Implemented by S5.
- * Built-in harness tools run in-process; MCP/skills tools run over HTTP. An
- * empty registry fails calls closed.
+ * The tool registry + dispatcher the kernel calls. Built-in harness tools run
+ * in-process; remote tools run over HTTP. An empty registry fails calls closed.
  */
 export interface ToolDispatcher {
   list(): ToolDescriptor[];

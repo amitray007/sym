@@ -1,10 +1,8 @@
 /**
  * Bridge Sym's ToolRegistry → Pi's AgentTool[].
  *
- * Each ToolDescriptor from the composite dispatcher (builtins + MCP connectors)
- * becomes an AgentTool. The execute function dispatches through the existing
- * Sym dispatcher so per-user connector auth (resolveConnectorAuth) is preserved
- * exactly as in the kernel loop.
+ * Each ToolDescriptor (the read-only built-in tools) becomes an AgentTool whose
+ * execute function dispatches through Sym's ToolDispatcher.
  *
  * Schema bridge: Sym's `ToolDescriptor.parameters` is a JSON Schema object.
  * Pi's `AgentTool.parameters` is TypeBox `TSchema`. TypeBox TSchema IS JSON
@@ -25,8 +23,7 @@ import type { ToolRegistry } from '@sym/kernel';
 /**
  * Convert a single Sym `ToolDescriptor` into a Pi `AgentTool`.
  *
- * The `execute` function dispatches through Sym's `ToolDispatcher` so that
- * connector auth, audit hooks, and error handling are identical to the kernel loop.
+ * The `execute` function dispatches through Sym's `ToolDispatcher`.
  *
  * On a Sym tool error (`ok: false`), we throw — Pi surfaces thrown errors to the
  * model as `isError` tool result messages, which is the correct behaviour for
@@ -80,12 +77,9 @@ function bridgeTool(
 /**
  * Build Pi `AgentTool[]` from a list of Sym `ToolDescriptor`s + runtime context.
  *
- * Pass an explicit `descriptors` list to scope bridging to a subset (e.g. only
- * eager / non-connector tools). Defaults to `registry.listTools()` when omitted
- * for back-compat.
- *
- * Returns an empty array when no descriptors are provided — Pi will send the
- * model no tool schemas, mirroring the kernel loop's behaviour.
+ * Defaults to `registry.listTools()` when no explicit `descriptors` list is given.
+ * Returns an empty array when there are no descriptors — Pi then sends the model
+ * no tool schemas.
  */
 export function bridgeTools(
   registry: ToolRegistry,

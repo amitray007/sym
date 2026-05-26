@@ -1,126 +1,86 @@
 # Sym
 
-An AI teammate that lives in a single team's Slack workspace, configured and
-observed through its own dashboard. Joins channels, holds opinions, remembers
-what matters, owns tasks, is accountable for everything it does.
+A personal AI teammate that lives in your Slack workspace. Send it a DM or
+@mention it in a channel and it replies. No database, no dashboard — configured
+entirely by environment variables.
 
-> Status: built. Spine (Sp1–Sp4) and all streams (S1–S8), plus the agent and
-> dashboard apps, are implemented, wired, and green (typecheck · lint · test ·
-> build). The system runs end-to-end — see "Run it live" below.
+**Stack:** Hono (HTTP server) · Pi agent SDK · Fireworks (OpenAI-compatible LLM) · Slack Events API
+
+## How it works
+
+1. Slack sends a signed HTTP event to `apps/agent` (Hono).
+2. The server verifies the Slack signing secret and drops anything not from the
+   configured workspace.
+3. Only the owner (`SYM_OWNER_SLACK_USER_ID`) can invoke the bot — all other
+   messages are silently ignored.
+4. The full Slack thread is fetched and passed to the Pi agent loop as context
+   (the thread _is_ the memory — stateless, no DB).
+5. The Pi loop calls Fireworks (OpenAI-compatible) with a set of built-in
+   read-only tools and streams the reply back into the thread.
+
+## Environment variables
+
+Copy `.env.example` to `.env` and fill in the values.
+
+| Variable                  | Required | Description                                                                    |
+| ------------------------- | -------- | ------------------------------------------------------------------------------ |
+| `SLACK_SIGNING_SECRET`    | yes      | From your Slack app's Basic Information page                                   |
+| `SLACK_BOT_TOKEN`         | yes      | Bot token (xoxb-…) from OAuth & Permissions                                    |
+| `SLACK_BOT_USER_ID`       | yes      | Bot's member ID (U…) from Slack app settings                                   |
+| `SLACK_TEAM_ID`           | yes      | Your workspace team ID (T…)                                                    |
+| `SYM_OWNER_SLACK_USER_ID` | yes      | Slack user ID of the single owner                                              |
+| `FIREWORKS_API_KEY`       | yes      | API key from fireworks.ai                                                      |
+| `FIREWORKS_MODEL`         | yes      | Model ID, e.g. `accounts/fireworks/models/llama-v3p1-405b-instruct`            |
+| `FIREWORKS_BASE_URL`      | no       | Override Fireworks base URL (default: `https://api.fireworks.ai/inference/v1`) |
+| `AGENT_PORT`              | no       | Port for the Hono server (default: `3001`)                                     |
+
+## Setup
+
+### 1. Create a Slack app
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and create a new app
+   **from scratch**.
+2. Under **OAuth & Permissions**, add these bot token scopes:
+   - `app_mentions:read`, `channels:history`, `channels:read`
+   - `chat:write`, `groups:history`, `im:history`, `im:write`
+   - `mpim:history`, `users:read`
+3. Install the app to your workspace and copy the **Bot User OAuth Token**.
+4. Under **Event Subscriptions**, enable events and set the request URL to
+   `https://<your-agent-host>/slack/events`.
+5. Subscribe to these bot events: `app_mention`, `message.im`.
+6. Copy the **Signing Secret** from Basic Information.
+7. Find your **Bot User ID** (the `SLACK_BOT_USER_ID`) in the app's settings
+   under "App Home" → "Your App's Bot User".
+
+### 2. Configure env
+
+```sh
+cp .env.example .env
+# edit .env — fill in all required variables
+```
+
+### 3. Run
+
+```sh
+pnpm install
+pnpm --filter @sym/agent dev
+```
+
+The agent listens on `http://localhost:3001` (or `$AGENT_PORT`).
+
+To expose it to Slack during local development, use a tunnel such as
+`ngrok http 3001` and point the Slack app's Event Subscriptions URL at the
+tunnel URL.
 
 ## Repository layout
 
 ```
-apps/                 Deployables — one folder per service
-  agent/                Slack-side runtime (Hono + custom thin loop)        [S2/S1]
-  dashboard/            Control plane (Next.js + Tailwind + shadcn + Clerk) [S3]
-
-packages/             Workspace packages — @sym/* scope
-  contracts/            Pure TypeScript types shared by all units           [Sp3]
-  db/                   Drizzle schema + migrations                         [Sp2]
-  secrets/              libsodium encrypt/decrypt + encryptedText column    [Sp4]
-  kernel/               Thin agent loop                                     [S2]
-  memory/               5-scope memory + retrieval gate                     [S7a]
-  audit/                Hash-chained audit + receipts                       [S7b]
-  tasks/                Durable queue + slice/checkpoint                    [S7c]
-  soul/                 Cascade + tone-rewrite + substance-diff guard       [S7d]
-  sandbox/              Docker + gVisor + egress proxy + leases             [S6]
-  adapter/              Inbound surfaces (grouped; Slack-only in v1)
-    slack/                Slack ingress + outbound + Block Kit              [S1]
-  provider/             LLM providers (grouped; one impl per backend)
-    fireworks/            Fireworks impl (OpenAI-compat)                    [S2]
-  ext/                  Extensions (grouped)
-    mcp/                  MCP HTTP + stdio + tool registry                  [S5]
-    skills/               Skill loader + activation                         [S5]
-
-docs/                 Specs, build plan, schema draft, blast-radius map
-.claude/skills/       Discipline skills (cross-unit-impact, future)
+apps/
+  agent/    Hono server — Slack events → Pi agent loop → Fireworks reply
+docs/
+  FUTURE.md Parked features (connectors, skills, DB, dashboard, audit, tasks)
 ```
-
-> Package names keep a flat scope (`@sym/adapter-slack`, `@sym/provider-fireworks`)
-> since npm package names can't nest; only the on-disk directories are grouped
-> under `adapter/`, `provider/`, and `ext/`.
-
-## Working model
-
-Build is **dependency-ordered**, not phase- or calendar-based. Sequence and
-parallelism are visualized in `docs/build-flow.md`. Per-stream end goals and
-internal chunks are in `docs/implementation-ideology-plan.md`.
-
-The **spine** (Sp1 → Sp4) must finish before any stream forks:
-
-1. **Sp1** · Monorepo + tooling — _this chunk_
-2. **Sp2** · `@sym/db` schema + migrations
-3. **Sp3** · `@sym/contracts` (pure types)
-4. **Sp4** · `@sym/secrets` (libsodium)
-
-Then streams S1–S8 fork in parallel.
-
-## Discipline
-
-Every PR touching schema, `@sym/contracts`, or any shared interface runs the
-checklist in `.claude/skills/cross-unit-impact/SKILL.md` and includes a
-**Cross-unit impact** section in its description (the PR template enforces it
-from PR #1).
-
-## Getting started
-
-Prerequisites: Node 24, pnpm 10, Postgres 16+ (native install), Redis 7+
-(native install). See `docs/files-to-care-about.md` for sensitive surfaces.
-
-```sh
-pnpm install
-pnpm typecheck
-pnpm lint
-pnpm test
-pnpm build
-```
-
-### Run it live (local)
-
-One-time bootstrap (assumes Postgres + Redis are installed and running — see
-`scripts/setup-macos.sh` / `scripts/setup-linux.sh`):
-
-```sh
-sh scripts/dev-setup.sh   # creates sym_dev, writes .env + SYM_ENCRYPTION_KEY, migrates
-```
-
-Then fill the remaining secrets in `.env` (the bootstrap leaves these blank):
-
-- **Clerk** — `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` (enable
-  Google + Slack sign-in in the Clerk dashboard).
-- **Slack app** — `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_SIGNING_SECRET`.
-  Set the app's OAuth redirect URL to `${AGENT_URL}/slack/oauth/callback` and its
-  Event request URL to the agent.
-- **URLs** — `AGENT_URL` (default `http://localhost:3001`) and `DASHBOARD_URL`
-  (default `http://localhost:3000`).
-- **First admin** — `SYM_BOOTSTRAP_ADMIN_EMAILS=you@example.com` (your Clerk
-  email). This is how you claim owner of a fresh instance.
-
-> Do **not** run `pnpm db:seed` for a real Slack workspace — the seed inserts a
-> fake workspace whose team id would block the real install (single-tenant).
-> Seed only for dashboard-only dev without a real Slack connection.
-
-Run both services:
-
-```sh
-pnpm dev            # agent on :3001, dashboard on :3000 (turbo, watch mode)
-```
-
-Open the dashboard, sign in with your allowlisted email, and walk the `/setup`
-wizard: **Install** (Slack OAuth — creates the workspace and makes you owner on
-return) → **Provider** (Fireworks API key + models) → **Access** (Slack ACL
-mode). Once complete, DM or @mention the bot in Slack and it replies.
 
 ## License
 
 MIT. Private OSS / internal use; not published to public npm. See `LICENSE`.
-
-## Related docs
-
-- `docs/specs/sym-overview-spec.md` — product thesis + v1 hard decisions
-- `docs/implementation-ideology-plan.md` — how we build (spine + streams)
-- `docs/build-flow.md` — visual dependency diagram
-- `docs/db-schema-draft.md` — Sp2 schema review input
-- `docs/files-to-care-about.md` — blast-radius map of files
-- `.claude/skills/cross-unit-impact/SKILL.md` — the discipline applied on every PR

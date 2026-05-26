@@ -9,23 +9,15 @@
     "lint": "eslint .",
     "test": "vitest run",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
-    "spike:pi": "tsx src/spike/pi-spike.ts",
-    "spike:toolsearch": "tsx src/spike/tool-search-spike.ts"
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.75.5",
     "@earendil-works/pi-ai": "0.75.5",
     "@hono/node-server": "^1.13.7",
     "@sym/adapter-slack": "workspace:*",
-    "@sym/audit": "workspace:*",
     "@sym/contracts": "workspace:*",
-    "@sym/db": "workspace:*",
-    "@sym/ext-mcp": "workspace:*",
-    "@sym/ext-skills": "workspace:*",
     "@sym/kernel": "workspace:*",
-    "@sym/secrets": "workspace:*",
-    "drizzle-orm": "^0.44.2",
     "hono": "^4.6.14"
   },
   "devDependencies": {

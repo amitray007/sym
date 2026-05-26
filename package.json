@@ -2,7 +2,7 @@
   "name": "sym",
   "version": "0.0.0",
   "private": true,
-  "description": "Sym — an AI teammate that lives in a Slack workspace, configured and observed through its own dashboard.",
+  "description": "Sym — an AI teammate that lives in a Slack workspace.",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.33.2",
@@ -19,12 +19,6 @@
     "dev": "turbo run dev",
     "format": "prettier --write .",
     "clean": "turbo run clean && rm -rf node_modules .turbo",
-    "db:generate": "pnpm --filter @sym/db db:generate",
-    "db:migrate": "pnpm --filter @sym/db db:migrate",
-    "db:seed": "pnpm --filter @sym/db db:seed",
-    "db:check": "pnpm --filter @sym/db db:check",
-    "db:reset": "pnpm --filter @sym/db db:reset",
-    "db:studio": "pnpm --filter @sym/db db:studio",
     "prepare": "husky"
   },
   "devDependencies": {
