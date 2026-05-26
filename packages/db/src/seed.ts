@@ -3,15 +3,14 @@ import { eq } from 'drizzle-orm';
 
 import { loadDatabaseUrl } from './cli-env.js';
 import { createDb } from './client.js';
-import { aclModes, dashboardAdmins, slackInstalls, workspaces } from './schema/index.js';
+import { dashboardAdmins, slackInstalls, workspaces } from './schema/index.js';
 
 const TEST_TEAM_ID = 'T_SYM_DEV';
 
 /**
- * Inserts a single dev workspace with an owner admin, a (fake) Slack install,
- * and default ACL modes (slack=open, dashboard=allowlist). Idempotent — safe
- * to run repeatedly. The Slack bot token is encrypted via `encryptedText`, so
- * we init the key ring first.
+ * Inserts a single dev workspace with an owner admin and a (fake) Slack install.
+ * Idempotent — safe to run repeatedly. The Slack bot token is encrypted via
+ * `encryptedText`, so we init the key ring first.
  */
 async function main(): Promise<void> {
   const databaseUrl = loadDatabaseUrl();
@@ -64,14 +63,6 @@ async function main(): Promise<void> {
       scopes: ['app_mentions:read', 'chat:write', 'im:history'],
       installedBySlackUserId: 'U_DEV_OWNER',
     })
-    .onConflictDoNothing();
-
-  await db
-    .insert(aclModes)
-    .values([
-      { workspaceId, surface: 'slack', mode: 'open' },
-      { workspaceId, surface: 'dashboard', mode: 'allowlist' },
-    ])
     .onConflictDoNothing();
 
   console.info('[db:seed] done.');

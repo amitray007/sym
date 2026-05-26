@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 
 import { loadDatabaseUrl } from './cli-env.js';
 import { createDb } from './client.js';
-import { aclModes, dashboardAdmins, slackInstalls, workspaces } from './schema/index.js';
+import { dashboardAdmins, slackInstalls, workspaces } from './schema/index.js';
 
 /** Mask a secret for display: keep a recognizable head + tail, hide the middle. */
 function mask(secret: string): string {
@@ -29,14 +29,13 @@ async function main(): Promise<void> {
       .select()
       .from(dashboardAdmins)
       .where(eq(dashboardAdmins.workspaceId, w.id));
-    const modes = await db.select().from(aclModes).where(eq(aclModes.workspaceId, w.id));
     const installs = await db
       .select()
       .from(slackInstalls)
       .where(eq(slackInstalls.workspaceId, w.id));
     console.info(
       `  • ${w.name} (${w.slackTeamId}) id=${w.id} status=${w.status} ` +
-        `admins=${admins.length} aclModes=${modes.length}`,
+        `owner=${w.ownerSlackUserId ?? '(unset)'} admins=${admins.length}`,
     );
     for (const install of installs) {
       // botAccessToken is decrypted by encryptedText.fromDriver on read.

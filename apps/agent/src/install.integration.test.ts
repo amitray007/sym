@@ -63,6 +63,10 @@ suite('@sym/agent installWorkspace (integration)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.status).toBe('active');
     expect(rows[0]?.botAccessToken).toBe('xoxb-test-token'); // decrypted via encryptedText
+
+    // Owner is captured from the installer on first install.
+    const ws = await db.select().from(workspaces).where(eq(workspaces.id, r.workspaceId));
+    expect(ws[0]?.ownerSlackUserId).toBe('UADMIN');
   });
 
   it('re-auth of the same team revokes the old install and adds a new active one', async () => {
@@ -75,6 +79,17 @@ suite('@sym/agent installWorkspace (integration)', () => {
       .where(and(eq(slackInstalls.workspaceId, r.workspaceId), eq(slackInstalls.status, 'active')));
     expect(active).toHaveLength(1);
     expect(active[0]?.botAccessToken).toBe('xoxb-rotated-token');
+  });
+
+  it('re-auth never reassigns ownership — even when a different user reinstalls', async () => {
+    const r = await installWorkspace(
+      db,
+      makeResult({ accessToken: 'xoxb-rotated-again', installerUserId: 'USOMEONE_ELSE' }),
+    );
+    expect(r.reinstalled).toBe(true);
+
+    const ws = await db.select().from(workspaces).where(eq(workspaces.id, r.workspaceId));
+    expect(ws[0]?.ownerSlackUserId).toBe('UADMIN'); // still the original installer
   });
 
   it('refuses a different team (single-tenant)', async () => {

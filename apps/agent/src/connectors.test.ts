@@ -36,17 +36,15 @@ vi.mock('@sym/ext-mcp', () => {
 
 // Mock @sym/audit so we don't need a real DB connection for auditFn.
 vi.mock('@sym/audit', () => ({
-  append: vi
-    .fn()
-    .mockResolvedValue({
-      id: 0,
-      workspaceId: '',
-      kind: '',
-      actorKind: 'system',
-      actorId: '',
-      payload: {},
-      ts: new Date(),
-    }),
+  append: vi.fn().mockResolvedValue({
+    id: 0,
+    workspaceId: '',
+    kind: '',
+    actorKind: 'system',
+    actorId: '',
+    payload: {},
+    ts: new Date(),
+  }),
 }));
 
 import { buildConnectorConfigs, compositeDispatcher, loadConnectorRegistry } from './connectors.js';

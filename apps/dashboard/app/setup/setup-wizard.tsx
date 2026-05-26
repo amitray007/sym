@@ -1,10 +1,10 @@
 'use client';
 
-import { ArrowRight, CheckCircle2, Circle, KeyRound, Shield, Slack } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Circle, KeyRound, Slack } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 
-import { saveAcl, saveProviderConfig } from './actions';
+import { saveProviderConfig } from './actions';
 
 import type { SetupStatus } from '@/lib/setup';
 
@@ -20,6 +20,7 @@ interface ProviderPrefill {
 interface Props {
   status: SetupStatus;
   workspaceName: string | null;
+  ownerSlackUserId: string | null;
   agentInstallUrl: string | null;
   provider: ProviderPrefill | null;
 }
@@ -49,11 +50,15 @@ function StepHeader({
   );
 }
 
-export function SetupWizard({ status, workspaceName, agentInstallUrl, provider }: Props) {
+export function SetupWizard({
+  status,
+  workspaceName,
+  ownerSlackUserId,
+  agentInstallUrl,
+  provider,
+}: Props) {
   const [providerDone, setProviderDone] = useState(status.hasProvider);
   const [providerMsg, setProviderMsg] = useState<string | null>(null);
-  const [aclDone, setAclDone] = useState(status.hasAcl);
-  const [aclMsg, setAclMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function onProvider(e: React.FormEvent<HTMLFormElement>) {
@@ -64,16 +69,6 @@ export function SetupWizard({ status, workspaceName, agentInstallUrl, provider }
     setBusy(false);
     setProviderDone(res.ok);
     setProviderMsg(res.ok ? 'Saved.' : (res.error ?? 'Failed to save.'));
-  }
-
-  async function onAcl(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBusy(true);
-    setAclMsg(null);
-    const res = await saveAcl(new FormData(e.currentTarget));
-    setBusy(false);
-    setAclDone(res.ok);
-    setAclMsg(res.ok ? 'Saved.' : (res.error ?? 'Failed to save.'));
   }
 
   const complete = status.hasInstall && providerDone;
@@ -186,50 +181,25 @@ export function SetupWizard({ status, workspaceName, agentInstallUrl, provider }
         </form>
       </section>
 
-      {/* Step 3 — Access */}
-      <section className="card p-5 space-y-4">
-        <StepHeader
-          done={aclDone || status.hasAcl}
-          icon={<Shield className="w-4 h-4" />}
-          title="3 · Access"
-          subtitle="Who can talk to Sym in Slack."
-        />
-        <form onSubmit={onAcl} className="space-y-3">
-          <div>
-            <label className={labelCls} htmlFor="slackMode">
-              Slack access mode
-            </label>
-            <select id="slackMode" name="slackMode" defaultValue="open" className={inputCls}>
-              <option value="open">Open — everyone in the workspace</option>
-              <option value="allowlist">Allowlist — only explicitly allowed users</option>
-              <option value="workspace_minus_blocked">Everyone except blocked users</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-3">
-            <button type="submit" disabled={busy} className={btnCls}>
-              Save access
-            </button>
-            {aclMsg && (
-              <span className={aclDone ? 'text-success text-xs' : 'text-danger text-xs'}>
-                {aclMsg}
-              </span>
-            )}
-          </div>
-        </form>
-      </section>
-
       {/* Done */}
       <section className="card p-5">
         <StepHeader
           done={complete}
           icon={<CheckCircle2 className="w-4 h-4" />}
-          title="4 · Done"
+          title="3 · Done"
           subtitle={complete ? 'Sym is ready.' : 'Finish the steps above to activate Sym.'}
         />
         {complete && (
-          <Link href="/activity" className={`${btnCls} mt-4`}>
-            Go to dashboard <ArrowRight className="w-4 h-4" />
-          </Link>
+          <div className="mt-4 space-y-3">
+            <p className="text-ink-tertiary text-xs">
+              Owner:{' '}
+              <span className="font-mono text-ink-secondary">{ownerSlackUserId ?? 'unknown'}</span>{' '}
+              — Sym takes requests only from this Slack user.
+            </p>
+            <Link href="/activity" className={btnCls}>
+              Go to dashboard <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
         )}
       </section>
     </div>

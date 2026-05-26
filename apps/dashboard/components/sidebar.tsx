@@ -7,7 +7,6 @@ import {
   Cpu,
   Globe,
   LayoutGrid,
-  Lock,
   Plug,
   Shield,
   Sparkles,
@@ -42,7 +41,6 @@ const NAV: NavSection[] = [
     label: 'Configuration',
     items: [
       { href: '/install', label: 'Install', icon: Plug },
-      { href: '/acl', label: 'Access Control', icon: Lock },
       { href: '/provider', label: 'Provider', icon: Cpu },
       { href: '/connectors', label: 'Connectors', icon: Globe },
       { href: '/skills', label: 'Skills', icon: Zap },
