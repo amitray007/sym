@@ -8,6 +8,25 @@ import type { McpConfigId, OAuthTokenId, SlackUserId, WorkspaceId } from './ids.
  * `provider`. Token values are NEVER exposed to the model.
  */
 
+/**
+ * Shape of the `mcp_configs.oauth_config_json` (jsonb) column for
+ * `authMode = 'oauth'` connectors.
+ *
+ * SECURITY: The client secret is NOT here. It lives encrypted in `envJson` as
+ * `{ "clientSecret": "..." }` (the same encryptedText column used for static
+ * tokens). Never put the secret in jsonb, never log it, never return it.
+ */
+export interface ConnectorOAuthConfig {
+  /** The provider's authorization endpoint (where the browser is sent). */
+  authorizeUrl: string;
+  /** The provider's token endpoint (server-side POST). */
+  tokenUrl: string;
+  /** The OAuth 2.0 client ID. Safe to store in plain jsonb. */
+  clientId: string;
+  /** The set of scopes to request from the provider. */
+  scopes: string[];
+}
+
 /** How a connector authenticates to its server. */
 export type ConnectorAuthMode =
   /** No auth (open MCP server). */
