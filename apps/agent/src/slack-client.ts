@@ -68,17 +68,19 @@ interface RepliesResponse extends SlackOkResponse {
 export class WebApiSlackClient implements SlackClient {
   constructor(private readonly botToken: string) {}
 
-  private async call<T extends SlackOkResponse = SlackOkResponse>(
+  /** Shared transport: POST to a Slack method, handle 429 + the `ok` envelope. */
+  private async dispatch<T extends SlackOkResponse = SlackOkResponse>(
     method: string,
-    body: Record<string, unknown>,
+    contentType: string,
+    body: string,
   ): Promise<T> {
     const res = await fetch(`${SLACK_API}/${method}`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${this.botToken}`,
-        'content-type': 'application/json; charset=utf-8',
+        'content-type': contentType,
       },
-      body: JSON.stringify(body),
+      body,
     });
 
     if (res.status === 429) {
@@ -92,6 +94,34 @@ export class WebApiSlackClient implements SlackClient {
       throw new SlackWebApiError(errorCode, { error: errorCode });
     }
     return json;
+  }
+
+  /** JSON-body call — for write methods (chat.*, assistant.*) that accept it. */
+  private call<T extends SlackOkResponse = SlackOkResponse>(
+    method: string,
+    body: Record<string, unknown>,
+  ): Promise<T> {
+    return this.dispatch<T>(method, 'application/json; charset=utf-8', JSON.stringify(body));
+  }
+
+  /**
+   * Form-urlencoded call — for read methods. Slack's `conversations.*` read
+   * methods reject `application/json` with `invalid_arguments`, so their
+   * (simple, scalar) params must be sent as a urlencoded form.
+   */
+  private callForm<T extends SlackOkResponse = SlackOkResponse>(
+    method: string,
+    params: Record<string, string | number | undefined>,
+  ): Promise<T> {
+    const form = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) form.set(key, String(value));
+    }
+    return this.dispatch<T>(
+      method,
+      'application/x-www-form-urlencoded; charset=utf-8',
+      form.toString(),
+    );
   }
 
   async chatPostMessage(params: PostMessageParams): Promise<PostMessageResult> {
@@ -142,7 +172,7 @@ export class WebApiSlackClient implements SlackClient {
     // Page through the thread (Slack caps a page at SLACK_PAGE_LIMIT) until we
     // run out of replies or hit the ceiling — whichever comes first.
     do {
-      const json = await this.call<RepliesResponse>('conversations.replies', {
+      const json = await this.callForm<RepliesResponse>('conversations.replies', {
         channel: params.channel,
         ts: params.ts,
         limit: Math.min(SLACK_PAGE_LIMIT, ceiling - messages.length),
@@ -175,7 +205,7 @@ export class WebApiSlackClient implements SlackClient {
     // Page through the channel (Slack returns newest-first) until we hit the
     // ceiling or run out of messages — whichever comes first.
     do {
-      const json = await this.call<RepliesResponse>('conversations.history', {
+      const json = await this.callForm<RepliesResponse>('conversations.history', {
         channel: params.channel,
         limit: Math.min(SLACK_PAGE_LIMIT, ceiling - collected.length),
         ...(cursor !== undefined ? { cursor } : {}),
