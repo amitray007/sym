@@ -12,18 +12,20 @@
  */
 
 import { Agent } from '@earendil-works/pi-agent-core';
-import { matchSkills, buildSkillContext } from '@sym/ext-skills';
+import { buildSkillContext } from '@sym/ext-skills';
 import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
 import { bridgeTools } from './tools.js';
 
 import type {
+  AgentTool,
+  AgentToolResult,
   BeforeToolCallContext,
   AgentEvent,
   AgentMessage,
 } from '@earendil-works/pi-agent-core';
-import type { AssistantMessage, UserMessage, Model } from '@earendil-works/pi-ai';
+import type { AssistantMessage, UserMessage, Model, TSchema } from '@earendil-works/pi-ai';
 import type { SlackClient } from '@sym/adapter-slack';
 import type {
   ChatMessage,
@@ -59,8 +61,9 @@ export interface PiLoopOptions {
   signal?: AbortSignal;
   /**
    * Pre-loaded enabled skills for this workspace.  When provided, the Pi loop
-   * runs `matchSkills` against the turn text and injects matched skill content
-   * into the system prompt via `buildSkillContext`.
+   * appends a `## Available skills` index (slug + description only) to the
+   * system prompt, and exposes a `load_skill(slug)` tool so the model can
+   * fetch full skill instructions on demand.
    */
   skills?: Skill[];
   /**
@@ -218,16 +221,14 @@ export async function runLoopPi(
   // Pi receives the system prompt via AgentState.systemPrompt).
   const historyMessages = toAgentMessages(opts.history);
 
-  // Build the system prompt: start with the static base, then inject any
-  // skills whose activationPattern matches the current turn text.
+  // Build the system prompt: start with the static base, then append a cheap
+  // index of all enabled skills (slug + description only — no bodies).
+  // The model fetches full instructions on demand via the `load_skill` tool.
   const basePrompt = buildSystemPrompt();
   let systemPrompt = basePrompt;
   if (opts.skills && opts.skills.length > 0) {
-    const matched = matchSkills(turn.text, opts.skills);
-    if (matched.length > 0) {
-      const skillBlocks = matched.map(buildSkillContext).join('\n\n');
-      systemPrompt = `${basePrompt}\n\n${skillBlocks}`;
-    }
+    const indexLines = opts.skills.map((s) => `- ${s.slug}: ${s.description}`).join('\n');
+    systemPrompt = `${basePrompt}\n\n## Available skills\n${indexLines}`;
   }
 
   // The user's message, with turn metadata framed as context-only so "summarize
@@ -235,8 +236,61 @@ export async function runLoopPi(
   // as the kernel's assembleTurnMessages.
   const userText = buildUserTurnContent(turn);
 
-  // Assemble all tools via the bridge.
-  const agentTools = bridgeTools(registry, ctx);
+  // ---------------------------------------------------------------------------
+  // load_skill tool — progressive disclosure of skill bodies.
+  //
+  // The system prompt lists only slug + description for each enabled skill.
+  // When the model determines a skill is relevant, it calls load_skill(slug)
+  // to fetch the full instructions. This keeps the initial context window small
+  // and avoids injecting bodies that aren't needed for the current turn.
+  // ---------------------------------------------------------------------------
+  const skillsList = opts.skills ?? [];
+  const loadSkillTool: AgentTool = {
+    name: 'load_skill',
+    label: 'load_skill',
+    description:
+      "Load the full instructions for a skill by its slug. Call this when a skill listed under 'Available skills' fits the task, then follow the returned instructions.",
+    parameters: {
+      type: 'object',
+      properties: {
+        slug: {
+          type: 'string',
+          description: 'The skill slug from the Available skills list',
+        },
+      },
+      required: ['slug'],
+      additionalProperties: false,
+    } as unknown as TSchema,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prepareArguments: (args: unknown) => args as any,
+    execute: async (_toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
+      const { slug } = params as { slug: string };
+      const skill = skillsList.find((s) => s.slug === slug);
+      if (skill) {
+        return {
+          content: [{ type: 'text', text: buildSkillContext(skill) }],
+          details: { slug },
+        };
+      }
+      const validSlugs = skillsList.map((s) => s.slug).join(', ');
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `No skill with slug "${slug}". Available: ${validSlugs || '(none)'}`,
+          },
+        ],
+        details: { slug, found: false },
+      };
+    },
+  };
+
+  // Assemble all tools: bridge tools from the registry, plus load_skill when
+  // skills are configured for this workspace.
+  const agentTools = [
+    ...bridgeTools(registry, ctx),
+    ...(skillsList.length > 0 ? [loadSkillTool] : []),
+  ];
 
   // Build a name → ToolDescriptor map so beforeToolCall can look up hints.
   const descriptorMap = new Map<string, ToolDescriptor>(
