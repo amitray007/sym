@@ -78,12 +78,20 @@ function bridgeTool(
 }
 
 /**
- * Build the full Pi `AgentTool[]` from Sym's registry + runtime context.
+ * Build Pi `AgentTool[]` from a list of Sym `ToolDescriptor`s + runtime context.
  *
- * Returns an empty array when the registry has no tools — Pi will send the model
- * no tool schemas, mirroring the kernel loop's behaviour.
+ * Pass an explicit `descriptors` list to scope bridging to a subset (e.g. only
+ * eager / non-connector tools). Defaults to `registry.listTools()` when omitted
+ * for back-compat.
+ *
+ * Returns an empty array when no descriptors are provided — Pi will send the
+ * model no tool schemas, mirroring the kernel loop's behaviour.
  */
-export function bridgeTools(registry: ToolRegistry, ctx: ToolRuntimeContext): AgentTool[] {
-  const descriptors = registry.listTools();
-  return descriptors.map((d) => bridgeTool(d, registry, ctx));
+export function bridgeTools(
+  registry: ToolRegistry,
+  ctx: ToolRuntimeContext,
+  descriptors?: ReturnType<ToolRegistry['listTools']>,
+): AgentTool[] {
+  const list = descriptors ?? registry.listTools();
+  return list.map((d) => bridgeTool(d, registry, ctx));
 }

@@ -85,7 +85,10 @@ import type { TSchema } from '@earendil-works/pi-ai';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 loadDotenv({ path: resolve(repoRoot, '.env') });
 
-const SPIKE_MODE = (process.env['SPIKE_MODE'] ?? 'native') as 'native' | 'dispatch';
+// Default is `dispatch`: the spike confirmed Fireworks does search→call_tool
+// cleanly, while `native` (mid-run state.tools mutation) is blocked by Pi's
+// run-start snapshot. Pass SPIKE_MODE=native to re-confirm the native finding.
+const SPIKE_MODE = (process.env['SPIKE_MODE'] ?? 'dispatch') as 'native' | 'dispatch';
 
 // ---------------------------------------------------------------------------
 // Fireworks config loader (identical to pi-spike.ts)

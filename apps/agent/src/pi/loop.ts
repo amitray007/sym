@@ -16,6 +16,7 @@ import { buildSkillContext } from '@sym/ext-skills';
 import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
+import { buildDiscoveryTools } from './discovery.js';
 import { bridgeTools } from './tools.js';
 
 import type {
@@ -285,17 +286,48 @@ export async function runLoopPi(
     },
   };
 
-  // Assemble all tools: bridge tools from the registry, plus load_skill when
-  // skills are configured for this workspace.
+  // ---------------------------------------------------------------------------
+  // Eager / connector split
+  //
+  // EAGER: built-in tools whose names do NOT start with "mcp__" → bridged as
+  //        native Pi tools with full schemas visible to the model up front.
+  // CONNECTOR: MCP-backed tools whose names start with "mcp__" → hidden behind
+  //            search_tools + call_tool (the DISPATCH pattern). Pi snapshots
+  //            state.tools at run-start so mid-run tool mutation does NOT work;
+  //            the dispatch pattern is the only reliable path.
+  // ---------------------------------------------------------------------------
+  const allDescriptors = registry.listTools();
+  const eagerDescriptors = allDescriptors.filter((d) => !d.name.startsWith('mcp__'));
+  const connectorDescriptors = allDescriptors.filter((d) => d.name.startsWith('mcp__'));
+
+  // Bridge only the EAGER descriptors as native Pi tools.
+  const eagerTools = bridgeTools(registry, ctx, eagerDescriptors);
+
+  // Build discovery meta-tools only when connector tools exist.
+  const discoveryTools =
+    connectorDescriptors.length > 0
+      ? buildDiscoveryTools({
+          connectorDescriptors,
+          registry,
+          ctx,
+          ...(turn.channelId !== undefined ? { channelId: turn.channelId } : {}),
+          ...(turn.threadTs !== undefined ? { threadTs: turn.threadTs } : {}),
+          ...(opts.slackClient !== undefined ? { slackClient: opts.slackClient } : {}),
+        })
+      : [];
+
+  // Assemble all tools: eager built-ins + optional discovery pair + load_skill.
   const agentTools = [
-    ...bridgeTools(registry, ctx),
+    ...eagerTools,
+    ...discoveryTools,
     ...(skillsList.length > 0 ? [loadSkillTool] : []),
   ];
 
   // Build a name → ToolDescriptor map so beforeToolCall can look up hints.
-  const descriptorMap = new Map<string, ToolDescriptor>(
-    registry.listTools().map((d) => [d.name, d]),
-  );
+  // Only eager descriptors are in the native tool list; connector confirm lives
+  // inside call_tool. We include all descriptors here for safety, but
+  // beforeToolCall will only fire for eagerly registered tool names.
+  const descriptorMap = new Map<string, ToolDescriptor>(allDescriptors.map((d) => [d.name, d]));
 
   // Accumulate streaming text deltas.
   const draftParts: string[] = [];

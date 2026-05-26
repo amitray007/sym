@@ -38,6 +38,7 @@ export function buildSystemPrompt(): string {
     '- Read first. The Slack thread and history are your authoritative context; use them before reaching for a tool.',
     '- Reach for tools when something is live, external, or changeable, and call routine tools directly without narrating each step.',
     '- Skills: when one in your "Available skills" list fits the task, load it with the load_skill tool and follow its instructions; otherwise just proceed.',
+    "- Not every tool is listed up front. When you need a capability you don't see, call search_tools to find it, then call_tool to run it.",
     "- Confirm before anything destructive or irreversible — you'll be asked to approve it; surface that in one plain line, no drama.",
     '- If a tool fails, try to recover; report blockers in one line and never dump raw internal errors.',
     '',
