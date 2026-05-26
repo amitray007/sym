@@ -39,16 +39,18 @@ function StepHeader({
   return (
     <div className="flex items-center gap-3">
       <span className={done ? 'text-success' : 'text-ink-muted'}>
-        {done ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
+        {done ? <CheckCircle2 className="w-4 h-4" /> : <Circle className="w-4 h-4" />}
       </span>
       <span className="text-ink-tertiary">{icon}</span>
       <div>
-        <h3 className="text-ink-primary text-sm font-semibold">{title}</h3>
+        <h3 className="text-ink-primary text-sm font-medium">{title}</h3>
         <p className="text-ink-tertiary text-xs mt-0.5">{subtitle}</p>
       </div>
     </div>
   );
 }
+
+const labelCls = 'block text-ink-secondary text-xs font-medium mb-1';
 
 export function SetupWizard({
   status,
@@ -72,19 +74,13 @@ export function SetupWizard({
   }
 
   const complete = status.hasInstall && providerDone;
-  const inputCls =
-    'w-full bg-surface-3 border border-border rounded-md px-3 py-2 text-ink-primary text-sm ' +
-    'placeholder:text-ink-muted focus:outline-none focus:border-accent-400 font-mono';
-  const labelCls = 'block text-ink-secondary text-xs font-medium mb-1';
-  const btnCls =
-    'inline-flex items-center gap-2 rounded-md bg-accent-500 px-4 py-2 text-sm font-medium ' +
-    'text-white hover:bg-accent-400 disabled:opacity-50 transition-colors';
 
   return (
-    <div className="mx-auto max-w-2xl p-8 space-y-6 animate-fade-in">
+    <div className="mx-auto max-w-2xl p-6 space-y-5 animate-fade-in">
+      {/* Page header */}
       <div>
-        <h1 className="text-ink-primary text-xl font-semibold">Set up Sym</h1>
-        <p className="text-ink-tertiary text-sm mt-1">
+        <h1 className="text-ink-primary font-medium text-sm">Set up Sym</h1>
+        <p className="text-ink-secondary text-xs mt-0.5">
           {workspaceName ? `Configuring ${workspaceName}.` : 'Connect Sym to your Slack workspace.'}
         </p>
       </div>
@@ -93,18 +89,18 @@ export function SetupWizard({
       <section className="card p-5 space-y-4">
         <StepHeader
           done={status.hasInstall}
-          icon={<Slack className="w-4 h-4" />}
+          icon={<Slack className="w-3.5 h-3.5" />}
           title="1 · Install to Slack"
           subtitle="Authorize Sym's bot in your workspace (OAuth — nothing is baked in)."
         />
         {status.hasInstall ? (
-          <p className="text-success text-sm">Installed ✓</p>
+          <p className="text-success text-xs font-mono">Installed</p>
         ) : agentInstallUrl ? (
-          <a className={btnCls} href={`${agentInstallUrl}/slack/install`}>
-            <Slack className="w-4 h-4" /> Install to Slack
+          <a className="btn-primary" href={`${agentInstallUrl}/slack/install`}>
+            <Slack className="w-3.5 h-3.5" /> Install to Slack
           </a>
         ) : (
-          <p className="text-warning text-xs">
+          <p className="text-warning text-xs font-mono">
             Set <code>AGENT_URL</code> (and the Slack app credentials on the agent) to enable
             install.
           </p>
@@ -115,7 +111,7 @@ export function SetupWizard({
       <section className="card p-5 space-y-4">
         <StepHeader
           done={providerDone}
-          icon={<KeyRound className="w-4 h-4" />}
+          icon={<KeyRound className="w-3.5 h-3.5" />}
           title="2 · Provider"
           subtitle="Your Fireworks API key (encrypted at rest) and per-task models."
         />
@@ -129,7 +125,7 @@ export function SetupWizard({
               name="apiKey"
               type="password"
               required
-              className={inputCls}
+              className="input font-mono"
               placeholder="fw-…"
             />
           </div>
@@ -141,7 +137,7 @@ export function SetupWizard({
               id="modelChat"
               name="modelChat"
               defaultValue={provider?.modelChat ?? DEFAULT_MODEL}
-              className={inputCls}
+              className="input font-mono"
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -153,7 +149,7 @@ export function SetupWizard({
                 id="modelToneRewrite"
                 name="modelToneRewrite"
                 defaultValue={provider?.modelToneRewrite ?? DEFAULT_MODEL}
-                className={inputCls}
+                className="input font-mono"
               />
             </div>
             <div>
@@ -164,16 +160,18 @@ export function SetupWizard({
                 id="modelSummarization"
                 name="modelSummarization"
                 defaultValue={provider?.modelSummarization ?? DEFAULT_MODEL}
-                className={inputCls}
+                className="input font-mono"
               />
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button type="submit" disabled={busy} className={btnCls}>
+            <button type="submit" disabled={busy} className="btn-primary">
               Save provider
             </button>
             {providerMsg && (
-              <span className={providerDone ? 'text-success text-xs' : 'text-danger text-xs'}>
+              <span
+                className={`text-xs font-mono ${providerDone ? 'text-success' : 'text-danger'}`}
+              >
                 {providerMsg}
               </span>
             )}
@@ -185,19 +183,18 @@ export function SetupWizard({
       <section className="card p-5">
         <StepHeader
           done={complete}
-          icon={<CheckCircle2 className="w-4 h-4" />}
+          icon={<CheckCircle2 className="w-3.5 h-3.5" />}
           title="3 · Done"
           subtitle={complete ? 'Sym is ready.' : 'Finish the steps above to activate Sym.'}
         />
         {complete && (
           <div className="mt-4 space-y-3">
-            <p className="text-ink-tertiary text-xs">
-              Owner:{' '}
-              <span className="font-mono text-ink-secondary">{ownerSlackUserId ?? 'unknown'}</span>{' '}
-              — Sym takes requests only from this Slack user.
+            <p className="text-ink-tertiary text-xs font-mono">
+              owner: <span className="text-ink-secondary">{ownerSlackUserId ?? 'unknown'}</span> —
+              Sym takes requests only from this Slack user.
             </p>
-            <Link href="/activity" className={btnCls}>
-              Go to dashboard <ArrowRight className="w-4 h-4" />
+            <Link href="/activity" className="btn-primary">
+              Go to dashboard <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
         )}

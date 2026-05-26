@@ -1,70 +1,72 @@
 @import 'tailwindcss';
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@400;500&family=Silkscreen:wght@400;700&display=swap');
 
 @theme {
-  /* Font families */
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+  /* Type — Geist for everything readable, Silkscreen (pixel) for the signature */
+  --font-sans: 'Geist', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+  --font-pixel: 'Silkscreen', 'Geist Mono', monospace;
 
-  /* Dark surface scale */
-  --color-surface-0: #0a0b0d;
-  --color-surface-1: #0f1115;
-  --color-surface-2: #14171e;
-  --color-surface-3: #1a1e28;
-  --color-surface-4: #212636;
-  --color-surface-5: #2a3147;
-  --color-surface-6: #353d56;
+  /* Neutral near-black surface scale (no blue tint) */
+  --color-surface-0: #08090a;
+  --color-surface-1: #0b0c0d;
+  --color-surface-2: #0e0f11;
+  --color-surface-3: #141517;
+  --color-surface-4: #1a1b1e;
+  --color-surface-5: #212327;
+  --color-surface-6: #2c2e33;
 
-  /* Accent: electric indigo */
-  --color-accent: #7c6af0;
-  --color-accent-50: #f2f1fe;
-  --color-accent-100: #e8e5fd;
-  --color-accent-200: #d3cffc;
-  --color-accent-300: #b3abf9;
-  --color-accent-400: #9589f5;
-  --color-accent-500: #7c6af0;
-  --color-accent-600: #6a53e8;
-  --color-accent-700: #5a43d0;
-  --color-accent-800: #4a37aa;
-  --color-accent-900: #3d2f87;
+  /* Accent — phosphor green, used sparingly (active, focus, links, live) */
+  --color-accent: #56d364;
+  --color-accent-50: #e9fbef;
+  --color-accent-100: #c3f3d0;
+  --color-accent-200: #92e6a8;
+  --color-accent-300: #66d77f;
+  --color-accent-400: #56d364;
+  --color-accent-500: #3fb950;
+  --color-accent-600: #2ea043;
+  --color-accent-700: #238636;
+  --color-accent-800: #1b6e2c;
+  --color-accent-900: #135122;
 
-  /* Status colors */
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
-  --color-danger: #ef4444;
+  /* Status */
+  --color-success: #3fb950;
+  --color-warning: #d9a441;
+  --color-danger: #e5534b;
 
   /* Text scale */
-  --color-ink-primary: #f0f2f7;
-  --color-ink-secondary: #9ba3b8;
-  --color-ink-tertiary: #5e6882;
-  --color-ink-muted: #3d4460;
+  --color-ink-primary: #ededed;
+  --color-ink-secondary: #a1a1a6;
+  --color-ink-tertiary: #6e7075;
+  --color-ink-muted: #46484d;
 
-  /* Border */
-  --color-border: #1f2537;
-  --color-border-subtle: #171d2e;
-  --color-border-strong: #2e3650;
+  /* Borders — hairline, neutral */
+  --color-border: #242529;
+  --color-border-subtle: #19191c;
+  --color-border-strong: #34363c;
 
-  /* Border radius */
+  /* Radius — crisp, restrained */
   --radius-sm: 4px;
   --radius: 6px;
   --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
 
-  /* Box shadow */
-  --shadow-glow-accent: 0 0 0 1px rgb(124 106 240 / 0.25), 0 0 20px rgb(124 106 240 / 0.08);
-  --shadow-glow-sm: 0 1px 3px rgb(0 0 0 / 0.4), 0 1px 2px rgb(0 0 0 / 0.3);
-  --shadow-card: 0 1px 4px rgb(0 0 0 / 0.5), inset 0 1px 0 rgb(255 255 255 / 0.03);
+  /* Shadow — flat by default; depth only for overlays */
+  --shadow-glow-accent: 0 0 0 1px rgb(86 211 100 / 0.25);
+  --shadow-glow-sm: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-card: none;
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.45);
 
-  /* Animations */
-  --animate-fade-in: fadeIn 0.2s ease-out;
-  --animate-slide-in: slideIn 0.2s ease-out;
+  /* Animation — subtle, single page-load reveal */
+  --animate-fade-in: fadeIn 0.18s ease-out;
+  --animate-slide-in: slideIn 0.18s ease-out;
 
   @keyframes fadeIn {
     from {
       opacity: 0;
-      transform: translateY(4px);
+      transform: translateY(3px);
     }
     to {
       opacity: 1;
@@ -75,7 +77,7 @@
   @keyframes slideIn {
     from {
       opacity: 0;
-      transform: translateX(-8px);
+      transform: translateX(-6px);
     }
     to {
       opacity: 1;
@@ -105,14 +107,21 @@
     background-color: var(--color-surface-2);
     color: var(--color-ink-primary);
     font-family: var(--font-sans);
-    font-size: 13.5px;
-    line-height: 1.5;
+    font-size: 14px;
+    line-height: 1.55;
+    letter-spacing: -0.006em;
   }
 
-  /* Scrollbar styling */
+  /* Pixel type never antialiases — keep the bitmap crisp */
+  .font-pixel {
+    -webkit-font-smoothing: none;
+    -moz-osx-font-smoothing: unset;
+    letter-spacing: 0.02em;
+  }
+
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track {
@@ -121,24 +130,28 @@
 
   ::-webkit-scrollbar-thumb {
     background: var(--color-border-strong);
-    border-radius: 3px;
+    border-radius: 4px;
+    border: 2px solid var(--color-surface-2);
   }
 
   ::-webkit-scrollbar-thumb:hover {
     background: var(--color-surface-6);
   }
 
-  /* Selection */
   ::selection {
-    background: rgb(124 106 240 / 0.25);
-    color: #f0f2f7;
+    background: rgb(86 211 100 / 0.22);
+    color: var(--color-ink-primary);
   }
 
-  /* Focus ring */
   :focus-visible {
-    outline: 2px solid rgb(124 106 240 / 0.6);
+    outline: 1px solid var(--color-accent);
     outline-offset: 2px;
-    border-radius: 4px;
+    border-radius: 3px;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
   }
 }
 
@@ -147,12 +160,14 @@
     display: flex;
     align-items: center;
     gap: 0.625rem;
-    padding: 0.375rem 0.75rem;
-    border-radius: 0.375rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: var(--radius-sm);
     color: var(--color-ink-secondary);
-    font-size: 0.75rem;
-    font-weight: 500;
-    transition: all 0.15s;
+    font-size: 0.8125rem;
+    font-weight: 450;
+    transition:
+      color 0.12s ease,
+      background 0.12s ease;
     cursor: pointer;
     user-select: none;
   }
@@ -163,96 +178,158 @@
   }
 
   .nav-item.active {
-    background: var(--color-surface-5);
-    color: var(--color-accent);
+    background: var(--color-surface-3);
+    color: var(--color-ink-primary);
     box-shadow: inset 2px 0 0 var(--color-accent);
   }
 
+  /* Flat card — hairline border, no glow */
   .card {
     background: var(--color-surface-3);
     border: 1px solid var(--color-border);
-    border-radius: 0.5rem;
-    box-shadow:
-      0 1px 4px rgb(0 0 0 / 0.5),
-      inset 0 1px 0 rgb(255 255 255 / 0.03);
+    border-radius: var(--radius-md);
   }
 
   .badge {
     display: inline-flex;
     align-items: center;
-    padding: 0.125rem 0.375rem;
-    border-radius: 0.25rem;
+    gap: 0.25rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
     font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
+    font-weight: 500;
+    letter-spacing: 0.02em;
     text-transform: uppercase;
+    background: var(--color-surface-4);
+    color: var(--color-ink-secondary);
+    border: 1px solid var(--color-border);
   }
 
   .badge-accent {
-    background: rgb(124 106 240 / 0.15);
-    color: var(--color-accent-400);
-    border: 1px solid rgb(124 106 240 / 0.2);
+    background: rgb(86 211 100 / 0.12);
+    color: var(--color-accent-300);
+    border-color: rgb(86 211 100 / 0.22);
   }
 
   .badge-success {
-    background: rgb(34 197 94 / 0.15);
-    color: var(--color-success);
-    border: 1px solid rgb(34 197 94 / 0.2);
+    background: rgb(63 185 80 / 0.12);
+    color: var(--color-accent-300);
+    border-color: rgb(63 185 80 / 0.22);
   }
 
   .badge-warning {
-    background: rgb(245 158 11 / 0.15);
+    background: rgb(217 164 65 / 0.12);
     color: var(--color-warning);
-    border: 1px solid rgb(245 158 11 / 0.2);
+    border-color: rgb(217 164 65 / 0.22);
   }
 
   .badge-danger {
-    background: rgb(239 68 68 / 0.15);
+    background: rgb(229 83 75 / 0.12);
     color: var(--color-danger);
-    border: 1px solid rgb(239 68 68 / 0.2);
+    border-color: rgb(229 83 75 / 0.22);
   }
 
+  /* Primary = monochrome white-on-black (Geist style) */
   .btn-primary {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    border-radius: 0.375rem;
-    background: var(--color-accent);
-    color: white;
-    font-size: 0.75rem;
-    font-weight: 600;
-    transition: all 0.15s;
+    padding: 0.45rem 0.9rem;
+    border-radius: var(--radius);
+    background: var(--color-ink-primary);
+    color: var(--color-surface-0);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    transition: opacity 0.12s ease;
   }
 
   .btn-primary:hover {
-    background: var(--color-accent-600);
+    opacity: 0.88;
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
   .btn-ghost {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.375rem 0.75rem;
-    border-radius: 0.375rem;
+    padding: 0.4rem 0.7rem;
+    border-radius: var(--radius);
     color: var(--color-ink-secondary);
-    font-size: 0.75rem;
-    font-weight: 500;
-    transition: all 0.15s;
+    font-size: 0.8125rem;
+    font-weight: 450;
+    border: 1px solid var(--color-border);
+    transition:
+      color 0.12s ease,
+      background 0.12s ease,
+      border-color 0.12s ease;
   }
 
   .btn-ghost:hover {
     color: var(--color-ink-primary);
     background: var(--color-surface-4);
+    border-color: var(--color-border-strong);
   }
 
+  /* Section label — the pixel signature */
   .section-heading {
-    font-size: 11px;
-    font-weight: 600;
+    font-family: var(--font-pixel);
+    font-size: 9px;
+    font-weight: 400;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.04em;
     color: var(--color-ink-tertiary);
-    padding: 0 0.75rem;
-    margin-bottom: 0.25rem;
+    padding: 0 0.7rem;
+    margin-bottom: 0.4rem;
+  }
+
+  /* Pixel wordmark */
+  .wordmark {
+    font-family: var(--font-pixel);
+    color: var(--color-ink-primary);
+    letter-spacing: 0.04em;
+  }
+
+  /* Form input — dark surface, hairline border, green focus ring */
+  .input {
+    width: 100%;
+    background: var(--color-surface-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 0.45rem 0.75rem;
+    color: var(--color-ink-primary);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    transition:
+      border-color 0.12s ease,
+      box-shadow 0.12s ease;
+  }
+
+  .input::placeholder {
+    color: var(--color-ink-muted);
+  }
+
+  .input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px rgb(86 211 100 / 0.12);
+  }
+
+  .input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Select inherits input but uses sans not mono by default */
+  .input-select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236e7075' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    padding-right: 2rem;
   }
 }

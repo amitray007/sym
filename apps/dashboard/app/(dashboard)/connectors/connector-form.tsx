@@ -18,22 +18,7 @@ interface ConnectorFormProps {
   connectors: ConnectorRow[];
 }
 
-const inputCls =
-  'w-full bg-surface-3 border border-border rounded-md px-3 py-2 text-ink-primary text-sm ' +
-  'placeholder:text-ink-muted focus:outline-none focus:border-accent-400 font-mono';
-const selectCls =
-  'w-full bg-surface-3 border border-border rounded-md px-3 py-2 text-ink-primary text-sm ' +
-  'focus:outline-none focus:border-accent-400';
 const labelCls = 'block text-ink-secondary text-xs font-medium mb-1';
-const btnPrimaryCls =
-  'inline-flex items-center gap-2 rounded-md bg-accent-500 px-4 py-2 text-sm font-medium ' +
-  'text-white hover:bg-accent-400 disabled:opacity-50 transition-colors';
-const btnGhostCls =
-  'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium ' +
-  'text-ink-secondary border border-border hover:bg-surface-4 disabled:opacity-50 transition-colors';
-const btnDangerCls =
-  'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium ' +
-  'text-danger border border-border hover:bg-surface-4 disabled:opacity-50 transition-colors';
 
 /** Auto-generate a slug from a display name. */
 function toSlug(name: string): string {
@@ -101,7 +86,7 @@ function ConnectorFormFields({
             name="name"
             type="text"
             required
-            className={inputCls}
+            className="input font-sans"
             placeholder="My Connector"
             value={name}
             onChange={(e) => handleNameChange(e.target.value)}
@@ -110,7 +95,7 @@ function ConnectorFormFields({
         <div>
           <label className={labelCls} htmlFor="connector-slug">
             Slug
-            <span className="ml-1 text-ink-muted font-normal">(unique, kebab-case)</span>
+            <span className="ml-1 text-ink-muted font-normal">(kebab-case)</span>
           </label>
           <input
             id="connector-slug"
@@ -118,7 +103,7 @@ function ConnectorFormFields({
             type="text"
             required
             pattern="[a-z0-9][a-z0-9\-]*"
-            className={inputCls}
+            className="input font-mono"
             placeholder="my-connector"
             value={slug}
             onChange={(e) => handleSlugChange(e.target.value)}
@@ -136,7 +121,7 @@ function ConnectorFormFields({
           name="url"
           type="url"
           required
-          className={inputCls}
+          className="input font-mono"
           placeholder="https://mcp.example.com"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -150,7 +135,7 @@ function ConnectorFormFields({
         <select
           id="connector-auth-mode"
           name="authMode"
-          className={selectCls}
+          className="input input-select"
           value={authMode}
           onChange={(e) => setAuthMode(e.target.value as ConnectorAuthMode)}
         >
@@ -175,12 +160,12 @@ function ConnectorFormFields({
             name="token"
             type="password"
             autoComplete="new-password"
-            className={inputCls}
+            className="input font-mono"
             placeholder={initial.hasExistingToken ? '••••••••' : 'Paste token…'}
             // Write-only: never pre-fill with the stored value.
           />
           {initial.hasExistingToken && (
-            <p className="mt-1 text-ink-muted text-xs">
+            <p className="mt-1 text-ink-muted text-xs font-mono">
               Token set — leave blank to keep the current value.
             </p>
           )}
@@ -188,7 +173,7 @@ function ConnectorFormFields({
       )}
 
       {authMode === 'oauth' && (
-        <div className="rounded-md border border-border bg-surface-3 px-4 py-3">
+        <div className="card px-4 py-3">
           <p className="text-ink-secondary text-xs">
             Each user connects their own account — connect flow coming soon.
           </p>
@@ -198,12 +183,12 @@ function ConnectorFormFields({
       {/* Transport is always 'http' in v1 — stdio needs the sandbox runner (deferred). */}
       <input type="hidden" name="transport" value="http" />
 
-      {error && <p className="text-danger text-xs">{error}</p>}
+      {error && <p className="text-danger text-xs font-mono">{error}</p>}
       <div className="flex items-center gap-2">
-        <button type="submit" disabled={busy} className={btnPrimaryCls}>
+        <button type="submit" disabled={busy} className="btn-primary">
           {busy ? 'Saving…' : 'Save'}
         </button>
-        <button type="button" disabled={busy} className={btnGhostCls} onClick={onCancel}>
+        <button type="button" disabled={busy} className="btn-ghost" onClick={onCancel}>
           Cancel
         </button>
       </div>
@@ -213,30 +198,19 @@ function ConnectorFormFields({
 
 function EnabledBadge({ enabled }: { enabled: boolean }) {
   return (
-    <span
-      className={
-        `inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ` +
-        (enabled
-          ? 'bg-success/10 text-success border-success/20'
-          : 'bg-surface-4 text-ink-tertiary border-border')
-      }
-    >
-      {enabled ? 'Enabled' : 'Disabled'}
+    <span className={enabled ? 'badge badge-success' : 'badge'}>
+      {enabled ? 'enabled' : 'disabled'}
     </span>
   );
 }
 
 function AuthModeBadge({ mode }: { mode: ConnectorAuthMode }) {
   const labels: Record<ConnectorAuthMode, string> = {
-    none: 'Open',
-    static: 'Static token',
-    oauth: 'OAuth',
+    none: 'open',
+    static: 'static',
+    oauth: 'oauth',
   };
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border bg-surface-4 text-ink-tertiary border-border">
-      {labels[mode]}
-    </span>
-  );
+  return <span className="badge">{labels[mode]}</span>;
 }
 
 function ConnectorRow({
@@ -268,36 +242,42 @@ function ConnectorRow({
   }
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-0">
+    <div className="flex items-center gap-3 px-4 py-3 border-b border-border-subtle last:border-0">
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-ink-primary text-sm font-medium truncate">{connector.name}</span>
-          <span className="text-ink-muted text-xs font-mono shrink-0">{connector.slug}</span>
+          <span className="font-mono text-ink-muted text-[10px]">{connector.slug}</span>
           <AuthModeBadge mode={connector.authMode} />
+          <EnabledBadge enabled={connector.enabled} />
         </div>
-        <span className="text-ink-tertiary text-xs font-mono truncate block mt-0.5">
+        <span className="text-ink-tertiary text-[10px] font-mono truncate block mt-0.5">
           {connector.url ?? '—'}
         </span>
       </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <EnabledBadge enabled={connector.enabled} />
+      <div className="flex items-center gap-1.5 shrink-0">
         <button
           type="button"
           disabled={busy}
-          className={btnGhostCls}
+          className="btn-ghost text-[11px] py-1 px-2"
           onClick={handleToggle}
           title={connector.enabled ? 'Disable' : 'Enable'}
         >
           {connector.enabled ? 'Disable' : 'Enable'}
         </button>
-        <button type="button" disabled={busy} className={btnGhostCls} onClick={onEdit} title="Edit">
+        <button
+          type="button"
+          disabled={busy}
+          className="btn-ghost text-[11px] py-1 px-2"
+          onClick={onEdit}
+          title="Edit"
+        >
           <Pencil className="w-3 h-3" />
           Edit
         </button>
         <button
           type="button"
           disabled={busy}
-          className={btnDangerCls}
+          className="btn-ghost text-[11px] py-1 px-2 text-danger border-danger/30 hover:border-danger/50"
           onClick={handleDelete}
           title="Delete"
         >
@@ -351,40 +331,41 @@ export function ConnectorForm({ connectors }: ConnectorFormProps) {
     editingId !== null ? connectors.find((c) => c.id === editingId) : undefined;
 
   return (
-    <div className="mx-auto max-w-3xl p-8 space-y-6 animate-fade-in">
+    <div className="mx-auto max-w-3xl p-6 space-y-5 animate-fade-in">
+      {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-ink-primary text-xl font-semibold">Connectors</h1>
-          <p className="text-ink-tertiary text-sm mt-1">
+          <h1 className="text-ink-primary font-medium text-sm">Connectors</h1>
+          <p className="text-ink-secondary text-xs mt-0.5">
             Remote MCP servers extend Sym with external tools. The agent reads these on every turn.
           </p>
         </div>
         {!showAdd && (
           <button
             type="button"
-            className={btnPrimaryCls}
+            className="btn-primary"
             onClick={() => {
               setShowAdd(true);
               setEditingId(null);
               setFormError(null);
             }}
           >
-            <Plus className="w-4 h-4" />
-            Add connector
+            <Plus className="w-3.5 h-3.5" />
+            Add
           </button>
         )}
       </div>
 
       {flashError && (
-        <div className="rounded-md border border-danger/20 bg-danger/10 px-4 py-2">
-          <p className="text-danger text-xs">{flashError}</p>
+        <div className="rounded border border-danger/20 bg-danger/10 px-4 py-2">
+          <p className="text-danger text-xs font-mono">{flashError}</p>
         </div>
       )}
 
       {/* Add form */}
       {showAdd && (
         <section className="card p-5 space-y-4">
-          <h2 className="text-ink-primary text-sm font-semibold">New connector</h2>
+          <p className="section-heading">New connector</p>
           <ConnectorFormFields
             initial={{ name: '', slug: '', url: '', authMode: 'none', hasExistingToken: false }}
             onSave={handleCreate}
@@ -401,9 +382,9 @@ export function ConnectorForm({ connectors }: ConnectorFormProps) {
       {/* Connector list */}
       <section className="card overflow-hidden">
         {connectors.length === 0 && !showAdd ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-            <p className="text-ink-secondary text-sm">No connectors configured yet.</p>
-            <p className="text-ink-muted text-xs">
+          <div className="flex flex-col items-center justify-center py-14 gap-2 text-center">
+            <p className="text-ink-secondary text-xs">No connectors configured yet.</p>
+            <p className="text-ink-muted text-[10px] font-mono">
               Add a remote MCP server above to extend Sym&apos;s toolset.
             </p>
           </div>
@@ -411,9 +392,7 @@ export function ConnectorForm({ connectors }: ConnectorFormProps) {
           connectors.map((connector) =>
             editingId === connector.id && editingConnector ? (
               <div key={connector.id} className="px-4 py-4 border-b border-border last:border-0">
-                <h2 className="text-ink-primary text-sm font-semibold mb-3">
-                  Edit &ldquo;{editingConnector.name}&rdquo;
-                </h2>
+                <p className="section-heading mb-3">Edit &ldquo;{editingConnector.name}&rdquo;</p>
                 <ConnectorFormFields
                   initial={{
                     name: editingConnector.name,
@@ -448,7 +427,7 @@ export function ConnectorForm({ connectors }: ConnectorFormProps) {
         )}
       </section>
 
-      <p className="text-ink-muted text-xs">
+      <p className="text-ink-muted text-[10px] font-mono">
         Only HTTP transport is supported in v1. stdio servers (local command execution) require the
         sandbox runner and will be enabled in a future release.
       </p>

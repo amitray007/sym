@@ -1,4 +1,4 @@
-import { Bell, LogOut, Search, User } from 'lucide-react';
+import { LogOut, User } from 'lucide-react';
 
 import { signOut } from '@/app/sign-in/actions';
 import { authMode } from '@/lib/auth';
@@ -8,29 +8,17 @@ interface TopbarProps {
 }
 
 /**
- * Topbar with Clerk UserButton (lazy-loaded when Clerk keys are present).
- * Falls back to a generic user icon in build/test environments.
+ * Topbar — page title left, account control right.
+ * No fake/inert controls (search, notifications removed).
  */
 export function Topbar({ pageTitle }: TopbarProps) {
   return (
-    <header className="h-11 border-b border-border bg-surface-2/80 backdrop-blur-sm sticky top-0 z-10 flex items-center px-5 gap-4">
+    <header className="h-11 border-b border-border bg-surface-2 sticky top-0 z-10 flex items-center px-5 gap-4">
       {/* Title */}
-      <h1 className="text-ink-secondary text-xs font-medium flex-1">{pageTitle}</h1>
+      <p className="text-ink-tertiary text-xs font-mono flex-1 truncate">{pageTitle}</p>
 
-      {/* Actions */}
-      <div className="flex items-center gap-2">
-        <button className="btn-ghost p-1.5" aria-label="Search">
-          <Search className="w-3.5 h-3.5" />
-        </button>
-
-        <button className="btn-ghost p-1.5 relative" aria-label="Notifications">
-          <Bell className="w-3.5 h-3.5" />
-        </button>
-
-        <div className="w-px h-4 bg-border mx-0.5" />
-
-        <UserButtonOrFallback />
-      </div>
+      {/* Account */}
+      <UserButtonOrFallback />
     </header>
   );
 }
@@ -59,9 +47,9 @@ async function UserButtonOrFallback() {
       <UserButton
         appearance={{
           variables: {
-            colorBackground: '#14171e',
-            colorText: '#f0f2f7',
-            colorPrimary: '#7c6af0',
+            colorBackground: 'var(--color-surface-3)',
+            colorText: 'var(--color-ink-primary)',
+            colorPrimary: 'var(--color-accent)',
           },
           elements: {
             avatarBox: 'w-6 h-6',
@@ -72,8 +60,8 @@ async function UserButtonOrFallback() {
   }
 
   return (
-    <div className="w-6 h-6 rounded-full bg-surface-5 border border-border flex items-center justify-center">
-      <User className="w-3.5 h-3.5 text-ink-tertiary" />
+    <div className="w-6 h-6 rounded-full bg-surface-4 border border-border flex items-center justify-center">
+      <User className="w-3 h-3 text-ink-tertiary" />
     </div>
   );
 }

@@ -55,43 +55,42 @@ export default async function AuditPage() {
   }
 
   return (
-    <div className="p-6 space-y-4 animate-fade-in">
+    <div className="p-6 space-y-5 animate-fade-in">
+      {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-ink-primary font-semibold text-sm">Audit Log</h2>
-          <p className="text-ink-tertiary text-xs mt-0.5">Hash-chained append-only event log</p>
+          <h1 className="text-ink-primary font-medium text-sm">Audit Log</h1>
+          <p className="text-ink-secondary text-xs mt-0.5">Hash-chained append-only event log</p>
         </div>
-        <span className="badge-accent">{events.length} events</span>
+        <span className="badge">{events.length} events</span>
       </div>
 
       <div className="card overflow-hidden">
         <table className="w-full text-xs">
           <thead>
-            <tr className="border-b border-border bg-surface-4/50">
-              <th className="text-left px-4 py-2.5 text-ink-tertiary font-medium tracking-wide">
+            <tr className="border-b border-border">
+              <th className="text-left px-4 py-2.5 text-ink-tertiary font-medium font-mono text-[10px] uppercase tracking-wider">
                 Event
               </th>
-              <th className="text-left px-4 py-2.5 text-ink-tertiary font-medium tracking-wide">
+              <th className="text-left px-4 py-2.5 text-ink-tertiary font-medium font-mono text-[10px] uppercase tracking-wider">
                 Actor
               </th>
-              <th className="text-right px-4 py-2.5 text-ink-tertiary font-medium tracking-wide">
+              <th className="text-right px-4 py-2.5 text-ink-tertiary font-medium font-mono text-[10px] uppercase tracking-wider">
                 When
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody className="divide-y divide-border-subtle">
             {events.map((ev) => (
-              <tr key={ev.id} className="hover:bg-surface-4/30 transition-colors">
+              <tr key={ev.id} className="hover:bg-surface-3/60 transition-colors">
                 <td className="px-4 py-2.5">
-                  <span className="font-mono text-accent-400">{ev.kind}</span>
+                  <span className="font-mono text-ink-primary text-xs">{ev.kind}</span>
                 </td>
                 <td className="px-4 py-2.5 text-ink-secondary">
-                  <span className="badge bg-surface-5 border border-border text-ink-tertiary mr-1.5">
-                    {ev.actorKind}
-                  </span>
-                  {ev.actorId}
+                  <span className="badge mr-1.5">{ev.actorKind}</span>
+                  <span className="font-mono text-ink-tertiary text-[10px]">{ev.actorId}</span>
                 </td>
-                <td className="px-4 py-2.5 text-ink-tertiary text-right font-mono">
+                <td className="px-4 py-2.5 text-ink-tertiary text-right font-mono tabular-nums">
                   {formatRelativeTime(new Date(ev.ts))}
                 </td>
               </tr>
