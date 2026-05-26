@@ -47,9 +47,6 @@ export interface HandleTurnDeps {
   fireworks?: { baseUrl: string; apiKey: string };
 }
 
-/** `true` when the Pi loop is enabled via env flag. Read once at module load. */
-const PI_LOOP_ENABLED = process.env['SYM_PI_LOOP'] === '1';
-
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
 const FLUSH_CHARS = 60;
 
@@ -67,7 +64,11 @@ async function runTurnLoop(
   history: ChatMessage[],
   onDelta?: (delta: string) => void | Promise<void>,
 ): Promise<Reply> {
-  if (PI_LOOP_ENABLED && deps.fireworks !== undefined) {
+  // Read the flag at call time, NOT at module load: index.ts runs loadDotenv()
+  // inside main(), which is AFTER this module is first imported — a module-level
+  // read would always see SYM_PI_LOOP unset and silently fall back to the kernel.
+  const piLoopEnabled = process.env['SYM_PI_LOOP'] === '1';
+  if (piLoopEnabled && deps.fireworks !== undefined) {
     const model = buildFireworksModel({
       baseUrl: deps.fireworks.baseUrl,
       modelId: deps.model,
