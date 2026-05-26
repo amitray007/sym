@@ -161,12 +161,11 @@ export function createServer(deps: ServerDeps): Hono {
         : undefined;
     await handleTurn(turn, {
       db,
-      provider: ctx.provider,
+      fireworks: ctx.fireworks,
       model: ctx.model,
       slackClient: ctx.slackClient,
       botUserId: ctx.botUserId,
       slackTeamId: ctx.slackTeamId,
-      fireworks: ctx.fireworks,
       ...(viewedChannelId !== undefined ? { viewedChannelId } : {}),
       audit: (input) => append(db, input).then(() => undefined),
     });

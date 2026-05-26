@@ -1,5 +1,5 @@
 import { markdownBlock, receiptToContextBlock, threadToHistory } from '@sym/adapter-slack';
-import { ToolRegistry, runLoop } from '@sym/kernel';
+import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
 import { compositeDispatcher, loadConnectorRegistry } from './connectors.js';
@@ -17,7 +17,6 @@ import type { AppendStreamParams, SlackClient, StartStreamParams } from '@sym/ad
 import type { AppendInput } from '@sym/audit';
 import type {
   ChatMessage,
-  ProviderInterface,
   Reply,
   SlackChannelId,
   SlackThreadTs,
@@ -29,7 +28,8 @@ import type { Database } from '@sym/db';
 /** Injected dependencies for processing a turn (the testable seam). */
 export interface HandleTurnDeps {
   db: Database;
-  provider: ProviderInterface;
+  /** Raw Fireworks credentials — required by the Pi loop. */
+  fireworks: { baseUrl: string; apiKey: string };
   model: string;
   slackClient: SlackClient;
   /** Sym's own bot user id — lets thread history mark its posts as assistant. */
@@ -40,22 +40,16 @@ export interface HandleTurnDeps {
   viewedChannelId?: string;
   /** Optional audit sink — best-effort; a failure must never block the turn. */
   audit?: (input: AppendInput) => Promise<void>;
-  /**
-   * Raw Fireworks credentials for the Pi loop path (`SYM_PI_LOOP=1`).
-   * Absent on the kernel path; `runLoopPi` is never called without it.
-   */
-  fireworks?: { baseUrl: string; apiKey: string };
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
 const FLUSH_CHARS = 60;
 
 /**
- * Dispatch to the kernel loop or the Pi loop depending on `SYM_PI_LOOP`.
+ * Run the turn through the Pi loop.
  *
- * Both paths return the same `Reply` shape. `onDelta` and `history` are
- * forwarded identically so the streaming / postMessage pipeline above is
- * completely unchanged.
+ * Single path — no fallback. `onDelta` and `history` are forwarded so the
+ * streaming / postMessage pipeline above is completely unchanged.
  */
 async function runTurnLoop(
   turn: Turn,
@@ -64,34 +58,22 @@ async function runTurnLoop(
   history: ChatMessage[],
   onDelta?: (delta: string) => void | Promise<void>,
 ): Promise<Reply> {
-  // Read the flag at call time, NOT at module load: index.ts runs loadDotenv()
-  // inside main(), which is AFTER this module is first imported — a module-level
-  // read would always see SYM_PI_LOOP unset and silently fall back to the kernel.
-  const piLoopEnabled = process.env['SYM_PI_LOOP'] === '1';
-  if (piLoopEnabled && deps.fireworks !== undefined) {
-    const model = buildFireworksModel({
-      baseUrl: deps.fireworks.baseUrl,
-      modelId: deps.model,
-    });
-    const skills = await loadEnabledSkills(deps.db, turn.workspaceId);
-    return runLoopPi(
-      turn,
-      { baseUrl: deps.fireworks.baseUrl, apiKey: deps.fireworks.apiKey, model },
-      registry,
-      {
-        history,
-        skills,
-        slackClient: deps.slackClient,
-        ...(onDelta !== undefined ? { onDelta } : {}),
-      },
-    );
-  }
-
-  return runLoop(turn, deps.provider, registry, {
-    model: deps.model,
-    history,
-    ...(onDelta !== undefined ? { onDelta } : {}),
+  const model = buildFireworksModel({
+    baseUrl: deps.fireworks.baseUrl,
+    modelId: deps.model,
   });
+  const skills = await loadEnabledSkills(deps.db, turn.workspaceId);
+  return runLoopPi(
+    turn,
+    { baseUrl: deps.fireworks.baseUrl, apiKey: deps.fireworks.apiKey, model },
+    registry,
+    {
+      history,
+      skills,
+      slackClient: deps.slackClient,
+      ...(onDelta !== undefined ? { onDelta } : {}),
+    },
+  );
 }
 
 /** A channel thread (not a DM) — read the live Slack thread for full context. */

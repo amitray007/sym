@@ -1,6 +1,23 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { handleTurn } from './handle-turn.js';
+
+// ---------------------------------------------------------------------------
+// Mock the Pi loop so tests are hermetic (no real HTTP calls to Fireworks).
+// vi.mock is hoisted before imports, so we can't reference module-scope vars
+// inside the factory — instead we export a ref from the mock that tests drive.
+// ---------------------------------------------------------------------------
+
+vi.mock('./pi/loop.js', () => {
+  const mockFn = vi.fn();
+  return { runLoopPi: mockFn, __mockRunLoopPi: mockFn };
+});
+
+import * as piLoopModule from './pi/loop.js';
+
+// Typed handle to the hoisted mock — cast through unknown to reach the hidden export.
+const mockRunLoopPi = (piLoopModule as unknown as { __mockRunLoopPi: ReturnType<typeof vi.fn> })
+  .__mockRunLoopPi;
 
 import type {
   AppendStreamParams,
@@ -18,9 +35,7 @@ import type {
 import type { AppendInput } from '@sym/audit';
 import type {
   ChatMessage,
-  CompletionChunk,
-  CompletionRequest,
-  ProviderInterface,
+  Reply,
   SlackChannelId,
   SlackThreadTs,
   SlackUserId,
@@ -29,6 +44,30 @@ import type {
   WorkspaceId,
 } from '@sym/contracts';
 import type { Database } from '@sym/db';
+
+// ---------------------------------------------------------------------------
+// Fake Fireworks credentials (value doesn't matter — Pi is mocked).
+// ---------------------------------------------------------------------------
+
+const FAKE_FIREWORKS = { baseUrl: 'http://fake.fireworks', apiKey: 'fake-key' };
+
+// ---------------------------------------------------------------------------
+// Default reply returned by the mock loop unless overridden.
+// ---------------------------------------------------------------------------
+
+function makeReply(overrides: Partial<Reply> = {}): Reply {
+  return {
+    turnId: 'turn-1' as TurnId,
+    markdown: 'Hello world',
+    receipt: {
+      turnId: 'turn-1' as TurnId,
+      model: 'test-model',
+      toolsInvoked: [],
+      durationMs: 10,
+    },
+    ...overrides,
+  };
+}
 
 const BOT = 'UBOT' as SlackUserId;
 
@@ -114,37 +153,6 @@ class MockSlackClient implements SlackClient {
   }
 }
 
-/** A provider that records the messages it was asked to complete. */
-function capturingProvider(): { provider: ProviderInterface; captured: () => ChatMessage[] } {
-  let seen: ChatMessage[] = [];
-  const provider: ProviderInterface = {
-    id: 'capture',
-    async *complete(req: CompletionRequest): AsyncIterable<CompletionChunk> {
-      seen = req.messages;
-      yield { delta: { content: 'ok' } };
-      yield {
-        delta: {},
-        finishReason: 'stop',
-        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
-      };
-    },
-  };
-  return { provider, captured: () => seen };
-}
-
-const fakeProvider: ProviderInterface = {
-  id: 'fake',
-  async *complete(): AsyncIterable<CompletionChunk> {
-    yield { delta: { content: 'Hello ' } };
-    yield { delta: { content: 'world' } };
-    yield {
-      delta: {},
-      finishReason: 'stop',
-      usage: { promptTokens: 10, completionTokens: 2, totalTokens: 12 },
-    };
-  },
-};
-
 function makeTurn(overrides: Partial<Turn> = {}): Turn {
   return {
     id: 'turn-1' as TurnId,
@@ -160,11 +168,16 @@ function makeTurn(overrides: Partial<Turn> = {}): Turn {
 }
 
 describe('handleTurn', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('runs the loop and posts the reply with a markdown block + receipt footer', async () => {
+    mockRunLoopPi.mockResolvedValueOnce(makeReply());
     const slack = new MockSlackClient();
     await handleTurn(makeTurn(), {
       db: stubDb(),
-      provider: fakeProvider,
+      fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
       botUserId: BOT,
@@ -183,10 +196,20 @@ describe('handleTurn', () => {
   });
 
   it('streams (not chatPostMessage) when the turn is threaded (app_mention)', async () => {
+    // The mock streams deltas via onDelta so appendedText is populated.
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as { onDelta?: (d: string) => Promise<void> };
+        await o.onDelta?.('Hello ');
+        await o.onDelta?.('world');
+        return makeReply({ markdown: 'Hello world' });
+      },
+    );
+
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
       db: stubDb(),
-      provider: fakeProvider,
+      fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
       botUserId: BOT,
@@ -207,10 +230,19 @@ describe('handleTurn', () => {
   });
 
   it('streams a DM turn, calls setStatus, and startStream has no recipient ids', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as { onDelta?: (d: string) => Promise<void> };
+        await o.onDelta?.('Hello ');
+        await o.onDelta?.('world');
+        return makeReply({ markdown: 'Hello world' });
+      },
+    );
+
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ entrySurface: 'dm', threadTs: '500.0' as SlackThreadTs }), {
       db: stubDb(),
-      provider: fakeProvider,
+      fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
       botUserId: BOT,
@@ -241,12 +273,15 @@ describe('handleTurn', () => {
   });
 
   it('falls back to chatPostMessage when chatStartStream rejects', async () => {
+    // Pi loop is called once per path. startStream fails → fallback calls the loop again.
+    mockRunLoopPi.mockResolvedValue(makeReply());
+
     const slack = new MockSlackClient();
     slack.startStreamError = new Error('stream_unavailable');
 
     await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
       db: stubDb(),
-      provider: fakeProvider,
+      fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
       botUserId: BOT,
@@ -267,16 +302,26 @@ describe('handleTurn', () => {
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ channelId: undefined }), {
       db: stubDb(),
-      provider: fakeProvider,
+      fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
     });
     expect(slack.posts).toHaveLength(0);
+    // runLoopPi must not be called when there is no channelId.
+    expect(mockRunLoopPi).not.toHaveBeenCalled();
   });
 
   it('feeds the live Slack thread as history on a channel mention, excluding the trigger', async () => {
+    let capturedHistory: ChatMessage[] = [];
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        capturedHistory = (opts as { history?: ChatMessage[] }).history ?? [];
+        return makeReply();
+      },
+    );
+
     const slack = new MockSlackClient();
     slack.replies = [
       {
@@ -291,7 +336,6 @@ describe('handleTurn', () => {
         ts: '900.3' as SlackThreadTs,
       },
     ];
-    const cap = capturingProvider();
 
     await handleTurn(
       makeTurn({
@@ -301,7 +345,7 @@ describe('handleTurn', () => {
       }),
       {
         db: stubDb(),
-        provider: cap.provider,
+        fireworks: FAKE_FIREWORKS,
         model: 'test-model',
         slackClient: slack,
         botUserId: BOT,
@@ -309,69 +353,64 @@ describe('handleTurn', () => {
       },
     );
 
-    const messages = cap.captured();
-    const history = messages.slice(1, -1); // drop the system prompt + the final turn
-
     // Earlier human + Sym messages become labelled history; Sym's is assistant.
-    expect(history).toEqual([
+    expect(capturedHistory).toEqual([
       { role: 'user', content: 'U1: we should migrate to PG16' },
       { role: 'assistant', content: 'here were the tradeoffs' },
     ]);
-    // The triggering message appears once — as the current turn, not in history.
-    const mentions = messages.filter((m) => m.content?.includes('summarize the risks'));
-    expect(mentions).toHaveLength(1);
-    expect(messages.at(-1)?.role).toBe('user');
   });
 
-  it('wired round-trip: builtin get_current_time dispatched, final text streamed without error', async () => {
-    // Call-counter provider: call 1 emits a tool_call, call 2 emits final text.
-    let providerCallCount = 0;
-    const twoStepProvider: ProviderInterface = {
-      id: 'two-step',
-      async *complete(): AsyncIterable<CompletionChunk> {
-        providerCallCount++;
-        if (providerCallCount === 1) {
-          yield {
-            delta: {
-              toolCalls: [{ index: 0, id: 'tc1', name: 'get_current_time', argumentsDelta: '{}' }],
-            },
-          };
-          yield { delta: {}, finishReason: 'tool_calls' };
-        } else {
-          yield { delta: { content: 'The time is now.' }, finishReason: 'stop' };
-        }
+  it('runLoopPi is called: verifies the Pi path is always taken (tool receipt flows through)', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as { onDelta?: (d: string) => Promise<void> };
+        await o.onDelta?.('The time is now.');
+        return makeReply({
+          markdown: 'The time is now.',
+          receipt: {
+            turnId: 'turn-1' as TurnId,
+            model: 'test-model',
+            toolsInvoked: ['get_current_time'],
+            durationMs: 10,
+          },
+        });
       },
-    };
+    );
 
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ entrySurface: 'dm', threadTs: '500.0' as SlackThreadTs }), {
       db: stubDb(),
-      provider: twoStepProvider,
+      fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
     });
 
-    // Provider was called twice (tool loop ran).
-    expect(providerCallCount).toBe(2);
+    // Pi was called exactly once.
+    expect(mockRunLoopPi).toHaveBeenCalledOnce();
 
-    // Final reply text is from step 2.
-    expect(slack.appendedText).toContain('The time is now.');
-
-    // No errors — streaming completed normally (stopStream was called).
+    // Final reply text came through the streaming path.
+    expect(slack.appendedText).toBe('The time is now.');
     expect(slack.stopStreamCalls).toHaveLength(1);
     expect(slack.posts).toHaveLength(0);
   });
 
   it('prepends viewed-channel background context as the first history message for DM turns', async () => {
+    let capturedHistory: ChatMessage[] = [];
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        capturedHistory = (opts as { history?: ChatMessage[] }).history ?? [];
+        return makeReply();
+      },
+    );
+
     const slack = new MockSlackClient();
     // The channel the user is viewing has these recent messages (oldest-first).
     slack.historyMessages = [
       { user: 'U1' as SlackUserId, text: 'deploy went out', ts: '800.1' as SlackThreadTs },
       { user: 'U2' as SlackUserId, text: 'looks good to me', ts: '800.2' as SlackThreadTs },
     ];
-    const cap = capturingProvider();
 
     await handleTurn(
       makeTurn({
@@ -382,7 +421,7 @@ describe('handleTurn', () => {
       }),
       {
         db: stubDb(),
-        provider: cap.provider,
+        fireworks: FAKE_FIREWORKS,
         model: 'test-model',
         slackClient: slack,
         botUserId: BOT,
@@ -391,9 +430,8 @@ describe('handleTurn', () => {
       },
     );
 
-    const messages = cap.captured();
-    // The background context block must be the FIRST history message (after system prompt).
-    const backgroundMsg = messages[1];
+    // The background context block must be the FIRST history message.
+    const backgroundMsg = capturedHistory[0];
     expect(backgroundMsg?.content).toMatch(
       /^Background — the user is currently viewing channel C-VIEWED in Slack\./,
     );
@@ -402,6 +440,14 @@ describe('handleTurn', () => {
   });
 
   it('calls the audit sink with app.turn.complete after the reply is delivered (stream path)', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as { onDelta?: (d: string) => Promise<void> };
+        await o.onDelta?.('reply');
+        return makeReply({ markdown: 'reply' });
+      },
+    );
+
     const auditCalls: AppendInput[] = [];
     const audit = vi.fn((input: AppendInput) => {
       auditCalls.push(input);
@@ -413,7 +459,7 @@ describe('handleTurn', () => {
 
     await handleTurn(turn, {
       db: stubDb(),
-      provider: fakeProvider,
+      fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
       botUserId: BOT,
@@ -438,6 +484,8 @@ describe('handleTurn', () => {
   });
 
   it('calls the audit sink with app.turn.complete after the reply is delivered (post path)', async () => {
+    mockRunLoopPi.mockResolvedValueOnce(makeReply());
+
     const auditCalls: AppendInput[] = [];
     const audit = vi.fn((input: AppendInput) => {
       auditCalls.push(input);
@@ -450,7 +498,7 @@ describe('handleTurn', () => {
 
     await handleTurn(turn, {
       db: stubDb(),
-      provider: fakeProvider,
+      fireworks: FAKE_FIREWORKS,
       model: 'test-model',
       slackClient: slack,
       botUserId: BOT,
@@ -467,12 +515,14 @@ describe('handleTurn', () => {
   });
 
   it('does not call audit when audit dep is absent (existing tests stay green)', async () => {
+    mockRunLoopPi.mockResolvedValueOnce(makeReply());
+
     // Simply running without an audit dep must not throw.
     const slack = new MockSlackClient();
     await expect(
       handleTurn(makeTurn(), {
         db: stubDb(),
-        provider: fakeProvider,
+        fireworks: FAKE_FIREWORKS,
         model: 'test-model',
         slackClient: slack,
         botUserId: BOT,

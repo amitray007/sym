@@ -1,11 +1,10 @@
 import { providerConfigs, slackInstalls, workspaces } from '@sym/db';
-import { FireworksProvider } from '@sym/provider-fireworks';
 import { and, eq } from 'drizzle-orm';
 
 import { WebApiSlackClient } from './slack-client.js';
 
 import type { SlackClient } from '@sym/adapter-slack';
-import type { ProviderInterface, SlackUserId, WorkspaceId } from '@sym/contracts';
+import type { SlackUserId, WorkspaceId } from '@sym/contracts';
 import type { Database } from '@sym/db';
 
 const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
@@ -20,13 +19,9 @@ export interface WorkspaceContext {
    * backfill — the owner gate treats null as "deny everyone" (fail closed).
    */
   ownerSlackUserId: SlackUserId | null;
-  provider: ProviderInterface;
   model: string;
   slackClient: SlackClient;
-  /**
-   * Raw Fireworks credentials — consumed by `runLoopPi` when `SYM_PI_LOOP=1`.
-   * Kept alongside `provider` so the existing kernel path is untouched.
-   */
+  /** Raw Fireworks credentials — consumed by `runLoopPi`. */
   fireworks: {
     baseUrl: string;
     apiKey: string;
@@ -67,11 +62,6 @@ export async function loadWorkspaceContext(
   )[0];
   if (!config) return null;
 
-  const provider = new FireworksProvider({
-    baseUrl: config.baseUrl ?? DEFAULT_FIREWORKS_BASE_URL,
-    apiKey: config.apiKey,
-  });
-
   const fireworksBaseUrl = config.baseUrl ?? DEFAULT_FIREWORKS_BASE_URL;
 
   return {
@@ -79,7 +69,6 @@ export async function loadWorkspaceContext(
     botUserId: install.botUserId as SlackUserId,
     slackTeamId: workspace.slackTeamId,
     ownerSlackUserId: workspace.ownerSlackUserId as SlackUserId | null,
-    provider,
     model: config.modelChat,
     slackClient: new WebApiSlackClient(install.botAccessToken),
     fireworks: {

@@ -89,9 +89,6 @@ importers:
       '@sym/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
-      '@sym/provider-fireworks':
-        specifier: workspace:*
-        version: link:../../packages/provider/fireworks
       '@sym/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets

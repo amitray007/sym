@@ -1,4 +1,4 @@
-import type { ChatMessage, Turn } from '@sym/contracts';
+import type { Turn } from '@sym/contracts';
 
 /**
  * Sym's identity — single-owner framing. Static (no runtime data) so the whole
@@ -83,23 +83,4 @@ export function buildUserTurnContent(turn: Turn): string {
     '',
     turn.text,
   ].join('\n');
-}
-
-/**
- * Assemble the full `ChatMessage[]` array for a single turn.
- *
- * Shape: `[system] [history...] [user turn]`. The metadata line lives inside the
- * user turn (not the system prompt) so it is not replayed in future turns'
- * durable history, and is framed so it is never confused for the content.
- */
-export function assembleTurnMessages(
-  systemContent: string,
-  history: ChatMessage[],
-  turn: Turn,
-): ChatMessage[] {
-  return [
-    { role: 'system', content: systemContent },
-    ...history,
-    { role: 'user', content: buildUserTurnContent(turn) },
-  ];
 }

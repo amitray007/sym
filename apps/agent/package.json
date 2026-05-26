@@ -24,7 +24,6 @@
     "@sym/ext-mcp": "workspace:*",
     "@sym/ext-skills": "workspace:*",
     "@sym/kernel": "workspace:*",
-    "@sym/provider-fireworks": "workspace:*",
     "@sym/secrets": "workspace:*",
     "drizzle-orm": "^0.44.2",
     "hono": "^4.6.14"
