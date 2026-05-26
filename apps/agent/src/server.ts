@@ -21,7 +21,7 @@ export interface ServerDeps {
   config: AgentConfig;
 }
 
-/** Bounded in-memory dedup by Slack `event_id`. Redis-backed dedup is S1's deferred piece. */
+/** Bounded in-memory dedup by Slack `event_id`. */
 function createDedup(max = 10_000): (id: string) => boolean {
   const seen = new Set<string>();
   return (id: string): boolean => {

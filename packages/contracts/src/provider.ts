@@ -53,10 +53,8 @@ export interface CompletionChunk {
 }
 
 /**
- * The provider contract the kernel (S2) depends on. Fireworks is the v1 impl
- * (`@sym/provider-fireworks`); future providers implement the same interface.
- * Tools are passed per-request (`CompletionRequest.tools`) by the kernel from
- * the `ToolDispatcher` registry — the provider does not own a tool list.
+ * The provider completion contract. Fireworks is the current impl, via the
+ * openai-completions API. Tools are passed per-request via `CompletionRequest.tools`.
  */
 export interface ProviderInterface {
   /** Stable provider identifier, e.g. `fireworks`. */

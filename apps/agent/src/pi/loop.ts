@@ -43,7 +43,7 @@ export interface PiModelCfg {
   model: Model<'openai-completions'>;
 }
 
-/** Options accepted by `runLoopPi` — mirrors `LoopOptions` from the kernel. */
+/** Options accepted by `runLoopPi`. */
 export interface PiLoopOptions {
   /** Conversation history prior to this turn (Sym's `ChatMessage[]` shape). */
   history: ChatMessage[];
@@ -180,7 +180,7 @@ function extractUsage(messages: AgentMessage[]): Usage | undefined {
  * Run a single Sym turn through Pi's `Agent`.
  *
  * Builds the Agent, subscribes for streaming text deltas, runs `prompt()`, then
- * collects the markdown reply and builds a `Receipt` exactly as `runLoop` does.
+ * collects the markdown reply and builds a `Receipt`.
  *
  * The `onDelta` callback is forwarded unchanged so `streamReply`'s buffer /
  * `chatAppendStream` pipeline works without modification.
@@ -193,7 +193,7 @@ export async function runLoopPi(
 ): Promise<Reply> {
   const startMs = Date.now();
 
-  // Build the ToolRuntimeContext — mirrors what loop.ts passes to dispatcher.dispatch.
+  // Build the ToolRuntimeContext passed to each tool dispatch.
   const ctx: ToolRuntimeContext = {
     workspaceId: turn.workspaceId,
     conversationId: turn.conversationId,

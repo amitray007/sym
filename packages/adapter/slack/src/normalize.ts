@@ -16,7 +16,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 /** The `assistant_thread` object on assistant_thread_started/context_changed. */
-export interface SlackAssistantThread {
+interface SlackAssistantThread {
   user_id?: string;
   /** The DM-style channel the assistant container lives in. */
   channel_id: string;
@@ -196,7 +196,7 @@ function effectiveThreadTs(input: SlackTurnInput): SlackThreadTs | undefined {
  * Derive a stable `conversationId` from workspace + channel (+ effective thread).
  * Uses {@link effectiveThreadTs} so a top-level mention and its threaded replies
  * resolve to the SAME conversation (the thread Sym opened). Best-effort
- * client-side key; `@sym/kernel` (S2) may canonicalize it against DB state.
+ * client-side key.
  */
 function deriveConversationId(input: SlackTurnInput): ConversationId {
   const base = `${input.workspaceId}:${input.channelId}`;
@@ -213,7 +213,7 @@ function generateTurnId(): TurnId {
 
 /**
  * Converts a `SlackTurnInput` (adapter-domain) into a `Turn` (kernel-domain).
- * The kernel (S2) should validate and persist the resulting Turn.
+ * The agent processes the resulting Turn.
  */
 export function slackTurnInputToTurn(input: SlackTurnInput): Turn {
   const thread = effectiveThreadTs(input);

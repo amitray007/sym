@@ -4,7 +4,7 @@ import type { ContextBlock } from './blocks.js';
 import type { Receipt, ReceiptFooterField } from '@sym/contracts';
 
 /**
- * Converts a `Receipt` (from `@sym/kernel`, passed through S2) into an
+ * Converts a `Receipt` (built by `@sym/kernel`) into an
  * ordered array of `ReceiptFooterField` label/value pairs.
  *
  * Rendering rules (per outbound contract spec):

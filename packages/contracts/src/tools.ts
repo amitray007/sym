@@ -2,9 +2,8 @@ import type { ConversationId, SlackChannelId, SlackUserId, TurnId, WorkspaceId }
 import type { JsonObject, JsonSchema, JsonValue } from './json.js';
 
 /**
- * A function-tool the model may call. OpenAI-compatible shape. The exact
- * provider wire format (Fireworks vs OpenAI streaming deltas) is finalized
- * when S5 wires tools end-to-end (overview decision D2).
+ * A function-tool the model may call. OpenAI-compatible shape (Fireworks
+ * openai-completions API).
  */
 export interface ToolDescriptor {
   type: 'function';

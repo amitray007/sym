@@ -1,11 +1,8 @@
 /**
- * Cross-stream error model. Every recoverable cross-boundary failure is a
- * tagged value, not a thrown exception, so callers handle it explicitly.
- * Domain-internal throws are fine; what crosses a package boundary is typed.
+ * Cross-boundary error types and result envelope used by the adapter and agent.
  */
-export type SymErrorDomain = 'provider' | 'tool' | 'slack' | 'acl' | 'config' | 'audit';
 
-export interface SymErrorBase<D extends SymErrorDomain, C extends string> {
+interface SymErrorBase<D extends string, C extends string> {
   domain: D;
   code: C;
   message: string;
@@ -13,22 +10,13 @@ export interface SymErrorBase<D extends SymErrorDomain, C extends string> {
   cause?: unknown;
 }
 
-export type ProviderError = SymErrorBase<
-  'provider',
-  'rate_limited' | 'timeout' | 'upstream' | 'invalid_response' | 'unauthorized'
->;
-
 export type SlackActionError = SymErrorBase<
   'slack',
   'rate_limited' | 'invalid_input' | 'not_authed' | 'channel_not_found' | 'api_error'
 >;
 
-export type AclError = SymErrorBase<'acl', 'forbidden' | 'not_allowlisted' | 'blocked'>;
-
-export type ConfigError = SymErrorBase<'config', 'missing' | 'invalid' | 'disabled'>;
-
-/** The cross-stream error union. `tool` failures travel as `ToolError` (see tools.ts). */
-export type SymError = ProviderError | SlackActionError | AclError | ConfigError;
+/** The cross-boundary error union. Kept for the type test invariant. */
+export type SymError = SlackActionError;
 
 /** Explicit success/failure envelope for cross-boundary calls. */
 export type Result<T, E = SymError> = { ok: true; value: T } | { ok: false; error: E };

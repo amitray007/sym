@@ -1,13 +1,11 @@
 import type { ToolDispatcher } from '@sym/contracts';
 
 /**
- * Tool registry wrapper. In v1 with no tools wired (pre-S5), the registry
- * is empty and `list()` returns `[]`. The kernel passes this list to the
- * provider's `CompletionRequest.tools`. An empty list means the provider
- * sends no tool schemas — the model will not emit tool calls.
+ * Tool registry wrapper. Wraps a `ToolDispatcher` and exposes its tool list
+ * to the Pi loop.
  *
- * Fail-closed: if the model somehow emits a tool call and no dispatcher is
- * present, the kernel logs a warning and skips the call rather than crashing.
+ * Fail-closed: if no dispatcher is present, `listTools()` returns `[]` and
+ * `getDispatcher()` returns null — the caller handles the absence explicitly.
  */
 export class ToolRegistry {
   private readonly dispatcher: ToolDispatcher | null;

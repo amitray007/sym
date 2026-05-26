@@ -1,9 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { AuditEvent } from '../src/audit.js';
 import type { Receipt, Reply } from '../src/domain.js';
 import type { Result, SymError } from '../src/errors.js';
-import type { AuditEventId, SlackUserId, WorkspaceId } from '../src/ids.js';
+import type { SlackUserId, WorkspaceId } from '../src/ids.js';
 import type { CompletionChunk, ProviderInterface } from '../src/provider.js';
 import type { ToolResult } from '../src/tools.js';
 
@@ -18,7 +17,6 @@ describe('@sym/contracts type invariants', () => {
 
   it('distinct brands are not interchangeable', () => {
     expectTypeOf<WorkspaceId>().not.toEqualTypeOf<SlackUserId>();
-    expectTypeOf<AuditEventId>().toMatchTypeOf<number>();
   });
 
   it('ToolResult is a discriminated union on ok', () => {
@@ -33,9 +31,8 @@ describe('@sym/contracts type invariants', () => {
     >();
   });
 
-  it('Reply carries a Receipt and AuditEvent uses a branded id', () => {
+  it('Reply carries a Receipt', () => {
     expectTypeOf<Reply>().toHaveProperty('receipt').toEqualTypeOf<Receipt>();
-    expectTypeOf<AuditEvent>().toHaveProperty('id').toEqualTypeOf<AuditEventId>();
   });
 
   it('Result narrows on ok', () => {

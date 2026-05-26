@@ -10,7 +10,7 @@ export interface JsonObject {
 /**
  * A pragmatic JSON Schema subset for tool parameter descriptors. Not a full
  * Draft 2020-12 model — just enough to describe tool inputs to the provider.
- * The exact provider-side shape (Fireworks vs OpenAI) is pinned in S5 (D2).
+ * The provider-side shape (Fireworks via openai-completions API).
  */
 export interface JsonSchema {
   type?: 'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null';
