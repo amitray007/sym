@@ -13,6 +13,8 @@ import type {
   PostMessageParams,
   PostMessageResult,
   ReactionsAddParams,
+  RemindersAddParams,
+  RemindersAddResult,
   SearchMessageMatch,
   SearchMessagesParams,
   SearchMessagesResult,
@@ -29,6 +31,7 @@ import type {
   StreamHandle,
   UpdateMessageParams,
   UsersInfoParams,
+  UsersProfileSetParams,
 } from '@sym/adapter-slack';
 import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
 
@@ -411,6 +414,37 @@ export class WebApiSlackClient implements SlackClient {
       ...(m.permalink !== undefined ? { permalink: m.permalink } : {}),
     }));
     return { matches, total: json.messages?.total ?? matches.length };
+  }
+
+  async usersProfileSet(params: UsersProfileSetParams): Promise<void> {
+    // Slack expects the profile fields nested under `profile` as a JSON object.
+    const profile: Record<string, unknown> = {
+      status_text: params.statusText,
+    };
+    if (params.statusEmoji !== undefined) profile['status_emoji'] = params.statusEmoji;
+    if (params.statusExpiration !== undefined) {
+      profile['status_expiration'] = params.statusExpiration;
+    }
+    await this.call('users.profile.set', { profile });
+  }
+
+  async remindersAdd(params: RemindersAddParams): Promise<RemindersAddResult> {
+    interface RemindersResponse extends SlackOkResponse {
+      reminder?: {
+        id?: string;
+        text?: string;
+        time?: number;
+      };
+    }
+    const json = await this.call<RemindersResponse>('reminders.add', {
+      text: params.text,
+      time: params.time,
+    });
+    return {
+      id: json.reminder?.id ?? '',
+      text: json.reminder?.text ?? params.text,
+      ...(json.reminder?.time !== undefined ? { time: json.reminder.time } : {}),
+    };
   }
 
   async conversationsList(params: ConversationsListParams): Promise<ConversationsListResult> {

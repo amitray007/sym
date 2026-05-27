@@ -229,6 +229,126 @@ function pickClient(
   return { client: deps.slackClient, usedActor: 'bot' };
 }
 
+// ---------------------------------------------------------------------------
+// Phase B — Act-as-owner write tools (user-token only)
+// ---------------------------------------------------------------------------
+//
+// These tools use the owner's user token so the action shows up in Slack as
+// being performed by the owner, not by Sym. Destructive ones ride the
+// existing beforeToolCall confirmation flow (pi/loop.ts) — the owner must
+// approve via a Slack button before they execute.
+
+const POST_AS_OWNER_DESCRIPTOR: ToolDescriptor = {
+  type: 'function',
+  name: 'post_as_owner',
+  description:
+    'Post a Slack message AS THE OWNER (acts under the owner\'s identity, not as Sym). Use ONLY when the user EXPLICITLY asks Sym to send a message on their behalf — phrases like "send X to #channel as me", "post this on my behalf", "draft this and send it from my account". For Sym\'s OWN replies in the current thread, do NOT call this tool — just generate the reply text and Sym will post it itself. The owner must confirm via a Slack button before the message is sent.',
+  parameters: {
+    type: 'object',
+    properties: {
+      channel_id: {
+        type: 'string',
+        description: 'Where to post: channel ID (C0123), DM ID (D0123), or MPIM ID.',
+      },
+      text: {
+        type: 'string',
+        description: 'The message body. Markdown supported.',
+      },
+      thread_ts: {
+        type: 'string',
+        description: "Optional — reply in this thread root's `ts` instead of posting top-level.",
+      },
+    },
+    required: ['channel_id', 'text'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
+  actor: 'user',
+  destructiveHint: true,
+};
+
+const REACT_AS_OWNER_DESCRIPTOR: ToolDescriptor = {
+  type: 'function',
+  name: 'react_as_owner',
+  description:
+    'Add an emoji reaction to a Slack message AS THE OWNER. Use ONLY when the user explicitly asks "react with X as me" / "add a 👀 from me to that message". Owner confirms via Slack button before the reaction is added.',
+  parameters: {
+    type: 'object',
+    properties: {
+      channel_id: {
+        type: 'string',
+        description: 'Channel containing the message (C0123 / D0123).',
+      },
+      message_ts: {
+        type: 'string',
+        description: "The target message's `ts`.",
+      },
+      emoji: {
+        type: 'string',
+        description: 'Emoji alias WITHOUT colons (e.g. "thumbsup", "eyes", "white_check_mark").',
+      },
+    },
+    required: ['channel_id', 'message_ts', 'emoji'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
+  actor: 'user',
+  destructiveHint: true,
+};
+
+const SET_STATUS_DESCRIPTOR: ToolDescriptor = {
+  type: 'function',
+  name: 'set_status',
+  description:
+    'Update the owner\'s Slack profile status (text + optional emoji + optional expiration). Use ONLY when the user explicitly asks to set/change/clear their status — "set my status to \'in a meeting\'", "I\'m heads-down for the next hour", "clear my status". Pass an empty status_text to CLEAR the current status. Owner confirms via Slack button before the change is applied.',
+  parameters: {
+    type: 'object',
+    properties: {
+      status_text: {
+        type: 'string',
+        description: 'New status text. Empty string clears the existing status.',
+      },
+      status_emoji: {
+        type: 'string',
+        description:
+          'Optional `:emoji:` shortcode WITH colons, e.g. `:palm_tree:`, `:headphones:`.',
+      },
+      expires_in_minutes: {
+        type: 'number',
+        description:
+          'Optional — automatically clear the status after N minutes. Omit for no expiration.',
+      },
+    },
+    required: ['status_text'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
+  actor: 'user',
+  destructiveHint: true,
+};
+
+const ADD_REMINDER_DESCRIPTOR: ToolDescriptor = {
+  type: 'function',
+  name: 'add_reminder',
+  description:
+    'Set a Slack reminder for the owner (`reminders.add`). Use when the user asks "remind me to X at Y" / "set a reminder for X tomorrow morning". Slack accepts natural-language time strings ("in 10 minutes", "tomorrow at 9am", "next Tuesday at 3pm") or a unix-seconds timestamp. Low-risk — does NOT require confirmation.',
+  parameters: {
+    type: 'object',
+    properties: {
+      text: {
+        type: 'string',
+        description: 'What the reminder will say when it fires.',
+      },
+      time: {
+        type: 'string',
+        description:
+          'When to fire the reminder. Natural-language ("in 10 minutes", "tomorrow at 9am") or a unix-seconds timestamp as a string.',
+      },
+    },
+    required: ['text', 'time'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
+  actor: 'user',
+  // Intentionally NOT destructive — adding a reminder is trivial to undo.
+};
+
 const SEARCH_MESSAGES_DESCRIPTOR: ToolDescriptor = {
   type: 'function',
   name: 'search_messages',
@@ -275,6 +395,10 @@ const ALL_BUILTIN_DESCRIPTORS: ToolDescriptor[] = [
   FETCH_URL_DESCRIPTOR,
   LIST_CHANNELS_DESCRIPTOR,
   SEARCH_MESSAGES_DESCRIPTOR,
+  POST_AS_OWNER_DESCRIPTOR,
+  REACT_AS_OWNER_DESCRIPTOR,
+  SET_STATUS_DESCRIPTOR,
+  ADD_REMINDER_DESCRIPTOR,
 ];
 const DESCRIPTORS_BY_NAME = new Map<string, ToolDescriptor>(
   ALL_BUILTIN_DESCRIPTORS.map((d) => [d.name, d]),
@@ -292,15 +416,7 @@ const DESCRIPTORS_BY_NAME = new Map<string, ToolDescriptor>(
 export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
   return {
     list(): ToolDescriptor[] {
-      return [
-        GET_CURRENT_TIME_DESCRIPTOR,
-        READ_CHANNEL_DESCRIPTOR,
-        READ_THREAD_DESCRIPTOR,
-        READ_USER_PROFILE_DESCRIPTOR,
-        FETCH_URL_DESCRIPTOR,
-        LIST_CHANNELS_DESCRIPTOR,
-        SEARCH_MESSAGES_DESCRIPTOR,
-      ];
+      return ALL_BUILTIN_DESCRIPTORS;
     },
 
     async dispatch(call: ToolCall, _ctx: ToolRuntimeContext): Promise<ToolResult> {
@@ -586,6 +702,167 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
                 .join('\n');
               result = { callId: call.id, ok: true, content: `${header}${body}` };
             }
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            result = {
+              callId: call.id,
+              ok: false,
+              error: { code: 'execution_failed', message },
+            };
+          }
+        }
+      } else if (call.name === 'post_as_owner') {
+        const channelArg = call.arguments['channel_id'];
+        const textArg = call.arguments['text'];
+        const threadTsArg = call.arguments['thread_ts'];
+        if (typeof channelArg !== 'string' || channelArg.length === 0) {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: { code: 'invalid_arguments', message: 'channel_id must be a non-empty string' },
+          };
+        } else if (typeof textArg !== 'string' || textArg.length === 0) {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: { code: 'invalid_arguments', message: 'text must be a non-empty string' },
+          };
+        } else {
+          try {
+            const posted = await slack.chatPostMessage({
+              channel: channelArg as SlackChannelId,
+              text: textArg,
+              ...(typeof threadTsArg === 'string' && threadTsArg.length > 0
+                ? { thread_ts: threadTsArg as SlackThreadTs }
+                : {}),
+            });
+            result = {
+              callId: call.id,
+              ok: true,
+              content: `posted as owner to ${channelArg} at ${posted.ts}`,
+            };
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            result = {
+              callId: call.id,
+              ok: false,
+              error: { code: 'execution_failed', message },
+            };
+          }
+        }
+      } else if (call.name === 'react_as_owner') {
+        const channelArg = call.arguments['channel_id'];
+        const tsArg = call.arguments['message_ts'];
+        const emojiArg = call.arguments['emoji'];
+        if (typeof channelArg !== 'string' || channelArg.length === 0) {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: { code: 'invalid_arguments', message: 'channel_id must be a non-empty string' },
+          };
+        } else if (typeof tsArg !== 'string' || tsArg.length === 0) {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: { code: 'invalid_arguments', message: 'message_ts must be a non-empty string' },
+          };
+        } else if (typeof emojiArg !== 'string' || emojiArg.length === 0) {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: { code: 'invalid_arguments', message: 'emoji must be a non-empty string' },
+          };
+        } else {
+          // Strip any leading/trailing colons the model might add habitually.
+          const name = emojiArg.replace(/^:|:$/g, '');
+          try {
+            await slack.reactionsAdd({
+              channel: channelArg as SlackChannelId,
+              timestamp: tsArg as SlackThreadTs,
+              name,
+            });
+            result = {
+              callId: call.id,
+              ok: true,
+              content: `reacted :${name}: as owner on ${channelArg}/${tsArg}`,
+            };
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            result = {
+              callId: call.id,
+              ok: false,
+              error: { code: 'execution_failed', message },
+            };
+          }
+        }
+      } else if (call.name === 'set_status') {
+        const textArg = call.arguments['status_text'];
+        const emojiArg = call.arguments['status_emoji'];
+        const expiresArg = call.arguments['expires_in_minutes'];
+        if (typeof textArg !== 'string') {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: { code: 'invalid_arguments', message: 'status_text must be a string' },
+          };
+        } else {
+          // Resolve expires_in_minutes → unix seconds.
+          const expiration =
+            typeof expiresArg === 'number' && expiresArg > 0
+              ? Math.floor(Date.now() / 1000) + Math.floor(expiresArg * 60)
+              : undefined;
+          try {
+            await slack.usersProfileSet({
+              statusText: textArg,
+              ...(typeof emojiArg === 'string' && emojiArg.length > 0
+                ? { statusEmoji: emojiArg }
+                : {}),
+              ...(expiration !== undefined ? { statusExpiration: expiration } : {}),
+            });
+            const summary =
+              textArg.length === 0
+                ? 'status cleared'
+                : `status set to "${textArg}"${typeof emojiArg === 'string' && emojiArg.length > 0 ? ` ${emojiArg}` : ''}${expiration !== undefined ? ` (expires in ${expiresArg as number} min)` : ''}`;
+            result = { callId: call.id, ok: true, content: summary };
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            result = {
+              callId: call.id,
+              ok: false,
+              error: { code: 'execution_failed', message },
+            };
+          }
+        }
+      } else if (call.name === 'add_reminder') {
+        const textArg = call.arguments['text'];
+        const timeArg = call.arguments['time'];
+        if (typeof textArg !== 'string' || textArg.length === 0) {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: { code: 'invalid_arguments', message: 'text must be a non-empty string' },
+          };
+        } else if (typeof timeArg !== 'string' && typeof timeArg !== 'number') {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: {
+              code: 'invalid_arguments',
+              message: 'time must be a string (natural language) or number (unix seconds)',
+            },
+          };
+        } else {
+          try {
+            const reminder = await slack.remindersAdd({ text: textArg, time: timeArg });
+            const when =
+              reminder.time !== undefined
+                ? ` for ${new Date(reminder.time * 1000).toISOString()}`
+                : '';
+            result = {
+              callId: call.id,
+              ok: true,
+              content: `reminder set${when}: "${reminder.text}" (id ${reminder.id})`,
+            };
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             result = {

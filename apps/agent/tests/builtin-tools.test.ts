@@ -6,11 +6,16 @@ import type {
   ConversationsHistoryResult,
   ConversationsListResult,
   ConversationsRepliesResult,
+  PostMessageParams,
+  ReactionsAddParams,
+  RemindersAddParams,
+  RemindersAddResult,
   SearchMessagesParams,
   SearchMessagesResult,
   SlackClient,
   SlackThreadMessage,
   SlackUserProfile,
+  UsersProfileSetParams,
 } from '@sym/adapter-slack';
 import type {
   ConversationId,
@@ -57,6 +62,16 @@ function makeSlackClient(opts: {
   searchResult?: SearchMessagesResult;
   searchError?: Error;
   searchCalls?: SearchMessagesParams[];
+  // Phase B mocks
+  postCalls?: PostMessageParams[];
+  postError?: Error;
+  reactionCalls?: ReactionsAddParams[];
+  reactionError?: Error;
+  profileCalls?: UsersProfileSetParams[];
+  profileError?: Error;
+  reminderCalls?: RemindersAddParams[];
+  reminderError?: Error;
+  reminderResult?: RemindersAddResult;
 }): SlackClient {
   return {
     async conversationsHistory(): Promise<ConversationsHistoryResult> {
@@ -75,14 +90,17 @@ function makeSlackClient(opts: {
       if (opts.listError !== undefined) throw opts.listError;
       return opts.listResult ?? { channels: [] };
     },
-    async chatPostMessage() {
-      return { ts: '0.0' as SlackThreadTs, channel: 'C1' as SlackChannelId };
+    async chatPostMessage(params: PostMessageParams) {
+      opts.postCalls?.push(params);
+      if (opts.postError !== undefined) throw opts.postError;
+      return { ts: '999.111' as SlackThreadTs, channel: params.channel };
     },
     async chatUpdate() {
       /* no-op */
     },
-    async reactionsAdd() {
-      /* no-op */
+    async reactionsAdd(params: ReactionsAddParams) {
+      opts.reactionCalls?.push(params);
+      if (opts.reactionError !== undefined) throw opts.reactionError;
     },
     async assistantThreadsSetStatus() {
       /* no-op */
@@ -113,6 +131,15 @@ function makeSlackClient(opts: {
       if (opts.searchError !== undefined) throw opts.searchError;
       return opts.searchResult ?? { matches: [], total: 0 };
     },
+    async usersProfileSet(params: UsersProfileSetParams) {
+      opts.profileCalls?.push(params);
+      if (opts.profileError !== undefined) throw opts.profileError;
+    },
+    async remindersAdd(params: RemindersAddParams): Promise<RemindersAddResult> {
+      opts.reminderCalls?.push(params);
+      if (opts.reminderError !== undefined) throw opts.reminderError;
+      return opts.reminderResult ?? { id: 'Rm123', text: params.text };
+    },
   };
 }
 
@@ -134,12 +161,16 @@ describe('createBuiltinDispatcher', () => {
           'fetch_url',
           'list_channels',
           'search_messages',
+          'post_as_owner',
+          'react_as_owner',
+          'set_status',
+          'add_reminder',
         ]),
       );
-      expect(tools).toHaveLength(7);
+      expect(tools).toHaveLength(11);
     });
 
-    it('declares actor:"user" on the tools that benefit from broader visibility', () => {
+    it('declares actor:"user" on every tool that should act under owner identity', () => {
       const dispatcher = createBuiltinDispatcher({
         slackClient: makeSlackClient({}),
         botUserId: BOT,
@@ -150,12 +181,32 @@ describe('createBuiltinDispatcher', () => {
         .map((t) => t.name)
         .sort();
       expect(userActorNames).toEqual([
+        'add_reminder',
         'list_channels',
+        'post_as_owner',
+        'react_as_owner',
         'read_channel',
         'read_thread',
         'read_user_profile',
         'search_messages',
+        'set_status',
       ]);
+    });
+
+    it('marks act-as-owner WRITE tools as destructive (rides confirm flow), reads are not', () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const byName = new Map(dispatcher.list().map((t) => [t.name, t]));
+      // Destructive: act-as-owner writes need owner confirmation.
+      expect(byName.get('post_as_owner')?.destructiveHint).toBe(true);
+      expect(byName.get('react_as_owner')?.destructiveHint).toBe(true);
+      expect(byName.get('set_status')?.destructiveHint).toBe(true);
+      // Reads + reminders: non-destructive.
+      expect(byName.get('add_reminder')?.destructiveHint).toBeUndefined();
+      expect(byName.get('read_channel')?.destructiveHint).toBeUndefined();
+      expect(byName.get('search_messages')?.destructiveHint).toBeUndefined();
     });
 
     it('all new READ tools have readOnlyHint: true', () => {
@@ -769,6 +820,217 @@ describe('createBuiltinDispatcher', () => {
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error('expected failure');
       expect(result.error.code).toBe('invalid_arguments');
+    });
+  });
+
+  describe('dispatch() — post_as_owner', () => {
+    it('posts via the USER client and returns the new message ts', async () => {
+      const userPosts: PostMessageParams[] = [];
+      const userClient = makeSlackClient({ postCalls: userPosts });
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: userClient,
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('post_as_owner', { channel_id: 'C1', text: 'hi as me' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok');
+      expect(result.content).toContain('999.111');
+      expect(userPosts).toHaveLength(1);
+      expect(userPosts[0]?.channel).toBe('C1');
+      expect(userPosts[0]?.text).toBe('hi as me');
+    });
+
+    it('refuses (execution_failed) when no user token is configured', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        // userSlackClient omitted — post_as_owner is destructive AND user-actor
+        // → hard-required → must fail rather than silently posting as the bot.
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('post_as_owner', { channel_id: 'C1', text: 'hi' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('execution_failed');
+      expect(result.error.message).toContain('SLACK_OWNER_USER_TOKEN');
+    });
+
+    it('threads when thread_ts is supplied', async () => {
+      const userPosts: PostMessageParams[] = [];
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({ postCalls: userPosts }),
+        botUserId: BOT,
+      });
+      await dispatcher.dispatch(
+        makeCall('post_as_owner', { channel_id: 'C1', text: 'reply', thread_ts: '900.1' }),
+        makeCtx(),
+      );
+      expect(userPosts[0]?.thread_ts).toBe('900.1');
+    });
+
+    it('rejects empty text with invalid_arguments', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('post_as_owner', { channel_id: 'C1', text: '' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('invalid_arguments');
+    });
+  });
+
+  describe('dispatch() — react_as_owner', () => {
+    it('strips colons from emoji and reacts via the user client', async () => {
+      const reactions: ReactionsAddParams[] = [];
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({ reactionCalls: reactions }),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('react_as_owner', {
+          channel_id: 'C1',
+          message_ts: '900.1',
+          emoji: ':thumbsup:',
+        }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      expect(reactions).toHaveLength(1);
+      expect(reactions[0]?.name).toBe('thumbsup');
+      expect(reactions[0]?.timestamp).toBe('900.1');
+    });
+
+    it('refuses when no user token is configured', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('react_as_owner', { channel_id: 'C1', message_ts: '900.1', emoji: 'eyes' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('execution_failed');
+    });
+  });
+
+  describe('dispatch() — set_status', () => {
+    it('sets status text + emoji and resolves expires_in_minutes to a unix expiration', async () => {
+      const profiles: UsersProfileSetParams[] = [];
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({ profileCalls: profiles }),
+        botUserId: BOT,
+      });
+      const before = Math.floor(Date.now() / 1000);
+      const result = await dispatcher.dispatch(
+        makeCall('set_status', {
+          status_text: 'in a meeting',
+          status_emoji: ':calendar:',
+          expires_in_minutes: 30,
+        }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      expect(profiles).toHaveLength(1);
+      expect(profiles[0]?.statusText).toBe('in a meeting');
+      expect(profiles[0]?.statusEmoji).toBe(':calendar:');
+      // expiration ≈ now + 30 min (1800s), within a generous window.
+      const expectedMin = before + 30 * 60 - 5;
+      const expectedMax = before + 30 * 60 + 60;
+      expect(profiles[0]?.statusExpiration).toBeGreaterThanOrEqual(expectedMin);
+      expect(profiles[0]?.statusExpiration).toBeLessThanOrEqual(expectedMax);
+    });
+
+    it('clears status when text is empty', async () => {
+      const profiles: UsersProfileSetParams[] = [];
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({ profileCalls: profiles }),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('set_status', { status_text: '' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok');
+      expect(result.content).toContain('cleared');
+      expect(profiles[0]?.statusText).toBe('');
+    });
+
+    it('refuses when no user token is configured', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('set_status', { status_text: 'lunch' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+    });
+  });
+
+  describe('dispatch() — add_reminder', () => {
+    it('creates a reminder and returns the id', async () => {
+      const reminders: RemindersAddParams[] = [];
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({
+          reminderCalls: reminders,
+          reminderResult: { id: 'Rm-abc', text: 'ship the PR', time: 1_710_000_000 },
+        }),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('add_reminder', { text: 'ship the PR', time: 'in 1 hour' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok');
+      expect(result.content).toContain('Rm-abc');
+      expect(reminders).toHaveLength(1);
+      expect(reminders[0]?.text).toBe('ship the PR');
+      expect(reminders[0]?.time).toBe('in 1 hour');
+    });
+
+    it('rejects non-string non-number time values', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('add_reminder', { text: 'x', time: { weird: true } as unknown as string }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('invalid_arguments');
+    });
+
+    it('add_reminder is NON-destructive (no confirm gate) — sanity check', () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const tool = dispatcher.list().find((t) => t.name === 'add_reminder');
+      expect(tool?.destructiveHint).toBeUndefined();
     });
   });
 

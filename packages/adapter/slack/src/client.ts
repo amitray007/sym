@@ -217,6 +217,37 @@ export interface StopStreamParams {
   blocks?: unknown[];
 }
 
+// --- users.profile.set (user-token, act-as-owner) --------------------------
+
+export interface UsersProfileSetParams {
+  /** Slack status text. Empty string clears the status. */
+  statusText: string;
+  /** Optional `:emoji:` shortcode (with surrounding colons, Slack convention). */
+  statusEmoji?: string;
+  /** Optional unix-seconds expiration; 0 (or omitted) means no expiration. */
+  statusExpiration?: number;
+}
+
+// --- reminders.add (user-token, set on owner's behalf) ---------------------
+
+export interface RemindersAddParams {
+  /** What the reminder will say. */
+  text: string;
+  /**
+   * Either a natural-language time string ("in 10 minutes", "tomorrow at 9am",
+   * "next Tuesday at 3pm") or an absolute unix-seconds timestamp.
+   */
+  time: string | number;
+}
+
+export interface RemindersAddResult {
+  /** Slack reminder id; useful for cancelling later. */
+  id: string;
+  text: string;
+  /** Resolved trigger time (unix seconds), if Slack returned one. */
+  time?: number;
+}
+
 // --- auth.test --------------------------------------------------------------
 
 export interface AuthTestResult {
@@ -302,6 +333,17 @@ export interface SlackClient {
    * For agents, call via the owner's user token.
    */
   searchMessages(params: SearchMessagesParams): Promise<SearchMessagesResult>;
+  /**
+   * Update the calling user's Slack profile status (`users.profile.set`).
+   * Acts as whoever owns the token — when called with the user token, sets
+   * the owner's status. Requires `users.profile:write` (user scope).
+   */
+  usersProfileSet(params: UsersProfileSetParams): Promise<void>;
+  /**
+   * Create a Slack reminder for the calling user (`reminders.add`). Requires
+   * `reminders:write` (user scope).
+   */
+  remindersAdd(params: RemindersAddParams): Promise<RemindersAddResult>;
 }
 
 // ---------------------------------------------------------------------------

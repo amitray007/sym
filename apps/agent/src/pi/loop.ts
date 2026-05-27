@@ -211,7 +211,11 @@ const TOOL_VERBS: Record<string, string> = {
   read_user_profile: 'looking up the user',
   fetch_url: 'reading the page',
   list_channels: 'listing channels',
-  search_workspace: 'searching Slack',
+  search_messages: 'searching Slack',
+  post_as_owner: 'sending a message as you',
+  react_as_owner: 'reacting as you',
+  set_status: 'updating your status',
+  add_reminder: 'setting a reminder',
 };
 
 function friendlyVerb(toolName: string): string {

@@ -153,6 +153,12 @@ class MockSlackClient implements SlackClient {
   async searchMessages() {
     return { matches: [], total: 0 };
   }
+  async usersProfileSet() {
+    /* no-op mock */
+  }
+  async remindersAdd() {
+    return { id: 'Rm0', text: '' };
+  }
 }
 
 function makeTurn(overrides: Partial<Turn> = {}): Turn {
