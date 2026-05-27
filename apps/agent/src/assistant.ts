@@ -4,6 +4,13 @@ import type { AssistantThreadStarted, SlackClient } from '@sym/adapter-slack';
 const WELCOME_TITLE = 'New chat with Sym';
 
 /**
+ * One-line greeting posted into the empty panel so the user sees a friendly
+ * acknowledgement before they type. Kept short — the suggested prompts
+ * underneath already advertise capability.
+ */
+const WELCOME_MESSAGE = "👋 Hey! I'm Sym — pick a prompt below or ask me anything.";
+
+/**
  * Starter prompts shown when a user opens Sym's assistant panel, so the
  * container isn't an empty box. Mix of context-aware tasks + a low-stakes
  * "is anyone home" ping so the user can see Sym respond.
@@ -51,5 +58,17 @@ export async function handleAssistantThreadStarted(
     });
   } catch (err) {
     console.warn('[agent] failed to set assistant suggested prompts:', err);
+  }
+
+  // Post a brief greeting into the panel so the freshly opened thread isn't
+  // an empty box above the suggested-prompts chips. Best-effort.
+  try {
+    await slackClient.chatPostMessage({
+      channel: thread.channelId,
+      text: WELCOME_MESSAGE,
+      thread_ts: thread.threadTs,
+    });
+  } catch (err) {
+    console.warn('[agent] failed to post assistant welcome message:', err);
   }
 }

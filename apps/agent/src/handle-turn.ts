@@ -150,6 +150,59 @@ function capitalize(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
 }
 
+/** Max characters in a derived assistant-thread title (Slack truncates long ones). */
+const TITLE_MAX_CHARS = 60;
+/** Words pulled from the user's text when deriving a title. */
+const TITLE_MAX_WORDS = 8;
+
+/**
+ * Heuristic title from a user message — strips bot mentions / links, takes the
+ * first few words, truncates. Used for `assistant.threads.setTitle` on the
+ * first user turn in an assistant-panel thread so Slack's left-rail History
+ * shows something readable instead of the raw question.
+ */
+function deriveTitle(userText: string): string {
+  const cleaned = userText
+    // Drop bot mentions like <@U123ABC> and channel/user link syntax.
+    .replace(/<[@#!][^>]+>/g, '')
+    // Collapse URLs to their host.
+    .replace(/https?:\/\/(\S+)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (cleaned.length === 0) return 'New chat with Sym';
+  const words = cleaned.split(' ').slice(0, TITLE_MAX_WORDS).join(' ');
+  const truncated =
+    words.length > TITLE_MAX_CHARS ? `${words.slice(0, TITLE_MAX_CHARS - 1)}…` : words;
+  return capitalize(truncated);
+}
+
+/**
+ * Set the assistant-panel thread title from the user's first message — only
+ * for DM/assistant-panel turns AND only when the thread has no prior user
+ * messages (the welcome post from `handleAssistantThreadStarted` is an
+ * assistant message and doesn't count). Best-effort: failures are logged.
+ */
+async function maybeSetThreadTitleFromTurn(
+  turn: Turn,
+  deps: HandleTurnDeps,
+  history: ChatMessage[],
+): Promise<void> {
+  if (turn.entrySurface !== 'dm') return;
+  if (turn.channelId === undefined || turn.threadTs === undefined) return;
+  const hasPriorUserTurn = history.some((m) => m.role === 'user');
+  if (hasPriorUserTurn) return;
+  const title = deriveTitle(turn.text ?? '');
+  try {
+    await deps.slackClient.assistantThreadsSetTitle({
+      channelId: turn.channelId as SlackChannelId,
+      threadTs: turn.threadTs as SlackThreadTs,
+      title,
+    });
+  } catch (err) {
+    console.warn('[agent] setTitle from first user turn failed (continuing):', err);
+  }
+}
+
 /**
  * Run the turn through the Pi loop.
  *
@@ -291,6 +344,10 @@ async function streamReply(
     const startParams: StartStreamParams = {
       channel,
       threadTs,
+      // Lock task_update chunks to render as individual task cards (one block
+      // per step). Without this, Slack chooses based on chunk volume — we'd
+      // rather not depend on that default.
+      taskDisplayMode: 'task',
       ...(isAssistant
         ? {}
         : { recipientUserId: turn.requester, recipientTeamId: deps.slackTeamId }),
@@ -458,6 +515,12 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   const baseHistory = await loadTurnHistory(turn, deps);
   const viewedContext = await loadViewedChannelContext(turn, deps);
   const history = viewedContext ? [viewedContext, ...baseHistory] : baseHistory;
+
+  // First user turn in an assistant-panel thread → derive a real title from
+  // their question. Fire-and-forget so it doesn't add latency to the reply.
+  // Checks `baseHistory` (raw thread) not `history` (which includes synthetic
+  // viewed-channel context as a user role message).
+  void maybeSetThreadTitleFromTurn(turn, deps, baseHistory);
 
   const builtin = createBuiltinDispatcher({
     slackClient: deps.slackClient,

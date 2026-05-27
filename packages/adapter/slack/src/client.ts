@@ -160,6 +160,14 @@ export interface StartStreamParams {
   recipientTeamId?: string;
   /** Optional text to seed the stream with. */
   markdownText?: string;
+  /**
+   * How Slack renders `task_update` chunks pushed into this stream.
+   *  `task` — individual task cards (one block per step)
+   *  `plan` — grouped plan block (steps shown as a checklist inside one block)
+   * Default if omitted: Slack picks. We set this explicitly to lock the
+   * rendering we want.
+   */
+  taskDisplayMode?: 'task' | 'plan';
 }
 
 /** Handle to an in-flight stream — pass to append/stop. */

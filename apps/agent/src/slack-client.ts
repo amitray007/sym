@@ -282,6 +282,9 @@ export class WebApiSlackClient implements SlackClient {
         ? { recipient_team_id: params.recipientTeamId }
         : {}),
       ...(params.markdownText !== undefined ? { markdown_text: params.markdownText } : {}),
+      ...(params.taskDisplayMode !== undefined
+        ? { task_display_mode: params.taskDisplayMode }
+        : {}),
     });
     return {
       channel: (json.channel ?? params.channel) as SlackChannelId,

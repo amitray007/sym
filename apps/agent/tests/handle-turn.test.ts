@@ -32,6 +32,7 @@ import type {
   PostMessageParams,
   PostMessageResult,
   SetStatusParams,
+  SetTitleParams,
   SlackClient,
   SlackThreadMessage,
   StartStreamParams,
@@ -91,6 +92,8 @@ class MockSlackClient implements SlackClient {
   readonly stopStreamCalls: StopStreamParams[] = [];
   /** Captured assistantThreadsSetStatus calls. */
   readonly setStatusCalls: SetStatusParams[] = [];
+  /** Captured assistantThreadsSetTitle calls. */
+  readonly setTitleCalls: SetTitleParams[] = [];
 
   /** When truthy, chatStartStream rejects with this error. */
   startStreamError: Error | undefined = undefined;
@@ -117,8 +120,8 @@ class MockSlackClient implements SlackClient {
   async assistantThreadsSetSuggestedPrompts(): Promise<void> {
     /* no-op mock */
   }
-  async assistantThreadsSetTitle(): Promise<void> {
-    /* no-op mock */
+  async assistantThreadsSetTitle(params: SetTitleParams): Promise<void> {
+    this.setTitleCalls.push(params);
   }
   async chatStartStream(params: StartStreamParams): Promise<StreamHandle> {
     this.startStreamCalls.push(params);
@@ -482,5 +485,112 @@ describe('handleTurn', () => {
     );
     expect(backgroundMsg?.content).toContain('deploy went out');
     expect(backgroundMsg?.content).toContain('looks good to me');
+  });
+
+  it('derives a thread title from the user message on the first DM turn', async () => {
+    mockRunLoopPi.mockResolvedValueOnce(makeReply());
+    const slack = new MockSlackClient();
+
+    await handleTurn(
+      makeTurn({
+        entrySurface: 'dm',
+        channelId: 'D1' as SlackChannelId,
+        threadTs: '500.0' as SlackThreadTs,
+        text: '<@UBOT> summarize the postgres migration discussion from yesterday',
+      }),
+      {
+        fireworks: FAKE_FIREWORKS,
+        model: 'accounts/fireworks/models/gpt-oss-120b',
+        slackClient: slack,
+        botUserId: BOT,
+        slackTeamId: 'T-TEST',
+        behavior: FAKE_BEHAVIOR,
+      },
+    );
+
+    // Allow the fire-and-forget setTitle to settle.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(slack.setTitleCalls).toHaveLength(1);
+    expect(slack.setTitleCalls[0]?.channelId).toBe('D1');
+    expect(slack.setTitleCalls[0]?.threadTs).toBe('500.0');
+    // Bot mention is stripped; title starts with capitalised first word.
+    expect(slack.setTitleCalls[0]?.title).toMatch(/^Summarize/);
+  });
+
+  it('does NOT override the thread title once the user already has prior turns', async () => {
+    mockRunLoopPi.mockResolvedValueOnce(makeReply());
+    const slack = new MockSlackClient();
+    // Prior user turn already in the thread — title should stay as-is.
+    slack.replies = [
+      { user: 'U1' as SlackUserId, text: 'earlier question', ts: '500.0' as SlackThreadTs },
+      { user: BOT, text: 'earlier reply', ts: '500.1' as SlackThreadTs },
+    ];
+
+    await handleTurn(
+      makeTurn({
+        entrySurface: 'dm',
+        channelId: 'D1' as SlackChannelId,
+        threadTs: '500.0' as SlackThreadTs,
+        ts: '500.2' as SlackThreadTs,
+        text: 'follow-up question',
+      }),
+      {
+        fireworks: FAKE_FIREWORKS,
+        model: 'accounts/fireworks/models/gpt-oss-120b',
+        slackClient: slack,
+        botUserId: BOT,
+        slackTeamId: 'T-TEST',
+        behavior: FAKE_BEHAVIOR,
+      },
+    );
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(slack.setTitleCalls).toHaveLength(0);
+  });
+
+  it('does NOT setTitle for channel @-mentions (only assistant-panel DMs)', async () => {
+    mockRunLoopPi.mockResolvedValueOnce(makeReply());
+    const slack = new MockSlackClient();
+
+    await handleTurn(
+      makeTurn({ entrySurface: 'app_mention', threadTs: '900.1' as SlackThreadTs }),
+      {
+        fireworks: FAKE_FIREWORKS,
+        model: 'accounts/fireworks/models/gpt-oss-120b',
+        slackClient: slack,
+        botUserId: BOT,
+        slackTeamId: 'T-TEST',
+        behavior: FAKE_BEHAVIOR,
+      },
+    );
+
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(slack.setTitleCalls).toHaveLength(0);
+  });
+
+  it('sets task_display_mode=task on chatStartStream so chunks render as cards', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as { onDelta?: (d: string) => Promise<void> };
+        await o.onDelta?.('hi');
+        return makeReply({ markdown: 'hi' });
+      },
+    );
+
+    const slack = new MockSlackClient();
+    await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
+    });
+
+    expect(slack.startStreamCalls).toHaveLength(1);
+    expect(slack.startStreamCalls[0]?.taskDisplayMode).toBe('task');
   });
 });
