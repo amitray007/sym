@@ -8,7 +8,8 @@ export interface BehaviorConfig {
   /**
    * Minimum tool calls before the live task card appears on normal queries
    * (app_mention / dm). Slash commands always show from tool #1.
-   * Default: 3. Set to 0 to disable the card entirely.
+   * Default: 1 — task chunks render inside the streaming reply, so showing
+   * them from the first tool has no clutter cost. Set to 0 to disable.
    */
   taskCardThreshold: number;
   /**
@@ -42,7 +43,7 @@ export interface AgentConfig {
 }
 
 const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
-const DEFAULT_TASK_CARD_THRESHOLD = 3;
+const DEFAULT_TASK_CARD_THRESHOLD = 1;
 
 function required(name: string): string {
   const value = process.env[name];
