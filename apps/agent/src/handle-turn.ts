@@ -173,8 +173,10 @@ async function streamReply(
   }, STATUS_KEEPALIVE_MS);
 
   try {
-    // Open the stream. If this fails, fall back to a normal post (return false) —
-    // do NOT run the model twice.
+    // Lazy stream open — Slack's chat.startStream creates an empty message that
+    // shows its own "Thinking..." placeholder until first append. That competes
+    // with our setStatus shimmer. Defer startStream until we have real reply
+    // tokens; until then, only the shimmer is visible.
     const startParams: StartStreamParams = {
       channel,
       threadTs,
@@ -182,41 +184,64 @@ async function streamReply(
         ? {}
         : { recipientUserId: turn.requester, recipientTeamId: deps.slackTeamId }),
     };
-    let handle;
-    try {
-      handle = await deps.slackClient.chatStartStream(startParams);
-    } catch (err) {
-      console.warn('[agent] startStream failed; falling back to chat.postMessage:', err);
-      return false;
-    }
-
-    const streamTs = handle.ts;
+    let streamTs: SlackThreadTs | undefined;
+    let streamOpenFailed = false;
     let buffer = '';
-    const onDelta = async (delta: string): Promise<void> => {
-      buffer += delta;
-      if (buffer.length >= FLUSH_CHARS) {
-        const chunk = buffer;
-        buffer = '';
-        const appendParams: AppendStreamParams = { channel, ts: streamTs, markdownText: chunk };
-        try {
-          await deps.slackClient.chatAppendStream(appendParams);
-        } catch (err) {
-          console.warn('[agent] appendStream failed (continuing):', err);
-        }
+
+    const ensureStreamOpen = async (): Promise<boolean> => {
+      if (streamTs !== undefined) return true;
+      if (streamOpenFailed) return false;
+      try {
+        const handle = await deps.slackClient.chatStartStream(startParams);
+        streamTs = handle.ts;
+        return true;
+      } catch (err) {
+        console.warn('[agent] startStream failed; will fall back to postMessage:', err);
+        streamOpenFailed = true;
+        return false;
       }
+    };
+
+    const flushBuffer = async (): Promise<void> => {
+      if (buffer.length === 0 || streamTs === undefined) return;
+      const chunk = buffer;
+      buffer = '';
+      const appendParams: AppendStreamParams = { channel, ts: streamTs, markdownText: chunk };
+      try {
+        await deps.slackClient.chatAppendStream(appendParams);
+      } catch (err) {
+        console.warn('[agent] appendStream failed (continuing):', err);
+      }
+    };
+
+    const onDelta = async (delta: string): Promise<void> => {
+      if (delta.length === 0) return;
+      // Open the stream on the FIRST real delta — Slack's empty-stream
+      // "Thinking..." placeholder never shows.
+      if (!(await ensureStreamOpen())) return;
+      buffer += delta;
+      if (buffer.length < FLUSH_CHARS) return;
+      await flushBuffer();
     };
 
     const reply = await runTurnLoop(turn, deps, ctx.registry, ctx.history, onDelta, sendStatus);
 
-    if (buffer.length > 0) {
-      const appendParams: AppendStreamParams = { channel, ts: streamTs, markdownText: buffer };
-      try {
-        await deps.slackClient.chatAppendStream(appendParams);
-      } catch (err) {
-        console.warn('[agent] appendStream (final) failed:', err);
-      }
+    // Reply produced no streamed deltas (empty/very-short reply, or only tool
+    // calls). Either way, we never opened the stream — post normally so the
+    // user sees the answer instead of nothing.
+    if (streamTs === undefined) {
+      const blocks = [markdownBlock(reply.markdown), receiptToContextBlock(reply.receipt)];
+      await deps.slackClient.chatPostMessage({
+        channel,
+        text: reply.markdown,
+        blocks,
+        thread_ts: threadTs,
+      });
+      return true;
     }
 
+    // Final flush + close.
+    await flushBuffer();
     const receipt = receiptToContextBlock(reply.receipt);
     try {
       await deps.slackClient.chatStopStream({ channel, ts: streamTs, blocks: [receipt] });

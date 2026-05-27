@@ -293,8 +293,15 @@ describe('handleTurn', () => {
   });
 
   it('falls back to chatPostMessage when chatStartStream rejects', async () => {
-    // Pi loop is called once per path. startStream fails → fallback calls the loop again.
-    mockRunLoopPi.mockResolvedValue(makeReply());
+    // Drive a delta so the lazy startStream is actually attempted — otherwise
+    // the no-deltas path posts directly without ever calling startStream.
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as { onDelta?: (d: string) => Promise<void> };
+        await o.onDelta?.('Hello world');
+        return makeReply();
+      },
+    );
 
     const slack = new MockSlackClient();
     slack.startStreamError = new Error('stream_unavailable');
