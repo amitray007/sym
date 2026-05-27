@@ -80,35 +80,6 @@ const READ_THREAD_DESCRIPTOR: ToolDescriptor = {
   readOnlyHint: true,
 };
 
-const SEARCH_MESSAGES_DESCRIPTOR: ToolDescriptor = {
-  type: 'function',
-  name: 'search_messages',
-  // READ tool: free-text search across Slack messages visible to the bot.
-  description:
-    'Search Slack messages workspace-wide by query. Returns matches with channel, author, ts, text, and permalink. Use to find prior conversations on a topic. Supports Slack search modifiers like `in:#channel`, `from:@user`, `after:2026-01-01`.',
-  parameters: {
-    type: 'object',
-    properties: {
-      query: {
-        type: 'string',
-        description: 'Slack search query (supports `in:`, `from:`, `after:`, etc.)',
-      },
-      count: {
-        type: 'number',
-        description: 'Max matches (default 10, max 20)',
-      },
-      sort: {
-        type: 'string',
-        enum: ['timestamp', 'score'],
-        description: '`score` (default, relevance) or `timestamp` (newest-first)',
-      },
-    },
-    required: ['query'],
-    additionalProperties: false,
-  } satisfies JsonSchema,
-  readOnlyHint: true,
-};
-
 const READ_USER_PROFILE_DESCRIPTOR: ToolDescriptor = {
   type: 'function',
   name: 'read_user_profile',
@@ -214,7 +185,7 @@ export interface BuiltinToolDeps {
  * Create the built-in in-process tool dispatcher.
  *
  * Provides: `get_current_time`, `read_channel`, `read_thread`,
- * `search_messages`, `read_user_profile`, `fetch_url`, `list_channels`.
+ * `read_user_profile`, `fetch_url`, `list_channels`.
  * ctx is unused by built-in tools (no side-effects needing workspace context)
  * but is received for interface conformance.
  */
@@ -225,7 +196,6 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
         GET_CURRENT_TIME_DESCRIPTOR,
         READ_CHANNEL_DESCRIPTOR,
         READ_THREAD_DESCRIPTOR,
-        SEARCH_MESSAGES_DESCRIPTOR,
         READ_USER_PROFILE_DESCRIPTOR,
         FETCH_URL_DESCRIPTOR,
         LIST_CHANNELS_DESCRIPTOR,
@@ -289,55 +259,6 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
             });
             const transcript = formatTranscript(messages, deps.botUserId);
             result = { callId: call.id, ok: true, content: transcript };
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            result = {
-              callId: call.id,
-              ok: false,
-              error: { code: 'execution_failed', message },
-            };
-          }
-        }
-      } else if (call.name === 'search_messages') {
-        const queryArg = call.arguments['query'];
-        if (typeof queryArg !== 'string' || queryArg.length === 0) {
-          result = {
-            callId: call.id,
-            ok: false,
-            error: { code: 'invalid_arguments', message: 'query must be a non-empty string' },
-          };
-        } else {
-          const countArg = call.arguments['count'];
-          const rawCount = typeof countArg === 'number' ? countArg : 10;
-          const count = Math.max(1, Math.min(20, rawCount));
-          const sortArg = call.arguments['sort'];
-          const sort: 'timestamp' | 'score' =
-            sortArg === 'timestamp' || sortArg === 'score' ? sortArg : 'score';
-
-          try {
-            const { matches, total } = await deps.slackClient.searchMessages({
-              query: queryArg,
-              count,
-              sort,
-            });
-            if (matches.length === 0) {
-              result = {
-                callId: call.id,
-                ok: true,
-                content: `(no matches for "${queryArg}")`,
-              };
-            } else {
-              const header = `${matches.length} of ${total} match(es) for "${queryArg}":`;
-              const body = matches
-                .map((m) => {
-                  const who = m.username ?? m.user ?? '(unknown)';
-                  const where = m.channelName ? `#${m.channelName}` : m.channelId;
-                  const link = m.permalink ? ` ${m.permalink}` : '';
-                  return `- [${where}] ${who} @ ${m.ts}: ${m.text}${link}`;
-                })
-                .join('\n');
-              result = { callId: call.id, ok: true, content: `${header}\n${body}` };
-            }
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
             result = {

@@ -11,15 +11,12 @@ import type {
   PostMessageParams,
   PostMessageResult,
   ReactionsAddParams,
-  SearchMessagesParams,
-  SearchMessagesResult,
   SetStatusParams,
   SetSuggestedPromptsParams,
   SetTitleParams,
   SlackApiError,
   SlackChannelSummary,
   SlackClient,
-  SlackSearchMatch,
   SlackThreadMessage,
   SlackUserProfile,
   StartStreamParams,
@@ -298,37 +295,6 @@ export class WebApiSlackClient implements SlackClient {
       ts: params.ts,
       ...(params.blocks !== undefined ? { blocks: params.blocks } : {}),
     });
-  }
-
-  async searchMessages(params: SearchMessagesParams): Promise<SearchMessagesResult> {
-    interface SearchResponse extends SlackOkResponse {
-      messages?: {
-        total?: number;
-        matches?: {
-          channel?: { id?: string; name?: string };
-          user?: string;
-          username?: string;
-          ts?: string;
-          text?: string;
-          permalink?: string;
-        }[];
-      };
-    }
-    const json = await this.callForm<SearchResponse>('search.messages', {
-      query: params.query,
-      count: params.count ?? 10,
-      sort: params.sort ?? 'score',
-    });
-    const matches: SlackSearchMatch[] = (json.messages?.matches ?? []).map((m) => ({
-      channelId: (m.channel?.id ?? '') as SlackChannelId,
-      ...(m.channel?.name !== undefined ? { channelName: m.channel.name } : {}),
-      ...(m.user !== undefined ? { user: m.user as SlackUserId } : {}),
-      ...(m.username !== undefined ? { username: m.username } : {}),
-      ts: (m.ts ?? '') as SlackThreadTs,
-      text: m.text ?? '',
-      ...(m.permalink !== undefined ? { permalink: m.permalink } : {}),
-    }));
-    return { matches, total: json.messages?.total ?? matches.length };
   }
 
   async usersInfo(params: UsersInfoParams): Promise<SlackUserProfile> {

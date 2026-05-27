@@ -74,8 +74,7 @@ oauth_config:
       - groups:history
       - im:history
       - im:read
-      # Tool surface — added with the search/list/profile tools.
-      - search:read # search_messages
+      # Tool surface — added with the list/profile tools.
       - channels:read # list_channels (public)
       - groups:read # list_channels (private)
       - users:read # read_user_profile (display name, title, tz)

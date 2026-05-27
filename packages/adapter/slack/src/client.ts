@@ -78,32 +78,7 @@ export interface ConversationsHistoryResult {
   messages: SlackThreadMessage[];
 }
 
-// --- Search / users / channels listing -------------------------------------
-
-export interface SearchMessagesParams {
-  query: string;
-  /** Max matches to return (Slack's `count`, capped by the caller). */
-  count?: number;
-  /** Slack's `sort` — newest-first by `timestamp`, or relevance by `score`. */
-  sort?: 'timestamp' | 'score';
-}
-
-/** One match from `search.messages`, normalized to the fields Sym surfaces. */
-export interface SlackSearchMatch {
-  channelId: SlackChannelId;
-  channelName?: string;
-  user?: SlackUserId;
-  username?: string;
-  ts: SlackThreadTs;
-  text: string;
-  permalink?: string;
-}
-
-export interface SearchMessagesResult {
-  matches: SlackSearchMatch[];
-  /** Total matches Slack found (may exceed `matches.length`). */
-  total: number;
-}
+// --- Users / channels listing -----------------------------------------------
 
 export interface UsersInfoParams {
   user: SlackUserId;
@@ -229,8 +204,6 @@ export interface SlackClient {
   chatAppendStream(params: AppendStreamParams): Promise<void>;
   /** Finalize a stream, optionally adding Block Kit at the bottom. */
   chatStopStream(params: StopStreamParams): Promise<void>;
-  /** Full-text search across the workspace's messages (requires `search:read`). */
-  searchMessages(params: SearchMessagesParams): Promise<SearchMessagesResult>;
   /** Fetch a user's profile (requires `users:read`; email needs `users:read.email`). */
   usersInfo(params: UsersInfoParams): Promise<SlackUserProfile>;
   /** List channels the bot can see (requires `channels:read` / `groups:read`). */

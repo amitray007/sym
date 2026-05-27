@@ -6,7 +6,6 @@ import type {
   ConversationsHistoryResult,
   ConversationsListResult,
   ConversationsRepliesResult,
-  SearchMessagesResult,
   SlackClient,
   SlackThreadMessage,
   SlackUserProfile,
@@ -49,8 +48,6 @@ function makeSlackClient(opts: {
   repliesMessages?: SlackThreadMessage[];
   historyError?: Error;
   repliesError?: Error;
-  searchResult?: SearchMessagesResult;
-  searchError?: Error;
   userProfile?: SlackUserProfile;
   userError?: Error;
   listResult?: ConversationsListResult;
@@ -64,10 +61,6 @@ function makeSlackClient(opts: {
     async conversationsReplies(): Promise<ConversationsRepliesResult> {
       if (opts.repliesError !== undefined) throw opts.repliesError;
       return { messages: opts.repliesMessages ?? [] };
-    },
-    async searchMessages(): Promise<SearchMessagesResult> {
-      if (opts.searchError !== undefined) throw opts.searchError;
-      return opts.searchResult ?? { matches: [], total: 0 };
     },
     async usersInfo(): Promise<SlackUserProfile> {
       if (opts.userError !== undefined) throw opts.userError;
@@ -121,13 +114,12 @@ describe('createBuiltinDispatcher', () => {
           'get_current_time',
           'read_channel',
           'read_thread',
-          'search_messages',
           'read_user_profile',
           'fetch_url',
           'list_channels',
         ]),
       );
-      expect(tools).toHaveLength(7);
+      expect(tools).toHaveLength(6);
     });
 
     it('all new READ tools have readOnlyHint: true', () => {
@@ -135,7 +127,7 @@ describe('createBuiltinDispatcher', () => {
         slackClient: makeSlackClient({}),
         botUserId: BOT,
       });
-      for (const name of ['search_messages', 'read_user_profile', 'fetch_url', 'list_channels']) {
+      for (const name of ['read_user_profile', 'fetch_url', 'list_channels']) {
         const tool = dispatcher.list().find((t) => t.name === name);
         expect(tool?.readOnlyHint, `${name} readOnlyHint`).toBe(true);
       }
@@ -403,88 +395,6 @@ describe('createBuiltinDispatcher', () => {
       if (result.ok) throw new Error('expected failure');
       expect(result.error.code).toBe('execution_failed');
       expect(result.error.message).toContain('thread_not_found');
-    });
-  });
-
-  describe('dispatch() — search_messages', () => {
-    it('formats match results', async () => {
-      const dispatcher = createBuiltinDispatcher({
-        slackClient: makeSlackClient({
-          searchResult: {
-            total: 2,
-            matches: [
-              {
-                channelId: 'C1' as SlackChannelId,
-                channelName: 'general',
-                user: 'U1' as SlackUserId,
-                ts: '100.1' as SlackThreadTs,
-                text: 'deploys are broken',
-                permalink: 'https://slack/p100',
-              },
-              {
-                channelId: 'C2' as SlackChannelId,
-                username: 'alice',
-                ts: '100.2' as SlackThreadTs,
-                text: 'fixed it',
-              },
-            ],
-          },
-        }),
-        botUserId: BOT,
-      });
-
-      const result = await dispatcher.dispatch(
-        makeCall('search_messages', { query: 'deploys' }),
-        makeCtx(),
-      );
-      expect(result.ok).toBe(true);
-      if (!result.ok) throw new Error('expected ok');
-      const content = result.content as string;
-      expect(content).toContain('2 of 2 match');
-      expect(content).toContain('deploys are broken');
-      expect(content).toContain('https://slack/p100');
-      expect(content).toContain('#general');
-      expect(content).toContain('alice');
-    });
-
-    it('returns a friendly message on zero matches', async () => {
-      const dispatcher = createBuiltinDispatcher({
-        slackClient: makeSlackClient({ searchResult: { total: 0, matches: [] } }),
-        botUserId: BOT,
-      });
-      const result = await dispatcher.dispatch(
-        makeCall('search_messages', { query: 'nope' }),
-        makeCtx(),
-      );
-      expect(result.ok).toBe(true);
-      if (!result.ok) throw new Error('expected ok');
-      expect(result.content).toContain('no matches');
-    });
-
-    it('returns invalid_arguments when query is missing', async () => {
-      const dispatcher = createBuiltinDispatcher({
-        slackClient: makeSlackClient({}),
-        botUserId: BOT,
-      });
-      const result = await dispatcher.dispatch(makeCall('search_messages', {}), makeCtx());
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error('expected failure');
-      expect(result.error.code).toBe('invalid_arguments');
-    });
-
-    it('returns execution_failed when Slack throws', async () => {
-      const dispatcher = createBuiltinDispatcher({
-        slackClient: makeSlackClient({ searchError: new Error('not_authed') }),
-        botUserId: BOT,
-      });
-      const result = await dispatcher.dispatch(
-        makeCall('search_messages', { query: 'x' }),
-        makeCtx(),
-      );
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error('expected failure');
-      expect(result.error.code).toBe('execution_failed');
-      expect(result.error.message).toContain('not_authed');
     });
   });
 

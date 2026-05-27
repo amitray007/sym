@@ -192,7 +192,6 @@ const TOOL_VERBS: Record<string, string> = {
   read_thread: 'reading the thread',
   read_channel: 'reading the channel',
   get_current_time: 'checking the time',
-  search_messages: 'searching Slack messages',
   read_user_profile: 'looking up the user',
   fetch_url: 'reading the page',
   list_channels: 'listing channels',
