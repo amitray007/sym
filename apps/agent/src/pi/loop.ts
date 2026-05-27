@@ -56,19 +56,21 @@ export interface PiLoopOptions {
    */
   onStatus?: (status: string) => void | Promise<void>;
   /**
-   * Called with the friendly verb for each tool that starts executing (e.g.
-   * "reading the channel"). Used by the task card to track steps live.
-   * Receives the same label as onStatus but without "is" and "…".
+   * Called with the Pi tool-call id and friendly verb for each tool that starts
+   * executing (e.g. "reading the channel"). Used by the task card to track
+   * steps live. `toolCallId` is Pi's per-call identifier — required so the
+   * matching `onToolEnd` can settle the right task even when multiple tools
+   * run in parallel (gpt-oss-120b commonly emits batched tool calls).
    */
-  onToolStart?: (friendlyLabel: string) => void | Promise<void>;
+  onToolStart?: (toolCallId: string, friendlyLabel: string) => void | Promise<void>;
   /**
    * Called when a tool finishes — `errored` is true if the tool threw. Pi
    * still feeds the error back to the model as a tool result, so the model
-   * can recover and produce a "couldn't do X" reply. This callback just
-   * surfaces the failure to the task card so it renders red ✗ instead of
-   * a green checkmark.
+   * can recover and produce a "couldn't do X" reply. This callback surfaces
+   * the failure to the task card so it renders red ✗ instead of a green
+   * checkmark. `toolCallId` matches the value passed to onToolStart.
    */
-  onToolEnd?: (toolName: string, errored: boolean) => void | Promise<void>;
+  onToolEnd?: (toolCallId: string, errored: boolean) => void | Promise<void>;
   /** Propagate cancellation into the Pi Agent. */
   signal?: AbortSignal;
   /**
@@ -409,7 +411,7 @@ export async function runLoopPi(
       emittedWritingStatus = false;
       const verb = friendlyVerb(toolName);
       await opts.onStatus?.(`is ${verb}…`);
-      await opts.onToolStart?.(verb);
+      await opts.onToolStart?.(event.toolCallId, verb);
     }
 
     if (event.type === 'tool_execution_end') {
@@ -418,7 +420,7 @@ export async function runLoopPi(
       // we actually started. Pi feeds the error/result back to the model
       // internally; this is purely UI-facing.
       if (!descriptorMap.has(toolName)) return;
-      await opts.onToolEnd?.(toolName, event.isError);
+      await opts.onToolEnd?.(event.toolCallId, event.isError);
     }
   });
 

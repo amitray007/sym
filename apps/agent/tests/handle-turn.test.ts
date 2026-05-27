@@ -582,11 +582,11 @@ describe('handleTurn', () => {
       async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
         const o = opts as {
           onDelta?: (d: string) => Promise<void>;
-          onToolStart?: (label: string) => Promise<void>;
-          onToolEnd?: (name: string, errored: boolean) => Promise<void>;
+          onToolStart?: (toolCallId: string, label: string) => Promise<void>;
+          onToolEnd?: (toolCallId: string, errored: boolean) => Promise<void>;
         };
-        await o.onToolStart?.('reading the channel');
-        await o.onToolEnd?.('read_channel', true);
+        await o.onToolStart?.('call-1', 'reading the channel');
+        await o.onToolEnd?.('call-1', true);
         await o.onDelta?.("Couldn't read that channel — I'm not a member.");
         return makeReply({ markdown: "Couldn't read that channel — I'm not a member." });
       },
@@ -620,6 +620,67 @@ describe('handleTurn', () => {
     expect(task1.length).toBeGreaterThanOrEqual(2);
     expect(task1[0]?.status).toBe('in_progress');
     expect(task1.at(-1)?.status).toBe('error');
+  });
+
+  it('renders task cards when Pi runs 3 tools in PARALLEL (start_A start_B start_C end_A end_B end_C)', async () => {
+    // Regression: gpt-oss-120b commonly emits multiple tool calls per round
+    // and Pi runs them in parallel. With a single currentTask slot, tasks
+    // were overwritten before their ends fired — no cards rendered.
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as {
+          onDelta?: (d: string) => Promise<void>;
+          onToolStart?: (toolCallId: string, label: string) => Promise<void>;
+          onToolEnd?: (toolCallId: string, errored: boolean) => Promise<void>;
+        };
+        // All three starts fire BEFORE any end (parallel).
+        await o.onToolStart?.('call-A', 'checking the time');
+        await o.onToolStart?.('call-B', 'reading the channel');
+        await o.onToolStart?.('call-C', 'looking up the user');
+        // Ends interleave in completion order, not call order.
+        await o.onToolEnd?.('call-B', false);
+        await o.onToolEnd?.('call-A', false);
+        await o.onToolEnd?.('call-C', false);
+        await o.onDelta?.('here is your answer');
+        return makeReply({ markdown: 'here is your answer' });
+      },
+    );
+
+    const chunks: { id: string; status: string }[] = [];
+    const slack = new MockSlackClient();
+    const origAppend = slack.chatAppendStream.bind(slack);
+    slack.chatAppendStream = async (params: AppendStreamParams): Promise<void> => {
+      for (const c of params.chunks ?? []) {
+        if (c.type === 'task_update') chunks.push({ id: c.id, status: c.status });
+      }
+      await origAppend(params);
+    };
+
+    await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      // Production-default threshold of 3 — the threshold-flush happens at
+      // the third start, which is the case that was broken.
+      behavior: { taskCardThreshold: 3, taskCardAfter: 'delete' as const },
+    });
+
+    // All three tasks must end in `complete` (or `error`) state in the chunks.
+    const task1 = chunks.filter((c) => c.id === 'task-1').at(-1);
+    const task2 = chunks.filter((c) => c.id === 'task-2').at(-1);
+    const task3 = chunks.filter((c) => c.id === 'task-3').at(-1);
+    expect(task1?.status).toBe('complete');
+    expect(task2?.status).toBe('complete');
+    expect(task3?.status).toBe('complete');
+
+    // And the FIRST chunk batch (the threshold flush) must include all three
+    // tasks — that's the user-visible "cards rendered" signal.
+    const ids = new Set(chunks.slice(0, 3).map((c) => c.id));
+    expect(ids.has('task-1')).toBe(true);
+    expect(ids.has('task-2')).toBe(true);
+    expect(ids.has('task-3')).toBe(true);
   });
 
   it('sets task_display_mode=task on chatStartStream so chunks render as cards', async () => {

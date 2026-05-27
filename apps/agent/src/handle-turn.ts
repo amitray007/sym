@@ -57,31 +57,41 @@ const STATUS_KEEPALIVE_MS = 90_000;
 
 type SendChunks = (chunks: TaskUpdateChunk[]) => Promise<void>;
 
+/** A tracked task — same record, status mutates as start → end fires. */
+interface TrackedTask {
+  id: string;
+  title: string;
+  status: 'in_progress' | 'complete' | 'error';
+}
+
 /**
  * Manages live task-progress cards embedded in the streaming reply via Slack's
- * native `task_update` chunks (chat.appendStream). Steps appear inside the
- * message itself — no separate card message, no deletion required.
+ * native `task_update` chunks (chat.appendStream).
  *
- * Threshold buffering: tools that fire before the threshold is reached are
- * buffered and flushed all at once (as `complete`) when the threshold fires,
- * so the user sees only the relevant work once the query is clearly non-trivial.
+ * **Why we key by Pi's `toolCallId`:** gpt-oss-120b commonly emits multiple
+ * tool calls in a single round, and Pi runs them in parallel. The events
+ * arrive interleaved as `start_A, start_B, start_C, end_B, end_A, end_C`.
+ * A single `currentTask` slot would get overwritten on every new start before
+ * the matching end could settle it — losing tasks and leaving the card empty.
+ * Keying by `toolCallId` lets each task settle independently regardless of
+ * arrival order, which also gives the correct UX: all three cards render in
+ * parallel as `in_progress`, then transition to `complete` one by one.
+ *
+ * **Threshold buffering:** tools that fire before the threshold is crossed
+ * are tracked in memory; when threshold crosses, all known tasks flush at
+ * their current status. Tasks that already ended in the buffer window
+ * (sequential execution) flush as `complete`/`error`; tasks still running
+ * (parallel execution) flush as `in_progress` and update later on their end.
  *
  * All chunk sends are best-effort: errors are logged and swallowed so a card
  * failure never blocks reply delivery.
  */
-/** A task that's been started but not yet ended (pre-flush state). */
-interface SettledTask {
-  id: string;
-  title: string;
-  status: 'complete' | 'error';
-}
-
 class TaskCardManager {
   private taskCounter = 0;
-  /** Tasks that ended before the threshold was crossed — flushed all at once on activation. */
-  private settledBeforeActive: SettledTask[] = [];
-  /** The currently running task (in_progress until onToolEnd fires). */
-  private currentTask: { id: string; title: string } | undefined;
+  /** All known tasks, keyed by Pi's toolCallId. */
+  private readonly tasks = new Map<string, TrackedTask>();
+  /** Insertion order so chunks flush in tool-start order, not Map-iteration order. */
+  private readonly taskOrder: string[] = [];
   private toolCount = 0;
   private active = false;
 
@@ -92,29 +102,30 @@ class TaskCardManager {
     private readonly threshold: number,
   ) {}
 
-  async onToolStart(friendlyLabel: string): Promise<void> {
+  async onToolStart(toolCallId: string, friendlyLabel: string): Promise<void> {
     this.toolCount++;
-
     const id = `task-${++this.taskCounter}`;
     const title = capitalize(friendlyLabel);
-    this.currentTask = { id, title };
+    const task: TrackedTask = { id, title, status: 'in_progress' };
+    this.tasks.set(toolCallId, task);
+    this.taskOrder.push(toolCallId);
 
     if (!this.active && this.toolCount >= this.threshold) {
-      // Threshold crossed — flush all tasks that already settled while we were
-      // below threshold, then publish the new in_progress task.
+      // Threshold crossed — flush ALL known tasks at their current status. Any
+      // task that already ended (sequential mode) is complete/error; any still
+      // running (parallel mode) is in_progress and will update on its onToolEnd.
       this.active = true;
-      const chunks: TaskUpdateChunk[] = [
-        ...this.settledBeforeActive.map(
+      const chunks: TaskUpdateChunk[] = this.taskOrder
+        .map((tid) => this.tasks.get(tid))
+        .filter((t): t is TrackedTask => t !== undefined)
+        .map(
           (t): TaskUpdateChunk => ({
             type: 'task_update',
             id: t.id,
             title: t.title,
             status: t.status,
           }),
-        ),
-        { type: 'task_update', id, title, status: 'in_progress' },
-      ];
-      this.settledBeforeActive = [];
+        );
       await this.sendChunks(chunks).catch((err) =>
         console.warn('[agent] task card start failed (continuing):', err),
       );
@@ -125,38 +136,34 @@ class TaskCardManager {
     }
   }
 
-  async onToolEnd(errored: boolean): Promise<void> {
-    if (this.currentTask === undefined) return;
-    const { id, title } = this.currentTask;
-    const status: 'complete' | 'error' = errored ? 'error' : 'complete';
+  async onToolEnd(toolCallId: string, errored: boolean): Promise<void> {
+    const task = this.tasks.get(toolCallId);
+    if (task === undefined) return;
+    task.status = errored ? 'error' : 'complete';
+    // Only push an update chunk if the card is already visible. While
+    // buffered, the new status will flow out as part of the threshold-flush.
     if (this.active) {
-      await this.sendChunks([{ type: 'task_update', id, title, status }]).catch((err) =>
-        console.warn('[agent] task card settle failed (continuing):', err),
-      );
-    } else {
-      this.settledBeforeActive.push({ id, title, status });
+      await this.sendChunks([
+        { type: 'task_update', id: task.id, title: task.title, status: task.status },
+      ]).catch((err) => console.warn('[agent] task card settle failed (continuing):', err));
     }
-    this.currentTask = undefined;
   }
 
   async finish(): Promise<void> {
-    // Defensive: if the loop terminated mid-tool (no tool_execution_end fired
-    // for the current task), mark it complete so the card doesn't end stuck
-    // in_progress. Errored tasks already settled via onToolEnd.
-    if (!this.active || this.currentTask === undefined) return;
+    // Defensive: if the loop terminated mid-flight (no tool_execution_end for
+    // some task), mark anything still in_progress as complete so cards don't
+    // get stuck mid-air. Only runs when the card was ever shown.
+    if (!this.active) return;
+    const stuck: TaskUpdateChunk[] = this.taskOrder
+      .map((tid) => this.tasks.get(tid))
+      .filter((t): t is TrackedTask => t !== undefined && t.status === 'in_progress')
+      .map((t) => ({ type: 'task_update', id: t.id, title: t.title, status: 'complete' }));
+    if (stuck.length === 0) return;
     try {
-      await this.sendChunks([
-        {
-          type: 'task_update',
-          id: this.currentTask.id,
-          title: this.currentTask.title,
-          status: 'complete',
-        },
-      ]);
+      await this.sendChunks(stuck);
     } catch (err) {
       console.warn('[agent] task card finish failed (continuing):', err);
     }
-    this.currentTask = undefined;
   }
 }
 
@@ -230,8 +237,8 @@ async function runTurnLoop(
   history: ChatMessage[],
   onDelta?: (delta: string) => void | Promise<void>,
   onStatus?: (status: string) => void | Promise<void>,
-  onToolStart?: (friendlyLabel: string) => void | Promise<void>,
-  onToolEnd?: (toolName: string, errored: boolean) => void | Promise<void>,
+  onToolStart?: (toolCallId: string, friendlyLabel: string) => void | Promise<void>,
+  onToolEnd?: (toolCallId: string, errored: boolean) => void | Promise<void>,
 ): Promise<Reply> {
   const model = buildFireworksModel({
     baseUrl: deps.fireworks.baseUrl,
@@ -420,12 +427,12 @@ async function streamReply(
       await flushBuffer();
     };
 
-    const onToolStart = async (friendlyLabel: string): Promise<void> => {
-      await taskCard?.onToolStart(friendlyLabel);
+    const onToolStart = async (toolCallId: string, friendlyLabel: string): Promise<void> => {
+      await taskCard?.onToolStart(toolCallId, friendlyLabel);
     };
 
-    const onToolEnd = async (_toolName: string, errored: boolean): Promise<void> => {
-      await taskCard?.onToolEnd(errored);
+    const onToolEnd = async (toolCallId: string, errored: boolean): Promise<void> => {
+      await taskCard?.onToolEnd(toolCallId, errored);
     };
 
     const reply = await runTurnLoop(
