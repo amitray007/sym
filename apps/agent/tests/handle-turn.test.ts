@@ -54,6 +54,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 const FAKE_FIREWORKS = { baseUrl: 'http://fake.fireworks', apiKey: 'fake-key' };
+const FAKE_BEHAVIOR = { taskCardThreshold: 0, taskCardAfter: 'delete' as const };
 
 // ---------------------------------------------------------------------------
 // Default reply returned by the mock loop unless overridden.
@@ -132,6 +133,9 @@ class MockSlackClient implements SlackClient {
   async chatStopStream(params: StopStreamParams): Promise<void> {
     this.stopStreamCalls.push(params);
   }
+  async chatDelete(): Promise<void> {
+    /* no-op mock */
+  }
   async usersInfo() {
     return { id: 'U0' as SlackUserId };
   }
@@ -170,6 +174,7 @@ describe('handleTurn', () => {
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
     });
 
     expect(slack.posts).toHaveLength(1);
@@ -201,6 +206,7 @@ describe('handleTurn', () => {
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
     });
 
     // Streaming path was taken — no chatPostMessage.
@@ -243,6 +249,7 @@ describe('handleTurn', () => {
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
     });
 
     const statuses = slack.setStatusCalls.map((c) => c.status);
@@ -272,6 +279,7 @@ describe('handleTurn', () => {
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
     });
 
     // setStatus: initial 'is thinking…' + trailing '' clear after stopStream.
@@ -318,6 +326,7 @@ describe('handleTurn', () => {
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
     });
 
     // Fell back to postMessage.
@@ -340,6 +349,7 @@ describe('handleTurn', () => {
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
     });
     expect(slack.posts).toHaveLength(0);
     // runLoopPi must not be called when there is no channelId.
@@ -382,6 +392,7 @@ describe('handleTurn', () => {
         slackClient: slack,
         botUserId: BOT,
         slackTeamId: 'T-TEST',
+        behavior: FAKE_BEHAVIOR,
       },
     );
 
@@ -416,6 +427,7 @@ describe('handleTurn', () => {
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
     });
 
     // Pi was called exactly once.
@@ -456,6 +468,7 @@ describe('handleTurn', () => {
         slackClient: slack,
         botUserId: BOT,
         slackTeamId: 'T-TEST',
+        behavior: FAKE_BEHAVIOR,
         viewedChannelId: 'C-VIEWED',
       },
     );

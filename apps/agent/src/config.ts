@@ -3,6 +3,22 @@
  * in dev via the entrypoint's dotenv load). Single-tenant: one Slack workspace,
  * one owner, one model provider. No secrets are logged.
  */
+/** Runtime behavior knobs — all optional, all have safe defaults. */
+export interface BehaviorConfig {
+  /**
+   * Minimum tool calls before the live task card appears on normal queries
+   * (app_mention / dm). Slash commands always show from tool #1.
+   * Default: 3. Set to 0 to disable the card entirely.
+   */
+  taskCardThreshold: number;
+  /**
+   * What happens to the task card after the reply is delivered.
+   *   delete   — card is removed (default, keeps thread clean)
+   *   collapse — card shrinks to a single "✅ N steps · Xs" summary line
+   */
+  taskCardAfter: 'delete' | 'collapse';
+}
+
 export interface AgentConfig {
   port: number;
   /** App-level Slack signing secret (verifies inbound event signatures). */
@@ -21,9 +37,12 @@ export interface AgentConfig {
   fireworksModel: string;
   /** Fireworks base URL (defaults to the public inference endpoint). */
   fireworksBaseUrl: string;
+  /** Runtime behavior toggles. */
+  behavior: BehaviorConfig;
 }
 
 const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
+const DEFAULT_TASK_CARD_THRESHOLD = 3;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -31,6 +50,11 @@ function required(name: string): string {
     throw new Error(`${name} is required`);
   }
   return value;
+}
+
+function taskCardAfter(raw: string | undefined): 'delete' | 'collapse' {
+  if (raw === 'collapse') return 'collapse';
+  return 'delete';
 }
 
 export function loadAgentConfig(): AgentConfig {
@@ -44,5 +68,9 @@ export function loadAgentConfig(): AgentConfig {
     fireworksApiKey: required('FIREWORKS_API_KEY'),
     fireworksModel: required('FIREWORKS_MODEL'),
     fireworksBaseUrl: process.env['FIREWORKS_BASE_URL'] ?? DEFAULT_FIREWORKS_BASE_URL,
+    behavior: {
+      taskCardThreshold: Number(process.env['TASK_CARD_THRESHOLD'] ?? DEFAULT_TASK_CARD_THRESHOLD),
+      taskCardAfter: taskCardAfter(process.env['TASK_CARD_AFTER']),
+    },
   };
 }

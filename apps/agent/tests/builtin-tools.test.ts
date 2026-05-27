@@ -97,6 +97,9 @@ function makeSlackClient(opts: {
     async chatStopStream() {
       /* no-op */
     },
+    async chatDelete() {
+      /* no-op */
+    },
   };
 }
 

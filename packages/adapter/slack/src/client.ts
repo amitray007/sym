@@ -18,6 +18,11 @@ export interface PostMessageResult {
   channel: SlackChannelId;
 }
 
+export interface DeleteMessageParams {
+  channel: SlackChannelId;
+  ts: SlackThreadTs;
+}
+
 export interface UpdateMessageParams {
   channel: SlackChannelId;
   ts: SlackThreadTs;
@@ -188,6 +193,7 @@ export interface StopStreamParams {
 export interface SlackClient {
   chatPostMessage(params: PostMessageParams): Promise<PostMessageResult>;
   chatUpdate(params: UpdateMessageParams): Promise<void>;
+  chatDelete(params: DeleteMessageParams): Promise<void>;
   reactionsAdd(params: ReactionsAddParams): Promise<void>;
   assistantThreadsSetStatus(params: SetStatusParams): Promise<void>;
   /** Read a thread (root + replies), oldest-first, for in-thread context. */

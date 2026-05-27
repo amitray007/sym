@@ -55,6 +55,12 @@ export interface PiLoopOptions {
    * shimmer. Optional — loop runs fine when undefined.
    */
   onStatus?: (status: string) => void | Promise<void>;
+  /**
+   * Called with the friendly verb for each tool that starts executing (e.g.
+   * "reading the channel"). Used by the task card to track steps live.
+   * Receives the same label as onStatus but without "is" and "…".
+   */
+  onToolStart?: (friendlyLabel: string) => void | Promise<void>;
   /** Propagate cancellation into the Pi Agent. */
   signal?: AbortSignal;
   /**
@@ -392,7 +398,9 @@ export async function runLoopPi(
       toolsInvoked.push(toolName);
       // Re-arm the "writing" status so the next text_delta after this tool flips it again.
       emittedWritingStatus = false;
-      await opts.onStatus?.(`is ${friendlyVerb(toolName)}…`);
+      const verb = friendlyVerb(toolName);
+      await opts.onStatus?.(`is ${verb}…`);
+      await opts.onToolStart?.(verb);
     }
   });
 

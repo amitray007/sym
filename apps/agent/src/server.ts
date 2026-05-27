@@ -117,6 +117,7 @@ export function createServer(deps: ServerDeps): Hono {
       slackClient: ctx.slackClient,
       botUserId: ctx.botUserId,
       slackTeamId: ctx.slackTeamId,
+      behavior: config.behavior,
       ...(viewedChannelId !== undefined ? { viewedChannelId } : {}),
     });
   }

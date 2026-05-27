@@ -5,6 +5,7 @@ import { createBuiltinDispatcher } from './builtin-tools.js';
 import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 
+import type { BehaviorConfig } from './config.js';
 import type { AppendStreamParams, SlackClient, StartStreamParams } from '@sym/adapter-slack';
 import type {
   ChatMessage,
@@ -27,6 +28,8 @@ export interface HandleTurnDeps {
   slackTeamId: string;
   /** The channel the user is currently viewing in Slack's assistant panel, if known. */
   viewedChannelId?: string;
+  /** Runtime behavior knobs. */
+  behavior: BehaviorConfig;
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
@@ -41,6 +44,129 @@ const HISTORY_LIMIT = 20;
  */
 const STATUS_KEEPALIVE_MS = 90_000;
 
+/** Minimum ms the task card stays visible before delete/collapse runs. */
+const MIN_CARD_DISPLAY_MS = 800;
+
+/**
+ * Manages the live task card — a separate Slack message that tracks tool
+ * execution steps in real time. Appears when enough tools fire (threshold),
+ * then either deleted or collapsed to a summary line after the turn.
+ *
+ * All Slack calls are best-effort: any error is logged and swallowed so a
+ * card failure never blocks reply delivery.
+ */
+class TaskCardManager {
+  private cardTs: SlackThreadTs | undefined;
+  private completedLabels: string[] = [];
+  private currentLabel: string | undefined;
+  private toolCount = 0;
+  private readonly startMs = Date.now();
+
+  constructor(
+    private readonly channel: SlackChannelId,
+    private readonly threadTs: SlackThreadTs,
+    private readonly slackClient: SlackClient,
+    /** Tool calls before the card appears (0 = always show from first tool). */
+    private readonly threshold: number,
+    private readonly after: 'delete' | 'collapse',
+  ) {}
+
+  async onToolStart(friendlyLabel: string): Promise<void> {
+    this.toolCount++;
+
+    // Mark previous step done, set new current.
+    if (this.currentLabel !== undefined) {
+      this.completedLabels.push(this.currentLabel);
+    }
+    this.currentLabel = friendlyLabel;
+
+    if (this.toolCount < this.threshold) return;
+
+    if (this.cardTs === undefined) {
+      await this.postCard();
+    } else {
+      await this.updateCard();
+    }
+  }
+
+  async finish(): Promise<void> {
+    if (this.cardTs === undefined) return;
+
+    if (this.currentLabel !== undefined) {
+      this.completedLabels.push(this.currentLabel);
+      this.currentLabel = undefined;
+    }
+
+    // Ensure the card is visible for at least MIN_CARD_DISPLAY_MS.
+    const elapsed = Date.now() - this.startMs;
+    if (elapsed < MIN_CARD_DISPLAY_MS) {
+      await new Promise((r) => setTimeout(r, MIN_CARD_DISPLAY_MS - elapsed));
+    }
+
+    try {
+      if (this.after === 'collapse') {
+        const secs = ((Date.now() - this.startMs) / 1000).toFixed(1);
+        await this.slackClient.chatUpdate({
+          channel: this.channel,
+          ts: this.cardTs!,
+          text: `✅ ${this.completedLabels.length} steps · ${secs}s`,
+          blocks: [
+            {
+              type: 'context',
+              elements: [
+                {
+                  type: 'mrkdwn',
+                  text: `✅ ${this.completedLabels.length} steps · ${secs}s`,
+                },
+              ],
+            },
+          ],
+        });
+      } else {
+        await this.slackClient.chatDelete({ channel: this.channel, ts: this.cardTs! });
+      }
+    } catch (err) {
+      console.warn('[agent] task card finish failed (continuing):', err);
+    }
+  }
+
+  private cardText(): string {
+    const done = this.completedLabels.map((l) => `✅ ${capitalize(l)}`).join('\n');
+    const current = this.currentLabel !== undefined ? `\n⏳ ${capitalize(this.currentLabel)}…` : '';
+    return `${done}${current}`.trimStart();
+  }
+
+  private async postCard(): Promise<void> {
+    try {
+      const result = await this.slackClient.chatPostMessage({
+        channel: this.channel,
+        text: this.cardText(),
+        thread_ts: this.threadTs,
+      });
+      this.cardTs = result.ts;
+    } catch (err) {
+      console.warn('[agent] task card post failed (continuing):', err);
+    }
+  }
+
+  private async updateCard(): Promise<void> {
+    if (this.cardTs === undefined) return;
+    try {
+      await this.slackClient.chatUpdate({
+        channel: this.channel,
+        ts: this.cardTs,
+        text: this.cardText(),
+      });
+    } catch (err) {
+      console.warn('[agent] task card update failed (continuing):', err);
+    }
+  }
+}
+
+function capitalize(s: string): string {
+  return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+}
+
 /**
  * Run the turn through the Pi loop.
  *
@@ -54,6 +180,7 @@ async function runTurnLoop(
   history: ChatMessage[],
   onDelta?: (delta: string) => void | Promise<void>,
   onStatus?: (status: string) => void | Promise<void>,
+  onToolStart?: (friendlyLabel: string) => void | Promise<void>,
 ): Promise<Reply> {
   const model = buildFireworksModel({
     baseUrl: deps.fireworks.baseUrl,
@@ -68,6 +195,7 @@ async function runTurnLoop(
       slackClient: deps.slackClient,
       ...(onDelta !== undefined ? { onDelta } : {}),
       ...(onStatus !== undefined ? { onStatus } : {}),
+      ...(onToolStart !== undefined ? { onToolStart } : {}),
     },
   );
 }
@@ -172,6 +300,20 @@ async function streamReply(
     }
   }, STATUS_KEEPALIVE_MS);
 
+  // Task card — slash commands always show from tool #1; other surfaces use
+  // the configured threshold. Threshold of 0 disables the card entirely.
+  const cardThreshold = turn.entrySurface === 'slash_command' ? 1 : deps.behavior.taskCardThreshold;
+  const taskCard =
+    cardThreshold > 0
+      ? new TaskCardManager(
+          channel,
+          threadTs,
+          deps.slackClient,
+          cardThreshold,
+          deps.behavior.taskCardAfter,
+        )
+      : null;
+
   try {
     // Lazy stream open — Slack's chat.startStream creates an empty message that
     // shows its own "Thinking..." placeholder until first append. That competes
@@ -224,7 +366,22 @@ async function streamReply(
       await flushBuffer();
     };
 
-    const reply = await runTurnLoop(turn, deps, ctx.registry, ctx.history, onDelta, sendStatus);
+    const onToolStart = async (friendlyLabel: string): Promise<void> => {
+      await taskCard?.onToolStart(friendlyLabel);
+    };
+
+    const reply = await runTurnLoop(
+      turn,
+      deps,
+      ctx.registry,
+      ctx.history,
+      onDelta,
+      sendStatus,
+      onToolStart,
+    );
+
+    // Settle the task card before or alongside reply delivery.
+    await taskCard?.finish();
 
     // Reply produced no streamed deltas (empty/very-short reply, or only tool
     // calls). Either way, we never opened the stream — post normally so the

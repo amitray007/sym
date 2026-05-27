@@ -8,6 +8,7 @@ import type {
   ConversationsListResult,
   ConversationsRepliesParams,
   ConversationsRepliesResult,
+  DeleteMessageParams,
   PostMessageParams,
   PostMessageResult,
   ReactionsAddParams,
@@ -160,6 +161,13 @@ export class WebApiSlackClient implements SlackClient {
       ts: params.ts,
       text: params.text,
       ...(params.blocks !== undefined ? { blocks: params.blocks } : {}),
+    });
+  }
+
+  async chatDelete(params: DeleteMessageParams): Promise<void> {
+    await this.call('chat.delete', {
+      channel: params.channel,
+      ts: params.ts,
     });
   }
 
