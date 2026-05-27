@@ -132,6 +132,15 @@ class MockSlackClient implements SlackClient {
   async chatStopStream(params: StopStreamParams): Promise<void> {
     this.stopStreamCalls.push(params);
   }
+  async searchMessages() {
+    return { matches: [], total: 0 };
+  }
+  async usersInfo() {
+    return { id: 'U0' as SlackUserId };
+  }
+  async conversationsList() {
+    return { channels: [] };
+  }
 }
 
 function makeTurn(overrides: Partial<Turn> = {}): Turn {

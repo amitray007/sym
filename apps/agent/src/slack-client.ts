@@ -4,21 +4,29 @@ import type {
   AppendStreamParams,
   ConversationsHistoryParams,
   ConversationsHistoryResult,
+  ConversationsListParams,
+  ConversationsListResult,
   ConversationsRepliesParams,
   ConversationsRepliesResult,
   PostMessageParams,
   PostMessageResult,
   ReactionsAddParams,
+  SearchMessagesParams,
+  SearchMessagesResult,
   SetStatusParams,
   SetSuggestedPromptsParams,
   SetTitleParams,
   SlackApiError,
+  SlackChannelSummary,
   SlackClient,
+  SlackSearchMatch,
   SlackThreadMessage,
+  SlackUserProfile,
   StartStreamParams,
   StopStreamParams,
   StreamHandle,
   UpdateMessageParams,
+  UsersInfoParams,
 } from '@sym/adapter-slack';
 import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
 
@@ -290,5 +298,103 @@ export class WebApiSlackClient implements SlackClient {
       ts: params.ts,
       ...(params.blocks !== undefined ? { blocks: params.blocks } : {}),
     });
+  }
+
+  async searchMessages(params: SearchMessagesParams): Promise<SearchMessagesResult> {
+    interface SearchResponse extends SlackOkResponse {
+      messages?: {
+        total?: number;
+        matches?: {
+          channel?: { id?: string; name?: string };
+          user?: string;
+          username?: string;
+          ts?: string;
+          text?: string;
+          permalink?: string;
+        }[];
+      };
+    }
+    const json = await this.callForm<SearchResponse>('search.messages', {
+      query: params.query,
+      count: params.count ?? 10,
+      sort: params.sort ?? 'score',
+    });
+    const matches: SlackSearchMatch[] = (json.messages?.matches ?? []).map((m) => ({
+      channelId: (m.channel?.id ?? '') as SlackChannelId,
+      ...(m.channel?.name !== undefined ? { channelName: m.channel.name } : {}),
+      ...(m.user !== undefined ? { user: m.user as SlackUserId } : {}),
+      ...(m.username !== undefined ? { username: m.username } : {}),
+      ts: (m.ts ?? '') as SlackThreadTs,
+      text: m.text ?? '',
+      ...(m.permalink !== undefined ? { permalink: m.permalink } : {}),
+    }));
+    return { matches, total: json.messages?.total ?? matches.length };
+  }
+
+  async usersInfo(params: UsersInfoParams): Promise<SlackUserProfile> {
+    interface UserResponse extends SlackOkResponse {
+      user?: {
+        id?: string;
+        real_name?: string;
+        deleted?: boolean;
+        is_bot?: boolean;
+        tz?: string;
+        profile?: {
+          display_name?: string;
+          real_name?: string;
+          title?: string;
+          email?: string;
+          status_text?: string;
+          status_emoji?: string;
+        };
+      };
+    }
+    const json = await this.callForm<UserResponse>('users.info', { user: params.user });
+    const u = json.user ?? {};
+    const p = u.profile ?? {};
+    return {
+      id: (u.id ?? params.user) as SlackUserId,
+      ...(p.display_name !== undefined && p.display_name !== ''
+        ? { displayName: p.display_name }
+        : {}),
+      ...(p.real_name !== undefined || u.real_name !== undefined
+        ? { realName: (p.real_name ?? u.real_name) as string }
+        : {}),
+      ...(p.title !== undefined && p.title !== '' ? { title: p.title } : {}),
+      // Email only present when the bot has the `users:read.email` scope.
+      ...(p.email !== undefined && p.email !== '' ? { email: p.email } : {}),
+      ...(p.status_text !== undefined && p.status_text !== '' ? { statusText: p.status_text } : {}),
+      ...(p.status_emoji !== undefined && p.status_emoji !== ''
+        ? { statusEmoji: p.status_emoji }
+        : {}),
+      ...(u.tz !== undefined ? { tz: u.tz } : {}),
+      ...(u.is_bot !== undefined ? { isBot: u.is_bot } : {}),
+      ...(u.deleted !== undefined ? { deleted: u.deleted } : {}),
+    };
+  }
+
+  async conversationsList(params: ConversationsListParams): Promise<ConversationsListResult> {
+    interface ListResponse extends SlackOkResponse {
+      channels?: {
+        id?: string;
+        name?: string;
+        is_private?: boolean;
+        topic?: { value?: string };
+        num_members?: number;
+      }[];
+    }
+    const json = await this.callForm<ListResponse>('conversations.list', {
+      limit: params.limit ?? 50,
+      types: params.types ?? 'public_channel,private_channel',
+      exclude_archived: params.excludeArchived === false ? 'false' : 'true',
+    });
+    const channels: SlackChannelSummary[] = (json.channels ?? []).map((c) => ({
+      id: (c.id ?? '') as SlackChannelId,
+      ...(c.name !== undefined ? { name: c.name } : {}),
+      isPrivate: c.is_private === true,
+      ...(c.topic?.value !== undefined && c.topic.value !== '' ? { topic: c.topic.value } : {}),
+      ...(c.num_members !== undefined ? { memberCount: c.num_members } : {}),
+    }));
+    return { channels };
   }
 }

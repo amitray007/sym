@@ -78,6 +78,75 @@ export interface ConversationsHistoryResult {
   messages: SlackThreadMessage[];
 }
 
+// --- Search / users / channels listing -------------------------------------
+
+export interface SearchMessagesParams {
+  query: string;
+  /** Max matches to return (Slack's `count`, capped by the caller). */
+  count?: number;
+  /** Slack's `sort` — newest-first by `timestamp`, or relevance by `score`. */
+  sort?: 'timestamp' | 'score';
+}
+
+/** One match from `search.messages`, normalized to the fields Sym surfaces. */
+export interface SlackSearchMatch {
+  channelId: SlackChannelId;
+  channelName?: string;
+  user?: SlackUserId;
+  username?: string;
+  ts: SlackThreadTs;
+  text: string;
+  permalink?: string;
+}
+
+export interface SearchMessagesResult {
+  matches: SlackSearchMatch[];
+  /** Total matches Slack found (may exceed `matches.length`). */
+  total: number;
+}
+
+export interface UsersInfoParams {
+  user: SlackUserId;
+}
+
+/** Slack user profile flattened to the fields Sym surfaces. */
+export interface SlackUserProfile {
+  id: SlackUserId;
+  displayName?: string;
+  realName?: string;
+  title?: string;
+  /** Email — only present when the bot has the `users:read.email` scope. */
+  email?: string;
+  /** Slack status text (the kebab next to the name). */
+  statusText?: string;
+  statusEmoji?: string;
+  /** IANA tz like `America/Los_Angeles`. */
+  tz?: string;
+  isBot?: boolean;
+  deleted?: boolean;
+}
+
+export interface ConversationsListParams {
+  /** Page-size cap (Slack's `limit`; impl bounds it). */
+  limit?: number;
+  /** Comma-separated channel types, e.g. `public_channel,private_channel`. */
+  types?: string;
+  excludeArchived?: boolean;
+}
+
+export interface SlackChannelSummary {
+  id: SlackChannelId;
+  name?: string;
+  isPrivate: boolean;
+  /** Channel topic value (purpose is separate; we surface topic). */
+  topic?: string;
+  memberCount?: number;
+}
+
+export interface ConversationsListResult {
+  channels: SlackChannelSummary[];
+}
+
 // --- Assistant container (Agents & AI Apps) --------------------------------
 
 export interface SuggestedPrompt {
@@ -160,6 +229,12 @@ export interface SlackClient {
   chatAppendStream(params: AppendStreamParams): Promise<void>;
   /** Finalize a stream, optionally adding Block Kit at the bottom. */
   chatStopStream(params: StopStreamParams): Promise<void>;
+  /** Full-text search across the workspace's messages (requires `search:read`). */
+  searchMessages(params: SearchMessagesParams): Promise<SearchMessagesResult>;
+  /** Fetch a user's profile (requires `users:read`; email needs `users:read.email`). */
+  usersInfo(params: UsersInfoParams): Promise<SlackUserProfile>;
+  /** List channels the bot can see (requires `channels:read` / `groups:read`). */
+  conversationsList(params: ConversationsListParams): Promise<ConversationsListResult>;
 }
 
 // ---------------------------------------------------------------------------
