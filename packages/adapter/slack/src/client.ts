@@ -162,12 +162,12 @@ export interface StartStreamParams {
   markdownText?: string;
   /**
    * How Slack renders `task_update` chunks pushed into this stream.
-   *  `task` — individual task cards (one block per step)
-   *  `plan` — grouped plan block (steps shown as a checklist inside one block)
-   * Default if omitted: Slack picks. We set this explicitly to lock the
-   * rendering we want.
+   *  `timeline` — individual task cards rendered sequentially (the default).
+   *  `plan`     — all tasks grouped inside a single plan block.
+   *  `dense`    — consecutive tool calls collapsed into one summarized card.
+   * Per the chat.startStream docs. Omit to use Slack's default (`timeline`).
    */
-  taskDisplayMode?: 'task' | 'plan';
+  taskDisplayMode?: 'timeline' | 'plan' | 'dense';
 }
 
 /** Handle to an in-flight stream — pass to append/stop. */

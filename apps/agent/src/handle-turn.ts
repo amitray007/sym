@@ -367,10 +367,10 @@ async function streamReply(
     const startParams: StartStreamParams = {
       channel,
       threadTs,
-      // Lock task_update chunks to render as individual task cards (one block
-      // per step). Without this, Slack chooses based on chunk volume — we'd
-      // rather not depend on that default.
-      taskDisplayMode: 'task',
+      // Lock task_update chunks to render as individual cards in arrival
+      // order (Slack's `timeline` mode — also the API default, but we set it
+      // explicitly so behaviour is stable if the default ever shifts).
+      taskDisplayMode: 'timeline',
       ...(isAssistant
         ? {}
         : { recipientUserId: turn.requester, recipientTeamId: deps.slackTeamId }),

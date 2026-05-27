@@ -683,7 +683,7 @@ describe('handleTurn', () => {
     expect(ids.has('task-3')).toBe(true);
   });
 
-  it('sets task_display_mode=task on chatStartStream so chunks render as cards', async () => {
+  it('sets task_display_mode=timeline on chatStartStream so chunks render as sequential cards', async () => {
     mockRunLoopPi.mockImplementationOnce(
       async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
         const o = opts as { onDelta?: (d: string) => Promise<void> };
@@ -703,6 +703,6 @@ describe('handleTurn', () => {
     });
 
     expect(slack.startStreamCalls).toHaveLength(1);
-    expect(slack.startStreamCalls[0]?.taskDisplayMode).toBe('task');
+    expect(slack.startStreamCalls[0]?.taskDisplayMode).toBe('timeline');
   });
 });
