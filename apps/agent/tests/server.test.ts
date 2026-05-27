@@ -108,6 +108,66 @@ describe('agent server — Slack auth middleware (centralised gate)', () => {
       expect(await res.json()).toEqual({ ok: true });
     });
 
+    it("silent-ACKs the bot's own message echo without triggering a decline (regression: decline-loop)", async () => {
+      // Slack delivers every message in a channel back to the app, including
+      // the bot's own posts. Without the self-event filter, the middleware
+      // would treat each bot post as a non-owner DM, post a decline, see that
+      // decline come back as another event, post another decline … ad infinitum.
+      const bodyWithBotId = JSON.stringify({
+        type: 'event_callback',
+        team_id: 'T-TEST',
+        event_id: 'EvBot1',
+        event: {
+          type: 'message',
+          channel_type: 'im',
+          user: 'UBOT',
+          bot_id: 'B12345',
+          channel: 'D1',
+          ts: '1.0',
+          text: 'I am posting',
+        },
+      });
+      const res1 = await post({ body: bodyWithBotId });
+      expect(res1.status).toBe(200);
+
+      // Same scenario but signalled via `subtype` (Slack uses this for
+      // message_changed / bot_message / message_deleted).
+      const bodyWithSubtype = JSON.stringify({
+        type: 'event_callback',
+        team_id: 'T-TEST',
+        event_id: 'EvBot2',
+        event: {
+          type: 'message',
+          channel_type: 'im',
+          subtype: 'bot_message',
+          user: 'UBOT',
+          channel: 'D1',
+          ts: '1.0',
+          text: 'I am posting',
+        },
+      });
+      const res2 = await post({ body: bodyWithSubtype });
+      expect(res2.status).toBe(200);
+
+      // Defensive fallback: user equals our bot id even when bot_id/subtype
+      // are missing (can happen on freshly-posted messages).
+      const bodyWithBotUser = JSON.stringify({
+        type: 'event_callback',
+        team_id: 'T-TEST',
+        event_id: 'EvBot3',
+        event: {
+          type: 'message',
+          channel_type: 'im',
+          user: 'UBOT',
+          channel: 'D1',
+          ts: '1.0',
+          text: 'I am posting',
+        },
+      });
+      const res3 = await post({ body: bodyWithBotUser });
+      expect(res3.status).toBe(200);
+    });
+
     it('silent-ACKs a DM message from a non-owner (decline post is fire-and-forget)', async () => {
       const body = JSON.stringify({
         type: 'event_callback',

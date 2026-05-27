@@ -74,6 +74,7 @@ export function createServer(deps: ServerDeps): Hono<{ Variables: SlackContextVa
       signingSecret: config.slackSigningSecret,
       allowedTeamId: config.slackTeamId,
       allowedOwnerUserId: config.ownerSlackUserId as SlackUserId,
+      botUserId: config.slackBotUserId as SlackUserId,
       postDmDecline: async (channelId, threadTs) => {
         await ctx.slackClient.chatPostMessage({
           channel: channelId as SlackChannelId,

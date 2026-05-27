@@ -94,6 +94,14 @@ export interface SlackAuthDeps {
   allowedTeamId: string;
   allowedOwnerUserId: SlackUserId;
   /**
+   * Sym's own bot user id. Used to filter out self-originated events BEFORE
+   * the gate runs — Slack delivers the bot's own posts back as fresh
+   * `message.im` events, and without this filter the gate would treat them
+   * as "non-owner DMs" and post a decline, which is itself another bot post,
+   * which triggers another decline, ad infinitum. See {@link isSelfOriginatedEvent}.
+   */
+  botUserId: SlackUserId;
+  /**
    * Optional polite-decline poster for non-owner DMs. When provided and a
    * denied request is a DM message event, the middleware fires this so the
    * sender doesn't see total silence in a 1:1. Channel mentions stay silent
@@ -102,6 +110,30 @@ export interface SlackAuthDeps {
    * Failures are swallowed (logged but never block the ACK).
    */
   postDmDecline?: (channelId: string, threadTs: string | undefined) => Promise<void>;
+}
+
+/**
+ * Is this event_callback the bot hearing its own voice? Slack delivers every
+ * message in a channel back to subscribed apps, INCLUDING messages the app
+ * itself posted. Three independent signals catch this:
+ *   - `bot_id` is set on the inner event (Slack-confirmed bot-authored message)
+ *   - `subtype` is set (message_changed, bot_message, message_deleted, …)
+ *   - `user` equals our own bot user id (defensive: covers race conditions
+ *     where bot_id isn't set yet on freshly-posted messages)
+ *
+ * Mirrors the filter inside `normalizeSlackEvent` at
+ * packages/adapter/slack/src/normalize.ts. Kept here because the gate runs
+ * UPSTREAM of normalize — without this, self-echoes get owner-gate-denied
+ * and trigger a decline-post loop.
+ */
+function isSelfOriginatedEvent(parsed: ParsedSlackRequest, botUserId: SlackUserId): boolean {
+  if (parsed.kind !== 'event') return false;
+  const inner = parsed.event?.event;
+  if (!inner) return false;
+  if (inner.bot_id !== undefined) return true;
+  if (inner.subtype !== undefined) return true;
+  if (inner.user !== undefined && inner.user === botUserId) return true;
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +289,17 @@ export function slackAuth(deps: SlackAuthDeps): MiddlewareHandler<{
     // url_verification has no principal; respond with the challenge and stop.
     if (parsed.kind === 'url_verification') {
       return c.json({ challenge: parsed.challenge ?? '' });
+    }
+
+    // Drop self-originated events BEFORE the gate so the bot's own posts
+    // don't trigger a decline-storm. Slack delivers everything in the
+    // channel — including Sym's own messages — and treating those as
+    // non-owner DMs creates an infinite loop (decline → bot post → event
+    // → decline → …). Must run before extractPrincipal because the
+    // principal of a bot echo is the bot itself, which is by definition
+    // not the owner.
+    if (isSelfOriginatedEvent(parsed, deps.botUserId)) {
+      return c.json({ ok: true });
     }
 
     const { teamId, userId } = extractPrincipal(parsed);
