@@ -18,6 +18,17 @@ features:
     home_tab_enabled: false
     messages_tab_enabled: true
     messages_tab_read_only_enabled: false
+  assistant_view:
+    assistant_description: Your AI plus-one in Slack — always online, never on PTO.
+    suggested_prompts:
+      - title: Catch me up
+        message: Summarize #general from the last few hours
+      - title: Look someone up
+        message: Who is @alice? What's their role and current status?
+      - title: Fetch a link
+        message: What does this page say? https://
+      - title: What can you do?
+        message: What can you help me with?
   bot_user:
     display_name: Sym
     always_online: true
