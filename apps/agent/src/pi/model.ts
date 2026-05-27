@@ -13,10 +13,20 @@
 import { getModel, type Model } from '@earendil-works/pi-ai';
 
 export interface FireworksModelCfg {
-  /** Fireworks base URL, e.g. `https://api.fireworks.ai/inference/v1`. */
+  /** Fireworks base URL, e.g. `https://api.fireworks.ai/inference`. */
   baseUrl: string;
   /** Fireworks model id, e.g. `accounts/fireworks/models/gpt-oss-120b`. */
   modelId: string;
+}
+
+/**
+ * The Anthropic SDK appends `/v1/messages` to baseURL. Many Sym envs still hold
+ * the OpenAI-compat URL `…/inference/v1` from the previous surface, which would
+ * produce `…/v1/v1/messages` and 404. Strip a trailing `/v1` (with or without
+ * trailing slash) so old envs keep working without manual edits.
+ */
+function normalizeAnthropicBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '');
 }
 
 /**
@@ -39,5 +49,5 @@ export function buildFireworksModel(cfg: FireworksModelCfg): Model<'anthropic-me
       `expected anthropic-messages model for Harmony demux, got ${known.api} for ${cfg.modelId}`,
     );
   }
-  return { ...known, baseUrl: cfg.baseUrl };
+  return { ...known, baseUrl: normalizeAnthropicBaseUrl(cfg.baseUrl) };
 }
