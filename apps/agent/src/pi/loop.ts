@@ -330,12 +330,19 @@ export async function runLoopPi(
   };
 
   // Construct the Agent.
+  //
+  // thinkingLevel: 'low' — gpt-oss-120b on Fireworks REQUIRES an explicit
+  // reasoning effort. Default 'off' makes pi-ai send `thinking: { type: 'disabled' }`,
+  // which Fireworks translates to `reasoning_effort: 'none'` and rejects with 400.
+  // We don't surface reasoning to users (thinking_delta is filtered in the
+  // subscriber below), so 'low' keeps cost down while satisfying the API.
   const agent = new Agent({
     initialState: {
       systemPrompt,
       model: modelCfg.model,
       tools: agentTools,
       messages: historyMessages,
+      thinkingLevel: 'low',
     },
     getApiKey: (_provider: string) => modelCfg.apiKey,
     beforeToolCall,
