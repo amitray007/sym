@@ -210,6 +210,19 @@ async function streamReply(
     return true;
   } finally {
     clearInterval(keepaliveTimer);
+    // Explicitly clear the shimmer — Slack only auto-clears setStatus on
+    // chat.postMessage, NOT on chat.stopStream, so a streamed reply leaves
+    // the "is …" line stuck until the 2-min timeout. Belt-and-braces: also
+    // runs on the postMessage-fallback path (harmless; the post clears too).
+    try {
+      await deps.slackClient.assistantThreadsSetStatus({
+        channelId: channel,
+        threadTs,
+        status: '',
+      });
+    } catch (err) {
+      console.warn('[agent] setStatus clear failed:', err);
+    }
   }
 }
 

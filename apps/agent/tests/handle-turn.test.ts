@@ -234,8 +234,9 @@ describe('handleTurn', () => {
     });
 
     const statuses = slack.setStatusCalls.map((c) => c.status);
-    // Initial "is thinking…" + the two emissions from the loop.
-    expect(statuses).toEqual(['is thinking…', 'is searching Slack…', 'is writing the reply…']);
+    // Initial "is thinking…" + two loop emissions + the trailing '' clear
+    // (stopStream does not auto-clear setStatus, so we do it explicitly).
+    expect(statuses).toEqual(['is thinking…', 'is searching Slack…', 'is writing the reply…', '']);
   });
 
   // NOTE: we intentionally don't test the 90s keepalive timer. Fake-timer
@@ -261,9 +262,10 @@ describe('handleTurn', () => {
       slackTeamId: 'T-TEST',
     });
 
-    // setStatus was called for DM/assistant thread.
-    expect(slack.setStatusCalls).toHaveLength(1);
+    // setStatus: initial 'is thinking…' + trailing '' clear after stopStream.
+    expect(slack.setStatusCalls).toHaveLength(2);
     expect(slack.setStatusCalls[0]?.status).toBe('is thinking…');
+    expect(slack.setStatusCalls[1]?.status).toBe('');
 
     // startStream was called WITHOUT recipient ids (DM/assistant thread).
     expect(slack.startStreamCalls).toHaveLength(1);
