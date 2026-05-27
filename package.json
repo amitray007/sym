@@ -19,7 +19,8 @@
     "dev": "turbo run dev",
     "format": "prettier --write .",
     "clean": "turbo run clean && rm -rf node_modules .turbo",
-    "prepare": "husky"
+    "prepare": "husky",
+    "manifest:render": "node scripts/render-manifest.js"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.6.1",

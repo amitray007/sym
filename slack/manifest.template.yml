@@ -1,0 +1,96 @@
+# Sym — Slack app manifest (template)
+#
+# This is the canonical source of truth for the Slack app's display info,
+# OAuth scopes, event subscriptions, and feature flags. Render with
+# `pnpm manifest:render` (substitutes ${SLACK_PUBLIC_BASE_URL} from env)
+# and paste the output into Slack's app config / `slack manifest update`.
+#
+# Env vars used:
+#   SLACK_PUBLIC_BASE_URL  Public HTTPS base for redirect + events
+#                          (e.g. https://snowdrop-….ngrok-free.dev in dev,
+#                          your prod URL in prod).
+
+display_information:
+  name: Sym
+  description: AI teammate that lives in Slack
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Sym
+    always_online: true
+oauth_config:
+  redirect_urls:
+    - ${SLACK_PUBLIC_BASE_URL}/slack/oauth/callback
+  scopes:
+    user:
+      - search:read.public
+      - search:read.private
+      - search:read.mpim
+      - search:read.im
+      - search:read.files
+      - search:read.users
+      - chat:write
+      - channels:history
+      - groups:history
+      - mpim:history
+      - im:history
+      - canvases:read
+      - canvases:write
+      - users:read
+      - users:read.email
+      - reactions:write
+      - reactions:read
+      - emoji:read
+      - files:read
+      - channels:write
+      - groups:write
+      - im:write
+      - mpim:write
+      - channels:read
+      - groups:read
+      - mpim:read
+    user_optional:
+      - search:read.private
+      - search:read.mpim
+      - search:read.im
+      - search:read.files
+      - chat:write
+      - groups:history
+      - mpim:history
+      - im:history
+      - canvases:read
+      - canvases:write
+    bot:
+      # Core messaging.
+      - app_mentions:read
+      - assistant:write
+      - chat:write
+      - commands
+      # History readers (read_thread, read_channel tools).
+      - channels:history
+      - groups:history
+      - im:history
+      - im:read
+      # Tool surface — added with the search/list/profile tools.
+      - search:read # search_messages
+      - channels:read # list_channels (public)
+      - groups:read # list_channels (private)
+      - users:read # read_user_profile (display name, title, tz)
+      - users:read.email # read_user_profile (optional email surfacing)
+settings:
+  event_subscriptions:
+    request_url: ${SLACK_PUBLIC_BASE_URL}/slack/events
+    bot_events:
+      - app_mention
+      - message.im
+      # Assistant container lifecycle — drives setTitle + setSuggestedPrompts
+      # in apps/agent/src/assistant.ts.
+      - assistant_thread_started
+      - assistant_thread_context_changed
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
+  is_mcp_enabled: true

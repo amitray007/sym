@@ -62,6 +62,9 @@ drizzle-meta
 .vitest-cache
 test-results
 
+# Slack manifest — rendered output (generated from slack/manifest.template.yml)
+slack/manifest.yml
+
 # Misc
 .cache
 .parcel-cache
