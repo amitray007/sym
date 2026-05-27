@@ -3,7 +3,6 @@ import {
   assistantThreadStarted,
   normalizeSlackEvent,
   slackTurnInputToTurn,
-  verifySlackSignature,
 } from '@sym/adapter-slack';
 import { Hono } from 'hono';
 
@@ -11,11 +10,14 @@ import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { resolveConfirmation } from './confirmations.js';
 import { handleTurn } from './handle-turn.js';
-import { OWNER_DECLINE_MESSAGE, checkOwnerAccess } from './owner-gate.js';
+import { OWNER_DECLINE_MESSAGE } from './owner-gate.js';
+import { slackAuth } from './slack-auth.js';
 import { healthCheckTokens, loadWorkspaceContext } from './workspace-context.js';
 
 import type { AgentConfig } from './config.js';
+import type { SlackContextVariables } from './slack-auth.js';
 import type { RawSlackEvent } from '@sym/adapter-slack';
+import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
 
 export interface ServerDeps {
   config: AgentConfig;
@@ -36,16 +38,22 @@ function createDedup(max = 10_000): (id: string) => boolean {
 }
 
 /**
- * The agent's HTTP surface. Slack Events API (JSON) for app_mention + DM is
- * wired end-to-end here; slash commands / shortcuts arrive form-encoded and are
- * a follow-up (the adapter already normalizes their shape once parsed).
+ * The agent's HTTP surface.
  *
- * Slack requires a 200 within 3s, so we ACK immediately and process the turn
- * asynchronously (the reply is delivered via chat.postMessage when ready).
+ * EVERY route mounted at `/slack/*` is wrapped by `slackAuth` middleware,
+ * which centrally enforces: Slack signature verification, single-workspace
+ * scoping, and the SINGLE-OWNER access gate. Route handlers below assume
+ * the request has already been authenticated AND authorized — they never
+ * re-check team or owner. Adding a new Slack route = mount it under
+ * `/slack/*` and the gate is inherited by construction. See `slack-auth.ts`.
+ *
+ * Slack requires a 200 within 3s, so handlers ACK immediately and process
+ * the heavy work asynchronously (the reply is delivered via chat.postMessage
+ * when ready).
  */
-export function createServer(deps: ServerDeps): Hono {
+export function createServer(deps: ServerDeps): Hono<{ Variables: SlackContextVariables }> {
   const { config } = deps;
-  const app = new Hono();
+  const app = new Hono<{ Variables: SlackContextVariables }>();
   const alreadySeen = createDedup();
   const assistantContext = createAssistantContextStore();
   // Single-tenant runtime context — resolved once from env config.
@@ -55,13 +63,31 @@ export function createServer(deps: ServerDeps): Hono {
   // in the logs at boot without blocking server start.
   void healthCheckTokens(ctx);
 
-  async function processEvent(raw: RawSlackEvent, teamId: string): Promise<void> {
-    // Single workspace: ignore events from any other Slack team.
-    if (teamId !== config.slackTeamId) {
-      console.warn(`[agent] ignoring event from foreign team ${teamId}`);
-      return;
-    }
+  // ---------------------------------------------------------------------------
+  // The one and only Slack gate. Mounted before every /slack/* route so all
+  // ingress is verified + owner-checked by construction. Do not re-mount or
+  // re-check downstream.
+  // ---------------------------------------------------------------------------
+  app.use(
+    '/slack/*',
+    slackAuth({
+      signingSecret: config.slackSigningSecret,
+      allowedTeamId: config.slackTeamId,
+      allowedOwnerUserId: config.ownerSlackUserId as SlackUserId,
+      postDmDecline: async (channelId, threadTs) => {
+        await ctx.slackClient.chatPostMessage({
+          channel: channelId as SlackChannelId,
+          text: OWNER_DECLINE_MESSAGE,
+          ...(threadTs !== undefined ? { thread_ts: threadTs as SlackThreadTs } : {}),
+        });
+      },
+    }),
+  );
 
+  // ---------------------------------------------------------------------------
+  // /slack/events — Events API (app_mention, DM, assistant container lifecycle)
+  // ---------------------------------------------------------------------------
+  async function processEvent(raw: RawSlackEvent): Promise<void> {
     // Assistant container lifecycle: track context changes before anything else.
     const ctxChanged = assistantThreadContextChanged(raw);
     if (ctxChanged) {
@@ -93,24 +119,6 @@ export function createServer(deps: ServerDeps): Hono {
     if (!input) return; // an event we don't act on
     const turn = slackTurnInputToTurn(input);
 
-    // Single-owner gate: Sym acts only on its owner's requests. Non-owner turns
-    // are dropped — silently in channels (Sym stays invisible to the rest of the
-    // team), with one polite line in a DM (silence in a 1:1 just looks broken).
-    if (checkOwnerAccess(turn.requester, ctx.ownerSlackUserId) === 'deny') {
-      if (turn.entrySurface === 'dm' && turn.channelId !== undefined) {
-        try {
-          await ctx.slackClient.chatPostMessage({
-            channel: turn.channelId,
-            text: OWNER_DECLINE_MESSAGE,
-            ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),
-          });
-        } catch (postErr) {
-          console.warn('[agent] owner-gate decline post failed (continuing):', postErr);
-        }
-      }
-      return;
-    }
-
     const viewedChannelId =
       turn.channelId !== undefined && turn.threadTs !== undefined
         ? assistantContext.lookup(turn.channelId, turn.threadTs)
@@ -130,124 +138,40 @@ export function createServer(deps: ServerDeps): Hono {
     });
   }
 
-  app.post('/slack/events', async (c) => {
-    const rawBody = await c.req.text();
-    const verification = verifySlackSignature({
-      signingSecret: config.slackSigningSecret,
-      headers: {
-        'x-slack-request-timestamp': c.req.header('x-slack-request-timestamp') ?? '',
-        'x-slack-signature': c.req.header('x-slack-signature') ?? '',
-      },
-      rawBody,
-    });
-    if (!verification.ok) {
-      return c.json({ error: verification.reason }, 401);
-    }
-
-    let parsed: RawSlackEvent & { challenge?: string };
-    try {
-      parsed = JSON.parse(rawBody) as RawSlackEvent & { challenge?: string };
-    } catch {
-      return c.json({ error: 'invalid_json' }, 400);
-    }
-
-    // Slack Events API endpoint verification handshake.
-    if (parsed.type === 'url_verification') {
-      return c.json({ challenge: parsed.challenge ?? '' });
-    }
+  app.post('/slack/events', (c) => {
+    const slack = c.get('slack');
+    const raw = slack.event;
+    if (!raw) return c.json({ ok: true });
 
     // Dedup Slack retries (it re-sends if it doesn't get a fast 200).
-    if (parsed.event_id && alreadySeen(parsed.event_id)) {
+    if (raw.event_id && alreadySeen(raw.event_id)) {
       return c.json({ ok: true });
     }
 
     // ACK now; do the slow work (LLM call + reply) after responding.
-    if (parsed.team_id) {
-      const teamId = parsed.team_id;
-      void processEvent(parsed, teamId).catch((err: unknown) => {
-        console.error('[agent] processEvent failed', err);
-      });
-    }
+    void processEvent(raw).catch((err: unknown) => {
+      console.error('[agent] processEvent failed', err);
+    });
     return c.json({ ok: true });
   });
 
-  // --- Slack Interactivity (button clicks for confirmations) ----------------
-  // Slack posts a `application/x-www-form-urlencoded` body with a `payload`
-  // field that contains URL-encoded JSON. We verify the Slack signature EXACTLY
-  // as we do for /slack/events (same signing secret, raw body, timestamp window)
-  // and then owner-gate the click before resolving the confirmation.
-  //
-  // Interactivity Request URL: <AGENT_URL>/slack/interactivity
-  // Set this in your Slack app's "Interactivity & Shortcuts" settings.
-  app.post('/slack/interactivity', async (c) => {
-    // Read the raw body — must happen before any parsing so we can verify the
-    // Slack signature over the exact bytes Slack sent.
-    const rawBody = await c.req.text();
-
-    const verification = verifySlackSignature({
-      signingSecret: config.slackSigningSecret,
-      headers: {
-        'x-slack-request-timestamp': c.req.header('x-slack-request-timestamp') ?? '',
-        'x-slack-signature': c.req.header('x-slack-signature') ?? '',
-      },
-      rawBody,
-    });
-    if (!verification.ok) {
-      return c.json({ error: verification.reason }, 401);
-    }
-
-    // Parse `application/x-www-form-urlencoded` → extract `payload` field.
-    let payloadJson: string;
-    try {
-      const params = new URLSearchParams(rawBody);
-      const raw = params.get('payload');
-      if (!raw) {
-        return c.json({ error: 'missing_payload' }, 400);
-      }
-      payloadJson = raw;
-    } catch {
-      return c.json({ error: 'invalid_form' }, 400);
-    }
-
-    // Parse the block_actions payload.
-    let payload: {
-      type?: string;
-      user?: { id?: string };
-      team?: { id?: string };
-      actions?: { action_id?: string }[];
-      response_url?: string;
-    };
-    try {
-      payload = JSON.parse(payloadJson) as typeof payload;
-    } catch {
-      return c.json({ error: 'invalid_payload_json' }, 400);
-    }
+  // ---------------------------------------------------------------------------
+  // /slack/interactivity — button clicks for confirmations
+  // ---------------------------------------------------------------------------
+  app.post('/slack/interactivity', (c) => {
+    const slack = c.get('slack');
+    const payload = slack.interactivity;
+    if (!payload) return c.json({ ok: true });
 
     if (payload.type !== 'block_actions') {
       // We only handle block_actions; ACK other interaction types without error.
       return c.json({ ok: true });
     }
 
-    const clickerId = payload.user?.id;
-    const teamId = payload.team?.id;
     const actionId = payload.actions?.[0]?.action_id ?? '';
     const responseUrl = payload.response_url;
 
-    if (!clickerId || !teamId) {
-      return c.json({ error: 'missing_user_or_team' }, 400);
-    }
-
-    // ---------------------------------------------------------------------------
-    // Owner gate — only the owner's click, from our workspace, resolves a
-    // confirmation. Anything else is silently ACK'd (no Slack error shown).
-    // ---------------------------------------------------------------------------
-    if (teamId !== config.slackTeamId || clickerId !== config.ownerSlackUserId) {
-      return c.json({ ok: true });
-    }
-
-    // ---------------------------------------------------------------------------
     // Parse action_id: `sym_confirm:<id>:approve|deny`
-    // ---------------------------------------------------------------------------
     const match = /^sym_confirm:([^:]+):(approve|deny)$/.exec(actionId);
     if (!match) {
       // Not a sym_confirm action — ACK without processing.
@@ -260,9 +184,9 @@ export function createServer(deps: ServerDeps): Hono {
 
     resolveConfirmation(confirmationId, approved);
 
-    // ACK Slack immediately (already done implicitly by returning below).
-    // Best-effort: update the interactive message via response_url so the
-    // buttons are replaced with a status line. Never block the ACK on this.
+    // ACK Slack immediately. Best-effort: update the interactive message via
+    // response_url so the buttons are replaced with a status line. Never
+    // block the ACK on this.
     if (responseUrl) {
       const statusText = approved ? 'Approved ✅' : 'Cancelled ✋';
       void fetch(responseUrl, {
@@ -274,6 +198,21 @@ export function createServer(deps: ServerDeps): Hono {
       });
     }
 
+    return c.json({ ok: true });
+  });
+
+  // ---------------------------------------------------------------------------
+  // /slack/commands — slash commands (e.g. /sym ...). Inherits the owner
+  // gate from the middleware above. No slash commands are wired yet; this
+  // ACKs cleanly so adding one is a matter of dispatch logic, not auth.
+  // ---------------------------------------------------------------------------
+  app.post('/slack/commands', (c) => {
+    const slack = c.get('slack');
+    const cmd = slack.slash;
+    if (!cmd) return c.json({ ok: true });
+    // TODO: dispatch by `cmd.command` when slash commands are introduced.
+    // For now: silent ACK (Slack shows nothing to the user).
+    console.log(`[agent] slash command received (no handler yet): ${cmd.command}`);
     return c.json({ ok: true });
   });
 
