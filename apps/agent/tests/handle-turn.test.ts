@@ -2,15 +2,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { handleTurn } from '../src/handle-turn.js';
 
+import type * as PiLoopModuleType from '../src/pi/loop.js';
+
 // ---------------------------------------------------------------------------
 // Mock the Pi loop so tests are hermetic (no real HTTP calls to Fireworks).
 // vi.mock is hoisted before imports, so we can't reference module-scope vars
 // inside the factory — instead we export a ref from the mock that tests drive.
 // ---------------------------------------------------------------------------
 
-vi.mock('../src/pi/loop.js', () => {
+vi.mock('../src/pi/loop.js', async (importOriginal) => {
+  // Partial mock: stub runLoopPi (hermetic — no real HTTP), but keep the real
+  // exports for whimsy helpers (WHIMSY_WORDS, nextWhimsicalStatus) that
+  // handle-turn imports.
+  const actual = await importOriginal<typeof PiLoopModuleType>();
   const mockFn = vi.fn();
-  return { runLoopPi: mockFn, __mockRunLoopPi: mockFn };
+  return { ...actual, runLoopPi: mockFn, __mockRunLoopPi: mockFn };
 });
 
 import * as piLoopModule from '../src/pi/loop.js';
@@ -59,7 +65,7 @@ function makeReply(overrides: Partial<Reply> = {}): Reply {
     markdown: 'Hello world',
     receipt: {
       turnId: 'turn-1' as TurnId,
-      model: 'test-model',
+      model: 'accounts/fireworks/models/gpt-oss-120b',
       toolsInvoked: [],
       durationMs: 10,
     },
@@ -154,7 +160,7 @@ describe('handleTurn', () => {
     const slack = new MockSlackClient();
     await handleTurn(makeTurn(), {
       fireworks: FAKE_FIREWORKS,
-      model: 'test-model',
+      model: 'accounts/fireworks/models/gpt-oss-120b',
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
@@ -185,7 +191,7 @@ describe('handleTurn', () => {
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
       fireworks: FAKE_FIREWORKS,
-      model: 'test-model',
+      model: 'accounts/fireworks/models/gpt-oss-120b',
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
@@ -227,7 +233,7 @@ describe('handleTurn', () => {
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
       fireworks: FAKE_FIREWORKS,
-      model: 'test-model',
+      model: 'accounts/fireworks/models/gpt-oss-120b',
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
@@ -256,7 +262,7 @@ describe('handleTurn', () => {
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ entrySurface: 'dm', threadTs: '500.0' as SlackThreadTs }), {
       fireworks: FAKE_FIREWORKS,
-      model: 'test-model',
+      model: 'accounts/fireworks/models/gpt-oss-120b',
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
@@ -295,7 +301,7 @@ describe('handleTurn', () => {
 
     await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
       fireworks: FAKE_FIREWORKS,
-      model: 'test-model',
+      model: 'accounts/fireworks/models/gpt-oss-120b',
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
@@ -317,7 +323,7 @@ describe('handleTurn', () => {
     delete (noChannelTurn as Partial<Turn>).channelId;
     await handleTurn(noChannelTurn, {
       fireworks: FAKE_FIREWORKS,
-      model: 'test-model',
+      model: 'accounts/fireworks/models/gpt-oss-120b',
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
@@ -359,7 +365,7 @@ describe('handleTurn', () => {
       }),
       {
         fireworks: FAKE_FIREWORKS,
-        model: 'test-model',
+        model: 'accounts/fireworks/models/gpt-oss-120b',
         slackClient: slack,
         botUserId: BOT,
         slackTeamId: 'T-TEST',
@@ -382,7 +388,7 @@ describe('handleTurn', () => {
           markdown: 'The time is now.',
           receipt: {
             turnId: 'turn-1' as TurnId,
-            model: 'test-model',
+            model: 'accounts/fireworks/models/gpt-oss-120b',
             toolsInvoked: ['get_current_time'],
             durationMs: 10,
           },
@@ -393,7 +399,7 @@ describe('handleTurn', () => {
     const slack = new MockSlackClient();
     await handleTurn(makeTurn({ entrySurface: 'dm', threadTs: '500.0' as SlackThreadTs }), {
       fireworks: FAKE_FIREWORKS,
-      model: 'test-model',
+      model: 'accounts/fireworks/models/gpt-oss-120b',
       slackClient: slack,
       botUserId: BOT,
       slackTeamId: 'T-TEST',
@@ -433,7 +439,7 @@ describe('handleTurn', () => {
       }),
       {
         fireworks: FAKE_FIREWORKS,
-        model: 'test-model',
+        model: 'accounts/fireworks/models/gpt-oss-120b',
         slackClient: slack,
         botUserId: BOT,
         slackTeamId: 'T-TEST',

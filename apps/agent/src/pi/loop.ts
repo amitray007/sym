@@ -40,7 +40,7 @@ import type { ToolRegistry } from '@sym/kernel';
 export interface PiModelCfg {
   baseUrl: string;
   apiKey: string;
-  model: Model<'openai-completions'>;
+  model: Model<'anthropic-messages'>;
 }
 
 /** Options accepted by `runLoopPi`. */
@@ -114,7 +114,9 @@ function toAgentMessages(history: ChatMessage[]): AgentMessage[] {
         const assistantMsg: AssistantMessage = {
           role: 'assistant',
           content: msg.content != null ? [{ type: 'text', text: msg.content }] : [],
-          api: 'openai-completions',
+          // History stub: align with the live model surface so Pi's re-serialization
+          // for context doesn't see a mixed api union mid-conversation.
+          api: 'anthropic-messages',
           provider: 'fireworks',
           model: '',
           usage: {
@@ -194,6 +196,35 @@ const TOOL_VERBS: Record<string, string> = {
 
 function friendlyVerb(toolName: string): string {
   return TOOL_VERBS[toolName] ?? `using ${toolName}`;
+}
+
+// ---------------------------------------------------------------------------
+// Whimsy — playful keepalive rotation
+// ---------------------------------------------------------------------------
+
+/**
+ * Curated playful present-progressive words for long "still thinking" stretches.
+ * Tool-specific verbs (TOOL_VERBS) stay concrete; this only kicks in on the
+ * keepalive cycle when no real phase update has fired.
+ */
+export const WHIMSY_WORDS: readonly string[] = [
+  'pondering',
+  'cogitating',
+  'ruminating',
+  'musing',
+  'marinating',
+  'noodling',
+  'wadoodling',
+  'percolating',
+  'mulling it over',
+  'gathering thoughts',
+];
+
+/** Format a whimsical status string for the given keepalive tick. */
+export function nextWhimsicalStatus(tick: number): string {
+  const word =
+    WHIMSY_WORDS[((tick % WHIMSY_WORDS.length) + WHIMSY_WORDS.length) % WHIMSY_WORDS.length]!;
+  return `is ${word}…`;
 }
 
 // ---------------------------------------------------------------------------
@@ -316,23 +347,42 @@ export async function runLoopPi(
 
   // Subscribe to events for streaming + tool tracking.
   // The subscriber is synchronous where possible; async onDelta is awaited in-band.
+  //
+  // NOTE: `thinking_delta` events (Harmony analysis/commentary on the
+  // anthropic-messages surface) are deliberately NOT routed anywhere — neither
+  // onDelta nor onStatus. They're internal reasoning and must never appear in
+  // the Slack message body or shimmer.
   agent.subscribe(async (event: AgentEvent) => {
     if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
       const delta = event.assistantMessageEvent.delta;
-      // First reply token after tools (or at the very start) → "writing" status.
+      // Only flip "writing" status when the partial actually carries a non-empty
+      // text-type content block — guards against premature flips from edge-case
+      // events where text_delta arrives before any real text is materialised.
       if (!emittedWritingStatus && opts.onStatus !== undefined) {
-        emittedWritingStatus = true;
-        await opts.onStatus('is writing the reply…');
+        const partial = event.assistantMessageEvent.partial;
+        const hasRealText = partial.content.some((b) => b.type === 'text' && b.text.length > 0);
+        if (hasRealText) {
+          emittedWritingStatus = true;
+          await opts.onStatus('is writing the reply…');
+        }
       }
       draftParts.push(delta);
       await opts.onDelta?.(delta);
     }
 
     if (event.type === 'tool_execution_start') {
-      toolsInvoked.push(event.toolName);
+      const toolName = event.toolName;
+      // Phantom tool guard: if some future model leaks a Harmony tool-call frame
+      // that names a tool we never registered, drop the status update instead of
+      // echoing garbage into the shimmer. Belt-and-braces for the demux fix.
+      if (!descriptorMap.has(toolName)) {
+        console.warn(`[pi] dropping status for unknown tool '${toolName}' (not in registry)`);
+        return;
+      }
+      toolsInvoked.push(toolName);
       // Re-arm the "writing" status so the next text_delta after this tool flips it again.
       emittedWritingStatus = false;
-      await opts.onStatus?.(`is ${friendlyVerb(event.toolName)}…`);
+      await opts.onStatus?.(`is ${friendlyVerb(toolName)}…`);
     }
   });
 

@@ -1,42 +1,43 @@
 /**
  * Shared Fireworks model builder for Pi.
  *
- * Single source of truth for the Model<'openai-completions'> config used by
- * both the Pi turn loop and the spike. Callers supply the Fireworks baseUrl +
- * model id; the rest is fixed Fireworks compat metadata.
+ * Returns the pi-ai registry entry for the requested Fireworks model, with the
+ * caller-supplied baseUrl overridden on top. We MUST use the registry entry
+ * (not a hand-rolled config) so the correct Harmony-aware api surface is
+ * selected — e.g. Fireworks's gpt-oss-120b is `anthropic-messages`, which
+ * demuxes Harmony channels (analysis/commentary/final) into proper text vs
+ * thinking content. Calling it via `openai-completions` leaks reasoning text
+ * and phantom tool-call frames into `delta.content`.
  */
 
-import type { Model } from '@earendil-works/pi-ai';
+import { getModel, type Model } from '@earendil-works/pi-ai';
 
 export interface FireworksModelCfg {
   /** Fireworks base URL, e.g. `https://api.fireworks.ai/inference/v1`. */
   baseUrl: string;
-  /** Fireworks model id, e.g. `accounts/fireworks/models/llama-v3p1-70b-instruct`. */
+  /** Fireworks model id, e.g. `accounts/fireworks/models/gpt-oss-120b`. */
   modelId: string;
 }
 
 /**
- * Build a `Model<'openai-completions'>` for the Fireworks endpoint.
+ * Build a `Model<'anthropic-messages'>` for the Fireworks endpoint by looking
+ * up the registry entry and overriding `baseUrl` with the env-supplied value.
  *
- * - `compat.supportsStore: false` — Fireworks rejects the OpenAI `store` field.
- * - `compat.supportsUsageInStreaming: false` — Fireworks does not send usage in
- *   streaming chunks; Pi will read it from the final non-streaming response body
- *   if available, or skip it.
+ * Throws if the modelId is unknown or its api surface is not anthropic-messages
+ * — the demux behaviour is load-bearing for clean streaming.
  */
-export function buildFireworksModel(cfg: FireworksModelCfg): Model<'openai-completions'> {
-  return {
-    id: cfg.modelId,
-    name: 'Fireworks (Sym)',
-    api: 'openai-completions',
-    provider: 'fireworks',
-    baseUrl: cfg.baseUrl,
-    reasoning: false,
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 131_072,
-    maxTokens: 4_096,
-    compat: {
-      supportsStore: false,
-    },
-  };
+export function buildFireworksModel(cfg: FireworksModelCfg): Model<'anthropic-messages'> {
+  // getModel is strictly typed on TModelId — runtime lookup is what matters here,
+  // so we cast through unknown to accept the user's env-supplied modelId string.
+  const known = getModel(
+    'fireworks',
+    cfg.modelId as unknown as 'accounts/fireworks/models/gpt-oss-120b',
+  );
+  if (!known) throw new Error(`unknown Fireworks model: ${cfg.modelId}`);
+  if (known.api !== 'anthropic-messages') {
+    throw new Error(
+      `expected anthropic-messages model for Harmony demux, got ${known.api} for ${cfg.modelId}`,
+    );
+  }
+  return { ...known, baseUrl: cfg.baseUrl };
 }

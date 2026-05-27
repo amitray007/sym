@@ -2,7 +2,7 @@ import { markdownBlock, receiptToContextBlock, threadToHistory } from '@sym/adap
 import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
-import { runLoopPi } from './pi/loop.js';
+import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 
 import type { AppendStreamParams, SlackClient, StartStreamParams } from '@sym/adapter-slack';
@@ -131,9 +131,18 @@ async function streamReply(
   const isAssistant = turn.entrySurface === 'dm';
 
   // Track the most recent status so the keepalive interval can re-send it.
+  // `phaseUpdated` flips true the first time we see a concrete phase string
+  // (tool verb or "writing the reply") — that signal lets the keepalive choose
+  // between rotating whimsy ("is wadoodling…") and re-sending the real phase.
   let lastStatus = 'is thinking…';
+  let phaseUpdated = false;
+  // Recognise whimsy phrases so they don't trip the "real phase fired" flag.
+  const whimsyPhrases = new Set(WHIMSY_WORDS.map((w) => `is ${w}…`));
   const sendStatus = async (status: string): Promise<void> => {
     lastStatus = status;
+    if (status !== 'is thinking…' && status !== '' && !whimsyPhrases.has(status)) {
+      phaseUpdated = true;
+    }
     try {
       await deps.slackClient.assistantThreadsSetStatus({
         channelId: channel,
@@ -150,9 +159,17 @@ async function streamReply(
   await sendStatus('is thinking…');
 
   // Keepalive — Slack auto-clears the shimmer after 2 min, so re-send the latest
-  // status every 90s. Cleared in finally below.
+  // status every 90s. If no real phase has fired yet, rotate through whimsical
+  // "still thinking" words so the shimmer feels alive on long turns. If a phase
+  // has fired ("is reading the thread…"), re-send it verbatim — don't override
+  // real phase info with whimsy.
+  let whimsyTick = 0;
   const keepaliveTimer = setInterval(() => {
-    void sendStatus(lastStatus);
+    if (phaseUpdated) {
+      void sendStatus(lastStatus);
+    } else {
+      void sendStatus(nextWhimsicalStatus(++whimsyTick));
+    }
   }, STATUS_KEEPALIVE_MS);
 
   try {
