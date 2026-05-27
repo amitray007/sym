@@ -6,7 +6,12 @@ import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 
 import type { BehaviorConfig } from './config.js';
-import type { AppendStreamParams, SlackClient, StartStreamParams } from '@sym/adapter-slack';
+import type {
+  AppendStreamParams,
+  SlackClient,
+  StartStreamParams,
+  TaskUpdateChunk,
+} from '@sym/adapter-slack';
 import type {
   ChatMessage,
   Reply,
@@ -44,122 +49,100 @@ const HISTORY_LIMIT = 20;
  */
 const STATUS_KEEPALIVE_MS = 90_000;
 
-/** Minimum ms the task card stays visible before delete/collapse runs. */
-const MIN_CARD_DISPLAY_MS = 800;
+type SendChunks = (chunks: TaskUpdateChunk[]) => Promise<void>;
 
 /**
- * Manages the live task card — a separate Slack message that tracks tool
- * execution steps in real time. Appears when enough tools fire (threshold),
- * then either deleted or collapsed to a summary line after the turn.
+ * Manages live task-progress cards embedded in the streaming reply via Slack's
+ * native `task_update` chunks (chat.appendStream). Steps appear inside the
+ * message itself — no separate card message, no deletion required.
  *
- * All Slack calls are best-effort: any error is logged and swallowed so a
- * card failure never blocks reply delivery.
+ * Threshold buffering: tools that fire before the threshold is reached are
+ * buffered and flushed all at once (as `complete`) when the threshold fires,
+ * so the user sees only the relevant work once the query is clearly non-trivial.
+ *
+ * All chunk sends are best-effort: errors are logged and swallowed so a card
+ * failure never blocks reply delivery.
  */
 class TaskCardManager {
-  private cardTs: SlackThreadTs | undefined;
-  private completedLabels: string[] = [];
-  private currentLabel: string | undefined;
+  private taskCounter = 0;
+  private completedTasks: { id: string; title: string }[] = [];
+  private currentTask: { id: string; title: string } | undefined;
   private toolCount = 0;
-  private readonly startMs = Date.now();
+  private active = false;
 
   constructor(
-    private readonly channel: SlackChannelId,
-    private readonly threadTs: SlackThreadTs,
-    private readonly slackClient: SlackClient,
-    /** Tool calls before the card appears (0 = always show from first tool). */
+    /** Callback that pushes task_update chunks into the open stream. */
+    private readonly sendChunks: SendChunks,
+    /** Tool calls before the card appears (1 = always show from first tool). */
     private readonly threshold: number,
-    private readonly after: 'delete' | 'collapse',
   ) {}
 
   async onToolStart(friendlyLabel: string): Promise<void> {
     this.toolCount++;
 
-    // Mark previous step done, set new current.
-    if (this.currentLabel !== undefined) {
-      this.completedLabels.push(this.currentLabel);
+    // Previous task transitions to complete.
+    if (this.currentTask !== undefined) {
+      const completed: TaskUpdateChunk = {
+        type: 'task_update',
+        id: this.currentTask.id,
+        title: this.currentTask.title,
+        status: 'complete',
+      };
+      if (this.active) {
+        await this.sendChunks([completed]).catch((err) =>
+          console.warn('[agent] task card update failed (continuing):', err),
+        );
+      } else {
+        this.completedTasks.push(this.currentTask);
+      }
     }
-    this.currentLabel = friendlyLabel;
 
-    if (this.toolCount < this.threshold) return;
+    // Register new in-progress task.
+    const id = `task-${++this.taskCounter}`;
+    const title = capitalize(friendlyLabel);
+    this.currentTask = { id, title };
 
-    if (this.cardTs === undefined) {
-      await this.postCard();
-    } else {
-      await this.updateCard();
+    if (!this.active && this.toolCount >= this.threshold) {
+      // Threshold crossed — flush all buffered completed tasks + current as in_progress.
+      this.active = true;
+      const chunks: TaskUpdateChunk[] = [
+        ...this.completedTasks.map(
+          (t): TaskUpdateChunk => ({
+            type: 'task_update',
+            id: t.id,
+            title: t.title,
+            status: 'complete',
+          }),
+        ),
+        { type: 'task_update', id, title, status: 'in_progress' },
+      ];
+      this.completedTasks = [];
+      await this.sendChunks(chunks).catch((err) =>
+        console.warn('[agent] task card start failed (continuing):', err),
+      );
+    } else if (this.active) {
+      await this.sendChunks([{ type: 'task_update', id, title, status: 'in_progress' }]).catch(
+        (err) => console.warn('[agent] task card update failed (continuing):', err),
+      );
     }
   }
 
   async finish(): Promise<void> {
-    if (this.cardTs === undefined) return;
-
-    if (this.currentLabel !== undefined) {
-      this.completedLabels.push(this.currentLabel);
-      this.currentLabel = undefined;
-    }
-
-    // Ensure the card is visible for at least MIN_CARD_DISPLAY_MS.
-    const elapsed = Date.now() - this.startMs;
-    if (elapsed < MIN_CARD_DISPLAY_MS) {
-      await new Promise((r) => setTimeout(r, MIN_CARD_DISPLAY_MS - elapsed));
-    }
-
+    // If the threshold was never reached, no chunks were ever sent — nothing to close.
+    if (!this.active || this.currentTask === undefined) return;
     try {
-      if (this.after === 'collapse') {
-        const secs = ((Date.now() - this.startMs) / 1000).toFixed(1);
-        await this.slackClient.chatUpdate({
-          channel: this.channel,
-          ts: this.cardTs!,
-          text: `✅ ${this.completedLabels.length} steps · ${secs}s`,
-          blocks: [
-            {
-              type: 'context',
-              elements: [
-                {
-                  type: 'mrkdwn',
-                  text: `✅ ${this.completedLabels.length} steps · ${secs}s`,
-                },
-              ],
-            },
-          ],
-        });
-      } else {
-        await this.slackClient.chatDelete({ channel: this.channel, ts: this.cardTs! });
-      }
+      await this.sendChunks([
+        {
+          type: 'task_update',
+          id: this.currentTask.id,
+          title: this.currentTask.title,
+          status: 'complete',
+        },
+      ]);
     } catch (err) {
       console.warn('[agent] task card finish failed (continuing):', err);
     }
-  }
-
-  private cardText(): string {
-    const done = this.completedLabels.map((l) => `✅ ${capitalize(l)}`).join('\n');
-    const current = this.currentLabel !== undefined ? `\n⏳ ${capitalize(this.currentLabel)}…` : '';
-    return `${done}${current}`.trimStart();
-  }
-
-  private async postCard(): Promise<void> {
-    try {
-      const result = await this.slackClient.chatPostMessage({
-        channel: this.channel,
-        text: this.cardText(),
-        thread_ts: this.threadTs,
-      });
-      this.cardTs = result.ts;
-    } catch (err) {
-      console.warn('[agent] task card post failed (continuing):', err);
-    }
-  }
-
-  private async updateCard(): Promise<void> {
-    if (this.cardTs === undefined) return;
-    try {
-      await this.slackClient.chatUpdate({
-        channel: this.channel,
-        ts: this.cardTs,
-        text: this.cardText(),
-      });
-    } catch (err) {
-      console.warn('[agent] task card update failed (continuing):', err);
-    }
+    this.currentTask = undefined;
   }
 }
 
@@ -300,20 +283,6 @@ async function streamReply(
     }
   }, STATUS_KEEPALIVE_MS);
 
-  // Task card — slash commands always show from tool #1; other surfaces use
-  // the configured threshold. Threshold of 0 disables the card entirely.
-  const cardThreshold = turn.entrySurface === 'slash_command' ? 1 : deps.behavior.taskCardThreshold;
-  const taskCard =
-    cardThreshold > 0
-      ? new TaskCardManager(
-          channel,
-          threadTs,
-          deps.slackClient,
-          cardThreshold,
-          deps.behavior.taskCardAfter,
-        )
-      : null;
-
   try {
     // Lazy stream open — Slack's chat.startStream creates an empty message that
     // shows its own "Thinking..." placeholder until first append. That competes
@@ -343,6 +312,18 @@ async function streamReply(
         return false;
       }
     };
+
+    // Task card — slash commands always show from tool #1; other surfaces use
+    // the configured threshold. Threshold of 0 disables the card entirely.
+    // sendTaskChunks opens the stream lazily (tools can fire before the first
+    // delta arrives) and pushes task_update chunks into the stream message.
+    const cardThreshold =
+      turn.entrySurface === 'slash_command' ? 1 : deps.behavior.taskCardThreshold;
+    const sendTaskChunks = async (chunks: TaskUpdateChunk[]): Promise<void> => {
+      if (!(await ensureStreamOpen())) return;
+      await deps.slackClient.chatAppendStream({ channel, ts: streamTs!, chunks });
+    };
+    const taskCard = cardThreshold > 0 ? new TaskCardManager(sendTaskChunks, cardThreshold) : null;
 
     const flushBuffer = async (): Promise<void> => {
       if (buffer.length === 0 || streamTs === undefined) return;

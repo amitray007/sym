@@ -168,10 +168,24 @@ export interface StreamHandle {
   ts: SlackThreadTs;
 }
 
+/** A single chunk appended to an in-flight stream via `chat.appendStream`. */
+export interface TaskUpdateChunk {
+  type: 'task_update';
+  id: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'complete' | 'error';
+  details?: string;
+  output?: string;
+  sources?: { type: 'url'; text: string; url: string }[];
+}
+
 export interface AppendStreamParams {
   channel: SlackChannelId;
   ts: SlackThreadTs;
-  markdownText: string;
+  /** Plain markdown text to append to the stream message. */
+  markdownText?: string;
+  /** Structured chunks (e.g. `task_update`) to push into the stream. */
+  chunks?: TaskUpdateChunk[];
 }
 
 export interface StopStreamParams {

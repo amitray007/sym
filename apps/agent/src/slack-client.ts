@@ -293,7 +293,8 @@ export class WebApiSlackClient implements SlackClient {
     await this.call('chat.appendStream', {
       channel: params.channel,
       ts: params.ts,
-      markdown_text: params.markdownText,
+      ...(params.markdownText !== undefined ? { markdown_text: params.markdownText } : {}),
+      ...(params.chunks !== undefined ? { chunks: params.chunks } : {}),
     });
   }
 

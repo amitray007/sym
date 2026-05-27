@@ -128,7 +128,9 @@ class MockSlackClient implements SlackClient {
     return { channel: params.channel, ts: '111.stream' as SlackThreadTs };
   }
   async chatAppendStream(params: AppendStreamParams): Promise<void> {
-    this.appendedText += params.markdownText;
+    if (params.markdownText !== undefined) {
+      this.appendedText += params.markdownText;
+    }
   }
   async chatStopStream(params: StopStreamParams): Promise<void> {
     this.stopStreamCalls.push(params);
