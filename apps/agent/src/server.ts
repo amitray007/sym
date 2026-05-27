@@ -100,14 +100,18 @@ export function createServer(deps: ServerDeps): Hono {
     if (token && turn.channelId !== undefined && turn.threadTs !== undefined) {
       actionTokens.remember(turn.channelId, turn.threadTs, token);
     } else if (!token) {
-      // Visible-on-first-miss diagnostic: tells the operator that the agent
-      // subscribed correctly but Slack isn't issuing the token. Most often
-      // this means the app needs to be reinstalled after adding the
-      // search:read.* bot scopes (action_tokens are gated on those).
+      // Diagnostic: dump the keys of the payload so we can see where (or
+      // whether) Slack put action_token. Helps distinguish "Slack didn't
+      // send it" from "we're reading the wrong field". Keys only — no values.
       const eventType = raw.event?.type ?? raw.type;
+      const outerKeys = Object.keys(raw).sort().join(', ');
+      const eventKeys = raw.event ? Object.keys(raw.event).sort().join(', ') : '(no event)';
       console.warn(
-        `[agent] no action_token on ${eventType} event — search_workspace will be unavailable. ` +
-          `If you just added search:read.public/.files/.users, reinstall the Slack app.`,
+        `[agent] no action_token on ${eventType} event — search_workspace unavailable.\n` +
+          `  outer keys: ${outerKeys}\n` +
+          `  event keys: ${eventKeys}\n` +
+          `  if action_token is present under a different name, file an issue.\n` +
+          `  if it's absent entirely, the workspace/app may need AI-Apps approval from Slack.`,
       );
     }
 
