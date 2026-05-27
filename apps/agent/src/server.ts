@@ -99,6 +99,16 @@ export function createServer(deps: ServerDeps): Hono {
     const token = extractActionToken(raw);
     if (token && turn.channelId !== undefined && turn.threadTs !== undefined) {
       actionTokens.remember(turn.channelId, turn.threadTs, token);
+    } else if (!token) {
+      // Visible-on-first-miss diagnostic: tells the operator that the agent
+      // subscribed correctly but Slack isn't issuing the token. Most often
+      // this means the app needs to be reinstalled after adding the
+      // search:read.* bot scopes (action_tokens are gated on those).
+      const eventType = raw.event?.type ?? raw.type;
+      console.warn(
+        `[agent] no action_token on ${eventType} event — search_workspace will be unavailable. ` +
+          `If you just added search:read.public/.files/.users, reinstall the Slack app.`,
+      );
     }
 
     // Single-owner gate: Sym acts only on its owner's requests. Non-owner turns

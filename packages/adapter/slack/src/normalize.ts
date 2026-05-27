@@ -64,6 +64,12 @@ export interface RawSlackEvent {
   text?: string;
   /** Present for event_callback payloads. */
   event?: SlackEventPayload;
+  /**
+   * AI-native action_token. Slack issues this on message events for apps
+   * subscribed to the Agents & AI Apps surface. Some Slack payloads carry it
+   * on `event.action_token`, others on the outer envelope — we accept both.
+   */
+  action_token?: string;
   /** Present for shortcut / message_action. */
   user?: { id: string; team_id?: string };
   /** Present for shortcut. */
@@ -276,17 +282,22 @@ export function assistantThreadStarted(raw: RawSlackEvent): AssistantThreadStart
  * Reuses the `AssistantThreadStarted` interface — both lifecycle events share the same shape.
  */
 /**
- * Pull the per-event `action_token` from a message event, if any.
+ * Pull the per-event `action_token` from a message / app_mention event, if any.
  *
- * Slack issues this on every message delivered to an Agents-AI-Apps-enabled
- * bot. We capture it so AI-native APIs (`assistant.search.context`) that
- * require a fresh action_token can be called with the latest one for the
- * current thread.
+ * Slack issues this on message events for apps subscribed to the Agents & AI
+ * Apps surface. The docs are vague about the exact JSON path, so we check
+ * both `raw.event.action_token` and the outer `raw.action_token` field.
+ *
+ * We capture it so AI-native APIs (`assistant.search.context`) can be called
+ * with the latest token for the current thread.
  */
 export function extractActionToken(raw: RawSlackEvent): string | null {
-  if (raw.type !== 'event_callback' || !raw.event) return null;
-  const token = raw.event.action_token;
-  return typeof token === 'string' && token.length > 0 ? token : null;
+  if (raw.type !== 'event_callback') return null;
+  const candidates = [raw.event?.action_token, raw.action_token];
+  for (const token of candidates) {
+    if (typeof token === 'string' && token.length > 0) return token;
+  }
+  return null;
 }
 
 export function assistantThreadContextChanged(raw: RawSlackEvent): AssistantThreadStarted | null {
