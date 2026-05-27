@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createBuiltinDispatcher } from '../src/builtin-tools.js';
 
 import type {
+  AssistantSearchContextParams,
+  AssistantSearchContextResult,
   ConversationsHistoryResult,
   ConversationsListResult,
   ConversationsRepliesResult,
@@ -52,6 +54,9 @@ function makeSlackClient(opts: {
   userError?: Error;
   listResult?: ConversationsListResult;
   listError?: Error;
+  searchResult?: AssistantSearchContextResult;
+  searchError?: Error;
+  searchCalls?: AssistantSearchContextParams[];
 }): SlackClient {
   return {
     async conversationsHistory(): Promise<ConversationsHistoryResult> {
@@ -100,6 +105,13 @@ function makeSlackClient(opts: {
     async chatDelete() {
       /* no-op */
     },
+    async assistantSearchContext(
+      params: AssistantSearchContextParams,
+    ): Promise<AssistantSearchContextResult> {
+      opts.searchCalls?.push(params);
+      if (opts.searchError !== undefined) throw opts.searchError;
+      return opts.searchResult ?? { messages: [] };
+    },
   };
 }
 
@@ -120,9 +132,10 @@ describe('createBuiltinDispatcher', () => {
           'read_user_profile',
           'fetch_url',
           'list_channels',
+          'search_workspace',
         ]),
       );
-      expect(tools).toHaveLength(6);
+      expect(tools).toHaveLength(7);
     });
 
     it('all new READ tools have readOnlyHint: true', () => {
@@ -634,6 +647,106 @@ describe('createBuiltinDispatcher', () => {
         makeCtx(),
       );
       expect(result.ok).toBe(true);
+    });
+  });
+
+  describe('dispatch() — search_workspace', () => {
+    it('returns execution_failed when no action_token is available', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+        // actionToken omitted — bot tokens require it.
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('search_workspace', { query: 'postgres migration' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('execution_failed');
+      expect(result.error.message).toMatch(/action_token/);
+    });
+
+    it('calls assistant.search.context and formats the results', async () => {
+      const calls: AssistantSearchContextParams[] = [];
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({
+          searchCalls: calls,
+          searchResult: {
+            messages: [
+              {
+                channelId: 'C1' as SlackChannelId,
+                channelName: 'eng',
+                messageTs: '900.1' as SlackThreadTs,
+                content: 'we decided to upgrade postgres next quarter',
+                authorName: 'amit',
+                permalink: 'https://slack.com/archives/C1/p9001',
+              },
+            ],
+          },
+        }),
+        botUserId: BOT,
+        actionToken: 'fake.action.token',
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('search_workspace', { query: 'postgres migration', limit: 5 }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok');
+      expect(result.content).toContain('amit');
+      expect(result.content).toContain('eng');
+      expect(result.content).toContain('upgrade postgres');
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.query).toBe('postgres migration');
+      expect(calls[0]?.actionToken).toBe('fake.action.token');
+      expect(calls[0]?.limit).toBe(5);
+    });
+
+    it('returns "(no matching messages)" on empty results', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({ searchResult: { messages: [] } }),
+        botUserId: BOT,
+        actionToken: 'fake.action.token',
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('search_workspace', { query: 'nothing' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok');
+      expect(result.content).toContain('(no matching messages)');
+    });
+
+    it('surfaces Slack errors as execution_failed', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({ searchError: new Error('rate_limited') }),
+        botUserId: BOT,
+        actionToken: 'fake.action.token',
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('search_workspace', { query: 'q' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('execution_failed');
+      expect(result.error.message).toContain('rate_limited');
+    });
+
+    it('rejects empty query string with invalid_arguments', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+        actionToken: 'fake.action.token',
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('search_workspace', { query: '   ' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('invalid_arguments');
     });
   });
 });

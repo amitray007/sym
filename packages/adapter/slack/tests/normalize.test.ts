@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assistantThreadContextChanged,
   assistantThreadStarted,
+  extractActionToken,
   normalizeSlackEvent,
   slackTurnInputToTurn,
   type RawSlackEvent,
@@ -369,5 +370,46 @@ describe('assistantThreadContextChanged', () => {
       },
     };
     expect(assistantThreadContextChanged(startedEvent)).toBeNull();
+  });
+});
+
+describe('extractActionToken', () => {
+  it('returns the action_token from a message event when present', () => {
+    const event: RawSlackEvent = {
+      type: 'event_callback',
+      event_id: 'Ev123',
+      team_id: 'T001',
+      event: {
+        type: 'message',
+        channel_type: 'im',
+        ts: '1700000010.000100',
+        user: 'U042MBPUZ9N',
+        channel: 'D999',
+        text: 'hi',
+        action_token: '12345.98765.abcd2358fdea',
+      },
+    };
+    expect(extractActionToken(event)).toBe('12345.98765.abcd2358fdea');
+  });
+
+  it('returns null when no action_token is on the event', () => {
+    const event: RawSlackEvent = {
+      type: 'event_callback',
+      event_id: 'Ev123',
+      team_id: 'T001',
+      event: {
+        type: 'message',
+        channel_type: 'im',
+        ts: '1700000010.000100',
+        user: 'U042MBPUZ9N',
+        channel: 'D999',
+        text: 'hi',
+      },
+    };
+    expect(extractActionToken(event)).toBeNull();
+  });
+
+  it('returns null for non-event_callback payloads (e.g. url_verification)', () => {
+    expect(extractActionToken({ type: 'url_verification' } as RawSlackEvent)).toBeNull();
   });
 });

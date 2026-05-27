@@ -1,12 +1,14 @@
 import {
   assistantThreadContextChanged,
   assistantThreadStarted,
+  extractActionToken,
   normalizeSlackEvent,
   slackTurnInputToTurn,
   verifySlackSignature,
 } from '@sym/adapter-slack';
 import { Hono } from 'hono';
 
+import { createActionTokenStore } from './action-tokens.js';
 import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { resolveConfirmation } from './confirmations.js';
@@ -48,6 +50,7 @@ export function createServer(deps: ServerDeps): Hono {
   const app = new Hono();
   const alreadySeen = createDedup();
   const assistantContext = createAssistantContextStore();
+  const actionTokens = createActionTokenStore();
   // Single-tenant runtime context — resolved once from env config.
   const ctx = loadWorkspaceContext(config);
 
@@ -89,6 +92,15 @@ export function createServer(deps: ServerDeps): Hono {
     if (!input) return; // an event we don't act on
     const turn = slackTurnInputToTurn(input);
 
+    // Capture per-event action_token (needed for `assistant.search.context`).
+    // Done after normalisation so we have a stable channel/thread key. The
+    // token expires per Slack's rules; the store always holds the latest one
+    // for the thread.
+    const token = extractActionToken(raw);
+    if (token && turn.channelId !== undefined && turn.threadTs !== undefined) {
+      actionTokens.remember(turn.channelId, turn.threadTs, token);
+    }
+
     // Single-owner gate: Sym acts only on its owner's requests. Non-owner turns
     // are dropped — silently in channels (Sym stays invisible to the rest of the
     // team), with one polite line in a DM (silence in a 1:1 just looks broken).
@@ -111,6 +123,10 @@ export function createServer(deps: ServerDeps): Hono {
       turn.channelId !== undefined && turn.threadTs !== undefined
         ? assistantContext.lookup(turn.channelId, turn.threadTs)
         : undefined;
+    const actionToken =
+      turn.channelId !== undefined && turn.threadTs !== undefined
+        ? actionTokens.lookup(turn.channelId, turn.threadTs)
+        : undefined;
     await handleTurn(turn, {
       fireworks: ctx.fireworks,
       model: ctx.model,
@@ -119,6 +135,7 @@ export function createServer(deps: ServerDeps): Hono {
       slackTeamId: ctx.slackTeamId,
       behavior: config.behavior,
       ...(viewedChannelId !== undefined ? { viewedChannelId } : {}),
+      ...(actionToken !== undefined ? { actionToken } : {}),
     });
   }
 

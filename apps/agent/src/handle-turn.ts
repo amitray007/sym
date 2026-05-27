@@ -35,6 +35,12 @@ export interface HandleTurnDeps {
   viewedChannelId?: string;
   /** Runtime behavior knobs. */
   behavior: BehaviorConfig;
+  /**
+   * Latest action_token captured for this thread from Slack message events.
+   * Required by `search_workspace` (assistant.search.context). When absent,
+   * the tool returns a clean error and the model falls back to other tools.
+   */
+  actionToken?: string;
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
@@ -540,6 +546,7 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   const builtin = createBuiltinDispatcher({
     slackClient: deps.slackClient,
     botUserId: deps.botUserId,
+    ...(deps.actionToken !== undefined ? { actionToken: deps.actionToken } : {}),
   });
   const registry = new ToolRegistry(builtin);
 

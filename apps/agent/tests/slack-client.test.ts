@@ -265,6 +265,47 @@ describe('WebApiSlackClient assistant + streaming methods', () => {
     expect(callBody(fetchFn, 0)['markdown_text']).toBeUndefined();
   });
 
+  it('assistantSearchContext sends query + action_token and maps the response', async () => {
+    const fetchFn = mockFetch([
+      {
+        ok: true,
+        results: {
+          messages: [
+            {
+              author_name: 'amit',
+              author_user_id: 'U1',
+              channel_id: 'C1',
+              channel_name: 'eng',
+              message_ts: '900.1',
+              content: 'upgrade postgres',
+              permalink: 'https://slack.com/archives/C1/p9001',
+            },
+          ],
+        },
+        response_metadata: { next_cursor: 'abc' },
+      },
+    ]);
+    const client = new WebApiSlackClient('xoxb-test');
+
+    const result = await client.assistantSearchContext({
+      query: 'postgres',
+      actionToken: 'tok123',
+      limit: 5,
+    });
+
+    expect(callBody(fetchFn, 0)).toMatchObject({
+      query: 'postgres',
+      action_token: 'tok123',
+      limit: 5,
+    });
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0]?.authorName).toBe('amit');
+    expect(result.messages[0]?.channelName).toBe('eng');
+    expect(result.messages[0]?.content).toBe('upgrade postgres');
+    expect(result.messages[0]?.permalink).toBe('https://slack.com/archives/C1/p9001');
+    expect(result.nextCursor).toBe('abc');
+  });
+
   it('appendStream forwards task_update chunks unchanged', async () => {
     const fetchFn = mockFetch([{ ok: true }]);
     const client = new WebApiSlackClient('xoxb-test');

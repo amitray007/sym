@@ -179,7 +179,41 @@ function stripHtmlToText(html: string): string {
 export interface BuiltinToolDeps {
   slackClient: SlackClient;
   botUserId: SlackUserId;
+  /**
+   * Per-turn action_token from the most recent message event for this thread.
+   * Required for `assistant.search.context`. Undefined → `search_workspace`
+   * returns an error explaining the token is missing (so the model can
+   * gracefully fall back).
+   */
+  actionToken?: string;
 }
+
+const SEARCH_WORKSPACE_DESCRIPTOR: ToolDescriptor = {
+  type: 'function',
+  name: 'search_workspace',
+  description:
+    'Search across the Slack workspace using Slack\'s AI-native search (assistant.search.context). Returns the most relevant messages for a natural-language query, ranked by Slack. Use when the user asks about something that happened somewhere in Slack but you don\'t know which channel/thread — e.g. "find the discussion about the postgres migration", "who mentioned the Q3 launch plan". Prefer this over read_channel when the channel is unknown.',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Natural-language search query, e.g. "postgres migration decision".',
+      },
+      channel_id: {
+        type: 'string',
+        description: 'Optional — restrict the search to a single channel (C0123).',
+      },
+      limit: {
+        type: 'number',
+        description: 'Max results (default 10, max 20).',
+      },
+    },
+    required: ['query'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
+  readOnlyHint: true,
+};
 
 /**
  * Create the built-in in-process tool dispatcher.
@@ -199,6 +233,7 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
         READ_USER_PROFILE_DESCRIPTOR,
         FETCH_URL_DESCRIPTOR,
         LIST_CHANNELS_DESCRIPTOR,
+        SEARCH_WORKSPACE_DESCRIPTOR,
       ];
     },
 
@@ -411,6 +446,68 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
             ok: false,
             error: { code: 'execution_failed', message },
           };
+        }
+      } else if (call.name === 'search_workspace') {
+        const queryArg = call.arguments['query'];
+        if (typeof queryArg !== 'string' || queryArg.trim().length === 0) {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: { code: 'invalid_arguments', message: 'query must be a non-empty string' },
+          };
+        } else if (deps.actionToken === undefined) {
+          // Bot tokens require a fresh action_token from a recent message
+          // event for this thread. If we never captured one (e.g. the agent
+          // restarted between the user's last message and this call), return
+          // a clean error so the model can fall back to read_channel or
+          // tell the user.
+          result = {
+            callId: call.id,
+            ok: false,
+            error: {
+              code: 'execution_failed',
+              message:
+                'workspace search is not available for this turn (no action_token captured yet — ask the user to send another message)',
+            },
+          };
+        } else {
+          const channelArg = call.arguments['channel_id'];
+          const limitArg = call.arguments['limit'];
+          const rawLimit = typeof limitArg === 'number' ? limitArg : 10;
+          const limit = Math.max(1, Math.min(20, rawLimit));
+          try {
+            const { messages } = await deps.slackClient.assistantSearchContext({
+              query: queryArg.trim(),
+              actionToken: deps.actionToken,
+              limit,
+              ...(typeof channelArg === 'string' && channelArg.length > 0
+                ? { contextChannelId: channelArg as SlackChannelId }
+                : {}),
+            });
+            if (messages.length === 0) {
+              result = { callId: call.id, ok: true, content: '(no matching messages)' };
+            } else {
+              const body = messages
+                .map((m, i) => {
+                  const who = m.authorName ?? m.authorUserId ?? '(unknown)';
+                  const where = m.channelName ? `#${m.channelName}` : (m.channelId ?? '');
+                  const link = m.permalink ? ` <${m.permalink}|link>` : '';
+                  // Trim each result to keep the context tight.
+                  const content =
+                    m.content.length > 400 ? `${m.content.slice(0, 400)}…` : m.content;
+                  return `${i + 1}. ${who} in ${where}${link}\n   ${content}`;
+                })
+                .join('\n');
+              result = { callId: call.id, ok: true, content: body };
+            }
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            result = {
+              callId: call.id,
+              ok: false,
+              error: { code: 'execution_failed', message },
+            };
+          }
         }
       } else {
         result = {

@@ -43,6 +43,13 @@ interface SlackEventPayload {
   subtype?: string;
   /** Present on assistant_thread_started / assistant_thread_context_changed. */
   assistant_thread?: SlackAssistantThread;
+  /**
+   * Per-event token Slack issues for AI-native APIs that scope work to the
+   * user's session (e.g. `assistant.search.context`). Present on message
+   * events delivered to apps with the Agents & AI Apps feature enabled.
+   * Lifetime is per-event; refresh by reading the latest event.
+   */
+  action_token?: string;
 }
 
 export interface RawSlackEvent {
@@ -268,6 +275,20 @@ export function assistantThreadStarted(raw: RawSlackEvent): AssistantThreadStart
  * Returns `null` for any other event — this is a lifecycle signal, not a Turn.
  * Reuses the `AssistantThreadStarted` interface — both lifecycle events share the same shape.
  */
+/**
+ * Pull the per-event `action_token` from a message event, if any.
+ *
+ * Slack issues this on every message delivered to an Agents-AI-Apps-enabled
+ * bot. We capture it so AI-native APIs (`assistant.search.context`) that
+ * require a fresh action_token can be called with the latest one for the
+ * current thread.
+ */
+export function extractActionToken(raw: RawSlackEvent): string | null {
+  if (raw.type !== 'event_callback' || !raw.event) return null;
+  const token = raw.event.action_token;
+  return typeof token === 'string' && token.length > 0 ? token : null;
+}
+
 export function assistantThreadContextChanged(raw: RawSlackEvent): AssistantThreadStarted | null {
   if (raw.type !== 'event_callback' || raw.event?.type !== 'assistant_thread_context_changed')
     return null;

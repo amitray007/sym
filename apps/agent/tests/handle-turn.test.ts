@@ -147,6 +147,9 @@ class MockSlackClient implements SlackClient {
   async conversationsList() {
     return { channels: [] };
   }
+  async assistantSearchContext() {
+    return { messages: [] };
+  }
 }
 
 function makeTurn(overrides: Partial<Turn> = {}): Turn {

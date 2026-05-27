@@ -90,6 +90,12 @@ oauth_config:
       - groups:read # list_channels (private)
       - users:read # read_user_profile (display name, title, tz)
       - users:read.email # read_user_profile (optional email surfacing)
+      # AI-native search via assistant.search.context (search_workspace tool).
+      # These are bot-token equivalents — the `search:read` user scope is not
+      # valid for bot tokens.
+      - search:read.public
+      - search:read.files
+      - search:read.users
 settings:
   event_subscriptions:
     request_url: ${SLACK_PUBLIC_BASE_URL}/slack/events

@@ -217,6 +217,45 @@ export interface StopStreamParams {
   blocks?: unknown[];
 }
 
+// --- AI-native search (assistant.search.context) ---------------------------
+
+export interface AssistantSearchContextParams {
+  /** The user question / query string. */
+  query: string;
+  /**
+   * Bot-token-issued per-event token, captured from the latest message event
+   * for this thread. Required when calling with a bot token.
+   */
+  actionToken: string;
+  /** Limit search to this channel, when provided. */
+  contextChannelId?: SlackChannelId;
+  /** Default: `['messages']`. */
+  contentTypes?: ('messages' | 'files' | 'channels' | 'users')[];
+  /** Default: `['public_channel']`. */
+  channelTypes?: ('public_channel' | 'private_channel' | 'mpim' | 'im')[];
+  /** Results per page (max 20, default 20). */
+  limit?: number;
+  /** Pagination cursor from a previous response. */
+  cursor?: string;
+}
+
+/** A message result from `assistant.search.context`. */
+export interface AssistantSearchMessageResult {
+  authorName?: string;
+  authorUserId?: SlackUserId;
+  channelId: SlackChannelId;
+  channelName?: string;
+  messageTs: SlackThreadTs;
+  content: string;
+  permalink?: string;
+  isAuthorBot?: boolean;
+}
+
+export interface AssistantSearchContextResult {
+  messages: AssistantSearchMessageResult[];
+  nextCursor?: string;
+}
+
 // ---------------------------------------------------------------------------
 // SlackClient interface
 // ---------------------------------------------------------------------------
@@ -250,6 +289,15 @@ export interface SlackClient {
   usersInfo(params: UsersInfoParams): Promise<SlackUserProfile>;
   /** List channels the bot can see (requires `channels:read` / `groups:read`). */
   conversationsList(params: ConversationsListParams): Promise<ConversationsListResult>;
+  /**
+   * AI-native workspace search. Returns Slack-ranked messages relevant to a
+   * query, scoped to channels the bot can see. Requires
+   * `search:read.public` / `search:read.files` / `search:read.users` and a
+   * fresh `action_token` from a recent message event for this thread.
+   */
+  assistantSearchContext(
+    params: AssistantSearchContextParams,
+  ): Promise<AssistantSearchContextResult>;
 }
 
 // ---------------------------------------------------------------------------

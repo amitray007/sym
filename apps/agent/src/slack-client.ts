@@ -2,6 +2,9 @@ import { withSlackRetries } from '@sym/adapter-slack';
 
 import type {
   AppendStreamParams,
+  AssistantSearchContextParams,
+  AssistantSearchContextResult,
+  AssistantSearchMessageResult,
   ConversationsHistoryParams,
   ConversationsHistoryResult,
   ConversationsListParams,
@@ -355,6 +358,53 @@ export class WebApiSlackClient implements SlackClient {
       ...(u.tz !== undefined ? { tz: u.tz } : {}),
       ...(u.is_bot !== undefined ? { isBot: u.is_bot } : {}),
       ...(u.deleted !== undefined ? { deleted: u.deleted } : {}),
+    };
+  }
+
+  async assistantSearchContext(
+    params: AssistantSearchContextParams,
+  ): Promise<AssistantSearchContextResult> {
+    interface SearchResponse extends SlackOkResponse {
+      results?: {
+        messages?: {
+          author_name?: string;
+          author_user_id?: string;
+          channel_id?: string;
+          channel_name?: string;
+          message_ts?: string;
+          content?: string;
+          permalink?: string;
+          is_author_bot?: boolean;
+        }[];
+      };
+      response_metadata?: { next_cursor?: string };
+    }
+    const json = await this.call<SearchResponse>('assistant.search.context', {
+      query: params.query,
+      action_token: params.actionToken,
+      ...(params.contextChannelId !== undefined
+        ? { context_channel_id: params.contextChannelId }
+        : {}),
+      ...(params.contentTypes !== undefined ? { content_types: params.contentTypes } : {}),
+      ...(params.channelTypes !== undefined ? { channel_types: params.channelTypes } : {}),
+      ...(params.limit !== undefined ? { limit: params.limit } : {}),
+      ...(params.cursor !== undefined ? { cursor: params.cursor } : {}),
+    });
+    const rawMessages = json.results?.messages ?? [];
+    const messages: AssistantSearchMessageResult[] = rawMessages.map((m) => ({
+      ...(m.author_name !== undefined ? { authorName: m.author_name } : {}),
+      ...(m.author_user_id !== undefined ? { authorUserId: m.author_user_id as SlackUserId } : {}),
+      channelId: (m.channel_id ?? '') as SlackChannelId,
+      ...(m.channel_name !== undefined ? { channelName: m.channel_name } : {}),
+      messageTs: (m.message_ts ?? '') as SlackThreadTs,
+      content: m.content ?? '',
+      ...(m.permalink !== undefined ? { permalink: m.permalink } : {}),
+      ...(m.is_author_bot !== undefined ? { isAuthorBot: m.is_author_bot } : {}),
+    }));
+    const nextCursor = json.response_metadata?.next_cursor;
+    return {
+      messages,
+      ...(nextCursor !== undefined && nextCursor.length > 0 ? { nextCursor } : {}),
     };
   }
 
