@@ -8,9 +8,12 @@ import { loadAgentConfig } from './config.js';
 import { createServer } from './server.js';
 
 function main(): void {
-  // Dev convenience: load the repo-root .env. Production injects env directly.
+  // Dev convenience: load the repo-root .env, letting it OVERRIDE vars already
+  // in the shell — otherwise a stale/empty exported var (e.g. an empty
+  // SLACK_BOT_TOKEN left in the shell) silently shadows the file. In production
+  // there is no .env here (env is injected directly), so override is a no-op.
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-  loadDotenv({ path: resolve(repoRoot, '.env') });
+  loadDotenv({ path: resolve(repoRoot, '.env'), override: true });
 
   const config = loadAgentConfig();
   const app = createServer({ config });
