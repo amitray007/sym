@@ -43,13 +43,6 @@ interface SlackEventPayload {
   subtype?: string;
   /** Present on assistant_thread_started / assistant_thread_context_changed. */
   assistant_thread?: SlackAssistantThread;
-  /**
-   * Per-event token Slack issues for AI-native APIs that scope work to the
-   * user's session (e.g. `assistant.search.context`). Present on message
-   * events delivered to apps with the Agents & AI Apps feature enabled.
-   * Lifetime is per-event; refresh by reading the latest event.
-   */
-  action_token?: string;
 }
 
 export interface RawSlackEvent {
@@ -64,12 +57,6 @@ export interface RawSlackEvent {
   text?: string;
   /** Present for event_callback payloads. */
   event?: SlackEventPayload;
-  /**
-   * AI-native action_token. Slack issues this on message events for apps
-   * subscribed to the Agents & AI Apps surface. Some Slack payloads carry it
-   * on `event.action_token`, others on the outer envelope — we accept both.
-   */
-  action_token?: string;
   /** Present for shortcut / message_action. */
   user?: { id: string; team_id?: string };
   /** Present for shortcut. */
@@ -281,25 +268,6 @@ export function assistantThreadStarted(raw: RawSlackEvent): AssistantThreadStart
  * Returns `null` for any other event — this is a lifecycle signal, not a Turn.
  * Reuses the `AssistantThreadStarted` interface — both lifecycle events share the same shape.
  */
-/**
- * Pull the per-event `action_token` from a message / app_mention event, if any.
- *
- * Slack issues this on message events for apps subscribed to the Agents & AI
- * Apps surface. The docs are vague about the exact JSON path, so we check
- * both `raw.event.action_token` and the outer `raw.action_token` field.
- *
- * We capture it so AI-native APIs (`assistant.search.context`) can be called
- * with the latest token for the current thread.
- */
-export function extractActionToken(raw: RawSlackEvent): string | null {
-  if (raw.type !== 'event_callback') return null;
-  const candidates = [raw.event?.action_token, raw.action_token];
-  for (const token of candidates) {
-    if (typeof token === 'string' && token.length > 0) return token;
-  }
-  return null;
-}
-
 export function assistantThreadContextChanged(raw: RawSlackEvent): AssistantThreadStarted | null {
   if (raw.type !== 'event_callback' || raw.event?.type !== 'assistant_thread_context_changed')
     return null;

@@ -2,9 +2,7 @@ import { withSlackRetries } from '@sym/adapter-slack';
 
 import type {
   AppendStreamParams,
-  AssistantSearchContextParams,
-  AssistantSearchContextResult,
-  AssistantSearchMessageResult,
+  AuthTestResult,
   ConversationsHistoryParams,
   ConversationsHistoryResult,
   ConversationsListParams,
@@ -15,6 +13,9 @@ import type {
   PostMessageParams,
   PostMessageResult,
   ReactionsAddParams,
+  SearchMessageMatch,
+  SearchMessagesParams,
+  SearchMessagesResult,
   SetStatusParams,
   SetSuggestedPromptsParams,
   SetTitleParams,
@@ -361,51 +362,55 @@ export class WebApiSlackClient implements SlackClient {
     };
   }
 
-  async assistantSearchContext(
-    params: AssistantSearchContextParams,
-  ): Promise<AssistantSearchContextResult> {
+  async authTest(): Promise<AuthTestResult> {
+    interface AuthTestResponse extends SlackOkResponse {
+      user_id?: string;
+      team_id?: string;
+      user?: string;
+      bot_id?: string;
+    }
+    const json = await this.call<AuthTestResponse>('auth.test', {});
+    return {
+      userId: (json.user_id ?? '') as SlackUserId,
+      teamId: json.team_id ?? '',
+      ...(json.user !== undefined ? { user: json.user } : {}),
+      ...(json.bot_id !== undefined ? { isBot: true } : {}),
+    };
+  }
+
+  async searchMessages(params: SearchMessagesParams): Promise<SearchMessagesResult> {
     interface SearchResponse extends SlackOkResponse {
-      results?: {
-        messages?: {
-          author_name?: string;
-          author_user_id?: string;
-          channel_id?: string;
-          channel_name?: string;
-          message_ts?: string;
-          content?: string;
+      messages?: {
+        total?: number;
+        matches?: {
+          channel?: { id?: string; name?: string };
+          username?: string;
+          user?: string;
+          ts?: string;
+          text?: string;
           permalink?: string;
-          is_author_bot?: boolean;
         }[];
       };
-      response_metadata?: { next_cursor?: string };
     }
-    const json = await this.call<SearchResponse>('assistant.search.context', {
+    // search.messages is a classic Web API: form-urlencoded.
+    const json = await this.callForm<SearchResponse>('search.messages', {
       query: params.query,
-      action_token: params.actionToken,
-      ...(params.contextChannelId !== undefined
-        ? { context_channel_id: params.contextChannelId }
-        : {}),
-      ...(params.contentTypes !== undefined ? { content_types: params.contentTypes } : {}),
-      ...(params.channelTypes !== undefined ? { channel_types: params.channelTypes } : {}),
-      ...(params.limit !== undefined ? { limit: params.limit } : {}),
-      ...(params.cursor !== undefined ? { cursor: params.cursor } : {}),
+      sort: params.sort ?? 'score',
+      sort_dir: params.sortDir ?? 'desc',
+      count: params.count ?? 20,
+      ...(params.page !== undefined ? { page: params.page } : {}),
     });
-    const rawMessages = json.results?.messages ?? [];
-    const messages: AssistantSearchMessageResult[] = rawMessages.map((m) => ({
-      ...(m.author_name !== undefined ? { authorName: m.author_name } : {}),
-      ...(m.author_user_id !== undefined ? { authorUserId: m.author_user_id as SlackUserId } : {}),
-      channelId: (m.channel_id ?? '') as SlackChannelId,
-      ...(m.channel_name !== undefined ? { channelName: m.channel_name } : {}),
-      messageTs: (m.message_ts ?? '') as SlackThreadTs,
-      content: m.content ?? '',
+    const raw = json.messages?.matches ?? [];
+    const matches: SearchMessageMatch[] = raw.map((m) => ({
+      channelId: (m.channel?.id ?? '') as SlackChannelId,
+      ...(m.channel?.name !== undefined ? { channelName: m.channel.name } : {}),
+      ...(m.username !== undefined ? { username: m.username } : {}),
+      ...(m.user !== undefined ? { userId: m.user as SlackUserId } : {}),
+      ts: (m.ts ?? '') as SlackThreadTs,
+      text: m.text ?? '',
       ...(m.permalink !== undefined ? { permalink: m.permalink } : {}),
-      ...(m.is_author_bot !== undefined ? { isAuthorBot: m.is_author_bot } : {}),
     }));
-    const nextCursor = json.response_metadata?.next_cursor;
-    return {
-      messages,
-      ...(nextCursor !== undefined && nextCursor.length > 0 ? { nextCursor } : {}),
-    };
+    return { matches, total: json.messages?.total ?? matches.length };
   }
 
   async conversationsList(params: ConversationsListParams): Promise<ConversationsListResult> {

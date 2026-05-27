@@ -1,20 +1,18 @@
 import {
   assistantThreadContextChanged,
   assistantThreadStarted,
-  extractActionToken,
   normalizeSlackEvent,
   slackTurnInputToTurn,
   verifySlackSignature,
 } from '@sym/adapter-slack';
 import { Hono } from 'hono';
 
-import { createActionTokenStore } from './action-tokens.js';
 import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { resolveConfirmation } from './confirmations.js';
 import { handleTurn } from './handle-turn.js';
 import { OWNER_DECLINE_MESSAGE, checkOwnerAccess } from './owner-gate.js';
-import { loadWorkspaceContext } from './workspace-context.js';
+import { healthCheckTokens, loadWorkspaceContext } from './workspace-context.js';
 
 import type { AgentConfig } from './config.js';
 import type { RawSlackEvent } from '@sym/adapter-slack';
@@ -50,9 +48,12 @@ export function createServer(deps: ServerDeps): Hono {
   const app = new Hono();
   const alreadySeen = createDedup();
   const assistantContext = createAssistantContextStore();
-  const actionTokens = createActionTokenStore();
   // Single-tenant runtime context — resolved once from env config.
   const ctx = loadWorkspaceContext(config);
+  // Fire-and-forget identity probe for the configured tokens. Surfaces
+  // misconfiguration (wrong workspace, revoked token, missing user OAuth)
+  // in the logs at boot without blocking server start.
+  void healthCheckTokens(ctx);
 
   async function processEvent(raw: RawSlackEvent, teamId: string): Promise<void> {
     // Single workspace: ignore events from any other Slack team.
@@ -92,29 +93,6 @@ export function createServer(deps: ServerDeps): Hono {
     if (!input) return; // an event we don't act on
     const turn = slackTurnInputToTurn(input);
 
-    // Capture per-event action_token (needed for `assistant.search.context`).
-    // Done after normalisation so we have a stable channel/thread key. The
-    // token expires per Slack's rules; the store always holds the latest one
-    // for the thread.
-    const token = extractActionToken(raw);
-    if (token && turn.channelId !== undefined && turn.threadTs !== undefined) {
-      actionTokens.remember(turn.channelId, turn.threadTs, token);
-    } else if (!token) {
-      // Diagnostic: dump the keys of the payload so we can see where (or
-      // whether) Slack put action_token. Helps distinguish "Slack didn't
-      // send it" from "we're reading the wrong field". Keys only — no values.
-      const eventType = raw.event?.type ?? raw.type;
-      const outerKeys = Object.keys(raw).sort().join(', ');
-      const eventKeys = raw.event ? Object.keys(raw.event).sort().join(', ') : '(no event)';
-      console.warn(
-        `[agent] no action_token on ${eventType} event — search_workspace unavailable.\n` +
-          `  outer keys: ${outerKeys}\n` +
-          `  event keys: ${eventKeys}\n` +
-          `  if action_token is present under a different name, file an issue.\n` +
-          `  if it's absent entirely, the workspace/app may need AI-Apps approval from Slack.`,
-      );
-    }
-
     // Single-owner gate: Sym acts only on its owner's requests. Non-owner turns
     // are dropped — silently in channels (Sym stays invisible to the rest of the
     // team), with one polite line in a DM (silence in a 1:1 just looks broken).
@@ -137,19 +115,15 @@ export function createServer(deps: ServerDeps): Hono {
       turn.channelId !== undefined && turn.threadTs !== undefined
         ? assistantContext.lookup(turn.channelId, turn.threadTs)
         : undefined;
-    const actionToken =
-      turn.channelId !== undefined && turn.threadTs !== undefined
-        ? actionTokens.lookup(turn.channelId, turn.threadTs)
-        : undefined;
     await handleTurn(turn, {
       fireworks: ctx.fireworks,
       model: ctx.model,
       slackClient: ctx.slackClient,
+      ...(ctx.userSlackClient !== undefined ? { userSlackClient: ctx.userSlackClient } : {}),
       botUserId: ctx.botUserId,
       slackTeamId: ctx.slackTeamId,
       behavior: config.behavior,
       ...(viewedChannelId !== undefined ? { viewedChannelId } : {}),
-      ...(actionToken !== undefined ? { actionToken } : {}),
     });
   }
 

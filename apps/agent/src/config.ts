@@ -26,6 +26,13 @@ export interface AgentConfig {
   slackSigningSecret: string;
   /** Bot token (`xoxb-…`) for all outbound Slack Web API calls. */
   slackBotToken: string;
+  /**
+   * Owner user token (`xoxp-…`) — optional. When set, tools declared
+   * `actor: 'user'` use it (broader reads, real `search.messages`,
+   * act-as-owner writes). When absent, read tools fall back to the bot
+   * token; user-required tools (act-as-owner writes) become unavailable.
+   */
+  slackUserToken?: string;
   /** Sym's own bot user id (`U…`) — marks its own posts + ignores its own events. */
   slackBotUserId: string;
   /** The Slack workspace (team) id Sym serves; events from other teams are ignored. */
@@ -63,6 +70,9 @@ export function loadAgentConfig(): AgentConfig {
     port: Number(process.env['AGENT_PORT'] ?? '3001'),
     slackSigningSecret: required('SLACK_SIGNING_SECRET'),
     slackBotToken: required('SLACK_BOT_TOKEN'),
+    ...(process.env['SLACK_OWNER_USER_TOKEN']
+      ? { slackUserToken: process.env['SLACK_OWNER_USER_TOKEN'] }
+      : {}),
     slackBotUserId: required('SLACK_BOT_USER_ID'),
     slackTeamId: required('SLACK_TEAM_ID'),
     ownerSlackUserId: required('SYM_OWNER_SLACK_USER_ID'),

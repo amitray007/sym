@@ -34,17 +34,18 @@ const GET_CURRENT_TIME_DESCRIPTOR: ToolDescriptor = {
 const READ_CHANNEL_DESCRIPTOR: ToolDescriptor = {
   type: 'function',
   name: 'read_channel',
-  // READ tool: the model supplies channel_id from user-visible mentions like <#C0123|name>.
-  // Slack's bot-membership gate bounds what channels are actually readable.
-  // Side-effect tools (a later chunk) will take their target from ToolRuntimeContext instead.
+  // READ tool. With actor:'user', sees private channels + DMs the owner is in
+  // without Sym needing to be added as a member. Falls back to bot client when
+  // SLACK_OWNER_USER_TOKEN isn't configured (then the bot-membership rule
+  // applies as before).
   description:
-    "Read the most recent messages of a Slack channel (oldest-first). Use to catch up on or summarize a channel other than the current one. `channel_id` is a Slack channel ID like C0123 (the model can read it from a `<#C0123|name>` mention in the user's message). Sym can only read channels it is a member of.",
+    "Read the most recent messages of a Slack channel (oldest-first). Use to catch up on or summarize a channel other than the current one. `channel_id` is a Slack channel ID like C0123 (the model can read it from a `<#C0123|name>` mention in the user's message). Acts as the owner — can see any public channel, plus private channels and DMs the owner is in.",
   parameters: {
     type: 'object',
     properties: {
       channel_id: {
         type: 'string',
-        description: 'Slack channel ID, e.g. C0123',
+        description: 'Slack channel ID, e.g. C0123 or D0123 for a DM',
       },
       limit: {
         type: 'number',
@@ -55,13 +56,15 @@ const READ_CHANNEL_DESCRIPTOR: ToolDescriptor = {
     additionalProperties: false,
   } satisfies JsonSchema,
   readOnlyHint: true,
+  actor: 'user',
 };
 
 const READ_THREAD_DESCRIPTOR: ToolDescriptor = {
   type: 'function',
   name: 'read_thread',
   // READ tool: model supplies both channel_id and thread_ts from context.
-  // Same membership-gate constraint as read_channel applies.
+  // Acts as owner via user token; private/DM threads accessible without bot
+  // membership when the owner is a member.
   description:
     'Read all messages in a specific Slack thread (oldest-first). `channel_id` (C0123/D0123) and `thread_ts` identify the thread.',
   parameters: {
@@ -78,12 +81,14 @@ const READ_THREAD_DESCRIPTOR: ToolDescriptor = {
     additionalProperties: false,
   } satisfies JsonSchema,
   readOnlyHint: true,
+  actor: 'user',
 };
 
 const READ_USER_PROFILE_DESCRIPTOR: ToolDescriptor = {
   type: 'function',
   name: 'read_user_profile',
   // READ tool: model supplies user_id from <@U0123> mentions or search results.
+  // User token surfaces a richer profile (some fields are user-scope only).
   description:
     "Fetch a Slack user's profile (display name, real name, title, status, timezone). `user_id` is a Slack user ID like U0123 (read from a `<@U0123>` mention).",
   parameters: {
@@ -98,6 +103,7 @@ const READ_USER_PROFILE_DESCRIPTOR: ToolDescriptor = {
     additionalProperties: false,
   } satisfies JsonSchema,
   readOnlyHint: true,
+  actor: 'user',
 };
 
 const FETCH_URL_DESCRIPTOR: ToolDescriptor = {
@@ -127,9 +133,11 @@ const FETCH_URL_DESCRIPTOR: ToolDescriptor = {
 const LIST_CHANNELS_DESCRIPTOR: ToolDescriptor = {
   type: 'function',
   name: 'list_channels',
-  // READ tool: surfaces channels the bot's token can see (membership-bounded for private).
+  // READ tool: with actor:'user' surfaces ALL channels the owner is in (public,
+  // private, DMs, MPIMs). Falls back to bot's narrower view when user token
+  // isn't configured.
   description:
-    'List Slack channels the bot can see (public + private channels it belongs to). Returns id, name, topic, is_private, member_count. Use to discover channel IDs before calling read_channel.',
+    "List Slack channels the owner can see (public + private channels + DMs they're in). Returns id, name, topic, is_private, member_count. Use to discover channel IDs before calling read_channel.",
   parameters: {
     type: 'object',
     properties: {
@@ -141,6 +149,7 @@ const LIST_CHANNELS_DESCRIPTOR: ToolDescriptor = {
     additionalProperties: false,
   } satisfies JsonSchema,
   readOnlyHint: true,
+  actor: 'user',
 };
 
 /**
@@ -175,53 +184,110 @@ function stripHtmlToText(html: string): string {
     .trim();
 }
 
-/** Dependencies required by the built-in dispatcher for Slack read tools. */
+/**
+ * Dependencies required by the built-in dispatcher.
+ *
+ * `slackClient` is the bot-token client (Sym's identity). `userSlackClient` is
+ * the optional owner-token client. Per-tool actor routing picks one or the
+ * other; READ tools that prefer user fall back to bot when the user token
+ * isn't configured.
+ */
 export interface BuiltinToolDeps {
   slackClient: SlackClient;
+  /** Owner user-token client; set when SLACK_OWNER_USER_TOKEN is configured. */
+  userSlackClient?: SlackClient;
   botUserId: SlackUserId;
-  /**
-   * Per-turn action_token from the most recent message event for this thread.
-   * Required for `assistant.search.context`. Undefined → `search_workspace`
-   * returns an error explaining the token is missing (so the model can
-   * gracefully fall back).
-   */
-  actionToken?: string;
 }
 
-const SEARCH_WORKSPACE_DESCRIPTOR: ToolDescriptor = {
+/**
+ * Pick the Slack client appropriate for this descriptor's `actor`.
+ *
+ * `actor: 'user'`:
+ *  - user client present → use it
+ *  - user client missing AND tool is read-only / non-destructive → fall back
+ *    to the bot client (it'll still work, just with bot's narrower
+ *    visibility)
+ *  - user client missing AND tool is destructive → return null so the
+ *    dispatcher emits an "unavailable" error (we will not silently post-as-
+ *    Sym when the model asked for post-as-owner)
+ *
+ * `actor: 'bot'` or unset → always the bot client.
+ */
+function pickClient(
+  descriptor: ToolDescriptor,
+  deps: BuiltinToolDeps,
+): { client: SlackClient; usedActor: 'bot' | 'user' } | null {
+  if (descriptor.actor === 'user') {
+    if (deps.userSlackClient !== undefined) {
+      return { client: deps.userSlackClient, usedActor: 'user' };
+    }
+    if (descriptor.destructiveHint === true) {
+      return null; // hard-required user token is missing
+    }
+    return { client: deps.slackClient, usedActor: 'bot' };
+  }
+  return { client: deps.slackClient, usedActor: 'bot' };
+}
+
+const SEARCH_MESSAGES_DESCRIPTOR: ToolDescriptor = {
   type: 'function',
-  name: 'search_workspace',
+  name: 'search_messages',
   description:
-    'Search across the Slack workspace using Slack\'s AI-native search (assistant.search.context). Returns the most relevant messages for a natural-language query, ranked by Slack. Use when the user asks about something that happened somewhere in Slack but you don\'t know which channel/thread — e.g. "find the discussion about the postgres migration", "who mentioned the Q3 launch plan". Prefer this over read_channel when the channel is unknown.',
+    'Search across the Slack workspace via `search.messages` — Slack\'s full-workspace search ranked by relevance. Use when the user asks about something that happened somewhere in Slack but you don\'t know which channel/thread (e.g. "find the postgres migration discussion", "who mentioned the Q3 launch plan"). Prefer this over read_channel when the location is unknown. Returns the most relevant matches with permalinks. Slack search modifiers work in the query (e.g. `from:@amit in:#general after:2026-01-01 pricing`).',
   parameters: {
     type: 'object',
     properties: {
       query: {
         type: 'string',
-        description: 'Natural-language search query, e.g. "postgres migration decision".',
-      },
-      channel_id: {
-        type: 'string',
-        description: 'Optional — restrict the search to a single channel (C0123).',
+        description:
+          'Slack search query. Supports modifiers: from:@user, in:#channel, before:YYYY-MM-DD, after:YYYY-MM-DD, has:link, etc.',
       },
       limit: {
         type: 'number',
-        description: 'Max results (default 10, max 20).',
+        description: 'Max results (default 10, max 100).',
+      },
+      sort: {
+        type: 'string',
+        enum: ['score', 'timestamp'],
+        description: 'Rank by relevance (score, default) or recency (timestamp).',
       },
     },
     required: ['query'],
     additionalProperties: false,
   } satisfies JsonSchema,
   readOnlyHint: true,
+  // search.messages requires the user-token `search:read` scope (bot tokens
+  // cannot hold it). Falls back to bot client only if Sym is configured
+  // without a user token, in which case this tool will return an API error.
+  actor: 'user',
 };
+
+/**
+ * Lookup table built once per dispatcher — used to resolve a `ToolCall.name`
+ * back to its descriptor so the dispatcher can route to the bot or user
+ * Slack client based on the descriptor's `actor` field.
+ */
+const ALL_BUILTIN_DESCRIPTORS: ToolDescriptor[] = [
+  GET_CURRENT_TIME_DESCRIPTOR,
+  READ_CHANNEL_DESCRIPTOR,
+  READ_THREAD_DESCRIPTOR,
+  READ_USER_PROFILE_DESCRIPTOR,
+  FETCH_URL_DESCRIPTOR,
+  LIST_CHANNELS_DESCRIPTOR,
+  SEARCH_MESSAGES_DESCRIPTOR,
+];
+const DESCRIPTORS_BY_NAME = new Map<string, ToolDescriptor>(
+  ALL_BUILTIN_DESCRIPTORS.map((d) => [d.name, d]),
+);
 
 /**
  * Create the built-in in-process tool dispatcher.
  *
  * Provides: `get_current_time`, `read_channel`, `read_thread`,
- * `read_user_profile`, `fetch_url`, `list_channels`.
- * ctx is unused by built-in tools (no side-effects needing workspace context)
- * but is received for interface conformance.
+ * `read_user_profile`, `fetch_url`, `list_channels`, `search_messages`.
+ * Per-tool actor routing picks the bot or user Slack client based on the
+ * descriptor's `actor` field; READ tools prefer the user client (broader
+ * visibility) and fall back to bot when no user token is configured.
  */
 export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
   return {
@@ -233,12 +299,31 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
         READ_USER_PROFILE_DESCRIPTOR,
         FETCH_URL_DESCRIPTOR,
         LIST_CHANNELS_DESCRIPTOR,
-        SEARCH_WORKSPACE_DESCRIPTOR,
+        SEARCH_MESSAGES_DESCRIPTOR,
       ];
     },
 
     async dispatch(call: ToolCall, _ctx: ToolRuntimeContext): Promise<ToolResult> {
       let result: ToolResult;
+
+      // Look up the descriptor so we can route to the correct token client.
+      const descriptor = DESCRIPTORS_BY_NAME.get(call.name);
+
+      // pickClient is null only for hard-required user tools with no user token.
+      const pick = descriptor
+        ? pickClient(descriptor, deps)
+        : { client: deps.slackClient, usedActor: 'bot' as const };
+      if (pick === null) {
+        return {
+          callId: call.id,
+          ok: false,
+          error: {
+            code: 'execution_failed',
+            message: `${call.name} requires the owner user token (SLACK_OWNER_USER_TOKEN). Not configured on this deployment.`,
+          },
+        };
+      }
+      const slack = pick.client;
 
       if (call.name === 'get_current_time') {
         result = { callId: call.id, ok: true, content: new Date().toISOString() };
@@ -256,7 +341,7 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
           const limit = Math.max(1, Math.min(100, rawLimit));
 
           try {
-            const { messages } = await deps.slackClient.conversationsHistory({
+            const { messages } = await slack.conversationsHistory({
               channel: channelIdArg as SlackChannelId,
               limit,
             });
@@ -288,7 +373,7 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
           };
         } else {
           try {
-            const { messages } = await deps.slackClient.conversationsReplies({
+            const { messages } = await slack.conversationsReplies({
               channel: channelIdArg as SlackChannelId,
               ts: threadTsArg as SlackThreadTs,
             });
@@ -313,12 +398,12 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
           };
         } else {
           try {
-            const profile = await deps.slackClient.usersInfo({ user: userIdArg as SlackUserId });
+            const profile = await slack.usersInfo({ user: userIdArg as SlackUserId });
             const lines: string[] = [`id: ${profile.id}`];
             if (profile.displayName) lines.push(`display_name: ${profile.displayName}`);
             if (profile.realName) lines.push(`real_name: ${profile.realName}`);
             if (profile.title) lines.push(`title: ${profile.title}`);
-            // Email is only present when the bot has the `users:read.email` scope.
+            // Email is only present when the calling token has `users:read.email`.
             if (profile.email) lines.push(`email: ${profile.email}`);
             if (profile.statusText) {
               const emoji = profile.statusEmoji ? `${profile.statusEmoji} ` : '';
@@ -420,9 +505,14 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
         const rawLimit = typeof limitArg === 'number' ? limitArg : 50;
         const limit = Math.max(1, Math.min(200, rawLimit));
         try {
-          const { channels } = await deps.slackClient.conversationsList({
+          // When acting as user, include DMs + MPIMs in the visible set.
+          const types =
+            pick.usedActor === 'user'
+              ? 'public_channel,private_channel,mpim,im'
+              : 'public_channel,private_channel';
+          const { channels } = await slack.conversationsList({
             limit,
-            types: 'public_channel,private_channel',
+            types,
             excludeArchived: true,
           });
           if (channels.length === 0) {
@@ -447,7 +537,7 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
             error: { code: 'execution_failed', message },
           };
         }
-      } else if (call.name === 'search_workspace') {
+      } else if (call.name === 'search_messages') {
         const queryArg = call.arguments['query'];
         if (typeof queryArg !== 'string' || queryArg.trim().length === 0) {
           result = {
@@ -455,50 +545,46 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
             ok: false,
             error: { code: 'invalid_arguments', message: 'query must be a non-empty string' },
           };
-        } else if (deps.actionToken === undefined) {
-          // Bot tokens require a fresh action_token from a recent message
-          // event for this thread. If we never captured one (e.g. the agent
-          // restarted between the user's last message and this call), return
-          // a clean error so the model can fall back to read_channel or
-          // tell the user.
+        } else if (pick.usedActor !== 'user') {
+          // Bot tokens cannot hold `search:read`, so search.messages always
+          // fails when called as the bot. Surface a clean error rather than
+          // letting Slack return a confusing missing_scope.
           result = {
             callId: call.id,
             ok: false,
             error: {
               code: 'execution_failed',
               message:
-                'workspace search is not available for this turn (no action_token captured yet — ask the user to send another message)',
+                'workspace search requires SLACK_OWNER_USER_TOKEN — Slack bot tokens cannot hold the search:read scope',
             },
           };
         } else {
-          const channelArg = call.arguments['channel_id'];
           const limitArg = call.arguments['limit'];
           const rawLimit = typeof limitArg === 'number' ? limitArg : 10;
-          const limit = Math.max(1, Math.min(20, rawLimit));
+          const limit = Math.max(1, Math.min(100, rawLimit));
+          const sortArg = call.arguments['sort'];
+          const sort: 'score' | 'timestamp' = sortArg === 'timestamp' ? 'timestamp' : 'score';
           try {
-            const { messages } = await deps.slackClient.assistantSearchContext({
+            const { matches, total } = await slack.searchMessages({
               query: queryArg.trim(),
-              actionToken: deps.actionToken,
-              limit,
-              ...(typeof channelArg === 'string' && channelArg.length > 0
-                ? { contextChannelId: channelArg as SlackChannelId }
-                : {}),
+              count: limit,
+              sort,
             });
-            if (messages.length === 0) {
+            if (matches.length === 0) {
               result = { callId: call.id, ok: true, content: '(no matching messages)' };
             } else {
-              const body = messages
+              const header =
+                total > matches.length ? `(showing ${matches.length} of ${total} matches)\n` : '';
+              const body = matches
                 .map((m, i) => {
-                  const who = m.authorName ?? m.authorUserId ?? '(unknown)';
-                  const where = m.channelName ? `#${m.channelName}` : (m.channelId ?? '');
+                  const who = m.username ?? m.userId ?? '(unknown)';
+                  const where = m.channelName ? `#${m.channelName}` : m.channelId;
                   const link = m.permalink ? ` <${m.permalink}|link>` : '';
-                  // Trim each result to keep the context tight.
-                  const content =
-                    m.content.length > 400 ? `${m.content.slice(0, 400)}…` : m.content;
+                  const content = m.text.length > 400 ? `${m.text.slice(0, 400)}…` : m.text;
                   return `${i + 1}. ${who} in ${where}${link}\n   ${content}`;
                 })
                 .join('\n');
-              result = { callId: call.id, ok: true, content: body };
+              result = { callId: call.id, ok: true, content: `${header}${body}` };
             }
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);

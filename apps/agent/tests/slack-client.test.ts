@@ -265,45 +265,53 @@ describe('WebApiSlackClient assistant + streaming methods', () => {
     expect(callBody(fetchFn, 0)['markdown_text']).toBeUndefined();
   });
 
-  it('assistantSearchContext sends query + action_token and maps the response', async () => {
+  it('authTest returns the identity the token is acting as', async () => {
+    const fetchFn = mockFetch([
+      { ok: true, user_id: 'U1', team_id: 'T1', user: 'amit', bot_id: undefined },
+    ]);
+    const client = new WebApiSlackClient('xoxp-user');
+    const result = await client.authTest();
+    expect(result.userId).toBe('U1');
+    expect(result.teamId).toBe('T1');
+    expect(result.user).toBe('amit');
+    expect(result.isBot).toBeUndefined();
+    expect(fetchFn).toHaveBeenCalled();
+  });
+
+  it('searchMessages POSTs form-urlencoded query and maps Slack matches', async () => {
     const fetchFn = mockFetch([
       {
         ok: true,
-        results: {
-          messages: [
+        messages: {
+          total: 1,
+          matches: [
             {
-              author_name: 'amit',
-              author_user_id: 'U1',
-              channel_id: 'C1',
-              channel_name: 'eng',
-              message_ts: '900.1',
-              content: 'upgrade postgres',
+              channel: { id: 'C1', name: 'eng' },
+              username: 'amit',
+              user: 'U1',
+              ts: '900.1',
+              text: 'upgrade postgres',
               permalink: 'https://slack.com/archives/C1/p9001',
             },
           ],
         },
-        response_metadata: { next_cursor: 'abc' },
       },
     ]);
-    const client = new WebApiSlackClient('xoxb-test');
-
-    const result = await client.assistantSearchContext({
-      query: 'postgres',
-      actionToken: 'tok123',
-      limit: 5,
+    const client = new WebApiSlackClient('xoxp-user');
+    const result = await client.searchMessages({ query: 'postgres', count: 5 });
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0]?.channelId).toBe('C1');
+    expect(result.matches[0]?.channelName).toBe('eng');
+    expect(result.matches[0]?.username).toBe('amit');
+    expect(result.matches[0]?.text).toBe('upgrade postgres');
+    expect(result.matches[0]?.permalink).toBe('https://slack.com/archives/C1/p9001');
+    expect(result.total).toBe(1);
+    // search.messages is form-urlencoded, not JSON.
+    expect(fetchFn.mock.calls[0]?.[1]).toMatchObject({
+      headers: expect.objectContaining({
+        'content-type': 'application/x-www-form-urlencoded; charset=utf-8',
+      }),
     });
-
-    expect(callBody(fetchFn, 0)).toMatchObject({
-      query: 'postgres',
-      action_token: 'tok123',
-      limit: 5,
-    });
-    expect(result.messages).toHaveLength(1);
-    expect(result.messages[0]?.authorName).toBe('amit');
-    expect(result.messages[0]?.channelName).toBe('eng');
-    expect(result.messages[0]?.content).toBe('upgrade postgres');
-    expect(result.messages[0]?.permalink).toBe('https://slack.com/archives/C1/p9001');
-    expect(result.nextCursor).toBe('abc');
   });
 
   it('appendStream forwards task_update chunks unchanged', async () => {

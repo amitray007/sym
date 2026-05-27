@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createBuiltinDispatcher } from '../src/builtin-tools.js';
 
 import type {
-  AssistantSearchContextParams,
-  AssistantSearchContextResult,
   ConversationsHistoryResult,
   ConversationsListResult,
   ConversationsRepliesResult,
+  SearchMessagesParams,
+  SearchMessagesResult,
   SlackClient,
   SlackThreadMessage,
   SlackUserProfile,
@@ -54,9 +54,9 @@ function makeSlackClient(opts: {
   userError?: Error;
   listResult?: ConversationsListResult;
   listError?: Error;
-  searchResult?: AssistantSearchContextResult;
+  searchResult?: SearchMessagesResult;
   searchError?: Error;
-  searchCalls?: AssistantSearchContextParams[];
+  searchCalls?: SearchMessagesParams[];
 }): SlackClient {
   return {
     async conversationsHistory(): Promise<ConversationsHistoryResult> {
@@ -105,12 +105,13 @@ function makeSlackClient(opts: {
     async chatDelete() {
       /* no-op */
     },
-    async assistantSearchContext(
-      params: AssistantSearchContextParams,
-    ): Promise<AssistantSearchContextResult> {
+    async authTest() {
+      return { userId: 'U0' as SlackUserId, teamId: 'T0' };
+    },
+    async searchMessages(params: SearchMessagesParams): Promise<SearchMessagesResult> {
       opts.searchCalls?.push(params);
       if (opts.searchError !== undefined) throw opts.searchError;
-      return opts.searchResult ?? { messages: [] };
+      return opts.searchResult ?? { matches: [], total: 0 };
     },
   };
 }
@@ -132,10 +133,29 @@ describe('createBuiltinDispatcher', () => {
           'read_user_profile',
           'fetch_url',
           'list_channels',
-          'search_workspace',
+          'search_messages',
         ]),
       );
       expect(tools).toHaveLength(7);
+    });
+
+    it('declares actor:"user" on the tools that benefit from broader visibility', () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const userActorNames = dispatcher
+        .list()
+        .filter((t) => t.actor === 'user')
+        .map((t) => t.name)
+        .sort();
+      expect(userActorNames).toEqual([
+        'list_channels',
+        'read_channel',
+        'read_thread',
+        'read_user_profile',
+        'search_messages',
+      ]);
     });
 
     it('all new READ tools have readOnlyHint: true', () => {
@@ -650,46 +670,48 @@ describe('createBuiltinDispatcher', () => {
     });
   });
 
-  describe('dispatch() — search_workspace', () => {
-    it('returns execution_failed when no action_token is available', async () => {
+  describe('dispatch() — search_messages', () => {
+    it('returns execution_failed when no user token is configured (bot fallback path)', async () => {
       const dispatcher = createBuiltinDispatcher({
         slackClient: makeSlackClient({}),
         botUserId: BOT,
-        // actionToken omitted — bot tokens require it.
+        // userSlackClient omitted — falls back to bot, then refuses cleanly.
       });
       const result = await dispatcher.dispatch(
-        makeCall('search_workspace', { query: 'postgres migration' }),
+        makeCall('search_messages', { query: 'postgres migration' }),
         makeCtx(),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error('expected failure');
       expect(result.error.code).toBe('execution_failed');
-      expect(result.error.message).toMatch(/action_token/);
+      expect(result.error.message).toMatch(/SLACK_OWNER_USER_TOKEN/);
     });
 
-    it('calls assistant.search.context and formats the results', async () => {
-      const calls: AssistantSearchContextParams[] = [];
+    it('calls search.messages on the USER client and formats results', async () => {
+      const userCalls: SearchMessagesParams[] = [];
+      const userClient = makeSlackClient({
+        searchCalls: userCalls,
+        searchResult: {
+          matches: [
+            {
+              channelId: 'C1' as SlackChannelId,
+              channelName: 'eng',
+              ts: '900.1' as SlackThreadTs,
+              text: 'we decided to upgrade postgres next quarter',
+              username: 'amit',
+              permalink: 'https://slack.com/archives/C1/p9001',
+            },
+          ],
+          total: 1,
+        },
+      });
       const dispatcher = createBuiltinDispatcher({
-        slackClient: makeSlackClient({
-          searchCalls: calls,
-          searchResult: {
-            messages: [
-              {
-                channelId: 'C1' as SlackChannelId,
-                channelName: 'eng',
-                messageTs: '900.1' as SlackThreadTs,
-                content: 'we decided to upgrade postgres next quarter',
-                authorName: 'amit',
-                permalink: 'https://slack.com/archives/C1/p9001',
-              },
-            ],
-          },
-        }),
+        slackClient: makeSlackClient({}),
+        userSlackClient: userClient,
         botUserId: BOT,
-        actionToken: 'fake.action.token',
       });
       const result = await dispatcher.dispatch(
-        makeCall('search_workspace', { query: 'postgres migration', limit: 5 }),
+        makeCall('search_messages', { query: 'postgres migration', limit: 5 }),
         makeCtx(),
       );
       expect(result.ok).toBe(true);
@@ -697,20 +719,20 @@ describe('createBuiltinDispatcher', () => {
       expect(result.content).toContain('amit');
       expect(result.content).toContain('eng');
       expect(result.content).toContain('upgrade postgres');
-      expect(calls).toHaveLength(1);
-      expect(calls[0]?.query).toBe('postgres migration');
-      expect(calls[0]?.actionToken).toBe('fake.action.token');
-      expect(calls[0]?.limit).toBe(5);
+      expect(userCalls).toHaveLength(1);
+      expect(userCalls[0]?.query).toBe('postgres migration');
+      expect(userCalls[0]?.count).toBe(5);
+      expect(userCalls[0]?.sort).toBe('score');
     });
 
     it('returns "(no matching messages)" on empty results', async () => {
       const dispatcher = createBuiltinDispatcher({
-        slackClient: makeSlackClient({ searchResult: { messages: [] } }),
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({ searchResult: { matches: [], total: 0 } }),
         botUserId: BOT,
-        actionToken: 'fake.action.token',
       });
       const result = await dispatcher.dispatch(
-        makeCall('search_workspace', { query: 'nothing' }),
+        makeCall('search_messages', { query: 'nothing' }),
         makeCtx(),
       );
       expect(result.ok).toBe(true);
@@ -720,12 +742,12 @@ describe('createBuiltinDispatcher', () => {
 
     it('surfaces Slack errors as execution_failed', async () => {
       const dispatcher = createBuiltinDispatcher({
-        slackClient: makeSlackClient({ searchError: new Error('rate_limited') }),
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({ searchError: new Error('rate_limited') }),
         botUserId: BOT,
-        actionToken: 'fake.action.token',
       });
       const result = await dispatcher.dispatch(
-        makeCall('search_workspace', { query: 'q' }),
+        makeCall('search_messages', { query: 'q' }),
         makeCtx(),
       );
       expect(result.ok).toBe(false);
@@ -737,16 +759,36 @@ describe('createBuiltinDispatcher', () => {
     it('rejects empty query string with invalid_arguments', async () => {
       const dispatcher = createBuiltinDispatcher({
         slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({}),
         botUserId: BOT,
-        actionToken: 'fake.action.token',
       });
       const result = await dispatcher.dispatch(
-        makeCall('search_workspace', { query: '   ' }),
+        makeCall('search_messages', { query: '   ' }),
         makeCtx(),
       );
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error('expected failure');
       expect(result.error.code).toBe('invalid_arguments');
+    });
+  });
+
+  describe('dispatch() — actor routing', () => {
+    it('routes actor:"user" tool calls to the user client when available', async () => {
+      const userCalls: SearchMessagesParams[] = [];
+      const userClient = makeSlackClient({
+        searchCalls: userCalls,
+        searchResult: { matches: [], total: 0 },
+      });
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: userClient,
+        botUserId: BOT,
+      });
+      // read_channel is actor:'user' — and we record the call on the user client.
+      // We use read_channel's history reading via a shared mock; here we verify
+      // by way of search_messages which is unambiguously on the user client.
+      await dispatcher.dispatch(makeCall('search_messages', { query: 'test' }), makeCtx());
+      expect(userCalls).toHaveLength(1);
     });
   });
 });

@@ -26,7 +26,14 @@ export interface HandleTurnDeps {
   /** Raw Fireworks credentials — required by the Pi loop. */
   fireworks: { baseUrl: string; apiKey: string };
   model: string;
+  /** Bot-token client — Sym's identity (replies, streaming, status). */
   slackClient: SlackClient;
+  /**
+   * Owner user-token client — present when SLACK_OWNER_USER_TOKEN is set.
+   * Tools declared `actor: 'user'` use this for broader visibility and act-
+   * as-owner writes (Phase B).
+   */
+  userSlackClient?: SlackClient;
   /** Sym's own bot user id — lets thread history mark its posts as assistant. */
   botUserId: SlackUserId;
   /** Slack team id — required as `recipientTeamId` when streaming into channels. */
@@ -35,12 +42,6 @@ export interface HandleTurnDeps {
   viewedChannelId?: string;
   /** Runtime behavior knobs. */
   behavior: BehaviorConfig;
-  /**
-   * Latest action_token captured for this thread from Slack message events.
-   * Required by `search_workspace` (assistant.search.context). When absent,
-   * the tool returns a clean error and the model falls back to other tools.
-   */
-  actionToken?: string;
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
@@ -553,7 +554,7 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   const builtin = createBuiltinDispatcher({
     slackClient: deps.slackClient,
     botUserId: deps.botUserId,
-    ...(deps.actionToken !== undefined ? { actionToken: deps.actionToken } : {}),
+    ...(deps.userSlackClient !== undefined ? { userSlackClient: deps.userSlackClient } : {}),
   });
   const registry = new ToolRegistry(builtin);
 

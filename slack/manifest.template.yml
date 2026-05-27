@@ -36,66 +36,61 @@ oauth_config:
   redirect_urls:
     - ${SLACK_PUBLIC_BASE_URL}/slack/oauth/callback
   scopes:
+    # ── USER scopes — granted when the owner installs the app. Used by tools
+    # declared `actor: 'user'` so Sym can act with the owner's identity and
+    # full Slack visibility. The User OAuth Token (xoxp-…) goes into
+    # SLACK_OWNER_USER_TOKEN.
     user:
-      - search:read.public
-      - search:read.private
-      - search:read.mpim
-      - search:read.im
-      - search:read.files
-      - search:read.users
-      - chat:write
+      # Search — Slack's real `search.messages` requires the user scope
+      # (bot tokens cannot hold it). Powers the search_messages tool.
+      - search:read
+      # History reads across every surface the owner participates in.
+      # Lets read_channel / read_thread see private channels and DMs
+      # without Sym needing to be added as a member.
       - channels:history
       - groups:history
-      - mpim:history
       - im:history
-      - canvases:read
-      - canvases:write
-      - users:read
-      - users:read.email
-      - reactions:write
-      - reactions:read
-      - emoji:read
-      - files:read
-      - channels:write
-      - groups:write
-      - im:write
-      - mpim:write
+      - mpim:history
       - channels:read
       - groups:read
+      - im:read
       - mpim:read
-    user_optional:
-      - search:read.private
-      - search:read.mpim
-      - search:read.im
-      - search:read.files
-      - chat:write
-      - groups:history
-      - mpim:history
-      - im:history
+      # Profile reads.
+      - users:read
+      - users:read.email
+      # Phase B — act-as-owner writes.
+      - chat:write # post_as_owner
+      - reactions:write # react_as_owner
+      - reactions:read
+      - users.profile:write # set_status
+      - reminders:write # add_reminder
+      - reminders:read
+      # Misc useful surfaces (files / canvases / emoji) — covered now so
+      # Phase B+C feature work doesn't require another reinstall round.
+      - files:read
+      - emoji:read
       - canvases:read
       - canvases:write
+    # ── BOT scopes — Sym's identity. Used for replies, streaming, assistant
+    # panel state, status shimmer. Bot tokens cannot hold `search:read` — the
+    # search_messages tool routes to the user token instead.
     bot:
       # Core messaging.
       - app_mentions:read
       - assistant:write
       - chat:write
       - commands
-      # History readers (read_thread, read_channel tools).
+      # History readers — used when SLACK_OWNER_USER_TOKEN is NOT configured
+      # (the user actor falls back to bot for non-destructive reads).
       - channels:history
       - groups:history
       - im:history
       - im:read
-      # Tool surface — added with the list/profile tools.
-      - channels:read # list_channels (public)
-      - groups:read # list_channels (private)
-      - users:read # read_user_profile (display name, title, tz)
-      - users:read.email # read_user_profile (optional email surfacing)
-      # AI-native search via assistant.search.context (search_workspace tool).
-      # These are bot-token equivalents — the `search:read` user scope is not
-      # valid for bot tokens.
-      - search:read.public
-      - search:read.files
-      - search:read.users
+      # List / profile / channel discovery (bot fallback path).
+      - channels:read
+      - groups:read
+      - users:read
+      - users:read.email
 settings:
   event_subscriptions:
     request_url: ${SLACK_PUBLIC_BASE_URL}/slack/events

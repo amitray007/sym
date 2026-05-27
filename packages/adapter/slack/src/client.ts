@@ -217,43 +217,45 @@ export interface StopStreamParams {
   blocks?: unknown[];
 }
 
-// --- AI-native search (assistant.search.context) ---------------------------
+// --- auth.test --------------------------------------------------------------
 
-export interface AssistantSearchContextParams {
-  /** The user question / query string. */
-  query: string;
-  /**
-   * Bot-token-issued per-event token, captured from the latest message event
-   * for this thread. Required when calling with a bot token.
-   */
-  actionToken: string;
-  /** Limit search to this channel, when provided. */
-  contextChannelId?: SlackChannelId;
-  /** Default: `['messages']`. */
-  contentTypes?: ('messages' | 'files' | 'channels' | 'users')[];
-  /** Default: `['public_channel']`. */
-  channelTypes?: ('public_channel' | 'private_channel' | 'mpim' | 'im')[];
-  /** Results per page (max 20, default 20). */
-  limit?: number;
-  /** Pagination cursor from a previous response. */
-  cursor?: string;
+export interface AuthTestResult {
+  /** The user_id the token is currently acting as. */
+  userId: SlackUserId;
+  /** The team_id the token belongs to. */
+  teamId: string;
+  /** Human-readable username (bots: app name; users: their Slack handle). */
+  user?: string;
+  /** True when the token is a bot token (`xoxb-…`). */
+  isBot?: boolean;
 }
 
-/** A message result from `assistant.search.context`. */
-export interface AssistantSearchMessageResult {
-  authorName?: string;
-  authorUserId?: SlackUserId;
+// --- search.messages (user-token only) -------------------------------------
+
+export interface SearchMessagesParams {
+  /** Slack-style query string, e.g. `from:@amit pricing in:#general`. */
+  query: string;
+  sort?: 'score' | 'timestamp';
+  sortDir?: 'asc' | 'desc';
+  /** Results per page (default 20, max 100). */
+  count?: number;
+  page?: number;
+}
+
+export interface SearchMessageMatch {
   channelId: SlackChannelId;
   channelName?: string;
-  messageTs: SlackThreadTs;
-  content: string;
+  username?: string;
+  userId?: SlackUserId;
+  ts: SlackThreadTs;
+  text: string;
   permalink?: string;
-  isAuthorBot?: boolean;
 }
 
-export interface AssistantSearchContextResult {
-  messages: AssistantSearchMessageResult[];
-  nextCursor?: string;
+export interface SearchMessagesResult {
+  matches: SearchMessageMatch[];
+  /** Total matches across all pages. */
+  total: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,14 +292,16 @@ export interface SlackClient {
   /** List channels the bot can see (requires `channels:read` / `groups:read`). */
   conversationsList(params: ConversationsListParams): Promise<ConversationsListResult>;
   /**
-   * AI-native workspace search. Returns Slack-ranked messages relevant to a
-   * query, scoped to channels the bot can see. Requires
-   * `search:read.public` / `search:read.files` / `search:read.users` and a
-   * fresh `action_token` from a recent message event for this thread.
+   * Verify the token is valid and discover the identity it's acting as.
+   * Cheap; usable as a startup health check.
    */
-  assistantSearchContext(
-    params: AssistantSearchContextParams,
-  ): Promise<AssistantSearchContextResult>;
+  authTest(): Promise<AuthTestResult>;
+  /**
+   * Full Slack workspace search (`search.messages`). User-token only — bot
+   * tokens lack the `search:read` scope (Slack does not support it for bots).
+   * For agents, call via the owner's user token.
+   */
+  searchMessages(params: SearchMessagesParams): Promise<SearchMessagesResult>;
 }
 
 // ---------------------------------------------------------------------------

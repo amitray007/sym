@@ -147,8 +147,11 @@ class MockSlackClient implements SlackClient {
   async conversationsList() {
     return { channels: [] };
   }
-  async assistantSearchContext() {
-    return { messages: [] };
+  async authTest() {
+    return { userId: 'U0' as SlackUserId, teamId: 'T-TEST' };
+  }
+  async searchMessages() {
+    return { matches: [], total: 0 };
   }
 }
 

@@ -14,6 +14,18 @@ export interface ToolDescriptor {
   readOnlyHint?: boolean;
   /** Tool performs a destructive/irreversible action — requires user confirmation. */
   destructiveHint?: boolean;
+  /**
+   * Which Slack identity this tool acts under.
+   *  - `'bot'`  (default) — workspace bot token; the tool acts AS Sym.
+   *  - `'user'` — owner's user token; the tool acts AS the owner (Amit).
+   *
+   * READ tools that prefer `'user'` (broader visibility into private
+   * channels / DMs / full search) fall back to the bot token when no user
+   * token is configured. ACT-AS-OWNER WRITE tools with `actor: 'user'`
+   * AND `destructiveHint: true` hard-require the user token — they fail
+   * cleanly when it's missing rather than silently posting as Sym.
+   */
+  actor?: 'bot' | 'user';
 }
 
 /** A resolved tool invocation handed to the dispatcher (arguments parsed). */
