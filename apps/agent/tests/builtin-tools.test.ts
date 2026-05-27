@@ -861,6 +861,39 @@ describe('createBuiltinDispatcher', () => {
       expect(result.error.message).toContain('SLACK_OWNER_USER_TOKEN');
     });
 
+    it('appends a "(via Sym)" footer when ownerPostMarker is true', async () => {
+      const userPosts: PostMessageParams[] = [];
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({ postCalls: userPosts }),
+        botUserId: BOT,
+        ownerPostMarker: true,
+      });
+      await dispatcher.dispatch(
+        makeCall('post_as_owner', { channel_id: 'C1', text: 'heading out' }),
+        makeCtx(),
+      );
+      expect(userPosts).toHaveLength(1);
+      expect(userPosts[0]?.text).toContain('heading out');
+      expect(userPosts[0]?.text).toContain('_(via Sym)_');
+    });
+
+    it('omits the footer when ownerPostMarker is false', async () => {
+      const userPosts: PostMessageParams[] = [];
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({ postCalls: userPosts }),
+        botUserId: BOT,
+        ownerPostMarker: false,
+      });
+      await dispatcher.dispatch(
+        makeCall('post_as_owner', { channel_id: 'C1', text: 'heading out' }),
+        makeCtx(),
+      );
+      expect(userPosts[0]?.text).toBe('heading out');
+      expect(userPosts[0]?.text).not.toContain('Sym');
+    });
+
     it('threads when thread_ts is supplied', async () => {
       const userPosts: PostMessageParams[] = [];
       const dispatcher = createBuiltinDispatcher({

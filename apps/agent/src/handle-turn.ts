@@ -555,6 +555,7 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
     slackClient: deps.slackClient,
     botUserId: deps.botUserId,
     ...(deps.userSlackClient !== undefined ? { userSlackClient: deps.userSlackClient } : {}),
+    ownerPostMarker: deps.behavior.ownerPostMarker,
   });
   const registry = new ToolRegistry(builtin);
 

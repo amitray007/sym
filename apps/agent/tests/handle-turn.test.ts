@@ -55,7 +55,11 @@ import type {
 // ---------------------------------------------------------------------------
 
 const FAKE_FIREWORKS = { baseUrl: 'http://fake.fireworks', apiKey: 'fake-key' };
-const FAKE_BEHAVIOR = { taskCardThreshold: 0, taskCardAfter: 'delete' as const };
+const FAKE_BEHAVIOR = {
+  taskCardThreshold: 0,
+  taskCardAfter: 'delete' as const,
+  ownerPostMarker: true,
+};
 
 // ---------------------------------------------------------------------------
 // Default reply returned by the mock loop unless overridden.
@@ -621,7 +625,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       // Threshold 1 so the single tool triggers the card immediately.
-      behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const },
+      behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
     });
 
     // We expect at least an in_progress chunk then an error chunk for task-1.
@@ -673,7 +677,7 @@ describe('handleTurn', () => {
       slackTeamId: 'T-TEST',
       // Production-default threshold of 3 — the threshold-flush happens at
       // the third start, which is the case that was broken.
-      behavior: { taskCardThreshold: 3, taskCardAfter: 'delete' as const },
+      behavior: { taskCardThreshold: 3, taskCardAfter: 'delete' as const, ownerPostMarker: true },
     });
 
     // All three tasks must end in `complete` (or `error`) state in the chunks.

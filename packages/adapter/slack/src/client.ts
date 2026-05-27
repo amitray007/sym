@@ -440,12 +440,24 @@ export function mapSlackError(err: SlackApiError): SlackActionError {
     ratelimited: 'rate_limited',
     not_authed: 'not_authed',
     invalid_auth: 'not_authed',
+    token_revoked: 'not_authed',
+    token_expired: 'not_authed',
     channel_not_found: 'channel_not_found',
     invalid_blocks: 'invalid_input',
     no_text: 'invalid_input',
   };
 
   const code: SlackActionError['code'] = codeMap[slackError] ?? 'api_error';
+
+  // Loud, one-line operator signal when a token has been revoked / expired so
+  // it shows up in deploy logs without needing a separate health check. The
+  // structured SlackError still surfaces normally so callers can degrade.
+  if (code === 'not_authed') {
+    console.error(
+      `[slack-adapter] AUTH REJECTED (${slackError}) — token is invalid/revoked/expired. ` +
+        'Re-run the install to refresh SLACK_BOT_TOKEN or SLACK_OWNER_USER_TOKEN.',
+    );
+  }
 
   return new SlackError(code, slackError ?? err.message, code === 'rate_limited', err);
 }

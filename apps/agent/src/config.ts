@@ -18,6 +18,12 @@ export interface BehaviorConfig {
    *   collapse — card shrinks to a single "✅ N steps · Xs" summary line
    */
   taskCardAfter: 'delete' | 'collapse';
+  /**
+   * When true, `post_as_owner` appends a small `_(via Sym)_` footer to the
+   * posted message so collaborators know the owner used an assistant to
+   * relay it. Defaults to true for transparency; set to false to suppress.
+   */
+  ownerPostMarker: boolean;
 }
 
 export interface AgentConfig {
@@ -82,6 +88,7 @@ export function loadAgentConfig(): AgentConfig {
     behavior: {
       taskCardThreshold: Number(process.env['TASK_CARD_THRESHOLD'] ?? DEFAULT_TASK_CARD_THRESHOLD),
       taskCardAfter: taskCardAfter(process.env['TASK_CARD_AFTER']),
+      ownerPostMarker: process.env['OWNER_POST_MARKER'] !== 'false',
     },
   };
 }

@@ -197,6 +197,12 @@ export interface BuiltinToolDeps {
   /** Owner user-token client; set when SLACK_OWNER_USER_TOKEN is configured. */
   userSlackClient?: SlackClient;
   botUserId: SlackUserId;
+  /**
+   * When true, `post_as_owner` appends a `_(via Sym)_` footer to the posted
+   * message so collaborators can tell the owner used an assistant to relay it.
+   * Driven by `BehaviorConfig.ownerPostMarker`.
+   */
+  ownerPostMarker?: boolean;
 }
 
 /**
@@ -728,10 +734,12 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
             error: { code: 'invalid_arguments', message: 'text must be a non-empty string' },
           };
         } else {
+          // Optional transparency marker — disabled via OWNER_POST_MARKER=false.
+          const body = deps.ownerPostMarker === true ? `${textArg}\n_(via Sym)_` : textArg;
           try {
             const posted = await slack.chatPostMessage({
               channel: channelArg as SlackChannelId,
-              text: textArg,
+              text: body,
               ...(typeof threadTsArg === 'string' && threadTsArg.length > 0
                 ? { thread_ts: threadTsArg as SlackThreadTs }
                 : {}),
