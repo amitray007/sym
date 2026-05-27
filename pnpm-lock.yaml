@@ -77,6 +77,9 @@ importers:
       hono:
         specifier: ^4.6.14
         version: 4.12.22
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
     devDependencies:
       dotenv:
         specifier: ^16.4.7

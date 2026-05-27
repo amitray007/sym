@@ -18,7 +18,8 @@
     "@sym/adapter-slack": "workspace:*",
     "@sym/contracts": "workspace:*",
     "@sym/kernel": "workspace:*",
-    "hono": "^4.6.14"
+    "hono": "^4.6.14",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "dotenv": "^16.4.7",

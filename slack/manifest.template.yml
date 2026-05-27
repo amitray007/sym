@@ -21,12 +21,10 @@ features:
   assistant_view:
     assistant_description: Your AI plus-one in Slack — always online, never on PTO.
     suggested_prompts:
-      - title: Catch me up
+      - title: Catch me up with #general
         message: Summarize #general from the last few hours
       - title: Look someone up
-        message: Who is @alice? What's their role and current status?
-      - title: Fetch a link
-        message: What does this page say? https://
+        message: Who is @Amit? What's their role and current status?
       - title: What can you do?
         message: What can you help me with?
   bot_user:
