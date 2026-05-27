@@ -290,11 +290,18 @@ export class WebApiSlackClient implements SlackClient {
   }
 
   async chatAppendStream(params: AppendStreamParams): Promise<void> {
+    // Normalise both inputs into one `chunks` array. Slack drops the
+    // top-level `markdown_text` param when interleaved with chunk calls in
+    // the same stream, so we always send via `chunks`.
+    const chunks = [...(params.chunks ?? [])];
+    if (params.markdownText !== undefined && params.markdownText.length > 0) {
+      chunks.unshift({ type: 'markdown_text', text: params.markdownText });
+    }
+    if (chunks.length === 0) return;
     await this.call('chat.appendStream', {
       channel: params.channel,
       ts: params.ts,
-      ...(params.markdownText !== undefined ? { markdown_text: params.markdownText } : {}),
-      ...(params.chunks !== undefined ? { chunks: params.chunks } : {}),
+      chunks,
     });
   }
 

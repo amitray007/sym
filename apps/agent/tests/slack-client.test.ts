@@ -246,7 +246,7 @@ describe('WebApiSlackClient assistant + streaming methods', () => {
     expect(body['recipient_team_id']).toBe('T1');
   });
 
-  it('appendStream sends ts + markdown_text', async () => {
+  it('appendStream normalises markdownText into a markdown_text chunk', async () => {
     const fetchFn = mockFetch([{ ok: true }]);
     const client = new WebApiSlackClient('xoxb-test');
 
@@ -256,7 +256,29 @@ describe('WebApiSlackClient assistant + streaming methods', () => {
       markdownText: 'chunk',
     });
 
-    expect(callBody(fetchFn, 0)).toMatchObject({ ts: '500.1', markdown_text: 'chunk' });
+    // Slack drops the top-level markdown_text param when interleaved with
+    // chunks in the same stream — we always send via `chunks`.
+    expect(callBody(fetchFn, 0)).toMatchObject({
+      ts: '500.1',
+      chunks: [{ type: 'markdown_text', text: 'chunk' }],
+    });
+    expect(callBody(fetchFn, 0)['markdown_text']).toBeUndefined();
+  });
+
+  it('appendStream forwards task_update chunks unchanged', async () => {
+    const fetchFn = mockFetch([{ ok: true }]);
+    const client = new WebApiSlackClient('xoxb-test');
+
+    await client.chatAppendStream({
+      channel: CHANNEL,
+      ts: '500.1' as SlackThreadTs,
+      chunks: [{ type: 'task_update', id: 'task-1', title: 'Reading', status: 'in_progress' }],
+    });
+
+    expect(callBody(fetchFn, 0)).toMatchObject({
+      ts: '500.1',
+      chunks: [{ type: 'task_update', id: 'task-1', title: 'Reading', status: 'in_progress' }],
+    });
   });
 
   it('stopStream attaches bottom blocks when provided', async () => {

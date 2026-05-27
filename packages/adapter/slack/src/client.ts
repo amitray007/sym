@@ -168,7 +168,7 @@ export interface StreamHandle {
   ts: SlackThreadTs;
 }
 
-/** A single chunk appended to an in-flight stream via `chat.appendStream`. */
+/** A task-card update chunk (renders as a Slack `task_card` block). */
 export interface TaskUpdateChunk {
   type: 'task_update';
   id: string;
@@ -179,13 +179,27 @@ export interface TaskUpdateChunk {
   sources?: { type: 'url'; text: string; url: string }[];
 }
 
+/** A markdown text chunk (appends to the streamed message body). */
+export interface MarkdownTextChunk {
+  type: 'markdown_text';
+  text: string;
+}
+
+/** Any chunk type accepted by `chat.appendStream`'s `chunks` array. */
+export type StreamChunk = TaskUpdateChunk | MarkdownTextChunk;
+
 export interface AppendStreamParams {
   channel: SlackChannelId;
   ts: SlackThreadTs;
-  /** Plain markdown text to append to the stream message. */
+  /**
+   * Convenience field — converted to a `markdown_text` chunk internally so we
+   * never mix the top-level `markdown_text` parameter with the `chunks` array
+   * in the same stream (Slack silently drops markdown body when the two are
+   * interleaved).
+   */
   markdownText?: string;
-  /** Structured chunks (e.g. `task_update`) to push into the stream. */
-  chunks?: TaskUpdateChunk[];
+  /** Structured chunks (task_update / markdown_text) to push into the stream. */
+  chunks?: StreamChunk[];
 }
 
 export interface StopStreamParams {
