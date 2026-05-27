@@ -20,6 +20,7 @@ import type {
   SlackUserId,
   Turn,
 } from '@sym/contracts';
+import type { OwnerIdentity } from '@sym/kernel';
 
 /** Injected dependencies for processing a turn (the testable seam). */
 export interface HandleTurnDeps {
@@ -42,6 +43,12 @@ export interface HandleTurnDeps {
   viewedChannelId?: string;
   /** Runtime behavior knobs. */
   behavior: BehaviorConfig;
+  /**
+   * Resolved owner identity (name, tz, title) — embedded in the per-turn
+   * metadata so the model can address the owner naturally. Undefined when
+   * boot-time resolution hasn't completed or failed.
+   */
+  ownerProfile?: OwnerIdentity;
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
@@ -256,6 +263,7 @@ async function runTurnLoop(
       ...(onStatus !== undefined ? { onStatus } : {}),
       ...(onToolStart !== undefined ? { onToolStart } : {}),
       ...(onToolEnd !== undefined ? { onToolEnd } : {}),
+      ...(deps.ownerProfile !== undefined ? { ownerProfile: deps.ownerProfile } : {}),
     },
   );
 }

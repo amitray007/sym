@@ -30,7 +30,7 @@ import type {
   Turn,
   Usage,
 } from '@sym/contracts';
-import type { ToolRegistry } from '@sym/kernel';
+import type { OwnerIdentity, ToolRegistry } from '@sym/kernel';
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -79,6 +79,12 @@ export interface PiLoopOptions {
    * absent, destructive tools are blocked (fail closed).
    */
   slackClient?: SlackClient;
+  /**
+   * Owner identity (name, tz, title) — passed through to
+   * `buildUserTurnContent` so the per-turn metadata block carries enough info
+   * for the model to address the owner naturally instead of by Slack id.
+   */
+  ownerProfile?: OwnerIdentity;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,8 +296,10 @@ export async function runLoopPi(
 
   // The user's message, with turn metadata framed as context-only so "summarize
   // it" refers to the conversation (in history), not the metadata. Same builder
-  // as the kernel's assembleTurnMessages.
-  const userText = buildUserTurnContent(turn);
+  // as the kernel's assembleTurnMessages. When ownerProfile is supplied, an
+  // `owner: Amit Ray (Asia/Kolkata, …) — id U…` line lands inside the
+  // metadata block so the model knows who it's talking to.
+  const userText = buildUserTurnContent(turn, opts.ownerProfile);
 
   // Bridge the built-in tools as native Pi tools (full schemas visible up front).
   const descriptors = registry.listTools();

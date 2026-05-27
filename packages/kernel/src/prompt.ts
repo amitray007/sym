@@ -1,4 +1,19 @@
-import type { Turn } from '@sym/contracts';
+import type { SlackUserId, Turn } from '@sym/contracts';
+
+/**
+ * Resolved owner profile. Built once at agent boot from `users.info` on
+ * SYM_OWNER_SLACK_USER_ID and threaded into the per-turn user content so
+ * the model can address the owner by name and reason about their timezone
+ * without echoing raw Slack ids.
+ */
+export interface OwnerIdentity {
+  userId: SlackUserId;
+  displayName?: string;
+  realName?: string;
+  title?: string;
+  /** IANA tz, e.g. `Asia/Kolkata`. */
+  tz?: string;
+}
 
 /**
  * Sym's identity — single-owner framing. Static (no runtime data) so the whole
@@ -51,6 +66,13 @@ export function buildSystemPrompt(): string {
     '- Bold is `*single asterisks*`, italic `_underscores_`, strike `~tildes~`. Never use `**double**` or `#` headings — Slack prints them literally.',
     '- Links are `<https://example.com|label>`. Inline code `` `like this` ``; fenced blocks for multi-line. Bullets with `- ` are fine.',
     '- Keep it skimmable: tight answer first, details after. Avoid walls of text.',
+    '- Never echo raw Slack IDs (U…, C…, D…) in user-facing replies. Use the person\'s display name as plain text — no `<@id>` tag — so recaps and lookups do NOT notify them. For channels, write `#name` (plain text), not the channel id. When the user EXPLICITLY asks to mention/tag/ping someone ("send this and tag Amit", "@-mention Sarah"), then — and only then — use `<@USERID>` so Slack notifies them.',
+    '- If you have an id but no name, call `read_user_profile` once to resolve it before composing the reply. Never paste a bare `UXXX` into the answer.',
+    '',
+    '## Who you are talking to',
+    '- Each turn carries an `owner:` line in the metadata block — the person you work for. Use their NAME (display or real) when it makes a reply feel personal: greetings, when emphasising that something is theirs, when the answer is about them. Do NOT shoehorn the name into every line — natural cadence only.',
+    '- Interpret relative times ("today", "9am", "this morning") in the owner\'s timezone from the metadata block. When stating a time back, mention the timezone if it\'s ambiguous.',
+    '- When the owner refers to themselves ("who did I talk to", "set MY status", "remind ME"), they mean the owner whose id and name are in the metadata block. Don\'t ask who they are.',
   ].join('\n');
 }
 
@@ -75,16 +97,40 @@ export function buildTurnContextPrompt(turn: Turn): string {
 }
 
 /**
+ * Compact, comma-separated identity line for the owner — e.g.
+ * `Amit Ray (Asia/Kolkata, Engineering) — id U042MBPUZ9N`. Falls back to
+ * just the id when no name is available so the model never gets an empty
+ * "owner:" key.
+ */
+function buildOwnerLine(owner: OwnerIdentity): string {
+  const name = owner.displayName ?? owner.realName;
+  const tags: string[] = [];
+  if (owner.tz !== undefined) tags.push(owner.tz);
+  if (owner.title !== undefined && owner.title.length > 0) tags.push(owner.title);
+  const tagBlock = tags.length > 0 ? ` (${tags.join(', ')})` : '';
+  if (name === undefined) return `${owner.userId}${tagBlock}`;
+  return `${name}${tagBlock} — id ${owner.userId}`;
+}
+
+/**
  * Build the current user-turn message content.
  *
- * The user's actual text IS the message; turn metadata sits on a single line
- * above it, explicitly labeled context-only. This stops the model from treating
+ * The user's actual text IS the message; turn metadata sits in a clearly
+ * labeled "context only" block above it. This stops the model from treating
  * routing details as the content — e.g. "summarize it" must refer to the
  * surrounding Slack conversation (carried in history), never to this block.
+ *
+ * When `owner` is supplied, an `owner:` line is added so the model can
+ * address the user by name and reason about their timezone naturally.
  */
-export function buildUserTurnContent(turn: Turn): string {
+export function buildUserTurnContent(turn: Turn, owner?: OwnerIdentity): string {
+  const metaLines: string[] = [];
+  if (owner !== undefined) metaLines.push(`  owner: ${buildOwnerLine(owner)}`);
+  metaLines.push(`  ${buildTurnContextPrompt(turn)}`);
   return [
-    `[turn metadata — context only, NOT the message to act on or summarize: ${buildTurnContextPrompt(turn)}]`,
+    '[turn metadata — context only, NOT the message to act on or summarize:',
+    metaLines.join('\n'),
+    ']',
     '',
     turn.text,
   ].join('\n');

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { buildSystemPrompt, buildTurnContextPrompt, buildUserTurnContent } from '../src/prompt.js';
 
-import type { SlackThreadTs, Turn } from '@sym/contracts';
+import type { SlackThreadTs, SlackUserId, Turn } from '@sym/contracts';
 
 function makeTurn(overrides: Partial<Turn> = {}): Turn {
   return Object.assign(
@@ -82,5 +82,46 @@ describe('buildUserTurnContent', () => {
     const metaIdx = content.indexOf('turn metadata');
     const textIdx = content.indexOf('Hello, Sym!');
     expect(metaIdx).toBeLessThan(textIdx);
+  });
+
+  it('omits the owner line when no owner identity is supplied', () => {
+    const content = buildUserTurnContent(makeTurn());
+    expect(content).not.toContain('owner:');
+  });
+
+  it('embeds an "owner:" line with name, tz, and id when owner identity is supplied', () => {
+    const content = buildUserTurnContent(makeTurn(), {
+      userId: 'U042MBPUZ9N' as SlackUserId,
+      displayName: 'Amit Ray',
+      tz: 'Asia/Kolkata',
+      title: 'Founder',
+    });
+    expect(content).toContain('owner: Amit Ray');
+    expect(content).toContain('Asia/Kolkata');
+    expect(content).toContain('Founder');
+    expect(content).toContain('U042MBPUZ9N');
+    // Owner sits INSIDE the metadata block, ABOVE the existing turn-meta line.
+    const ownerIdx = content.indexOf('owner: Amit Ray');
+    // makeTurn() sets requester=U_alice, so the routing line starts "from U_alice".
+    const fromIdx = content.indexOf('from U_alice');
+    expect(ownerIdx).toBeLessThan(fromIdx);
+    // And the whole block precedes the user's actual text.
+    const textIdx = content.indexOf('Hello, Sym!');
+    expect(ownerIdx).toBeLessThan(textIdx);
+  });
+
+  it('falls back to real_name when display_name is missing, then to id when both are', () => {
+    const fallbackName = buildUserTurnContent(makeTurn(), {
+      userId: 'U042MBPUZ9N' as SlackUserId,
+      realName: 'Amit Ray',
+    });
+    expect(fallbackName).toContain('owner: Amit Ray');
+
+    const idOnly = buildUserTurnContent(makeTurn(), {
+      userId: 'U042MBPUZ9N' as SlackUserId,
+    });
+    // When no name resolves, the id stands alone (no "— id" suffix dangling).
+    expect(idOnly).toContain('owner: U042MBPUZ9N');
+    expect(idOnly).not.toContain('— id U042MBPUZ9N');
   });
 });

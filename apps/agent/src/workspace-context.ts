@@ -3,6 +3,7 @@ import { WebApiSlackClient } from './slack-client.js';
 import type { AgentConfig } from './config.js';
 import type { SlackClient } from '@sym/adapter-slack';
 import type { SlackUserId, WorkspaceId } from '@sym/contracts';
+import type { OwnerIdentity } from '@sym/kernel';
 
 /** Everything a turn needs, resolved once from env config (single-tenant). */
 export interface WorkspaceContext {
@@ -20,6 +21,14 @@ export interface WorkspaceContext {
    * `search.messages`, future act-as-owner writes).
    */
   userSlackClient?: SlackClient;
+  /**
+   * Owner identity (name, tz, title) — resolved once at boot via users.info.
+   * Threaded into every turn's metadata so the model can address the owner
+   * by name and reason about their timezone. Mutated in place by
+   * `healthCheckTokens` once the lookup completes; turns that arrive before
+   * resolution simply omit the owner block.
+   */
+  ownerProfile?: OwnerIdentity;
   /** Raw Fireworks credentials — consumed by `runLoopPi`. */
   fireworks: {
     baseUrl: string;
@@ -74,26 +83,53 @@ export async function healthCheckTokens(ctx: WorkspaceContext): Promise<void> {
     console.log(
       '[agent] no SLACK_OWNER_USER_TOKEN configured — actor:user tools will fall back to the bot token where possible',
     );
-    return;
+  } else {
+    try {
+      const auth = await ctx.userSlackClient.authTest();
+      console.log(`[agent] user token OK — acting as ${auth.user ?? auth.userId} (${auth.teamId})`);
+      if (auth.userId !== ctx.ownerSlackUserId) {
+        console.warn(
+          `[agent] user token belongs to ${auth.userId}, not the configured SYM_OWNER_SLACK_USER_ID (${ctx.ownerSlackUserId}) — confirm this is intended`,
+        );
+      }
+      if (auth.teamId !== ctx.slackTeamId) {
+        console.warn(
+          `[agent] user token team_id ${auth.teamId} does not match SLACK_TEAM_ID ${ctx.slackTeamId}`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        '[agent] user token health check FAILED — actor:user tools will be unavailable. ' +
+          'Re-run the OAuth install or update SLACK_OWNER_USER_TOKEN. Error:',
+        err,
+      );
+    }
   }
 
+  // Resolve owner profile so we can inject "owner: Amit Ray …" into every
+  // turn's metadata. Prefer the user token (richer fields), fall back to bot.
+  // Mutates ctx in place; turns that arrive before this resolves simply omit
+  // the owner block — the system prompt rule handles graceful degradation.
+  const profileClient = ctx.userSlackClient ?? ctx.slackClient;
   try {
-    const auth = await ctx.userSlackClient.authTest();
-    console.log(`[agent] user token OK — acting as ${auth.user ?? auth.userId} (${auth.teamId})`);
-    if (auth.userId !== ctx.ownerSlackUserId) {
-      console.warn(
-        `[agent] user token belongs to ${auth.userId}, not the configured SYM_OWNER_SLACK_USER_ID (${ctx.ownerSlackUserId}) — confirm this is intended`,
-      );
-    }
-    if (auth.teamId !== ctx.slackTeamId) {
-      console.warn(
-        `[agent] user token team_id ${auth.teamId} does not match SLACK_TEAM_ID ${ctx.slackTeamId}`,
-      );
-    }
+    const profile = await profileClient.usersInfo({ user: ctx.ownerSlackUserId });
+    ctx.ownerProfile = {
+      userId: ctx.ownerSlackUserId,
+      ...(profile.displayName !== undefined && profile.displayName.length > 0
+        ? { displayName: profile.displayName }
+        : {}),
+      ...(profile.realName !== undefined && profile.realName.length > 0
+        ? { realName: profile.realName }
+        : {}),
+      ...(profile.title !== undefined && profile.title.length > 0 ? { title: profile.title } : {}),
+      ...(profile.tz !== undefined ? { tz: profile.tz } : {}),
+    };
+    const label = ctx.ownerProfile.displayName ?? ctx.ownerProfile.realName ?? ctx.ownerSlackUserId;
+    const tz = ctx.ownerProfile.tz ?? 'unknown tz';
+    console.log(`[agent] owner profile resolved — ${label} (${tz})`);
   } catch (err) {
-    console.error(
-      '[agent] user token health check FAILED — actor:user tools will be unavailable. ' +
-        'Re-run the OAuth install or update SLACK_OWNER_USER_TOKEN. Error:',
+    console.warn(
+      '[agent] could not resolve owner profile — turn metadata will fall back to raw user id. Error:',
       err,
     );
   }
