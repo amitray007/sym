@@ -49,6 +49,12 @@ export interface PiLoopOptions {
   history: ChatMessage[];
   /** Called with each text delta for live streaming to Slack. */
   onDelta?: (delta: string) => void | Promise<void>;
+  /**
+   * Called with phase-aware status strings ("is searching Slack…", "is writing
+   * the reply…") so callers can drive Slack's `assistant.threads.setStatus`
+   * shimmer. Optional — loop runs fine when undefined.
+   */
+  onStatus?: (status: string) => void | Promise<void>;
   /** Propagate cancellation into the Pi Agent. */
   signal?: AbortSignal;
   /**
@@ -173,6 +179,24 @@ function extractUsage(messages: AgentMessage[]): Usage | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Status verbs
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a tool name → a friendly present-progressive verb phrase for Slack's
+ * setStatus shimmer. Unmapped tools fall back to `using {toolName}`.
+ */
+const TOOL_VERBS: Record<string, string> = {
+  read_thread: 'reading the thread',
+  read_channel: 'reading the channel',
+  get_current_time: 'checking the time',
+};
+
+function friendlyVerb(toolName: string): string {
+  return TOOL_VERBS[toolName] ?? `using ${toolName}`;
+}
+
+// ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
 
@@ -286,17 +310,29 @@ export async function runLoopPi(
     beforeToolCall,
   });
 
+  // The first text_delta (initial reply, or first delta after each tool round)
+  // flips status to "is writing the reply…". Re-armed on every tool start.
+  let emittedWritingStatus = false;
+
   // Subscribe to events for streaming + tool tracking.
   // The subscriber is synchronous where possible; async onDelta is awaited in-band.
   agent.subscribe(async (event: AgentEvent) => {
     if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
       const delta = event.assistantMessageEvent.delta;
+      // First reply token after tools (or at the very start) → "writing" status.
+      if (!emittedWritingStatus && opts.onStatus !== undefined) {
+        emittedWritingStatus = true;
+        await opts.onStatus('is writing the reply…');
+      }
       draftParts.push(delta);
       await opts.onDelta?.(delta);
     }
 
     if (event.type === 'tool_execution_start') {
       toolsInvoked.push(event.toolName);
+      // Re-arm the "writing" status so the next text_delta after this tool flips it again.
+      emittedWritingStatus = false;
+      await opts.onStatus?.(`is ${friendlyVerb(event.toolName)}…`);
     }
   });
 

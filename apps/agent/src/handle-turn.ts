@@ -36,6 +36,12 @@ const FLUSH_CHARS = 60;
 const HISTORY_LIMIT = 20;
 
 /**
+ * Slack's `assistant.threads.setStatus` shimmer auto-clears after 2 min. Re-send
+ * the most recent status every 90s so long tool runs keep showing feedback.
+ */
+const STATUS_KEEPALIVE_MS = 90_000;
+
+/**
  * Run the turn through the Pi loop.
  *
  * Single path — no fallback. `onDelta` and `history` are forwarded so the
@@ -47,6 +53,7 @@ async function runTurnLoop(
   registry: ToolRegistry,
   history: ChatMessage[],
   onDelta?: (delta: string) => void | Promise<void>,
+  onStatus?: (status: string) => void | Promise<void>,
 ): Promise<Reply> {
   const model = buildFireworksModel({
     baseUrl: deps.fireworks.baseUrl,
@@ -60,6 +67,7 @@ async function runTurnLoop(
       history,
       slackClient: deps.slackClient,
       ...(onDelta !== undefined ? { onDelta } : {}),
+      ...(onStatus !== undefined ? { onStatus } : {}),
     },
   );
 }
@@ -122,69 +130,87 @@ async function streamReply(
   const threadTs = turn.threadTs as SlackThreadTs;
   const isAssistant = turn.entrySurface === 'dm';
 
-  // Live status — assistant thread only (setStatus requires an assistant thread).
-  if (isAssistant) {
+  // Track the most recent status so the keepalive interval can re-send it.
+  let lastStatus = 'is thinking…';
+  const sendStatus = async (status: string): Promise<void> => {
+    lastStatus = status;
     try {
       await deps.slackClient.assistantThreadsSetStatus({
         channelId: channel,
         threadTs,
-        status: 'is thinking…',
+        status,
       });
     } catch (err) {
       console.warn('[agent] setStatus failed (continuing):', err);
     }
-  }
-
-  // Open the stream. If this fails, fall back to a normal post (return false) —
-  // do NOT run the model twice.
-  const startParams: StartStreamParams = {
-    channel,
-    threadTs,
-    ...(isAssistant ? {} : { recipientUserId: turn.requester, recipientTeamId: deps.slackTeamId }),
   };
-  let handle;
-  try {
-    handle = await deps.slackClient.chatStartStream(startParams);
-  } catch (err) {
-    console.warn('[agent] startStream failed; falling back to chat.postMessage:', err);
-    return false;
-  }
 
-  const streamTs = handle.ts;
-  let buffer = '';
-  const onDelta = async (delta: string): Promise<void> => {
-    buffer += delta;
-    if (buffer.length >= FLUSH_CHARS) {
-      const chunk = buffer;
-      buffer = '';
-      const appendParams: AppendStreamParams = { channel, ts: streamTs, markdownText: chunk };
+  // Live status — now safe for channel @-mentions too (per Slack's 2026-03-05
+  // changelog, setStatus works in channel threads with chat:write scope).
+  await sendStatus('is thinking…');
+
+  // Keepalive — Slack auto-clears the shimmer after 2 min, so re-send the latest
+  // status every 90s. Cleared in finally below.
+  const keepaliveTimer = setInterval(() => {
+    void sendStatus(lastStatus);
+  }, STATUS_KEEPALIVE_MS);
+
+  try {
+    // Open the stream. If this fails, fall back to a normal post (return false) —
+    // do NOT run the model twice.
+    const startParams: StartStreamParams = {
+      channel,
+      threadTs,
+      ...(isAssistant
+        ? {}
+        : { recipientUserId: turn.requester, recipientTeamId: deps.slackTeamId }),
+    };
+    let handle;
+    try {
+      handle = await deps.slackClient.chatStartStream(startParams);
+    } catch (err) {
+      console.warn('[agent] startStream failed; falling back to chat.postMessage:', err);
+      return false;
+    }
+
+    const streamTs = handle.ts;
+    let buffer = '';
+    const onDelta = async (delta: string): Promise<void> => {
+      buffer += delta;
+      if (buffer.length >= FLUSH_CHARS) {
+        const chunk = buffer;
+        buffer = '';
+        const appendParams: AppendStreamParams = { channel, ts: streamTs, markdownText: chunk };
+        try {
+          await deps.slackClient.chatAppendStream(appendParams);
+        } catch (err) {
+          console.warn('[agent] appendStream failed (continuing):', err);
+        }
+      }
+    };
+
+    const reply = await runTurnLoop(turn, deps, ctx.registry, ctx.history, onDelta, sendStatus);
+
+    if (buffer.length > 0) {
+      const appendParams: AppendStreamParams = { channel, ts: streamTs, markdownText: buffer };
       try {
         await deps.slackClient.chatAppendStream(appendParams);
       } catch (err) {
-        console.warn('[agent] appendStream failed (continuing):', err);
+        console.warn('[agent] appendStream (final) failed:', err);
       }
     }
-  };
 
-  const reply = await runTurnLoop(turn, deps, ctx.registry, ctx.history, onDelta);
-
-  if (buffer.length > 0) {
-    const appendParams: AppendStreamParams = { channel, ts: streamTs, markdownText: buffer };
+    const receipt = receiptToContextBlock(reply.receipt);
     try {
-      await deps.slackClient.chatAppendStream(appendParams);
+      await deps.slackClient.chatStopStream({ channel, ts: streamTs, blocks: [receipt] });
     } catch (err) {
-      console.warn('[agent] appendStream (final) failed:', err);
+      console.warn('[agent] stopStream failed:', err);
     }
-  }
 
-  const receipt = receiptToContextBlock(reply.receipt);
-  try {
-    await deps.slackClient.chatStopStream({ channel, ts: streamTs, blocks: [receipt] });
-  } catch (err) {
-    console.warn('[agent] stopStream failed:', err);
+    return true;
+  } finally {
+    clearInterval(keepaliveTimer);
   }
-
-  return true;
 }
 
 /**

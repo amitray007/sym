@@ -202,7 +202,45 @@ describe('handleTurn', () => {
     // app_mention is NOT a DM, so recipient ids are set.
     expect(start.recipientUserId).toBe('U1');
     expect(start.recipientTeamId).toBe('T-TEST');
+
+    // setStatus is now called for channel @-mentions too (Slack 2026-03-05
+    // changelog made the API work in channel threads with chat:write).
+    expect(slack.setStatusCalls.length).toBeGreaterThanOrEqual(1);
+    expect(slack.setStatusCalls[0]?.status).toBe('is thinking…');
   });
+
+  it('forwards Pi-loop onStatus emissions to Slack setStatus with the right phase strings', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as {
+          onDelta?: (d: string) => Promise<void>;
+          onStatus?: (s: string) => Promise<void>;
+        };
+        // Simulate the loop emitting a tool-phase status and then "writing".
+        await o.onStatus?.('is searching Slack…');
+        await o.onStatus?.('is writing the reply…');
+        await o.onDelta?.('done');
+        return makeReply({ markdown: 'done' });
+      },
+    );
+
+    const slack = new MockSlackClient();
+    await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'test-model',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+    });
+
+    const statuses = slack.setStatusCalls.map((c) => c.status);
+    // Initial "is thinking…" + the two emissions from the loop.
+    expect(statuses).toEqual(['is thinking…', 'is searching Slack…', 'is writing the reply…']);
+  });
+
+  // NOTE: we intentionally don't test the 90s keepalive timer. Fake-timer
+  // interactions with async setStatus calls are flaky and the keepalive is a
+  // straight setInterval/clearInterval pair around the stream path.
 
   it('streams a DM turn, calls setStatus, and startStream has no recipient ids', async () => {
     mockRunLoopPi.mockImplementationOnce(
