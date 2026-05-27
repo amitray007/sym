@@ -61,6 +61,14 @@ export interface PiLoopOptions {
    * Receives the same label as onStatus but without "is" and "…".
    */
   onToolStart?: (friendlyLabel: string) => void | Promise<void>;
+  /**
+   * Called when a tool finishes — `errored` is true if the tool threw. Pi
+   * still feeds the error back to the model as a tool result, so the model
+   * can recover and produce a "couldn't do X" reply. This callback just
+   * surfaces the failure to the task card so it renders red ✗ instead of
+   * a green checkmark.
+   */
+  onToolEnd?: (toolName: string, errored: boolean) => void | Promise<void>;
   /** Propagate cancellation into the Pi Agent. */
   signal?: AbortSignal;
   /**
@@ -401,6 +409,15 @@ export async function runLoopPi(
       const verb = friendlyVerb(toolName);
       await opts.onStatus?.(`is ${verb}…`);
       await opts.onToolStart?.(verb);
+    }
+
+    if (event.type === 'tool_execution_end') {
+      const toolName = event.toolName;
+      // Same phantom-tool guard as start — we only surface end events for tools
+      // we actually started. Pi feeds the error/result back to the model
+      // internally; this is purely UI-facing.
+      if (!descriptorMap.has(toolName)) return;
+      await opts.onToolEnd?.(toolName, event.isError);
     }
   });
 

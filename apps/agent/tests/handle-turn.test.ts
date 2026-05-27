@@ -571,6 +571,54 @@ describe('handleTurn', () => {
     expect(slack.setTitleCalls).toHaveLength(0);
   });
 
+  it('emits an error-status task_update chunk when a tool fails (graceful errors)', async () => {
+    // Mocked loop fires onToolStart, then onToolEnd with errored=true,
+    // then streams a "couldn't do X" recovery reply. We assert that the
+    // task card flushes with the failed task marked status='error'.
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as {
+          onDelta?: (d: string) => Promise<void>;
+          onToolStart?: (label: string) => Promise<void>;
+          onToolEnd?: (name: string, errored: boolean) => Promise<void>;
+        };
+        await o.onToolStart?.('reading the channel');
+        await o.onToolEnd?.('read_channel', true);
+        await o.onDelta?.("Couldn't read that channel — I'm not a member.");
+        return makeReply({ markdown: "Couldn't read that channel — I'm not a member." });
+      },
+    );
+
+    // Track chunks sent via chatAppendStream (the task_update chunks).
+    const chunks: { type: string; id: string; status: string }[] = [];
+    const slack = new MockSlackClient();
+    const origAppend = slack.chatAppendStream.bind(slack);
+    slack.chatAppendStream = async (params: AppendStreamParams): Promise<void> => {
+      for (const c of params.chunks ?? []) {
+        if (c.type === 'task_update') {
+          chunks.push({ type: c.type, id: c.id, status: c.status });
+        }
+      }
+      await origAppend(params);
+    };
+
+    await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      // Threshold 1 so the single tool triggers the card immediately.
+      behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const },
+    });
+
+    // We expect at least an in_progress chunk then an error chunk for task-1.
+    const task1 = chunks.filter((c) => c.id === 'task-1');
+    expect(task1.length).toBeGreaterThanOrEqual(2);
+    expect(task1[0]?.status).toBe('in_progress');
+    expect(task1.at(-1)?.status).toBe('error');
+  });
+
   it('sets task_display_mode=task on chatStartStream so chunks render as cards', async () => {
     mockRunLoopPi.mockImplementationOnce(
       async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {

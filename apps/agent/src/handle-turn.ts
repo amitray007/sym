@@ -63,9 +63,18 @@ type SendChunks = (chunks: TaskUpdateChunk[]) => Promise<void>;
  * All chunk sends are best-effort: errors are logged and swallowed so a card
  * failure never blocks reply delivery.
  */
+/** A task that's been started but not yet ended (pre-flush state). */
+interface SettledTask {
+  id: string;
+  title: string;
+  status: 'complete' | 'error';
+}
+
 class TaskCardManager {
   private taskCounter = 0;
-  private completedTasks: { id: string; title: string }[] = [];
+  /** Tasks that ended before the threshold was crossed — flushed all at once on activation. */
+  private settledBeforeActive: SettledTask[] = [];
+  /** The currently running task (in_progress until onToolEnd fires). */
   private currentTask: { id: string; title: string } | undefined;
   private toolCount = 0;
   private active = false;
@@ -80,43 +89,26 @@ class TaskCardManager {
   async onToolStart(friendlyLabel: string): Promise<void> {
     this.toolCount++;
 
-    // Previous task transitions to complete.
-    if (this.currentTask !== undefined) {
-      const completed: TaskUpdateChunk = {
-        type: 'task_update',
-        id: this.currentTask.id,
-        title: this.currentTask.title,
-        status: 'complete',
-      };
-      if (this.active) {
-        await this.sendChunks([completed]).catch((err) =>
-          console.warn('[agent] task card update failed (continuing):', err),
-        );
-      } else {
-        this.completedTasks.push(this.currentTask);
-      }
-    }
-
-    // Register new in-progress task.
     const id = `task-${++this.taskCounter}`;
     const title = capitalize(friendlyLabel);
     this.currentTask = { id, title };
 
     if (!this.active && this.toolCount >= this.threshold) {
-      // Threshold crossed — flush all buffered completed tasks + current as in_progress.
+      // Threshold crossed — flush all tasks that already settled while we were
+      // below threshold, then publish the new in_progress task.
       this.active = true;
       const chunks: TaskUpdateChunk[] = [
-        ...this.completedTasks.map(
+        ...this.settledBeforeActive.map(
           (t): TaskUpdateChunk => ({
             type: 'task_update',
             id: t.id,
             title: t.title,
-            status: 'complete',
+            status: t.status,
           }),
         ),
         { type: 'task_update', id, title, status: 'in_progress' },
       ];
-      this.completedTasks = [];
+      this.settledBeforeActive = [];
       await this.sendChunks(chunks).catch((err) =>
         console.warn('[agent] task card start failed (continuing):', err),
       );
@@ -127,8 +119,24 @@ class TaskCardManager {
     }
   }
 
+  async onToolEnd(errored: boolean): Promise<void> {
+    if (this.currentTask === undefined) return;
+    const { id, title } = this.currentTask;
+    const status: 'complete' | 'error' = errored ? 'error' : 'complete';
+    if (this.active) {
+      await this.sendChunks([{ type: 'task_update', id, title, status }]).catch((err) =>
+        console.warn('[agent] task card settle failed (continuing):', err),
+      );
+    } else {
+      this.settledBeforeActive.push({ id, title, status });
+    }
+    this.currentTask = undefined;
+  }
+
   async finish(): Promise<void> {
-    // If the threshold was never reached, no chunks were ever sent — nothing to close.
+    // Defensive: if the loop terminated mid-tool (no tool_execution_end fired
+    // for the current task), mark it complete so the card doesn't end stuck
+    // in_progress. Errored tasks already settled via onToolEnd.
     if (!this.active || this.currentTask === undefined) return;
     try {
       await this.sendChunks([
@@ -217,6 +225,7 @@ async function runTurnLoop(
   onDelta?: (delta: string) => void | Promise<void>,
   onStatus?: (status: string) => void | Promise<void>,
   onToolStart?: (friendlyLabel: string) => void | Promise<void>,
+  onToolEnd?: (toolName: string, errored: boolean) => void | Promise<void>,
 ): Promise<Reply> {
   const model = buildFireworksModel({
     baseUrl: deps.fireworks.baseUrl,
@@ -232,6 +241,7 @@ async function runTurnLoop(
       ...(onDelta !== undefined ? { onDelta } : {}),
       ...(onStatus !== undefined ? { onStatus } : {}),
       ...(onToolStart !== undefined ? { onToolStart } : {}),
+      ...(onToolEnd !== undefined ? { onToolEnd } : {}),
     },
   );
 }
@@ -408,6 +418,10 @@ async function streamReply(
       await taskCard?.onToolStart(friendlyLabel);
     };
 
+    const onToolEnd = async (_toolName: string, errored: boolean): Promise<void> => {
+      await taskCard?.onToolEnd(errored);
+    };
+
     const reply = await runTurnLoop(
       turn,
       deps,
@@ -416,6 +430,7 @@ async function streamReply(
       onDelta,
       sendStatus,
       onToolStart,
+      onToolEnd,
     );
 
     // Settle the task card before or alongside reply delivery.
