@@ -459,13 +459,26 @@ export class WebApiSlackClient implements SlackClient {
         topic?: { value?: string };
         num_members?: number;
       }[];
+      response_metadata?: { next_cursor?: string };
     }
-    const json = await this.callForm<ListResponse>('conversations.list', {
-      limit: params.limit ?? 50,
-      types: params.types ?? 'public_channel,private_channel',
-      exclude_archived: params.excludeArchived === false ? 'false' : 'true',
-    });
-    const channels: SlackChannelSummary[] = (json.channels ?? []).map((c) => ({
+    // Page through conversations.list (Slack caps a single page at 200) until
+    // we hit the caller's ceiling or run out of channels. Without pagination,
+    // owners in 50+ channels silently miss the rest of their workspace.
+    const ceiling = params.limit ?? 200;
+    const collected: ListResponse['channels'] = [];
+    let cursor: string | undefined;
+    do {
+      const json = await this.callForm<ListResponse>('conversations.list', {
+        limit: Math.min(SLACK_PAGE_LIMIT, ceiling - collected.length),
+        types: params.types ?? 'public_channel,private_channel',
+        exclude_archived: params.excludeArchived === false ? 'false' : 'true',
+        ...(cursor !== undefined ? { cursor } : {}),
+      });
+      for (const c of json.channels ?? []) collected.push(c);
+      cursor = json.response_metadata?.next_cursor || undefined;
+    } while (cursor !== undefined && collected.length < ceiling);
+
+    const channels: SlackChannelSummary[] = collected.map((c) => ({
       id: (c.id ?? '') as SlackChannelId,
       ...(c.name !== undefined ? { name: c.name } : {}),
       isPrivate: c.is_private === true,

@@ -1067,6 +1067,52 @@ describe('createBuiltinDispatcher', () => {
     });
   });
 
+  describe('dispatch() — transcript user-name resolution', () => {
+    it('resolves user ids in transcripts to display names via users.info', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({
+          repliesMessages: [
+            { user: 'U001' as SlackUserId, text: 'opener', ts: '900.1' as SlackThreadTs },
+            { user: 'U002' as SlackUserId, text: 'reply', ts: '900.2' as SlackThreadTs },
+          ],
+          // makeSlackClient.usersInfo returns the user profile we configure.
+          userProfile: { id: 'U001' as SlackUserId, displayName: 'Amit Ray' },
+        }),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('read_thread', { channel_id: 'C1', thread_ts: '900.1' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok');
+      // Display name should appear, not the raw U001.
+      expect(result.content).toContain('Amit Ray');
+    });
+
+    it('falls back to raw user id when users.info errors (sticky null cache)', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: makeSlackClient({
+          repliesMessages: [
+            { user: 'U001' as SlackUserId, text: 'opener', ts: '900.1' as SlackThreadTs },
+          ],
+          userError: new Error('user_not_found'),
+        }),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('read_thread', { channel_id: 'C1', thread_ts: '900.1' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok');
+      // Falls through to raw id rather than throwing.
+      expect(result.content).toContain('U001');
+    });
+  });
+
   describe('dispatch() — actor routing', () => {
     it('routes actor:"user" tool calls to the user client when available', async () => {
       const userCalls: SearchMessagesParams[] = [];

@@ -152,13 +152,64 @@ const LIST_CHANNELS_DESCRIPTOR: ToolDescriptor = {
   actor: 'user',
 };
 
+/** Per-turn user-id → display-name cache. `null` records a failed lookup. */
+type NameCache = Map<string, string | null>;
+
 /**
- * Format a list of Slack thread messages into a plain-text transcript string.
- * Sym's own posts are prefixed with "Sym:"; all others use threadToHistory's
- * author label (matching the pattern in loadViewedChannelContext in handle-turn.ts).
+ * Resolve every unique non-bot user id in `messages` to a display name in
+ * parallel, populating the cache. Subsequent reads in the same turn hit the
+ * cache instead of users.info. Failures are sticky (cached as null) so we
+ * don't re-hit a permission error each time.
  */
-function formatTranscript(messages: SlackThreadMessage[], botUserId: SlackUserId): string {
-  const mapped = threadToHistory(messages, { botUserId });
+async function resolveAuthorNames(
+  messages: SlackThreadMessage[],
+  botUserId: SlackUserId,
+  slack: SlackClient,
+  cache: NameCache,
+): Promise<Record<string, string>> {
+  const toResolve = new Set<string>();
+  for (const m of messages) {
+    if (m.user !== undefined && m.user !== botUserId && !cache.has(m.user)) {
+      toResolve.add(m.user);
+    }
+  }
+  if (toResolve.size > 0) {
+    await Promise.all(
+      [...toResolve].map(async (id) => {
+        try {
+          const p = await slack.usersInfo({ user: id as SlackUserId });
+          const name = p.displayName ?? p.realName ?? p.userName ?? null;
+          cache.set(id, name);
+        } catch {
+          cache.set(id, null);
+        }
+      }),
+    );
+  }
+  // Build the names map from the cache, dropping null entries (threadToHistory
+  // will fall through to the raw id when a name is missing — better than empty).
+  const names: Record<string, string> = {};
+  for (const [id, name] of cache) {
+    if (name !== null) names[id] = name;
+  }
+  return names;
+}
+
+/**
+ * Format a list of Slack thread messages into a plain-text transcript string,
+ * with display names resolved from a per-turn cache. Sym's own posts are
+ * prefixed with "Sym:"; other authors get their display name (falling back to
+ * raw user id only if name resolution fails, which the model is instructed
+ * to handle by calling read_user_profile).
+ */
+async function formatTranscript(
+  messages: SlackThreadMessage[],
+  botUserId: SlackUserId,
+  slack: SlackClient,
+  cache: NameCache,
+): Promise<string> {
+  const names = await resolveAuthorNames(messages, botUserId, slack, cache);
+  const mapped = threadToHistory(messages, { botUserId, names });
   if (mapped.length === 0) return '(no messages)';
   return mapped
     .map((m) => (m.role === 'assistant' ? `Sym: ${m.content ?? ''}` : (m.content ?? '')))
@@ -334,7 +385,7 @@ const ADD_REMINDER_DESCRIPTOR: ToolDescriptor = {
   type: 'function',
   name: 'add_reminder',
   description:
-    'Set a Slack reminder for the owner (`reminders.add`). Use when the user asks "remind me to X at Y" / "set a reminder for X tomorrow morning". Slack accepts natural-language time strings ("in 10 minutes", "tomorrow at 9am", "next Tuesday at 3pm") or a unix-seconds timestamp. Low-risk — does NOT require confirmation.',
+    'Set a Slack reminder for the owner (`reminders.add`). Use when the user asks "remind me to X at Y" / "set a reminder for X tomorrow morning". Slack accepts natural-language time strings ("in 10 minutes", "tomorrow at 9am", "next Tuesday at 3pm") or a unix-seconds timestamp. Low-risk — does NOT require confirmation. NOTE: Slack has been deprecating reminder APIs since March 2023 and they may return errors on some workspaces; if this tool fails, tell the owner reminders.add appears degraded for their workspace and suggest using Slack\'s native /remind slash command directly.',
   parameters: {
     type: 'object',
     properties: {
@@ -441,6 +492,11 @@ const DESCRIPTORS_BY_NAME = new Map<string, ToolDescriptor>(
  * visibility) and fall back to bot when no user token is configured.
  */
 export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
+  // Per-turn user-name cache shared by all read_channel / read_thread calls in
+  // this turn — first lookup pays the users.info latency, subsequent lookups
+  // hit memory.
+  const nameCache: NameCache = new Map();
+
   return {
     list(): ToolDescriptor[] {
       return ALL_BUILTIN_DESCRIPTORS;
@@ -488,7 +544,7 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
               channel: channelIdArg as SlackChannelId,
               limit,
             });
-            const transcript = formatTranscript(messages, deps.botUserId);
+            const transcript = await formatTranscript(messages, deps.botUserId, slack, nameCache);
             result = { callId: call.id, ok: true, content: transcript };
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
@@ -520,7 +576,7 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
               channel: channelIdArg as SlackChannelId,
               ts: threadTsArg as SlackThreadTs,
             });
-            const transcript = formatTranscript(messages, deps.botUserId);
+            const transcript = await formatTranscript(messages, deps.botUserId, slack, nameCache);
             result = { callId: call.id, ok: true, content: transcript };
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
