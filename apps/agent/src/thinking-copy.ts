@@ -27,6 +27,7 @@ import type { TurnId } from '@sym/contracts';
  * enough that owners notice variety, narrow enough that each one stays meant.
  */
 export const THINKING_COPY: readonly string[] = [
+  // Original 8 — neutral / professional.
   'Thinking',
   'On it',
   'Got it',
@@ -35,6 +36,23 @@ export const THINKING_COPY: readonly string[] = [
   'Sizing this up',
   'Tracking that down',
   'One sec',
+
+  // Expanded set — adds playful and investigative flavors. Same voice rules
+  // (warm, sharp colleague — no exclamation, no emoji, no chatty filler).
+  // Picked to feel coherent: "Cooking", "Brewing", "Crunching" are the
+  // playful edge; the rest are conversational naturals. If any one ever
+  // reads weird in a real reply context, trim it here — no other code
+  // changes required.
+  'Hmm',
+  'Right',
+  'Cooking',
+  'Brewing',
+  'Crunching',
+  'Digging in',
+  'Pulling threads',
+  'Connecting dots',
+  'On the case',
+  'Pondering',
 ];
 
 /**
