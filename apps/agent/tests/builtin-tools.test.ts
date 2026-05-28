@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createBuiltinDispatcher } from '../src/builtin-tools.js';
+import { NameResolver } from '../src/name-resolver.js';
 
 import type {
   ConversationsHistoryResult,
@@ -1132,6 +1133,97 @@ describe('createBuiltinDispatcher', () => {
       // by way of search_messages which is unambiguously on the user client.
       await dispatcher.dispatch(makeCall('search_messages', { query: 'test' }), makeCtx());
       expect(userCalls).toHaveLength(1);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // ID-resolution coverage — verifies that `<@U…>` / `<#C…>` markup that
+  // arrives via tool outputs (list_channels topics, read_user_profile
+  // status) gets rewritten by the workspace resolver BEFORE the dispatcher
+  // hands the result to the model. The prompt asks the model not to echo
+  // raw Slack ids; this is the structural defence behind that ask.
+  // -----------------------------------------------------------------------
+  describe('dispatch() — resolver rewrites raw Slack ids in tool outputs', () => {
+    it('list_channels rewrites `<@U…>` and `<#C…>` markup inside channel topics', async () => {
+      const resolver = new NameResolver();
+      resolver.primeForTests({ U042: 'Amit' }, { C999: 'design' });
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({
+          listResult: {
+            channels: [
+              {
+                id: 'C1' as SlackChannelId,
+                name: 'general',
+                isPrivate: false,
+                topic: 'owned by <@U042>, pairs with <#C999|design>',
+              },
+            ],
+          },
+        }),
+        botUserId: BOT,
+        nameResolver: resolver,
+      });
+      const result = await dispatcher.dispatch(makeCall('list_channels', {}), makeCtx());
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok');
+      const content = result.content as string;
+      // Display names replaced the raw ids; no `<@U…>` / `<#C…>` leak.
+      expect(content).toContain('owned by @Amit');
+      expect(content).toContain('#design');
+      expect(content).not.toContain('<@U042>');
+      expect(content).not.toContain('<#C999');
+    });
+
+    it('read_user_profile rewrites `<@U…>` markup inside the status text', async () => {
+      const resolver = new NameResolver();
+      resolver.primeForTests({ U777: 'Sarah' }, {});
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({
+          userProfile: {
+            id: 'U123' as SlackUserId,
+            displayName: 'amit',
+            statusText: 'in a 1:1 with <@U777>',
+            statusEmoji: ':speech_balloon:',
+          },
+        }),
+        botUserId: BOT,
+        nameResolver: resolver,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('read_user_profile', { user_id: 'U123' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok');
+      const content = result.content as string;
+      expect(content).toContain('status: :speech_balloon: in a 1:1 with @Sarah');
+      expect(content).not.toContain('<@U777>');
+    });
+
+    it('list_channels leaves clean topics unchanged', async () => {
+      // Sanity: the rewrite path is a no-op when topics carry no `<@…>` markup.
+      const resolver = new NameResolver();
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({
+          listResult: {
+            channels: [
+              {
+                id: 'C1' as SlackChannelId,
+                name: 'general',
+                isPrivate: false,
+                topic: 'company-wide announcements',
+              },
+            ],
+          },
+        }),
+        botUserId: BOT,
+        nameResolver: resolver,
+      });
+      const result = await dispatcher.dispatch(makeCall('list_channels', {}), makeCtx());
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok');
+      const content = result.content as string;
+      expect(content).toContain('company-wide announcements');
     });
   });
 });

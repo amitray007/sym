@@ -429,24 +429,38 @@ async function loadTurnHistory(turn: Turn, deps: HandleTurnDeps): Promise<ChatMe
   const channel = turn.channelId;
   if (channel === undefined) return [];
   try {
+    let messages;
     if (turn.threadTs !== undefined) {
-      const { messages } = await deps.slackClient.conversationsReplies({
+      ({ messages } = await deps.slackClient.conversationsReplies({
         channel,
         ts: turn.threadTs,
-      });
-      return threadToHistory(messages, {
-        botUserId: deps.botUserId,
-        ...(turn.ts !== undefined ? { excludeTs: turn.ts } : {}),
-      });
+      }));
+    } else {
+      ({ messages } = await deps.slackClient.conversationsHistory({
+        channel,
+        limit: HISTORY_LIMIT,
+      }));
     }
-    const { messages } = await deps.slackClient.conversationsHistory({
-      channel,
-      limit: HISTORY_LIMIT,
-    });
-    return threadToHistory(messages, {
+    const history = threadToHistory(messages, {
       botUserId: deps.botUserId,
       ...(turn.ts !== undefined ? { excludeTs: turn.ts } : {}),
     });
+    // Resolver pass: every history message may still carry raw `<@U…>` /
+    // `<#C…>` markup in its body (the prior message text the bot saw in
+    // Slack). Strip those before the model sees them — same rationale as
+    // for tool returns. Best-effort: a resolver failure logs and falls
+    // through to the raw text rather than dropping history entirely.
+    return Promise.all(
+      history.map(async (m) => {
+        if (m.content === undefined || m.content === null || m.content.length === 0) return m;
+        try {
+          const rewritten = await deps.nameResolver.rewriteMentions(m.content, deps.slackClient);
+          return { ...m, content: rewritten };
+        } catch {
+          return m;
+        }
+      }),
+    );
   } catch (err) {
     console.warn('[agent] history fetch failed (continuing with no history):', err);
     return [];
@@ -731,9 +745,21 @@ async function loadViewedChannelContext(
     const transcript = mapped
       .map((m) => (m.role === 'assistant' ? `Sym: ${m.content ?? ''}` : (m.content ?? '')))
       .join('\n');
+    // Rewrite `<@U…>` / `<#C…>` in the transcript AND in the viewed-channel
+    // id itself (so the model gets `#general` instead of `C012345`). Both
+    // are best-effort: on resolver failure the raw markup falls through.
+    let rewrittenTranscript = transcript;
+    let viewedLabel: string = viewed;
+    try {
+      rewrittenTranscript = await deps.nameResolver.rewriteMentions(transcript, deps.slackClient);
+      const resolvedName = await deps.nameResolver.resolveChannel(viewed, deps.slackClient);
+      if (resolvedName !== viewed) viewedLabel = `#${resolvedName}`;
+    } catch {
+      // fall through to the raw transcript / id
+    }
     return {
       role: 'user',
-      content: `Background — the user is currently viewing channel ${viewed} in Slack. Recent messages there:\n${transcript}`,
+      content: `Background — the user is currently viewing channel ${viewedLabel} in Slack. Recent messages there:\n${rewrittenTranscript}`,
     };
   } catch (err) {
     console.warn('[agent] viewed-channel context fetch failed (continuing):', err);
@@ -762,11 +788,29 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   const viewedContext = await loadViewedChannelContext(turn, deps);
   const history = viewedContext ? [viewedContext, ...baseHistory] : baseHistory;
 
+  // Rewrite the owner's own message — their text can carry raw `<@U…>` /
+  // `<#C…>` markup when Slack converted typed @-mentions on send. Without
+  // this pass, the model receives `<@U042>` in the user-turn metadata frame
+  // and may parrot it back. Best-effort: a resolver miss falls through to
+  // the raw text, identical to the pre-resolver behaviour.
+  let rewrittenTurn = turn;
+  if (turn.text !== undefined && turn.text.length > 0) {
+    try {
+      const rewrittenText = await deps.nameResolver.rewriteMentions(turn.text, deps.slackClient);
+      if (rewrittenText !== turn.text) {
+        rewrittenTurn = { ...turn, text: rewrittenText };
+      }
+    } catch {
+      // fall through with the raw turn
+    }
+  }
+
   // First user turn in an assistant-panel thread → derive a real title from
   // their question. Fire-and-forget so it doesn't add latency to the reply.
   // Checks `baseHistory` (raw thread) not `history` (which includes synthetic
-  // viewed-channel context as a user role message).
-  void maybeSetThreadTitleFromTurn(turn, deps, baseHistory);
+  // viewed-channel context as a user role message). Use the resolver-rewritten
+  // turn so the title shows display names, not raw `<@U…>` markup.
+  void maybeSetThreadTitleFromTurn(rewrittenTurn, deps, baseHistory);
 
   // Per-turn plan controller — both streaming and post-message paths share
   // this. On the streaming path it drives the TaskCardManager into plan-mode
@@ -786,12 +830,12 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
 
   // Threaded turns: try streaming; fall through to postMessage only if it fails.
   if (turn.threadTs !== undefined) {
-    const streamed = await streamReply(turn, deps, { history, registry, planController });
+    const streamed = await streamReply(rewrittenTurn, deps, { history, registry, planController });
     if (streamed) return;
   }
 
   // Non-threaded or stream fallback: run the loop and post normally.
-  const reply = await runTurnLoop(turn, deps, registry, history);
+  const reply = await runTurnLoop(rewrittenTurn, deps, registry, history);
 
   const blocks = [markdownBlock(reply.markdown), receiptToContextBlock(reply.receipt)];
   await deps.slackClient.chatPostMessage({

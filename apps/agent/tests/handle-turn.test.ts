@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { handleTurn } from '../src/handle-turn.js';
+import { NameResolver } from '../src/name-resolver.js';
 
 import type * as PiLoopModuleType from '../src/pi/loop.js';
 
@@ -773,5 +774,143 @@ describe('handleTurn', () => {
     const firstTaskIdx = chunks.findIndex((c) => c.id.startsWith('task-'));
     expect(firstPreludeIdx).toBeGreaterThanOrEqual(0);
     expect(firstPreludeIdx).toBeLessThan(firstTaskIdx);
+  });
+
+  // -----------------------------------------------------------------------
+  // ID-resolution coverage at the handle-turn boundary. Each entry surface
+  // that hands text to the model gets a defensive rewrite pass so raw
+  // `<@U…>` / `<#C…>` markup never reaches the loop. See name-resolver.ts.
+  // -----------------------------------------------------------------------
+  describe('name resolver — rewrites raw Slack ids before the loop sees them', () => {
+    it("rewrites `<@U…>` mentions in the owner's own turn text before the loop receives it", async () => {
+      // Capture the turn the loop was invoked with so we can assert on the
+      // text that actually gets embedded in the user-turn metadata block.
+      let capturedTurn: Turn | undefined;
+      mockRunLoopPi.mockImplementationOnce(
+        async (turn: unknown, _cfg: unknown, _reg: unknown, _opts: unknown) => {
+          capturedTurn = turn as Turn;
+          return makeReply();
+        },
+      );
+
+      const resolver = new NameResolver();
+      resolver.primeForTests({ U777: 'Sarah' }, {});
+
+      const slack = new MockSlackClient();
+      await handleTurn(
+        makeTurn({
+          // Pure post-message path keeps the assertion focused on turn rewriting.
+          text: 'draft a reply to <@U777> about the rollout',
+        }),
+        {
+          fireworks: FAKE_FIREWORKS,
+          model: 'accounts/fireworks/models/gpt-oss-120b',
+          slackClient: slack,
+          botUserId: BOT,
+          slackTeamId: 'T-TEST',
+          behavior: FAKE_BEHAVIOR,
+          nameResolver: resolver,
+        },
+      );
+
+      expect(capturedTurn?.text).toBe('draft a reply to @Sarah about the rollout');
+      expect(capturedTurn?.text).not.toContain('<@U777>');
+    });
+
+    it('rewrites `<@U…>` / `<#C…>` markup inside history message bodies', async () => {
+      let capturedHistory: ChatMessage[] = [];
+      mockRunLoopPi.mockImplementationOnce(
+        async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+          capturedHistory = (opts as { history?: ChatMessage[] }).history ?? [];
+          return makeReply();
+        },
+      );
+
+      const resolver = new NameResolver();
+      // Channel resolution would normally hit conversations.list — prime so
+      // the test stays hermetic. Pre-cache both user and channel.
+      resolver.primeForTests({ U042: 'Amit' }, { C999: 'design' });
+
+      const slack = new MockSlackClient();
+      slack.replies = [
+        {
+          user: 'U1' as SlackUserId,
+          text: 'ping <@U042> about <#C999|design>',
+          ts: '500.1' as SlackThreadTs,
+        },
+      ];
+
+      await handleTurn(
+        makeTurn({
+          threadTs: '500.0' as SlackThreadTs,
+          ts: '500.2' as SlackThreadTs,
+          text: 'what is this thread about',
+        }),
+        {
+          fireworks: FAKE_FIREWORKS,
+          model: 'accounts/fireworks/models/gpt-oss-120b',
+          slackClient: slack,
+          botUserId: BOT,
+          slackTeamId: 'T-TEST',
+          behavior: FAKE_BEHAVIOR,
+          nameResolver: resolver,
+        },
+      );
+
+      // Loop received history with rewritten bodies.
+      const histText = capturedHistory.map((m) => m.content ?? '').join('\n');
+      expect(histText).toContain('@Amit');
+      expect(histText).toContain('#design');
+      expect(histText).not.toContain('<@U042>');
+      expect(histText).not.toContain('<#C999');
+    });
+
+    it('rewrites `<@U…>` markup in the viewed-channel background block', async () => {
+      let capturedHistory: ChatMessage[] = [];
+      mockRunLoopPi.mockImplementationOnce(
+        async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+          capturedHistory = (opts as { history?: ChatMessage[] }).history ?? [];
+          return makeReply();
+        },
+      );
+
+      const resolver = new NameResolver();
+      resolver.primeForTests({ U999: 'Bob' }, { 'C-VIEWED': 'rollout' });
+
+      const slack = new MockSlackClient();
+      slack.historyMessages = [
+        {
+          user: 'U1' as SlackUserId,
+          text: 'cc <@U999> on the deploy',
+          ts: '800.1' as SlackThreadTs,
+        },
+      ];
+
+      await handleTurn(
+        makeTurn({
+          entrySurface: 'dm',
+          channelId: 'D1' as SlackChannelId,
+          threadTs: '500.0' as SlackThreadTs,
+          text: 'what is happening',
+        }),
+        {
+          fireworks: FAKE_FIREWORKS,
+          model: 'accounts/fireworks/models/gpt-oss-120b',
+          slackClient: slack,
+          botUserId: BOT,
+          slackTeamId: 'T-TEST',
+          behavior: FAKE_BEHAVIOR,
+          viewedChannelId: 'C-VIEWED',
+          nameResolver: resolver,
+        },
+      );
+
+      const backgroundMsg = capturedHistory[0]?.content ?? '';
+      // Channel id rewritten to #name in the lead-in, AND `<@U…>` rewritten
+      // inside the transcript body.
+      expect(backgroundMsg).toContain('viewing channel #rollout');
+      expect(backgroundMsg).toContain('@Bob');
+      expect(backgroundMsg).not.toContain('<@U999>');
+    });
   });
 });

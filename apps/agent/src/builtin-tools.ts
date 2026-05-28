@@ -680,7 +680,14 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
             if (profile.email) lines.push(`email: ${profile.email}`);
             if (profile.statusText) {
               const emoji = profile.statusEmoji ? `${profile.statusEmoji} ` : '';
-              lines.push(`status: ${emoji}${profile.statusText}`);
+              // Statuses occasionally contain `<@U…>` references (e.g. "in
+              // a 1:1 with <@U042>"). Rewrite through the resolver so the
+              // model gets `@DisplayName`. Best-effort; raw text falls
+              // through on resolver miss.
+              const statusText = await resolver
+                .rewriteMentions(profile.statusText, slack)
+                .catch(() => profile.statusText ?? '');
+              lines.push(`status: ${emoji}${statusText}`);
             }
             if (profile.tz) lines.push(`tz: ${profile.tz}`);
             if (profile.isBot) lines.push('is_bot: true');
@@ -791,12 +798,23 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
           if (channels.length === 0) {
             result = { callId: call.id, ok: true, content: '(no channels)' };
           } else {
+            // Topics can mention other users / channels by id. Rewrite each
+            // topic through the resolver in parallel so the model never sees
+            // raw `<@U…>` / `<#C…>` markup leaking out via this listing.
+            const rewrittenTopics = await Promise.all(
+              channels.map((c) =>
+                c.topic !== undefined && c.topic.length > 0
+                  ? resolver.rewriteMentions(c.topic, slack).catch(() => c.topic ?? '')
+                  : Promise.resolve(''),
+              ),
+            );
             const body = channels
-              .map((c) => {
+              .map((c, i) => {
                 const name = c.name ? `#${c.name}` : '(no name)';
                 const priv = c.isPrivate ? ' [private]' : '';
                 const members = c.memberCount !== undefined ? ` (${c.memberCount} members)` : '';
-                const topic = c.topic ? ` — ${c.topic}` : '';
+                const topicText = rewrittenTopics[i] ?? '';
+                const topic = topicText.length > 0 ? ` — ${topicText}` : '';
                 return `- ${c.id} ${name}${priv}${members}${topic}`;
               })
               .join('\n');
