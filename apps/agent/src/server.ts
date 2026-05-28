@@ -11,7 +11,7 @@ import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { resolveConfirmation } from './confirmations.js';
 import { handleTurn, type HandleTurnDeps } from './handle-turn.js';
-import { OWNER_DECLINE_MESSAGE, checkOwnerAccess } from './owner-gate.js';
+import { buildOwnerDeclineMessage, checkOwnerAccess } from './owner-gate.js';
 import { healthCheckTokens, loadWorkspaceContext } from './workspace-context.js';
 
 import type { AgentConfig } from './config.js';
@@ -110,7 +110,9 @@ export function createServer(deps: ServerDeps): Hono {
         try {
           await ctx.slackClient.chatPostMessage({
             channel: turn.channelId,
-            text: OWNER_DECLINE_MESSAGE,
+            // Owner-aware so the requester gets a clickable next step
+            // (mention the owner) instead of a dead-end "not for you".
+            text: buildOwnerDeclineMessage(ctx.ownerSlackUserId, ctx.ownerProfile),
             ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),
           });
         } catch (postErr) {
