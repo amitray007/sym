@@ -245,8 +245,11 @@ describe('handleTurn', () => {
 
     // setStatus is now called for channel @-mentions too (Slack 2026-03-05
     // changelog made the API work in channel threads with chat:write).
+    // First call rotates per-turn via pickShimmerStatus — we assert the
+    // shape ("is X…") rather than a specific phrase so reshuffling the
+    // SHIMMER_PHRASES list doesn't churn this test.
     expect(slack.setStatusCalls.length).toBeGreaterThanOrEqual(1);
-    expect(slack.setStatusCalls[0]?.status).toBe('is thinking…');
+    expect(slack.setStatusCalls[0]?.status).toMatch(/^is .+…$/);
   });
 
   it('forwards Pi-loop onStatus emissions to Slack setStatus with the right phase strings', async () => {
@@ -275,9 +278,13 @@ describe('handleTurn', () => {
     });
 
     const statuses = slack.setStatusCalls.map((c) => c.status);
-    // Initial "is thinking…" + two loop emissions + the trailing '' clear
-    // (stopStream does not auto-clear setStatus, so we do it explicitly).
-    expect(statuses).toEqual(['is thinking…', 'is searching Slack…', 'is writing the reply…', '']);
+    // Initial opener (rotated per-turn, "is X…" shape) + two loop emissions
+    // + trailing '' clear (stopStream does not auto-clear setStatus).
+    expect(statuses).toHaveLength(4);
+    expect(statuses[0]).toMatch(/^is .+…$/); // rotated opener
+    expect(statuses[1]).toBe('is searching Slack…');
+    expect(statuses[2]).toBe('is writing the reply…');
+    expect(statuses[3]).toBe('');
   });
 
   // NOTE: we intentionally don't test the 90s keepalive timer. Fake-timer
@@ -304,9 +311,9 @@ describe('handleTurn', () => {
       behavior: FAKE_BEHAVIOR,
     });
 
-    // setStatus: initial 'is thinking…' + trailing '' clear after stopStream.
+    // setStatus: initial rotated opener ("is X…") + trailing '' clear after stopStream.
     expect(slack.setStatusCalls).toHaveLength(2);
-    expect(slack.setStatusCalls[0]?.status).toBe('is thinking…');
+    expect(slack.setStatusCalls[0]?.status).toMatch(/^is .+…$/);
     expect(slack.setStatusCalls[1]?.status).toBe('');
 
     // startStream was called WITHOUT recipient ids (DM/assistant thread).
@@ -690,9 +697,7 @@ describe('handleTurn', () => {
     expect(task3?.status).toBe('complete');
 
     // The threshold-flush batch must include all three task ids — that's the
-    // user-visible "cards rendered" signal. We look at the first batch of
-    // task-* chunks (excluding the "Thinking" prelude, which now opens the
-    // stream before the threshold trips).
+    // user-visible "cards rendered" signal.
     const taskChunks = chunks.filter((c) => c.id.startsWith('task-'));
     const flushBatch = new Set(taskChunks.slice(0, 3).map((c) => c.id));
     expect(flushBatch.has('task-1')).toBe(true);
@@ -721,102 +726,6 @@ describe('handleTurn', () => {
 
     expect(slack.startStreamCalls).toHaveLength(1);
     expect(slack.startStreamCalls[0]?.taskDisplayMode).toBe('timeline');
-  });
-
-  it('emits a "Thinking" prelude row at stream open and settles it on first real content', async () => {
-    // Regression: Slack shows its own "Thinking..." placeholder in empty
-    // streamed messages. We pre-empt that by emitting our own highlighted
-    // in_progress prelude row, then settle it (✓) when real content lands.
-    mockRunLoopPi.mockImplementationOnce(
-      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
-        const o = opts as {
-          onDelta?: (d: string) => Promise<void>;
-          onToolStart?: (toolCallId: string, label: string) => Promise<void>;
-          onToolEnd?: (toolCallId: string, errored: boolean) => Promise<void>;
-        };
-        await o.onToolStart?.('call-1', 'checking the time');
-        await o.onToolEnd?.('call-1', false);
-        await o.onDelta?.('it is 5pm');
-        return makeReply({ markdown: 'it is 5pm' });
-      },
-    );
-
-    const chunks: { id: string; status: string }[] = [];
-    const slack = new MockSlackClient();
-    const origAppend = slack.chatAppendStream.bind(slack);
-    slack.chatAppendStream = async (params: AppendStreamParams): Promise<void> => {
-      for (const c of params.chunks ?? []) {
-        if (c.type === 'task_update') chunks.push({ id: c.id, status: c.status });
-      }
-      await origAppend(params);
-    };
-
-    await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
-      fireworks: FAKE_FIREWORKS,
-      model: 'accounts/fireworks/models/gpt-oss-120b',
-      slackClient: slack,
-      botUserId: BOT,
-      slackTeamId: 'T-TEST',
-      // threshold > 0 so the task card actually exists — the prelude is a
-      // card concept, suppressed when the surface explicitly disables cards.
-      behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
-    });
-
-    // The prelude row should appear in the chunk stream — first as in_progress,
-    // then as complete once real content lands.
-    const preludeChunks = chunks.filter((c) => c.id === 'sym-thinking-prelude');
-    expect(preludeChunks.length).toBeGreaterThanOrEqual(2);
-    expect(preludeChunks[0]?.status).toBe('in_progress');
-    expect(preludeChunks.at(-1)?.status).toBe('complete');
-
-    // And it should arrive BEFORE the first real tool row, not after.
-    const firstPreludeIdx = chunks.findIndex((c) => c.id === 'sym-thinking-prelude');
-    const firstTaskIdx = chunks.findIndex((c) => c.id.startsWith('task-'));
-    expect(firstPreludeIdx).toBeGreaterThanOrEqual(0);
-    expect(firstPreludeIdx).toBeLessThan(firstTaskIdx);
-  });
-
-  it('suppresses the prelude row on the assistant-panel surface (entrySurface=dm)', async () => {
-    // The assistant panel already runs the `assistant.threads.setStatus`
-    // shimmer at t=0 — the prelude row would duplicate it. Channel threads
-    // get the prelude; DMs (assistant panel) skip it.
-    mockRunLoopPi.mockImplementationOnce(
-      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
-        const o = opts as {
-          onDelta?: (d: string) => Promise<void>;
-          onToolStart?: (toolCallId: string, label: string) => Promise<void>;
-          onToolEnd?: (toolCallId: string, errored: boolean) => Promise<void>;
-        };
-        await o.onToolStart?.('call-1', 'checking the time');
-        await o.onToolEnd?.('call-1', false);
-        await o.onDelta?.('5pm');
-        return makeReply({ markdown: '5pm' });
-      },
-    );
-
-    const chunks: { id: string }[] = [];
-    const slack = new MockSlackClient();
-    const origAppend = slack.chatAppendStream.bind(slack);
-    slack.chatAppendStream = async (params: AppendStreamParams): Promise<void> => {
-      for (const c of params.chunks ?? []) {
-        if (c.type === 'task_update') chunks.push({ id: c.id });
-      }
-      await origAppend(params);
-    };
-
-    await handleTurn(makeTurn({ entrySurface: 'dm', threadTs: '900.1' as SlackThreadTs }), {
-      fireworks: FAKE_FIREWORKS,
-      model: 'accounts/fireworks/models/gpt-oss-120b',
-      slackClient: slack,
-      botUserId: BOT,
-      slackTeamId: 'T-TEST',
-      behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
-    });
-
-    // No prelude row at all on the assistant-panel surface.
-    expect(chunks.some((c) => c.id === 'sym-thinking-prelude')).toBe(false);
-    // Real tool rows still render — assistant-panel suppression is prelude-only.
-    expect(chunks.some((c) => c.id.startsWith('task-'))).toBe(true);
   });
 
   // -----------------------------------------------------------------------

@@ -7,7 +7,7 @@ import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
 import { PlanController } from './plan-controller.js';
-import { pickThinkingCopy } from './thinking-copy.js';
+import { pickShimmerPhrase, pickShimmerStatus } from './thinking-copy.js';
 
 import type { BehaviorConfig } from './config.js';
 import type { NameResolver } from './name-resolver.js';
@@ -117,9 +117,6 @@ interface TrackedTask {
  * All chunk sends are best-effort: errors are logged and swallowed so a card
  * failure never blocks reply delivery.
  */
-/** Stable id for the "Thinking" prelude row — kept off the user-visible counter. */
-const THINKING_PRELUDE_ID = 'sym-thinking-prelude';
-
 class TaskCardManager {
   private taskCounter = 0;
   /** All known tasks, keyed by Pi's toolCallId. */
@@ -136,17 +133,6 @@ class TaskCardManager {
    * left hanging. Null until `bindPlan` is called.
    */
   private boundPlan: PlanController | null = null;
-  /** Set once we've emitted the "Thinking" prelude row. */
-  private preludeEmitted = false;
-  /** Set once we've settled (checked off) the prelude row. */
-  private preludeSettled = false;
-  /**
-   * Title used on both the in_progress and complete rows for the prelude.
-   * Stored so `settlePrelude` doesn't have to receive the same string again
-   * — Slack will silently drop the row if the title shifts under the same
-   * id, so consistency matters.
-   */
-  private preludeTitle = 'Thinking';
 
   constructor(
     /** Callback that pushes task_update chunks into the open stream. */
@@ -154,53 +140,6 @@ class TaskCardManager {
     /** Tool calls before the card appears (1 = always show from first tool). */
     private readonly threshold: number,
   ) {}
-
-  /**
-   * Emit the prelude row — a highlighted in_progress task that replaces
-   * Slack's plain "Thinking..." stream placeholder. Called eagerly by
-   * `streamReply` once the stream is open. Idempotent; subsequent calls
-   * are no-ops. The title is supplied by the caller (today: rotated via
-   * `pickThinkingCopy(turn.id)`), stored so `settlePrelude` uses the same
-   * word — Slack expects (id, title) stability for an update to land on
-   * the same row.
-   *
-   * Settled to `complete` by `settlePrelude` the first time real content
-   * (plan rows, tool rows, text deltas) shows up — the prelude becomes the
-   * card's "I saw your ask" history marker.
-   */
-  async emitThinkingPrelude(title: string): Promise<void> {
-    if (this.preludeEmitted) return;
-    this.preludeEmitted = true;
-    this.preludeTitle = title;
-    this.active = true;
-    await this.sendChunks([
-      {
-        type: 'task_update',
-        id: THINKING_PRELUDE_ID,
-        title: this.preludeTitle,
-        status: 'in_progress',
-      },
-    ]).catch((err) => console.warn('[agent] prelude emit failed (continuing):', err));
-  }
-
-  /**
-   * Settle the prelude row to `complete` the first time real content arrives.
-   * Idempotent; safe to call from every "first content" hook (text delta,
-   * plan event, tool start). Reuses the title from `emitThinkingPrelude` so
-   * the row label is stable across the lifecycle.
-   */
-  async settlePrelude(): Promise<void> {
-    if (!this.preludeEmitted || this.preludeSettled) return;
-    this.preludeSettled = true;
-    await this.sendChunks([
-      {
-        type: 'task_update',
-        id: THINKING_PRELUDE_ID,
-        title: this.preludeTitle,
-        status: 'complete',
-      },
-    ]).catch((err) => console.warn('[agent] prelude settle failed (continuing):', err));
-  }
 
   /**
    * Subscribe to a `PlanController` for model-authored plan rows. Call once
@@ -211,9 +150,6 @@ class TaskCardManager {
     this.boundPlan = controller;
     controller.subscribe(async (event) => {
       if (event.type === 'set_plan') {
-        // Real content arriving — settle the "Thinking" prelude first so the
-        // sequence reads naturally (✓ Thinking → ◯ plan items).
-        await this.settlePrelude();
         // Latch into plan-mode and render every item at `pending`. This is
         // the activation moment for the card — even if tool calls already
         // fired, their rows are discarded and replaced by the plan view.
@@ -248,10 +184,6 @@ class TaskCardManager {
   }
 
   async onToolStart(toolCallId: string, friendlyLabel: string): Promise<void> {
-    // First tool fired — settle the "Thinking" prelude so the next row
-    // appears below a clean checkmark, not below a still-shimmering row.
-    await this.settlePrelude();
-
     // Plan-mode suppresses tool-derived rows entirely — the model's plan IS
     // the card; the per-tool shimmer is the right granularity for "what's
     // happening right now."
@@ -305,12 +237,6 @@ class TaskCardManager {
   }
 
   async finish(): Promise<void> {
-    // Safety: settle the prelude even if no real content arrived. An errored
-    // turn that emitted "Thinking" but never produced a delta/plan/tool
-    // would otherwise leave it shimmering forever. Runs in both modes
-    // because the prelude is independent of plan-mode latching.
-    await this.settlePrelude();
-
     // **Plan-mode auto-complete.** When the turn ends and the model produced
     // a reply, any plan items left in `pending` / `in_progress` should
     // visually close as complete — leaving them unsettled punishes the
@@ -545,13 +471,20 @@ async function streamReply(
   // `phaseUpdated` flips true the first time we see a concrete phase string
   // (tool verb or "writing the reply") — that signal lets the keepalive choose
   // between rotating whimsy ("is wadoodling…") and re-sending the real phase.
-  let lastStatus = 'is thinking…';
+  //
+  // The opener is rotated per-turn ("is thinking…", "is cooking…", "is mulling
+  // it over…", etc.) — deterministic by turn id so log slices reproduce.
+  // It's NOT a "real phase" in the keepalive-decision sense; we include it
+  // and the shimmer-phrase set in the whimsy-class check below.
+  const openerPhrase = pickShimmerPhrase(turn.id);
+  const openerStatus = pickShimmerStatus(turn.id);
+  let lastStatus = openerStatus;
   let phaseUpdated = false;
-  // Recognise whimsy phrases so they don't trip the "real phase fired" flag.
-  const whimsyPhrases = new Set(WHIMSY_WORDS.map((w) => `is ${w}…`));
+  // Recognise opener + whimsy phrases so they don't trip the "real phase fired" flag.
+  const whimsyPhrases = new Set([...WHIMSY_WORDS.map((w) => `is ${w}…`), `is ${openerPhrase}…`]);
   const sendStatus = async (status: string): Promise<void> => {
     lastStatus = status;
-    if (status !== 'is thinking…' && status !== '' && !whimsyPhrases.has(status)) {
+    if (status !== '' && !whimsyPhrases.has(status)) {
       phaseUpdated = true;
     }
     try {
@@ -567,7 +500,9 @@ async function streamReply(
 
   // Live status — now safe for channel @-mentions too (per Slack's 2026-03-05
   // changelog, setStatus works in channel threads with chat:write scope).
-  await sendStatus('is thinking…');
+  // Uses the rotated opener phrase so consecutive turns don't all say the
+  // same thing — feels more alive, same deterministic-by-turn-id guarantee.
+  await sendStatus(openerStatus);
 
   // Keepalive — Slack auto-clears the shimmer after 2 min, so re-send the latest
   // status every 90s. If no real phase has fired yet, rotate through whimsical
@@ -639,26 +574,12 @@ async function streamReply(
     // listener fires.
     taskCard?.bindPlan(ctx.planController);
 
-    // Eagerly emit the prelude row — opens the stream and renders a
-    // highlighted in_progress task row immediately so Slack's plain
-    // "Thinking..." stream placeholder never gets a chance to show.
-    // Awaited (not fire-and-forget) so the prelude row is on-screen before
-    // any tool row or text delta lands — predictable ordering for both the
-    // owner and for our integration tests.
-    //
-    // **Skipped on the assistant panel.** That surface already runs the
-    // `assistant.threads.setStatus` shimmer ("is thinking…") at t=0 — the
-    // prelude row would duplicate it. On channel threads the shimmer is
-    // less prominent, so the row earns its keep there.
-    //
-    // **Skipped when the card is fully disabled** (threshold=0): the
-    // surface has explicitly opted out of card UI.
-    //
-    // Title rotates per turn via `pickThinkingCopy(turn.id)` — deterministic
-    // so log slices and replays show the same word for the same turn.
-    if (taskCard !== null && !isAssistant) {
-      await taskCard.emitThinkingPrelude(pickThinkingCopy(turn.id));
-    }
+    // No prelude task row. Slack's default "Thinking..." placeholder in the
+    // streamed message body briefly shows for empty streams, but we can't
+    // customize that text (chat.startStream doesn't expose it); a
+    // prelude row in the card was confusing rather than helpful per
+    // 2026-05-29 feedback. The shimmer status fired above ('is thinking…')
+    // is where the agentic indicator lives now.
 
     const flushBuffer = async (): Promise<void> => {
       if (buffer.length === 0 || streamTs === undefined) return;
@@ -680,13 +601,8 @@ async function streamReply(
       // That's fine: we hold the stream open and wait for the boundary.
       const filtered = narration.push(delta);
       if (filtered.length === 0) return;
-      // Open the stream on the FIRST real delta that survived the filter —
-      // Slack's empty-stream "Thinking..." placeholder never shows.
+      // Open the stream on the FIRST real delta that survived the filter.
       if (!(await ensureStreamOpen())) return;
-      // First real text is real content — settle the "Thinking" prelude
-      // so the reply text doesn't render below a still-shimmering row.
-      // Idempotent: only fires on the first delta that opens the stream.
-      await taskCard?.settlePrelude();
       buffer += filtered;
       if (buffer.length < FLUSH_CHARS) return;
       await flushBuffer();
@@ -731,7 +647,6 @@ async function streamReply(
       if (streamTs !== undefined) {
         buffer += tail;
       } else if (await ensureStreamOpen()) {
-        await taskCard?.settlePrelude();
         buffer += tail;
       }
       // If the stream couldn't be opened, fall through to the no-stream
