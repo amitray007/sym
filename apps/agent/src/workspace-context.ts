@@ -1,3 +1,4 @@
+import { NameResolver } from './name-resolver.js';
 import { WebApiSlackClient } from './slack-client.js';
 
 import type { AgentConfig } from './config.js';
@@ -29,6 +30,14 @@ export interface WorkspaceContext {
    * resolution simply omit the owner block.
    */
   ownerProfile?: OwnerIdentity;
+  /**
+   * Workspace-scoped name resolver — rewrites raw `<@U…>` / `<#C…>` markup
+   * in tool returns to `@DisplayName` / `#channel-name`. Channels are
+   * bulk-filled at boot via `populateChannels`; users are lazy via
+   * `users.info` on first encounter. Shared across all turns so cache
+   * warms over a session.
+   */
+  nameResolver: NameResolver;
   /** Raw Fireworks credentials — consumed by `runLoopPi`. */
   fireworks: {
     baseUrl: string;
@@ -49,6 +58,7 @@ export function loadWorkspaceContext(config: AgentConfig): WorkspaceContext {
     ownerSlackUserId: config.ownerSlackUserId as SlackUserId,
     model: config.fireworksModel,
     slackClient: new WebApiSlackClient(config.slackBotToken),
+    nameResolver: new NameResolver(),
     fireworks: {
       baseUrl: config.fireworksBaseUrl,
       apiKey: config.fireworksApiKey,
@@ -137,4 +147,14 @@ export async function healthCheckTokens(ctx: WorkspaceContext): Promise<void> {
       err,
     );
   }
+
+  // Warm the channel cache — non-blocking. The user-token client has wider
+  // visibility (private channels the owner is in); fall back to the bot
+  // client when no user token. Failure is benign; the resolver continues
+  // lazily on cache miss.
+  const channelListClient = ctx.userSlackClient ?? ctx.slackClient;
+  void ctx.nameResolver
+    .populateChannels(channelListClient)
+    .then(() => console.log('[agent] channel name cache warmed'))
+    .catch((err) => console.warn('[agent] channel cache warm failed (continuing lazy):', err));
 }

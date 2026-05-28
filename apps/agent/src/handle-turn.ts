@@ -8,6 +8,7 @@ import { pickThinkingLevel } from './pi/think-router.js';
 import { PlanController } from './plan-controller.js';
 
 import type { BehaviorConfig } from './config.js';
+import type { NameResolver } from './name-resolver.js';
 import type {
   AppendStreamParams,
   SlackClient,
@@ -51,6 +52,12 @@ export interface HandleTurnDeps {
    * boot-time resolution hasn't completed or failed.
    */
   ownerProfile?: OwnerIdentity;
+  /**
+   * Workspace-scoped name resolver — passed into the builtin dispatcher
+   * so tool returns surface `@DisplayName` / `#channel-name` instead of
+   * raw `<@U…>` / `<#C…>` markup.
+   */
+  nameResolver: NameResolver;
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
@@ -659,6 +666,7 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
     ...(deps.userSlackClient !== undefined ? { userSlackClient: deps.userSlackClient } : {}),
     ownerPostMarker: deps.behavior.ownerPostMarker,
     planController,
+    nameResolver: deps.nameResolver,
   });
   const registry = new ToolRegistry(builtin);
 

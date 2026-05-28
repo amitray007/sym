@@ -1,5 +1,7 @@
 import { threadToHistory } from '@sym/adapter-slack';
 
+import { NameResolver } from './name-resolver.js';
+
 import type { PlanController, PlanItemStatus } from './plan-controller.js';
 import type { SlackClient, SlackThreadMessage } from '@sym/adapter-slack';
 import type {
@@ -153,68 +155,54 @@ const LIST_CHANNELS_DESCRIPTOR: ToolDescriptor = {
   actor: 'user',
 };
 
-/** Per-turn user-id → display-name cache. `null` records a failed lookup. */
-type NameCache = Map<string, string | null>;
-
 /**
- * Resolve every unique non-bot user id in `messages` to a display name in
- * parallel, populating the cache. Subsequent reads in the same turn hit the
- * cache instead of users.info. Failures are sticky (cached as null) so we
- * don't re-hit a permission error each time.
+ * Resolve every unique non-bot author id in `messages` to a display name via
+ * the workspace-scoped resolver, returning a `Record<id, name>` for
+ * `threadToHistory` to use as author labels. Failures fall through to raw
+ * id (handled downstream).
  */
 async function resolveAuthorNames(
   messages: SlackThreadMessage[],
   botUserId: SlackUserId,
   slack: SlackClient,
-  cache: NameCache,
+  resolver: NameResolver,
 ): Promise<Record<string, string>> {
-  const toResolve = new Set<string>();
+  const ids = new Set<string>();
   for (const m of messages) {
-    if (m.user !== undefined && m.user !== botUserId && !cache.has(m.user)) {
-      toResolve.add(m.user);
-    }
+    if (m.user !== undefined && m.user !== botUserId) ids.add(m.user);
   }
-  if (toResolve.size > 0) {
-    await Promise.all(
-      [...toResolve].map(async (id) => {
-        try {
-          const p = await slack.usersInfo({ user: id as SlackUserId });
-          const name = p.displayName ?? p.realName ?? p.userName ?? null;
-          cache.set(id, name);
-        } catch {
-          cache.set(id, null);
-        }
-      }),
-    );
-  }
-  // Build the names map from the cache, dropping null entries (threadToHistory
-  // will fall through to the raw id when a name is missing — better than empty).
+  await Promise.all([...ids].map((id) => resolver.resolveUser(id, slack)));
   const names: Record<string, string> = {};
-  for (const [id, name] of cache) {
-    if (name !== null) names[id] = name;
+  for (const id of ids) {
+    const name = resolver.getUser(id);
+    if (name !== undefined) names[id] = name;
   }
   return names;
 }
 
 /**
- * Format a list of Slack thread messages into a plain-text transcript string,
- * with display names resolved from a per-turn cache. Sym's own posts are
- * prefixed with "Sym:"; other authors get their display name (falling back to
- * raw user id only if name resolution fails, which the model is instructed
- * to handle by calling read_user_profile).
+ * Format a list of Slack thread messages into a plain-text transcript with
+ * display names resolved AND in-body mentions (`<@U…>`, `<#C…>`) rewritten
+ * to `@Name` / `#name`. Sym's own posts are prefixed with "Sym:". When name
+ * resolution fails, the raw id falls through — the model never sees raw
+ * structured Slack markup, but it may see a bare id as last-resort context.
  */
 async function formatTranscript(
   messages: SlackThreadMessage[],
   botUserId: SlackUserId,
   slack: SlackClient,
-  cache: NameCache,
+  resolver: NameResolver,
 ): Promise<string> {
-  const names = await resolveAuthorNames(messages, botUserId, slack, cache);
+  const names = await resolveAuthorNames(messages, botUserId, slack, resolver);
   const mapped = threadToHistory(messages, { botUserId, names });
   if (mapped.length === 0) return '(no messages)';
-  return mapped
+  const joined = mapped
     .map((m) => (m.role === 'assistant' ? `Sym: ${m.content ?? ''}` : (m.content ?? '')))
     .join('\n');
+  // Final pass: rewrite any `<@U…>` / `<#C…>` mentions in message bodies.
+  // resolveAuthorNames only touched author ids; mentions of OTHER users
+  // inside message text still need resolution.
+  return resolver.rewriteMentions(joined, slack);
 }
 
 /**
@@ -262,6 +250,14 @@ export interface BuiltinToolDeps {
    * supplies one.
    */
   planController?: PlanController;
+  /**
+   * Workspace-scoped name resolver shared across all turns. Used to rewrite
+   * `<@U…>` / `<#C…>` markup in tool returns BEFORE the model sees it, so
+   * raw ids can't leak into replies. Optional only for legacy test paths;
+   * production always supplies one (constructed in `loadWorkspaceContext`).
+   * When absent, tool returns include raw ids — degraded but functional.
+   */
+  nameResolver?: NameResolver;
 }
 
 /**
@@ -569,10 +565,11 @@ const DESCRIPTORS_BY_NAME = new Map<string, ToolDescriptor>(
  * visibility) and fall back to bot when no user token is configured.
  */
 export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
-  // Per-turn user-name cache shared by all read_channel / read_thread calls in
-  // this turn — first lookup pays the users.info latency, subsequent lookups
-  // hit memory.
-  const nameCache: NameCache = new Map();
+  // Workspace-scoped name resolver — preferred. Falls back to an ad-hoc
+  // per-dispatcher resolver if deps.nameResolver wasn't supplied (legacy
+  // test paths). Either way the same code paths apply; production always
+  // wires the shared one via `loadWorkspaceContext` for cross-turn reuse.
+  const resolver = deps.nameResolver ?? new NameResolver();
 
   return {
     list(): ToolDescriptor[] {
@@ -621,7 +618,7 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
               channel: channelIdArg as SlackChannelId,
               limit,
             });
-            const transcript = await formatTranscript(messages, deps.botUserId, slack, nameCache);
+            const transcript = await formatTranscript(messages, deps.botUserId, slack, resolver);
             result = { callId: call.id, ok: true, content: transcript };
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
@@ -653,7 +650,7 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
               channel: channelIdArg as SlackChannelId,
               ts: threadTsArg as SlackThreadTs,
             });
-            const transcript = await formatTranscript(messages, deps.botUserId, slack, nameCache);
+            const transcript = await formatTranscript(messages, deps.botUserId, slack, resolver);
             result = { callId: call.id, ok: true, content: transcript };
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);
@@ -859,12 +856,40 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
             } else {
               const header =
                 total > matches.length ? `(showing ${matches.length} of ${total} matches)\n` : '';
+              // Resolve author/channel ids upfront so the per-line formatting
+              // can stay synchronous. Search results often arrive without
+              // names attached; this pulls the resolver's cache up to date.
+              // SlackUserId / SlackChannelId are branded — strip to plain
+              // strings for the resolver (which speaks ids structurally).
+              const authorIds = matches
+                .map((m) => m.userId as string | undefined)
+                .filter((id): id is string => id !== undefined && id.length > 0);
+              const channelIds = matches
+                .map((m) => m.channelId as string | undefined)
+                .filter((id): id is string => id !== undefined && id.length > 0);
+              await Promise.all([
+                ...authorIds.map((id) => resolver.resolveUser(id, slack)),
+                ...channelIds.map((id) => resolver.resolveChannel(id, slack)),
+              ]);
+              // Body bodies may also contain `<@U…>` / `<#C…>` references to
+              // OTHER users / channels — rewrite each match's text once.
+              const rewrittenTexts = await Promise.all(
+                matches.map((m) => resolver.rewriteMentions(m.text, slack)),
+              );
               const body = matches
                 .map((m, i) => {
-                  const who = m.username ?? m.userId ?? '(unknown)';
-                  const where = m.channelName ? `#${m.channelName}` : m.channelId;
+                  const who =
+                    (m.userId !== undefined ? resolver.getUser(m.userId) : undefined) ??
+                    m.username ??
+                    m.userId ??
+                    '(unknown)';
+                  const channelName =
+                    m.channelName ??
+                    (m.channelId !== undefined ? resolver.getChannel(m.channelId) : undefined);
+                  const where = channelName ? `#${channelName}` : (m.channelId ?? '(unknown)');
                   const link = m.permalink ? ` <${m.permalink}|link>` : '';
-                  const content = m.text.length > 400 ? `${m.text.slice(0, 400)}…` : m.text;
+                  const raw = rewrittenTexts[i] ?? m.text;
+                  const content = raw.length > 400 ? `${raw.slice(0, 400)}…` : raw;
                   return `${i + 1}. ${who} in ${where}${link}\n   ${content}`;
                 })
                 .join('\n');

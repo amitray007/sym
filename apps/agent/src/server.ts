@@ -147,6 +147,7 @@ export function createServer(deps: ServerDeps): Hono {
       // Latest resolved owner profile (mutates onto ctx async — once boot
       // completes, every subsequent turn picks it up).
       ...(ctx.ownerProfile !== undefined ? { ownerProfile: ctx.ownerProfile } : {}),
+      nameResolver: ctx.nameResolver,
     };
   }
 
