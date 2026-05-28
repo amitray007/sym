@@ -2,6 +2,7 @@ import { markdownBlock, receiptToContextBlock, threadToHistory } from '@sym/adap
 import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
+import { NarrationFilter } from './narration-filter.js';
 import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
@@ -540,6 +541,12 @@ async function streamReply(
     let streamTs: SlackThreadTs | undefined;
     let streamOpenFailed = false;
     let buffer = '';
+    // Defensive narration filter — strips plan-mechanics self-talk
+    // ("marking p1 complete", "now searching slack", "calling
+    // search_messages") from streamed deltas before they reach Slack. The
+    // prompt asks the model not to narrate; this is the structural belt
+    // to that suspenders. See narration-filter.ts for the design notes.
+    const narration = new NarrationFilter();
 
     const ensureStreamOpen = async (): Promise<boolean> => {
       if (streamTs !== undefined) return true;
@@ -596,14 +603,20 @@ async function streamReply(
 
     const onDelta = async (delta: string): Promise<void> => {
       if (delta.length === 0) return;
-      // Open the stream on the FIRST real delta — Slack's empty-stream
-      // "Thinking..." placeholder never shows.
+      // Run the raw delta through the narration filter FIRST. The filter is
+      // line-buffered internally — it may return empty string for a delta
+      // whose content is mid-segment, even though the model produced text.
+      // That's fine: we hold the stream open and wait for the boundary.
+      const filtered = narration.push(delta);
+      if (filtered.length === 0) return;
+      // Open the stream on the FIRST real delta that survived the filter —
+      // Slack's empty-stream "Thinking..." placeholder never shows.
       if (!(await ensureStreamOpen())) return;
       // First real text is real content — settle the "Thinking" prelude
       // so the reply text doesn't render below a still-shimmering row.
       // Idempotent: only fires on the first delta that opens the stream.
       await taskCard?.settlePrelude();
-      buffer += delta;
+      buffer += filtered;
       if (buffer.length < FLUSH_CHARS) return;
       await flushBuffer();
     };
@@ -629,6 +642,30 @@ async function streamReply(
 
     // Settle the task card before or alongside reply delivery.
     await taskCard?.finish();
+
+    // Flush the narration filter's tail. The final partial line may be a
+    // real reply that didn't end with a newline (Slack mrkdwn doesn't
+    // require one) — we emit it unchanged rather than risk eating the
+    // owner's answer. See narration-filter.ts for the trade-off rationale.
+    //
+    // This runs BEFORE the no-stream fallback check because the model may
+    // have produced a single short delta ("The time is now.") with no
+    // boundary char — the filter held all of it, so streamTs is still
+    // undefined. We need to open the stream and emit the tail so the
+    // streaming path is preserved (rather than silently degrading to
+    // postMessage, which is observable in tests AND in the receipt-block
+    // delivery shape).
+    const tail = narration.flush();
+    if (tail.length > 0) {
+      if (streamTs !== undefined) {
+        buffer += tail;
+      } else if (await ensureStreamOpen()) {
+        await taskCard?.settlePrelude();
+        buffer += tail;
+      }
+      // If the stream couldn't be opened, fall through to the no-stream
+      // fallback below — `reply.markdown` is the authoritative full text.
+    }
 
     // Reply produced no streamed deltas (empty/very-short reply, or only tool
     // calls). Either way, we never opened the stream — post normally so the
