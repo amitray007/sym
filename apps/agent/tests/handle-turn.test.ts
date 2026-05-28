@@ -688,12 +688,15 @@ describe('handleTurn', () => {
     expect(task2?.status).toBe('complete');
     expect(task3?.status).toBe('complete');
 
-    // And the FIRST chunk batch (the threshold flush) must include all three
-    // tasks — that's the user-visible "cards rendered" signal.
-    const ids = new Set(chunks.slice(0, 3).map((c) => c.id));
-    expect(ids.has('task-1')).toBe(true);
-    expect(ids.has('task-2')).toBe(true);
-    expect(ids.has('task-3')).toBe(true);
+    // The threshold-flush batch must include all three task ids — that's the
+    // user-visible "cards rendered" signal. We look at the first batch of
+    // task-* chunks (excluding the "Thinking" prelude, which now opens the
+    // stream before the threshold trips).
+    const taskChunks = chunks.filter((c) => c.id.startsWith('task-'));
+    const flushBatch = new Set(taskChunks.slice(0, 3).map((c) => c.id));
+    expect(flushBatch.has('task-1')).toBe(true);
+    expect(flushBatch.has('task-2')).toBe(true);
+    expect(flushBatch.has('task-3')).toBe(true);
   });
 
   it('sets task_display_mode=timeline on chatStartStream so chunks render as sequential cards', async () => {
@@ -717,5 +720,58 @@ describe('handleTurn', () => {
 
     expect(slack.startStreamCalls).toHaveLength(1);
     expect(slack.startStreamCalls[0]?.taskDisplayMode).toBe('timeline');
+  });
+
+  it('emits a "Thinking" prelude row at stream open and settles it on first real content', async () => {
+    // Regression: Slack shows its own "Thinking..." placeholder in empty
+    // streamed messages. We pre-empt that by emitting our own highlighted
+    // in_progress prelude row, then settle it (✓) when real content lands.
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as {
+          onDelta?: (d: string) => Promise<void>;
+          onToolStart?: (toolCallId: string, label: string) => Promise<void>;
+          onToolEnd?: (toolCallId: string, errored: boolean) => Promise<void>;
+        };
+        await o.onToolStart?.('call-1', 'checking the time');
+        await o.onToolEnd?.('call-1', false);
+        await o.onDelta?.('it is 5pm');
+        return makeReply({ markdown: 'it is 5pm' });
+      },
+    );
+
+    const chunks: { id: string; status: string }[] = [];
+    const slack = new MockSlackClient();
+    const origAppend = slack.chatAppendStream.bind(slack);
+    slack.chatAppendStream = async (params: AppendStreamParams): Promise<void> => {
+      for (const c of params.chunks ?? []) {
+        if (c.type === 'task_update') chunks.push({ id: c.id, status: c.status });
+      }
+      await origAppend(params);
+    };
+
+    await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      // threshold > 0 so the task card actually exists — the prelude is a
+      // card concept, suppressed when the surface explicitly disables cards.
+      behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
+    });
+
+    // The prelude row should appear in the chunk stream — first as in_progress,
+    // then as complete once real content lands.
+    const preludeChunks = chunks.filter((c) => c.id === 'sym-thinking-prelude');
+    expect(preludeChunks.length).toBeGreaterThanOrEqual(2);
+    expect(preludeChunks[0]?.status).toBe('in_progress');
+    expect(preludeChunks.at(-1)?.status).toBe('complete');
+
+    // And it should arrive BEFORE the first real tool row, not after.
+    const firstPreludeIdx = chunks.findIndex((c) => c.id === 'sym-thinking-prelude');
+    const firstTaskIdx = chunks.findIndex((c) => c.id.startsWith('task-'));
+    expect(firstPreludeIdx).toBeGreaterThanOrEqual(0);
+    expect(firstPreludeIdx).toBeLessThan(firstTaskIdx);
   });
 });

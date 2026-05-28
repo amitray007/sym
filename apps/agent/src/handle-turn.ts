@@ -115,6 +115,9 @@ interface TrackedTask {
  * All chunk sends are best-effort: errors are logged and swallowed so a card
  * failure never blocks reply delivery.
  */
+/** Stable id for the "Thinking" prelude row — kept off the user-visible counter. */
+const THINKING_PRELUDE_ID = 'sym-thinking-prelude';
+
 class TaskCardManager {
   private taskCounter = 0;
   /** All known tasks, keyed by Pi's toolCallId. */
@@ -125,6 +128,10 @@ class TaskCardManager {
   private active = false;
   /** Set on first `set_plan` event; latches for the rest of the turn. */
   private planMode = false;
+  /** Set once we've emitted the "Thinking" prelude row. */
+  private preludeEmitted = false;
+  /** Set once we've settled (checked off) the prelude row. */
+  private preludeSettled = false;
 
   constructor(
     /** Callback that pushes task_update chunks into the open stream. */
@@ -134,6 +141,48 @@ class TaskCardManager {
   ) {}
 
   /**
+   * Emit the "Thinking" prelude row — a highlighted in_progress task that
+   * replaces Slack's plain "Thinking..." stream placeholder. Called eagerly
+   * by `streamReply` once the stream is open. Idempotent; subsequent calls
+   * are no-ops.
+   *
+   * Settled to `complete` by `settlePrelude` the first time real content
+   * (plan rows, tool rows, text deltas) shows up — the prelude becomes the
+   * card's "I saw your ask" history marker.
+   */
+  async emitThinkingPrelude(): Promise<void> {
+    if (this.preludeEmitted) return;
+    this.preludeEmitted = true;
+    this.active = true;
+    await this.sendChunks([
+      {
+        type: 'task_update',
+        id: THINKING_PRELUDE_ID,
+        title: 'Thinking',
+        status: 'in_progress',
+      },
+    ]).catch((err) => console.warn('[agent] prelude emit failed (continuing):', err));
+  }
+
+  /**
+   * Settle the prelude row to `complete` the first time real content arrives.
+   * Idempotent; safe to call from every "first content" hook (text delta,
+   * plan event, tool start).
+   */
+  async settlePrelude(): Promise<void> {
+    if (!this.preludeEmitted || this.preludeSettled) return;
+    this.preludeSettled = true;
+    await this.sendChunks([
+      {
+        type: 'task_update',
+        id: THINKING_PRELUDE_ID,
+        title: 'Thinking',
+        status: 'complete',
+      },
+    ]).catch((err) => console.warn('[agent] prelude settle failed (continuing):', err));
+  }
+
+  /**
    * Subscribe to a `PlanController` for model-authored plan rows. Call once
    * during stream setup. The first `set_plan` event flips the card into
    * plan-mode and suppresses subsequent tool-derived rows.
@@ -141,6 +190,9 @@ class TaskCardManager {
   bindPlan(controller: PlanController): void {
     controller.subscribe(async (event) => {
       if (event.type === 'set_plan') {
+        // Real content arriving — settle the "Thinking" prelude first so the
+        // sequence reads naturally (✓ Thinking → ◯ plan items).
+        await this.settlePrelude();
         // Latch into plan-mode and render every item at `pending`. This is
         // the activation moment for the card — even if tool calls already
         // fired, their rows are discarded and replaced by the plan view.
@@ -175,6 +227,10 @@ class TaskCardManager {
   }
 
   async onToolStart(toolCallId: string, friendlyLabel: string): Promise<void> {
+    // First tool fired — settle the "Thinking" prelude so the next row
+    // appears below a clean checkmark, not below a still-shimmering row.
+    await this.settlePrelude();
+
     // Plan-mode suppresses tool-derived rows entirely — the model's plan IS
     // the card; the per-tool shimmer is the right granularity for "what's
     // happening right now."
@@ -228,6 +284,12 @@ class TaskCardManager {
   }
 
   async finish(): Promise<void> {
+    // Safety: settle the prelude even if no real content arrived. An errored
+    // turn that emitted "Thinking" but never produced a delta/plan/tool
+    // would otherwise leave it shimmering forever. Runs in both modes
+    // because the prelude is independent of plan-mode latching.
+    await this.settlePrelude();
+
     // In plan-mode the model owns the plan's terminal state; do not
     // retroactively mark plan items complete. If the model left an item
     // in_progress at turn end, the visual reflects that — which is honest
@@ -509,6 +571,17 @@ async function streamReply(
     // listener fires.
     taskCard?.bindPlan(ctx.planController);
 
+    // Eagerly emit the "Thinking" prelude — opens the stream and renders a
+    // highlighted in_progress task row immediately so Slack's plain
+    // "Thinking..." stream placeholder never gets a chance to show.
+    // Awaited (not fire-and-forget) so the prelude row is on-screen before
+    // any tool row or text delta lands — predictable ordering for both the
+    // owner and for our integration tests. When the card is disabled
+    // (threshold=0) we skip — the surface accepts plain streams in that case.
+    if (taskCard !== null) {
+      await taskCard.emitThinkingPrelude();
+    }
+
     const flushBuffer = async (): Promise<void> => {
       if (buffer.length === 0 || streamTs === undefined) return;
       const chunk = buffer;
@@ -526,6 +599,10 @@ async function streamReply(
       // Open the stream on the FIRST real delta — Slack's empty-stream
       // "Thinking..." placeholder never shows.
       if (!(await ensureStreamOpen())) return;
+      // First real text is real content — settle the "Thinking" prelude
+      // so the reply text doesn't render below a still-shimmering row.
+      // Idempotent: only fires on the first delta that opens the stream.
+      await taskCard?.settlePrelude();
       buffer += delta;
       if (buffer.length < FLUSH_CHARS) return;
       await flushBuffer();
