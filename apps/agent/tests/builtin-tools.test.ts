@@ -165,9 +165,11 @@ describe('createBuiltinDispatcher', () => {
           'react_as_owner',
           'set_status',
           'add_reminder',
+          'set_plan',
+          'update_task',
         ]),
       );
-      expect(tools).toHaveLength(11);
+      expect(tools).toHaveLength(13);
     });
 
     it('declares actor:"user" on every tool that should act under owner identity', () => {

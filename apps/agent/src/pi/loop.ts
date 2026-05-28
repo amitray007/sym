@@ -230,7 +230,15 @@ const TOOL_VERBS: Record<string, string> = {
   react_as_owner: 'reacting as you',
   set_status: 'updating your status',
   add_reminder: 'setting a reminder',
+  set_plan: 'planning the work',
 };
+
+/**
+ * Tools whose execution is metadata-only — no shimmer, no task-card row, no
+ * receipt entry. The model uses them to mutate plan state; surfacing them in
+ * the UI would create noise on every checkmark.
+ */
+const SILENT_TOOLS: ReadonlySet<string> = new Set(['update_task']);
 
 function friendlyVerb(toolName: string): string {
   return TOOL_VERBS[toolName] ?? `using ${toolName}`;
@@ -428,6 +436,10 @@ export async function runLoopPi(
         console.warn(`[pi] dropping status for unknown tool '${toolName}' (not in registry)`);
         return;
       }
+      // Silent tools (e.g. `update_task`) mutate plan state only — no shimmer,
+      // no card row, no receipt entry. The PlanController already drove the
+      // matching UI update via its own event.
+      if (SILENT_TOOLS.has(toolName)) return;
       toolsInvoked.push(toolName);
       // Re-arm the "writing" status so the next text_delta after this tool flips it again.
       emittedWritingStatus = false;
@@ -442,6 +454,8 @@ export async function runLoopPi(
       // we actually started. Pi feeds the error/result back to the model
       // internally; this is purely UI-facing.
       if (!descriptorMap.has(toolName)) return;
+      // Silent tools never fired onToolStart, so onToolEnd would be unbalanced.
+      if (SILENT_TOOLS.has(toolName)) return;
       await opts.onToolEnd?.(event.toolCallId, event.isError);
     }
   });

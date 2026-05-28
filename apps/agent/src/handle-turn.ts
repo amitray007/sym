@@ -5,6 +5,7 @@ import { createBuiltinDispatcher } from './builtin-tools.js';
 import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
+import { PlanController } from './plan-controller.js';
 
 import type { BehaviorConfig } from './config.js';
 import type {
@@ -77,6 +78,17 @@ interface TrackedTask {
  * Manages live task-progress cards embedded in the streaming reply via Slack's
  * native `task_update` chunks (chat.appendStream).
  *
+ * **Two modes — one card.**
+ *  - **tool-mode** (default): every Pi `tool_execution_start` becomes a card
+ *    row. Mirrors the agent's mechanics. Threshold-buffered (`toolCount >=
+ *    threshold` flushes all known tasks).
+ *  - **plan-mode**: latched on first `set_plan` event from a bound
+ *    `PlanController`. The card reflects model-authored intent (the owner's
+ *    asks, not the tool names). Tool-derived rows are SUPPRESSED for the
+ *    rest of the turn — the per-tool shimmer (`onStatus`) still fires so
+ *    the owner can tell *something* is happening; that's the right
+ *    granularity. One-way latch: no reverting to tool-mode mid-turn.
+ *
  * **Why we key by Pi's `toolCallId`:** gpt-oss-120b commonly emits multiple
  * tool calls in a single round, and Pi runs them in parallel. The events
  * arrive interleaved as `start_A, start_B, start_C, end_B, end_A, end_C`.
@@ -86,11 +98,12 @@ interface TrackedTask {
  * arrival order, which also gives the correct UX: all three cards render in
  * parallel as `in_progress`, then transition to `complete` one by one.
  *
- * **Threshold buffering:** tools that fire before the threshold is crossed
- * are tracked in memory; when threshold crosses, all known tasks flush at
- * their current status. Tasks that already ended in the buffer window
- * (sequential execution) flush as `complete`/`error`; tasks still running
- * (parallel execution) flush as `in_progress` and update later on their end.
+ * **Threshold buffering** (tool-mode only): tools that fire before the
+ * threshold is crossed are tracked in memory; when threshold crosses, all
+ * known tasks flush at their current status. Tasks that already ended in the
+ * buffer window (sequential execution) flush as `complete`/`error`; tasks
+ * still running (parallel execution) flush as `in_progress` and update later
+ * on their end.
  *
  * All chunk sends are best-effort: errors are logged and swallowed so a card
  * failure never blocks reply delivery.
@@ -103,6 +116,8 @@ class TaskCardManager {
   private readonly taskOrder: string[] = [];
   private toolCount = 0;
   private active = false;
+  /** Set on first `set_plan` event; latches for the rest of the turn. */
+  private planMode = false;
 
   constructor(
     /** Callback that pushes task_update chunks into the open stream. */
@@ -111,7 +126,53 @@ class TaskCardManager {
     private readonly threshold: number,
   ) {}
 
+  /**
+   * Subscribe to a `PlanController` for model-authored plan rows. Call once
+   * during stream setup. The first `set_plan` event flips the card into
+   * plan-mode and suppresses subsequent tool-derived rows.
+   */
+  bindPlan(controller: PlanController): void {
+    controller.subscribe(async (event) => {
+      if (event.type === 'set_plan') {
+        // Latch into plan-mode and render every item at `pending`. This is
+        // the activation moment for the card — even if tool calls already
+        // fired, their rows are discarded and replaced by the plan view.
+        this.planMode = true;
+        this.active = true;
+        const chunks: TaskUpdateChunk[] = event.items.map((item) => ({
+          type: 'task_update',
+          id: item.id,
+          title: item.title,
+          status: 'pending',
+        }));
+        await this.sendChunks(chunks).catch((err) =>
+          console.warn('[agent] plan set_plan flush failed (continuing):', err),
+        );
+        return;
+      }
+      // update_task — single row update. `blocked` maps to Slack's native
+      // `error` status plus the reason in `details`, since TaskUpdateChunk
+      // doesn't carry a dedicated blocked state today.
+      const item = event.item;
+      const chunk: TaskUpdateChunk = {
+        type: 'task_update',
+        id: item.id,
+        title: item.title,
+        status: item.status === 'blocked' ? 'error' : item.status,
+        ...(item.note !== undefined ? { details: item.note } : {}),
+      };
+      await this.sendChunks([chunk]).catch((err) =>
+        console.warn('[agent] plan update_task flush failed (continuing):', err),
+      );
+    });
+  }
+
   async onToolStart(toolCallId: string, friendlyLabel: string): Promise<void> {
+    // Plan-mode suppresses tool-derived rows entirely — the model's plan IS
+    // the card; the per-tool shimmer is the right granularity for "what's
+    // happening right now."
+    if (this.planMode) return;
+
     this.toolCount++;
     const id = `task-${++this.taskCounter}`;
     const title = capitalize(friendlyLabel);
@@ -146,6 +207,7 @@ class TaskCardManager {
   }
 
   async onToolEnd(toolCallId: string, errored: boolean): Promise<void> {
+    if (this.planMode) return;
     const task = this.tasks.get(toolCallId);
     if (task === undefined) return;
     task.status = errored ? 'error' : 'complete';
@@ -159,6 +221,12 @@ class TaskCardManager {
   }
 
   async finish(): Promise<void> {
+    // In plan-mode the model owns the plan's terminal state; do not
+    // retroactively mark plan items complete. If the model left an item
+    // in_progress at turn end, the visual reflects that — which is honest
+    // and forces a follow-up rather than a silent lie.
+    if (this.planMode) return;
+
     // Defensive: if the loop terminated mid-flight (no tool_execution_end for
     // some task), mark anything still in_progress as complete so cards don't
     // get stuck mid-air. Only runs when the card was ever shown.
@@ -329,6 +397,13 @@ async function streamReply(
   ctx: {
     history: ChatMessage[];
     registry: ToolRegistry;
+    /**
+     * Plan controller for this turn — bound to the TaskCardManager below so
+     * `set_plan` / `update_task` tool calls render into the same card.
+     * Always passed when streaming; non-streaming fallback doesn't render
+     * plan rows but the tools still mutate the controller harmlessly.
+     */
+    planController: PlanController;
   },
 ): Promise<boolean> {
   const channel = turn.channelId as SlackChannelId;
@@ -422,6 +497,10 @@ async function streamReply(
       await deps.slackClient.chatAppendStream({ channel, ts: streamTs!, chunks });
     };
     const taskCard = cardThreshold > 0 ? new TaskCardManager(sendTaskChunks, cardThreshold) : null;
+    // Wire model-authored plan rows into the same card. When no card exists
+    // (threshold disabled), the plan controller still mutates harmlessly; no
+    // listener fires.
+    taskCard?.bindPlan(ctx.planController);
 
     const flushBuffer = async (): Promise<void> => {
       if (buffer.length === 0 || streamTs === undefined) return;
@@ -568,17 +647,24 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   // viewed-channel context as a user role message).
   void maybeSetThreadTitleFromTurn(turn, deps, baseHistory);
 
+  // Per-turn plan controller — both streaming and post-message paths share
+  // this. On the streaming path it drives the TaskCardManager into plan-mode
+  // when the model calls `set_plan`; on the post-message path it's a no-op
+  // state holder (no card exists) but the tool calls still succeed cleanly.
+  const planController = new PlanController();
+
   const builtin = createBuiltinDispatcher({
     slackClient: deps.slackClient,
     botUserId: deps.botUserId,
     ...(deps.userSlackClient !== undefined ? { userSlackClient: deps.userSlackClient } : {}),
     ownerPostMarker: deps.behavior.ownerPostMarker,
+    planController,
   });
   const registry = new ToolRegistry(builtin);
 
   // Threaded turns: try streaming; fall through to postMessage only if it fails.
   if (turn.threadTs !== undefined) {
-    const streamed = await streamReply(turn, deps, { history, registry });
+    const streamed = await streamReply(turn, deps, { history, registry, planController });
     if (streamed) return;
   }
 
