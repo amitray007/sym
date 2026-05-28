@@ -237,8 +237,16 @@ const TOOL_VERBS: Record<string, string> = {
  * Tools whose execution is metadata-only — no shimmer, no task-card row, no
  * receipt entry. The model uses them to mutate plan state; surfacing them in
  * the UI would create noise on every checkmark.
+ *
+ * `set_plan` lives here because the tool's start fires BEFORE plan-mode
+ * latches (the latch happens during the tool's dispatch, in
+ * `PlanController.setPlan`). A "Planning the work" tool row would slip
+ * onto the card before the actual plan items render, then never settle
+ * cleanly — the screenshot from 2026-05-29 showed it sitting at error.
+ * The PlanController's own `set_plan` event drives the visible rows; the
+ * tool execution itself is invisible.
  */
-const SILENT_TOOLS: ReadonlySet<string> = new Set(['update_task']);
+const SILENT_TOOLS: ReadonlySet<string> = new Set(['update_task', 'set_plan']);
 
 function friendlyVerb(toolName: string): string {
   return TOOL_VERBS[toolName] ?? `using ${toolName}`;

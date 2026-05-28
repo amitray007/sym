@@ -163,6 +163,33 @@ describe('NameResolver.rewriteMentions', () => {
     expect(out).toBe('unknown <@UDEAD> and <#CGHOST>');
   });
 
+  it('rewrites DM-style channel markup (`<#U…|direct message>`) using inline label', async () => {
+    // Slack search results sometimes carry DMs as channel-link syntax with a
+    // USER id prefix and an inline label like "direct message". The id is
+    // not a channel id at all; only the label is useful. Observed during
+    // dogfooding 2026-05-29 — raw <#U03…|direct message> markup was leaking
+    // into search-result replies.
+    const conversationsList = vi.fn();
+    const r = new NameResolver();
+    const out = await r.rewriteMentions(
+      'See <#U03U3R8232T|direct message>',
+      makeClient({ conversationsList }),
+    );
+    expect(out).toBe('See #direct message');
+    // Critical: U-prefix ids must NOT trigger a channel bulk-fill API call.
+    expect(conversationsList).not.toHaveBeenCalled();
+  });
+
+  it('handles a mix of canonical and DM-style channel links', async () => {
+    const r = new NameResolver();
+    r.primeForTests({}, { C100: 'general' });
+    const out = await r.rewriteMentions(
+      'posted in <#C100> and via <#D04ABC|dm with sarah>',
+      makeClient(),
+    );
+    expect(out).toBe('posted in #general and via #dm with sarah');
+  });
+
   it('resolves unknown user ids lazily during a rewrite', async () => {
     const usersInfo = vi.fn().mockResolvedValue({
       displayName: 'Sarah',

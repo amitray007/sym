@@ -36,8 +36,16 @@ type CacheValue = string | null;
 
 /** Match `<@U…>` and `<@W…>` Slack mention syntax (workspace/external members). */
 const USER_MENTION_RE = /<@([UW][A-Z0-9]+)>/g;
-/** Match `<#C…|optional-name>` Slack channel link syntax. */
-const CHANNEL_MENTION_RE = /<#(C[A-Z0-9]+)(?:\|([^>]*))?>/g;
+/**
+ * Match Slack channel-link syntax `<#XXX|optional-name>` for any uppercase
+ * id prefix. Public channels are `C…`, DMs are `D…`, MPIMs `G…`, but Slack
+ * search occasionally returns DMs with `<#U…|direct message>` style markup
+ * where the id is the OTHER party's user id. We accept any uppercase id
+ * shape and rely on (a) the channel cache for normal `C…` ids, (b) the
+ * inline label as fallback for the weird shapes. Without this widening the
+ * raw `<#U03…|direct message>` markup leaked into search-result replies.
+ */
+const CHANNEL_MENTION_RE = /<#([A-Z][A-Z0-9]+)(?:\|([^>]*))?>/g;
 
 export class NameResolver {
   private readonly users = new Map<string, CacheValue>();
@@ -121,7 +129,12 @@ export class NameResolver {
     }
     for (const m of text.matchAll(CHANNEL_MENTION_RE)) {
       const id = m[1]!;
-      if (!this.channels.has(id)) channelIds.add(id);
+      // Only resolve via conversations.list when the id has the canonical
+      // channel-prefix shape. DM-style channel markup (`<#U…|direct message>`)
+      // carries a USER id, not a channel id — resolving it as a channel
+      // would burn a bulk-list round-trip to learn the obvious. Rely on the
+      // inline label for those.
+      if (id.startsWith('C') && !this.channels.has(id)) channelIds.add(id);
     }
 
     await Promise.all([
@@ -135,6 +148,7 @@ export class NameResolver {
         return name != null ? `@${name}` : match;
       })
       .replace(CHANNEL_MENTION_RE, (match, id: string, inlineName?: string) => {
+        // Prefer cached canonical name → inline label → keep raw markup.
         const name = this.channels.get(id) ?? inlineName;
         return name != null && name.length > 0 ? `#${name}` : match;
       });

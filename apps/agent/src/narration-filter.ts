@@ -64,6 +64,27 @@ const NARRATION_PATTERNS: readonly RegExp[] = [
   // sentences like "I'm reading the thread now" mid-paragraph don't trip
   // (those rarely appear; if they do, the cost is one extra line drop).
   /^(?:searching|reading|calling|fetching|looking up|checking)\s+(?:slack|the\s+(?:channel|thread|messages?|workspace)|messages|channels?|the\s+web)\b/i,
+
+  // "Now fetch profile.", "Now search again.", "Now read channel C0123." —
+  // model talking to itself with an imperative verb after "Now". Gated to
+  // a tight verb list so "Now I have the answer" stays through. Observed
+  // 2026-05-29 dogfood: "Now fetch profile.Amit's recent remarks…"
+  /^now\s+(?:fetch|search|read|check|call|run|use|look\s+up|update|mark|move\s+on)\b/i,
+
+  // "Search again broader", "Search wider", "Search broader" — meta-narration
+  // about the model's own retrieval strategy. Gated to "search" as the
+  // line-start verb; the adverbs are the smoking gun.
+  /^search\s+(?:again|broader|wider|harder|deeper|more)\b/i,
+
+  // "Need to include those.", "Need to fetch the profile.", "Need to widen
+  // the search." — self-instruction. Real owner-facing prose almost never
+  // starts a sentence with bare "Need to" (it's "I need to" or "We need to").
+  /^need\s+to\s+\w+/i,
+
+  // "Let me check the docs", "Let me search again" — model planning aloud.
+  // Common in agent traces, rare in actual sharp-colleague replies. Gated
+  // to a tight verb list so "Let me know if…" stays through.
+  /^let\s+me\s+(?:check|search|see|look|find|try|read|fetch|pull|run)\b/i,
 ];
 
 /**
@@ -82,24 +103,45 @@ function isNarration(segment: string): boolean {
 /**
  * Find the index AFTER the first segment boundary in `s`, or -1 if none.
  *
- * Boundaries (in order of preference): `\n`, `. ` / `! ` / `? `. We treat the
- * boundary as INCLUSIVE — the returned index is the cut point so the segment
- * we extract includes the terminator (matters for preserving the newline /
- * space in kept content).
+ * Boundaries (in order of preference):
+ *  - `\n` — strongest signal
+ *  - `. ` / `! ` / `? ` — sentence end followed by whitespace
+ *  - `.X` / `!X` / `?X` where X is a capital letter — sentence end with NO
+ *    space (some checkpoints emit glued sentences: `"broader.We have..."`).
+ *    Without this lookahead the entire stretch arrives as one segment and
+ *    slips past narration classification at flush time.
+ *
+ * We treat the boundary as INCLUSIVE — the returned index is the cut point
+ * so the segment we extract includes the terminator (matters for preserving
+ * the newline / space in kept content).
  */
 function findSegmentEnd(s: string): number {
   // Newline first — strongest signal.
   const nl = s.indexOf('\n');
-  // Sentence-end: `.`, `!`, `?` followed by whitespace.
-  const sentenceRe = /[.!?](?=\s)/;
+  // Sentence-end: `.`, `!`, `?` followed by whitespace OR a capital letter
+  // (sentence boundary even without a space). The lookahead is intentionally
+  // strict on the capital-letter case so `e.g.` / `i.e.` / abbreviations
+  // mid-segment don't trip false splits.
+  const sentenceRe = /[.!?](?=\s|[A-Z])/;
   const m = sentenceRe.exec(s);
-  const sentEnd = m === null ? -1 : m.index + 1; // index of the punctuation + 1
+  // `m.index` points at the punctuation. The cut point depends on what
+  // followed:
+  //  - whitespace → include the whitespace in this segment so it isn't lost
+  //  - capital letter → do NOT include it; that letter belongs to the next
+  //    sentence (otherwise "broader.We" emits "e have…" — the W gets eaten)
+  let sentEnd = -1;
+  if (m !== null) {
+    const punctIdx = m.index;
+    const next = s.charAt(punctIdx + 1);
+    sentEnd = /\s/.test(next) ? punctIdx + 2 : punctIdx + 1;
+  }
 
   if (nl === -1 && sentEnd === -1) return -1;
-  if (nl === -1) return sentEnd + 1; // include the whitespace after punct
+  if (nl === -1) return sentEnd;
   if (sentEnd === -1) return nl + 1;
-  // Take the earlier boundary.
-  return nl <= sentEnd ? nl + 1 : sentEnd + 1;
+  // Take the earlier boundary. Newline cut is always nl+1 (include the \n).
+  const nlCut = nl + 1;
+  return nlCut <= sentEnd ? nlCut : sentEnd;
 }
 
 /**

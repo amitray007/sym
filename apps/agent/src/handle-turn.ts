@@ -130,6 +130,12 @@ class TaskCardManager {
   private active = false;
   /** Set on first `set_plan` event; latches for the rest of the turn. */
   private planMode = false;
+  /**
+   * Reference to the bound plan controller, kept around so `finish()` can
+   * inspect terminal plan-item states and auto-settle anything the model
+   * left hanging. Null until `bindPlan` is called.
+   */
+  private boundPlan: PlanController | null = null;
   /** Set once we've emitted the "Thinking" prelude row. */
   private preludeEmitted = false;
   /** Set once we've settled (checked off) the prelude row. */
@@ -202,6 +208,7 @@ class TaskCardManager {
    * plan-mode and suppresses subsequent tool-derived rows.
    */
   bindPlan(controller: PlanController): void {
+    this.boundPlan = controller;
     controller.subscribe(async (event) => {
       if (event.type === 'set_plan') {
         // Real content arriving — settle the "Thinking" prelude first so the
@@ -304,10 +311,37 @@ class TaskCardManager {
     // because the prelude is independent of plan-mode latching.
     await this.settlePrelude();
 
-    // In plan-mode the model owns the plan's terminal state; do not
-    // retroactively mark plan items complete. If the model left an item
-    // in_progress at turn end, the visual reflects that — which is honest
-    // and forces a follow-up rather than a silent lie.
+    // **Plan-mode auto-complete.** When the turn ends and the model produced
+    // a reply, any plan items left in `pending` / `in_progress` should
+    // visually close as complete — leaving them unsettled punishes the
+    // owner for the model's silence about calling `update_task`. We
+    // explicitly DO NOT touch items the model marked `blocked` (mapped to
+    // error in the chunk shape): the model affirmatively raised those, the
+    // owner needs to see them, the reply text typically explains them.
+    //
+    // Reversal of the earlier "honest" design — see the 2026-05-29 dogfood
+    // screenshot where unsettled rows displayed as ⚠️ and made a successful
+    // turn look like a failure. Honesty about un-touched items isn't worth
+    // implying failure on a turn that actually delivered.
+    if (this.planMode && this.boundPlan !== null) {
+      const stuck = this.boundPlan
+        .snapshot()
+        .filter((item) => item.status === 'pending' || item.status === 'in_progress')
+        .map(
+          (item): TaskUpdateChunk => ({
+            type: 'task_update',
+            id: item.id,
+            title: item.title,
+            status: 'complete',
+          }),
+        );
+      if (stuck.length > 0) {
+        await this.sendChunks(stuck).catch((err) =>
+          console.warn('[agent] plan auto-complete on finish failed (continuing):', err),
+        );
+      }
+      return;
+    }
     if (this.planMode) return;
 
     // Defensive: if the loop terminated mid-flight (no tool_execution_end for

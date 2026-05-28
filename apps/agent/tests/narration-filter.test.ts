@@ -138,6 +138,65 @@ describe('NarrationFilter — sentence-end boundary', () => {
   });
 });
 
+describe('NarrationFilter — patterns added 2026-05-29 (dogfood gaps)', () => {
+  // The model emits self-instruction sentences observed in dogfooding:
+  // "Now fetch profile.", "Search again broader.", "Need to include those."
+  // These are model-talks-to-itself and should be dropped from the reply.
+
+  it('drops "Now fetch profile." (model self-instruction)', () => {
+    expect(feedAll(['Now fetch profile.\n'])).toBe('');
+  });
+
+  it('drops "Search again broader." (meta-narration about retrieval)', () => {
+    expect(feedAll(['Search again broader.\n'])).toBe('');
+  });
+
+  it('drops "Need to include those." (internal reasoning out loud)', () => {
+    expect(feedAll(['Need to include those.\n'])).toBe('');
+  });
+
+  it('drops "Let me check the docs." (model planning aloud)', () => {
+    expect(feedAll(['Let me check the docs.\n'])).toBe('');
+  });
+
+  it('keeps "Let me know if you need anything else." (real reply phrasing)', () => {
+    // Tight verb gating so "Let me know if…" stays through despite the
+    // "Let me…" prefix. This is the false-drop guard.
+    expect(feedAll(['Let me know if you need anything else.\n'])).toBe(
+      'Let me know if you need anything else.\n',
+    );
+  });
+
+  it('keeps "Now I have the answer." (not a self-instruction)', () => {
+    // The "Now X" pattern only matches imperative verbs (fetch/search/read).
+    // Sentences like "Now I…" should pass through.
+    expect(feedAll(['Now I have the answer.\n'])).toBe('Now I have the answer.\n');
+  });
+});
+
+describe('NarrationFilter — glued-sentence boundary (no-space after period)', () => {
+  // Some checkpoints emit consecutive sentences without spaces:
+  // "broader.We have some pricing mentions". Without a capital-letter
+  // lookahead, findSegmentEnd misses the boundary and the whole stretch
+  // arrives as one segment that slips past classification.
+
+  it('splits "broader.We" so the narration is dropped and content kept', () => {
+    // First sentence is narration (Search again broader.), second is content.
+    const f = new NarrationFilter();
+    const out = f.push('Search again broader.We have some pricing mentions.\n');
+    expect(out).toBe('We have some pricing mentions.\n');
+  });
+
+  it('drops a sentence ending without space when the next sentence starts capital', () => {
+    expect(feedAll(['Now fetch profile.Amit said hello.\n'])).toBe('Amit said hello.\n');
+  });
+
+  it('does not over-split on intra-word periods (e.g., URLs, abbreviations)', () => {
+    // "i.e." / "etc." / lowercase-letter follow-ups should not trigger.
+    expect(feedAll(['e.g. this is fine.\n'])).toBe('e.g. this is fine.\n');
+  });
+});
+
 describe('NarrationFilter — empty / whitespace', () => {
   it('handles empty pushes', () => {
     const f = new NarrationFilter();
