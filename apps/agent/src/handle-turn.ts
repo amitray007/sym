@@ -7,6 +7,7 @@ import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
 import { PlanController } from './plan-controller.js';
+import { pickThinkingCopy } from './thinking-copy.js';
 
 import type { BehaviorConfig } from './config.js';
 import type { NameResolver } from './name-resolver.js';
@@ -133,6 +134,13 @@ class TaskCardManager {
   private preludeEmitted = false;
   /** Set once we've settled (checked off) the prelude row. */
   private preludeSettled = false;
+  /**
+   * Title used on both the in_progress and complete rows for the prelude.
+   * Stored so `settlePrelude` doesn't have to receive the same string again
+   * — Slack will silently drop the row if the title shifts under the same
+   * id, so consistency matters.
+   */
+  private preludeTitle = 'Thinking';
 
   constructor(
     /** Callback that pushes task_update chunks into the open stream. */
@@ -142,24 +150,28 @@ class TaskCardManager {
   ) {}
 
   /**
-   * Emit the "Thinking" prelude row — a highlighted in_progress task that
-   * replaces Slack's plain "Thinking..." stream placeholder. Called eagerly
-   * by `streamReply` once the stream is open. Idempotent; subsequent calls
-   * are no-ops.
+   * Emit the prelude row — a highlighted in_progress task that replaces
+   * Slack's plain "Thinking..." stream placeholder. Called eagerly by
+   * `streamReply` once the stream is open. Idempotent; subsequent calls
+   * are no-ops. The title is supplied by the caller (today: rotated via
+   * `pickThinkingCopy(turn.id)`), stored so `settlePrelude` uses the same
+   * word — Slack expects (id, title) stability for an update to land on
+   * the same row.
    *
    * Settled to `complete` by `settlePrelude` the first time real content
    * (plan rows, tool rows, text deltas) shows up — the prelude becomes the
    * card's "I saw your ask" history marker.
    */
-  async emitThinkingPrelude(): Promise<void> {
+  async emitThinkingPrelude(title: string): Promise<void> {
     if (this.preludeEmitted) return;
     this.preludeEmitted = true;
+    this.preludeTitle = title;
     this.active = true;
     await this.sendChunks([
       {
         type: 'task_update',
         id: THINKING_PRELUDE_ID,
-        title: 'Thinking',
+        title: this.preludeTitle,
         status: 'in_progress',
       },
     ]).catch((err) => console.warn('[agent] prelude emit failed (continuing):', err));
@@ -168,7 +180,8 @@ class TaskCardManager {
   /**
    * Settle the prelude row to `complete` the first time real content arrives.
    * Idempotent; safe to call from every "first content" hook (text delta,
-   * plan event, tool start).
+   * plan event, tool start). Reuses the title from `emitThinkingPrelude` so
+   * the row label is stable across the lifecycle.
    */
   async settlePrelude(): Promise<void> {
     if (!this.preludeEmitted || this.preludeSettled) return;
@@ -177,7 +190,7 @@ class TaskCardManager {
       {
         type: 'task_update',
         id: THINKING_PRELUDE_ID,
-        title: 'Thinking',
+        title: this.preludeTitle,
         status: 'complete',
       },
     ]).catch((err) => console.warn('[agent] prelude settle failed (continuing):', err));
@@ -592,15 +605,25 @@ async function streamReply(
     // listener fires.
     taskCard?.bindPlan(ctx.planController);
 
-    // Eagerly emit the "Thinking" prelude — opens the stream and renders a
+    // Eagerly emit the prelude row — opens the stream and renders a
     // highlighted in_progress task row immediately so Slack's plain
     // "Thinking..." stream placeholder never gets a chance to show.
     // Awaited (not fire-and-forget) so the prelude row is on-screen before
     // any tool row or text delta lands — predictable ordering for both the
-    // owner and for our integration tests. When the card is disabled
-    // (threshold=0) we skip — the surface accepts plain streams in that case.
-    if (taskCard !== null) {
-      await taskCard.emitThinkingPrelude();
+    // owner and for our integration tests.
+    //
+    // **Skipped on the assistant panel.** That surface already runs the
+    // `assistant.threads.setStatus` shimmer ("is thinking…") at t=0 — the
+    // prelude row would duplicate it. On channel threads the shimmer is
+    // less prominent, so the row earns its keep there.
+    //
+    // **Skipped when the card is fully disabled** (threshold=0): the
+    // surface has explicitly opted out of card UI.
+    //
+    // Title rotates per turn via `pickThinkingCopy(turn.id)` — deterministic
+    // so log slices and replays show the same word for the same turn.
+    if (taskCard !== null && !isAssistant) {
+      await taskCard.emitThinkingPrelude(pickThinkingCopy(turn.id));
     }
 
     const flushBuffer = async (): Promise<void> => {

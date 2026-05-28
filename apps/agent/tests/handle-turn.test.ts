@@ -776,6 +776,49 @@ describe('handleTurn', () => {
     expect(firstPreludeIdx).toBeLessThan(firstTaskIdx);
   });
 
+  it('suppresses the prelude row on the assistant-panel surface (entrySurface=dm)', async () => {
+    // The assistant panel already runs the `assistant.threads.setStatus`
+    // shimmer at t=0 — the prelude row would duplicate it. Channel threads
+    // get the prelude; DMs (assistant panel) skip it.
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as {
+          onDelta?: (d: string) => Promise<void>;
+          onToolStart?: (toolCallId: string, label: string) => Promise<void>;
+          onToolEnd?: (toolCallId: string, errored: boolean) => Promise<void>;
+        };
+        await o.onToolStart?.('call-1', 'checking the time');
+        await o.onToolEnd?.('call-1', false);
+        await o.onDelta?.('5pm');
+        return makeReply({ markdown: '5pm' });
+      },
+    );
+
+    const chunks: { id: string }[] = [];
+    const slack = new MockSlackClient();
+    const origAppend = slack.chatAppendStream.bind(slack);
+    slack.chatAppendStream = async (params: AppendStreamParams): Promise<void> => {
+      for (const c of params.chunks ?? []) {
+        if (c.type === 'task_update') chunks.push({ id: c.id });
+      }
+      await origAppend(params);
+    };
+
+    await handleTurn(makeTurn({ entrySurface: 'dm', threadTs: '900.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
+    });
+
+    // No prelude row at all on the assistant-panel surface.
+    expect(chunks.some((c) => c.id === 'sym-thinking-prelude')).toBe(false);
+    // Real tool rows still render — assistant-panel suppression is prelude-only.
+    expect(chunks.some((c) => c.id.startsWith('task-'))).toBe(true);
+  });
+
   // -----------------------------------------------------------------------
   // ID-resolution coverage at the handle-turn boundary. Each entry surface
   // that hands text to the model gets a defensive rewrite pass so raw
