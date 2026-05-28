@@ -30,6 +30,16 @@ features:
   bot_user:
     display_name: Sym
     always_online: true
+  # Slash commands — single universal entry. The owner can fire `/sym <text>`
+  # from any channel or DM; non-owner invocations are silently ACK'd by the
+  # agent (the slash command surface stays cosmetically functional without
+  # exposing Sym to the workspace). See apps/agent/src/server.ts → /slack/commands.
+  slash_commands:
+    - command: /sym
+      url: ${SLACK_PUBLIC_BASE_URL}/slack/commands
+      description: Ask Sym anything — recap, search, post, remind, find people
+      usage_hint: '<question or instruction>'
+      should_escape: false
 oauth_config:
   redirect_urls:
     - ${SLACK_PUBLIC_BASE_URL}/slack/oauth/callback
@@ -90,6 +100,13 @@ oauth_config:
       - users:read
       - users:read.email
 settings:
+  # Interactivity & Shortcuts — required for confirmation buttons (Phase B
+  # write tools) and for slash commands to deliver a response_url back to
+  # the agent. The endpoint owner-gates clicks the same way /slack/events
+  # gates messages.
+  interactivity:
+    is_enabled: true
+    request_url: ${SLACK_PUBLIC_BASE_URL}/slack/interactivity
   event_subscriptions:
     request_url: ${SLACK_PUBLIC_BASE_URL}/slack/events
     bot_events:

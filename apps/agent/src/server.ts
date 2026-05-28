@@ -10,12 +10,13 @@ import { Hono } from 'hono';
 import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { resolveConfirmation } from './confirmations.js';
-import { handleTurn } from './handle-turn.js';
+import { handleTurn, type HandleTurnDeps } from './handle-turn.js';
 import { OWNER_DECLINE_MESSAGE, checkOwnerAccess } from './owner-gate.js';
 import { healthCheckTokens, loadWorkspaceContext } from './workspace-context.js';
 
 import type { AgentConfig } from './config.js';
 import type { RawSlackEvent } from '@sym/adapter-slack';
+import type { SlackThreadTs, SlackUserId, Turn } from '@sym/contracts';
 
 export interface ServerDeps {
   config: AgentConfig;
@@ -63,8 +64,11 @@ export function createServer(deps: ServerDeps): Hono {
     }
 
     // Assistant container lifecycle: track context changes before anything else.
+    // Owner-gated — a non-owner navigating their own Sym panel must NOT cause
+    // Sym to update any panel state on their behalf. Silent drop, no API calls.
     const ctxChanged = assistantThreadContextChanged(raw);
     if (ctxChanged) {
+      if (ctxChanged.userId !== ctx.ownerSlackUserId) return;
       assistantContext.remember(
         ctxChanged.channelId,
         ctxChanged.threadTs,
@@ -74,8 +78,13 @@ export function createServer(deps: ServerDeps): Hono {
     }
 
     // Assistant container lifecycle: greet a freshly opened panel. Not a Turn.
+    // Owner-gated — without this, a non-owner opening the Sym Assistant panel
+    // would see a furnished bot (title, starter prompts, welcome message) that
+    // implies Sym serves them. Their messages still get declined later, but the
+    // first impression must not contradict the lock.
     const assistantStart = assistantThreadStarted(raw);
     if (assistantStart) {
+      if (assistantStart.userId !== ctx.ownerSlackUserId) return;
       assistantContext.remember(
         assistantStart.channelId,
         assistantStart.threadTs,
@@ -115,7 +124,16 @@ export function createServer(deps: ServerDeps): Hono {
       turn.channelId !== undefined && turn.threadTs !== undefined
         ? assistantContext.lookup(turn.channelId, turn.threadTs)
         : undefined;
-    await handleTurn(turn, {
+    await handleTurn(turn, buildTurnDeps(viewedChannelId));
+  }
+
+  /**
+   * Build the per-turn `HandleTurnDeps` from the workspace context. Extracted
+   * so every ingress route (events, slash commands, future shortcuts) hands
+   * `handleTurn` the same shape — no drift between paths.
+   */
+  function buildTurnDeps(viewedChannelId?: string): HandleTurnDeps {
+    return {
       fireworks: ctx.fireworks,
       model: ctx.model,
       slackClient: ctx.slackClient,
@@ -127,7 +145,74 @@ export function createServer(deps: ServerDeps): Hono {
       // Latest resolved owner profile (mutates onto ctx async — once boot
       // completes, every subsequent turn picks it up).
       ...(ctx.ownerProfile !== undefined ? { ownerProfile: ctx.ownerProfile } : {}),
+    };
+  }
+
+  /**
+   * Process a slash command turn. The flow:
+   *   1. Post a visible seed message in the channel attributing the command to
+   *      the owner ("`<@owner> via /sym`: <text>"). This gives us a `threadTs`
+   *      so the streamed reply lands in a thread under it — full task cards +
+   *      streaming + interactivity work, identical to an `app_mention` turn.
+   *   2. Run the turn through `handleTurn`, threaded under the seed.
+   *
+   * If the seed post fails — typically `not_in_channel` for a channel Sym
+   * isn't a member of — fall back to a private hint via `response_url`
+   * explaining that Sym needs to be invited first. We never drop silently:
+   * the owner deserves to see why their command did nothing.
+   *
+   * `responseUrl` is only used on the failure path; the success path is
+   * indistinguishable from a normal threaded reply.
+   */
+  async function processSlashCommand(
+    rawEvent: RawSlackEvent,
+    requester: SlackUserId,
+    responseUrl: string,
+  ): Promise<void> {
+    const input = normalizeSlackEvent({
+      event: rawEvent,
+      workspaceId: ctx.workspaceId,
+      botUserId: ctx.botUserId,
     });
+    if (!input) return;
+    const turn = slackTurnInputToTurn(input);
+    if (turn.channelId === undefined) return;
+
+    // Seed the channel with a one-line attribution; its ts becomes the thread
+    // root so the streamed reply renders as a normal in-thread answer.
+    const seedText = turn.text && turn.text.length > 0 ? turn.text : '(no text)';
+    let seedTs: SlackThreadTs;
+    try {
+      const result = await ctx.slackClient.chatPostMessage({
+        channel: turn.channelId,
+        text: `<@${requester}> via \`/sym\`: ${seedText}`,
+      });
+      seedTs = result.ts;
+    } catch (err) {
+      console.warn('[agent] /sym seed post failed — falling back to response_url:', err);
+      // Most common cause is `not_in_channel`. Surface a private, actionable
+      // hint to the owner via Slack's response_url (ephemeral by default).
+      try {
+        await fetch(responseUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            response_type: 'ephemeral',
+            text:
+              "I couldn't post in this channel — invite me first with `/invite @Sym`, then try `/sym` again. " +
+              '(Or run it from a channel I’m already in, or from our DM.)',
+          }),
+        });
+      } catch (postErr) {
+        console.warn('[agent] /sym response_url fallback failed (continuing):', postErr);
+      }
+      return;
+    }
+
+    // Re-issue the turn with the seed message's ts as the thread root so
+    // `streamReply` engages (task cards + streaming require a threadTs).
+    const threadedTurn: Turn = { ...turn, threadTs: seedTs };
+    await handleTurn(threadedTurn, buildTurnDeps());
   }
 
   app.post('/slack/events', async (c) => {
@@ -275,6 +360,106 @@ export function createServer(deps: ServerDeps): Hono {
     }
 
     return c.json({ ok: true });
+  });
+
+  // --- Slack Slash Commands -------------------------------------------------
+  // Single command for now: `/sym <anything>`. The Slack manifest declares it;
+  // configure its Request URL to <AGENT_URL>/slack/commands.
+  //
+  // Slack posts an `application/x-www-form-urlencoded` body with fields:
+  //   token, team_id, team_domain, channel_id, channel_name, user_id, user_name,
+  //   command, text, trigger_id, response_url, api_app_id, …
+  //
+  // We sig-verify on the raw bytes (same secret as /slack/events), then gate
+  // on workspace + owner. Non-owner / foreign-team commands silent-ACK so the
+  // command "works" cosmetically without exposing Sym to the rest of the team.
+  // The actual turn runs in the background via processSlashCommand.
+  app.post('/slack/commands', async (c) => {
+    const rawBody = await c.req.text();
+
+    const verification = verifySlackSignature({
+      signingSecret: config.slackSigningSecret,
+      headers: {
+        'x-slack-request-timestamp': c.req.header('x-slack-request-timestamp') ?? '',
+        'x-slack-signature': c.req.header('x-slack-signature') ?? '',
+      },
+      rawBody,
+    });
+    if (!verification.ok) {
+      return c.json({ error: verification.reason }, 401);
+    }
+
+    // Parse the form-encoded payload.
+    let params: URLSearchParams;
+    try {
+      params = new URLSearchParams(rawBody);
+    } catch {
+      return c.json({ error: 'invalid_form' }, 400);
+    }
+
+    const teamId = params.get('team_id') ?? '';
+    const userId = params.get('user_id') ?? '';
+    const channelId = params.get('channel_id') ?? '';
+    const command = params.get('command') ?? '';
+    const text = params.get('text') ?? '';
+    const triggerId = params.get('trigger_id') ?? '';
+    const responseUrl = params.get('response_url') ?? '';
+
+    // Foreign-workspace guard — silent-ACK so a misconfigured second install
+    // doesn't get a Slack-visible error pointing back at us.
+    if (teamId !== config.slackTeamId) {
+      return c.body(null, 200);
+    }
+
+    // Owner gate. The slash command surface looks identical for owner and
+    // non-owner — silent ACK either way, no telltale Slack error. Non-owner
+    // commands simply do nothing visible.
+    if (checkOwnerAccess(userId as SlackUserId, ctx.ownerSlackUserId) === 'deny') {
+      return c.body(null, 200);
+    }
+
+    if (!command || !channelId || !userId) {
+      return c.body(null, 200);
+    }
+
+    // Dedup on trigger_id (Slack guarantees uniqueness per command invocation).
+    // Slack doesn't retry slash commands the way it retries events, but the
+    // same dedup keeps duplicate clicks (browser double-tap, mobile retry) safe.
+    if (triggerId && alreadySeen(triggerId)) {
+      return c.body(null, 200);
+    }
+
+    // Empty `/sym` with no text — nudge the owner ephemerally rather than
+    // posting a blank seed in the channel.
+    if (text.trim().length === 0) {
+      void fetch(responseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          response_type: 'ephemeral',
+          text: 'Usage: `/sym <question or instruction>` — e.g. `/sym recap #eng-platform from this morning`',
+        }),
+      }).catch((err: unknown) => {
+        console.warn('[agent] /sym usage hint post failed:', err);
+      });
+      return c.body(null, 200);
+    }
+
+    // ACK now (empty 200, Slack's preferred shape for "no immediate message");
+    // the real reply arrives via chat.postMessage from processSlashCommand.
+    const rawEvent: RawSlackEvent = {
+      type: 'slash_command',
+      team_id: teamId,
+      trigger_id: triggerId,
+      command,
+      user_id: userId,
+      channel_id: channelId,
+      text,
+    };
+    void processSlashCommand(rawEvent, userId as SlackUserId, responseUrl).catch((err: unknown) => {
+      console.error('[agent] processSlashCommand failed', err);
+    });
+    return c.body(null, 200);
   });
 
   app.get('/health', (c) => c.json({ ok: true }));

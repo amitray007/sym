@@ -241,6 +241,14 @@ export function slackTurnInputToTurn(input: SlackTurnInput): Turn {
  * assistant-thread identity and optional viewed-channel context.
  */
 export interface AssistantThreadStarted {
+  /**
+   * The Slack user who opened (or is navigating) the assistant container.
+   * Always present on both lifecycle events per Slack's payload spec — we
+   * surface it so the agent can owner-gate before calling any panel API
+   * (setTitle / setSuggestedPrompts / chatPostMessage), keeping non-owners
+   * from seeing a furnished bot greeting.
+   */
+  userId: SlackUserId;
   channelId: SlackChannelId;
   threadTs: SlackThreadTs;
   /** The channel the user was viewing when they opened/navigated the panel, if any. */
@@ -254,9 +262,10 @@ export interface AssistantThreadStarted {
 export function assistantThreadStarted(raw: RawSlackEvent): AssistantThreadStarted | null {
   if (raw.type !== 'event_callback' || raw.event?.type !== 'assistant_thread_started') return null;
   const at = raw.event.assistant_thread;
-  if (!at) return null;
+  if (!at || !at.user_id) return null;
   const ctxChannel = at.context?.channel_id;
   return {
+    userId: at.user_id as SlackUserId,
     channelId: at.channel_id as SlackChannelId,
     threadTs: at.thread_ts as SlackThreadTs,
     ...(ctxChannel !== undefined ? { contextChannelId: ctxChannel as SlackChannelId } : {}),
@@ -272,9 +281,10 @@ export function assistantThreadContextChanged(raw: RawSlackEvent): AssistantThre
   if (raw.type !== 'event_callback' || raw.event?.type !== 'assistant_thread_context_changed')
     return null;
   const at = raw.event.assistant_thread;
-  if (!at) return null;
+  if (!at || !at.user_id) return null;
   const ctxChannel = at.context?.channel_id;
   return {
+    userId: at.user_id as SlackUserId,
     channelId: at.channel_id as SlackChannelId,
     threadTs: at.thread_ts as SlackThreadTs,
     ...(ctxChannel !== undefined ? { contextChannelId: ctxChannel as SlackChannelId } : {}),

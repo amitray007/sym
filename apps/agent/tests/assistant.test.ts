@@ -10,9 +10,10 @@ import type {
   SetTitleParams,
   SlackClient,
 } from '@sym/adapter-slack';
-import type { SlackChannelId, SlackThreadTs } from '@sym/contracts';
+import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
 
 const THREAD: AssistantThreadStarted = {
+  userId: 'UOWNER' as SlackUserId,
   channelId: 'D999' as SlackChannelId,
   threadTs: '1700000020.000001' as SlackThreadTs,
 };

@@ -284,8 +284,9 @@ describe('assistantThreadStarted', () => {
     },
   };
 
-  it('extracts the assistant channel, thread, and viewed-channel context', () => {
+  it('extracts the user, assistant channel, thread, and viewed-channel context', () => {
     expect(assistantThreadStarted(startedEvent)).toEqual({
+      userId: 'U001',
       channelId: 'D999',
       threadTs: '1700000020.000001',
       contextChannelId: 'C777',
@@ -295,9 +296,27 @@ describe('assistantThreadStarted', () => {
   it('omits contextChannelId when the user is not viewing a channel', () => {
     const noContext: RawSlackEvent = {
       ...startedEvent,
-      event: { ...startedEvent.event!, assistant_thread: { channel_id: 'D999', thread_ts: '1.1' } },
+      event: {
+        ...startedEvent.event!,
+        assistant_thread: { user_id: 'U001', channel_id: 'D999', thread_ts: '1.1' },
+      },
     };
-    expect(assistantThreadStarted(noContext)).toEqual({ channelId: 'D999', threadTs: '1.1' });
+    expect(assistantThreadStarted(noContext)).toEqual({
+      userId: 'U001',
+      channelId: 'D999',
+      threadTs: '1.1',
+    });
+  });
+
+  it('returns null when assistant_thread.user_id is missing (cannot owner-gate)', () => {
+    const noUser: RawSlackEvent = {
+      ...startedEvent,
+      event: {
+        ...startedEvent.event!,
+        assistant_thread: { channel_id: 'D999', thread_ts: '1.1' },
+      },
+    };
+    expect(assistantThreadStarted(noUser)).toBeNull();
   });
 
   it('returns null for non-assistant events (e.g. app_mention)', () => {
@@ -324,8 +343,9 @@ describe('assistantThreadContextChanged', () => {
     },
   };
 
-  it('extracts the assistant channel, thread, and viewed-channel context', () => {
+  it('extracts the user, assistant channel, thread, and viewed-channel context', () => {
     expect(assistantThreadContextChanged(contextChangedEvent)).toEqual({
+      userId: 'U001',
       channelId: 'D999',
       threadTs: '1700000020.000001',
       contextChannelId: 'C888',
@@ -337,13 +357,29 @@ describe('assistantThreadContextChanged', () => {
       ...contextChangedEvent,
       event: {
         ...contextChangedEvent.event!,
-        assistant_thread: { channel_id: 'D999', thread_ts: '1700000020.000001' },
+        assistant_thread: {
+          user_id: 'U001',
+          channel_id: 'D999',
+          thread_ts: '1700000020.000001',
+        },
       },
     };
     expect(assistantThreadContextChanged(noContext)).toEqual({
+      userId: 'U001',
       channelId: 'D999',
       threadTs: '1700000020.000001',
     });
+  });
+
+  it('returns null when assistant_thread.user_id is missing', () => {
+    const noUser: RawSlackEvent = {
+      ...contextChangedEvent,
+      event: {
+        ...contextChangedEvent.event!,
+        assistant_thread: { channel_id: 'D999', thread_ts: '1.1' },
+      },
+    };
+    expect(assistantThreadContextChanged(noUser)).toBeNull();
   });
 
   it('returns null for non-context-changed events (e.g. app_mention)', () => {
