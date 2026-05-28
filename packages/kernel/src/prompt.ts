@@ -8,6 +8,13 @@ import type { SlackUserId, Turn } from '@sym/contracts';
  */
 export interface OwnerIdentity {
   userId: SlackUserId;
+  /**
+   * Slack `@-handle` — the stable username Slack uses for `search.messages`
+   * `from:@…` filters. Distinct from `displayName` (which the owner may have
+   * set to anything). When present, the model should prefer this for search
+   * filters.
+   */
+  userName?: string;
   displayName?: string;
   realName?: string;
   title?: string;
@@ -65,7 +72,8 @@ export function buildSystemPrompt(): string {
     '- Read first. The Slack thread and recent history are your authoritative context; use them before reaching for a tool.',
     '- Reach for tools without narrating each step. The owner sees a live task card as you work — they don’t need a play-by-play.',
     '- When a tool fails, try to recover (different query, alternative tool, fall back to what you know). Only stop and report when you’ve tried.',
-    '- For broad "what happened" / "who did I talk to" / "catch me up" questions, survey ALL relevant surfaces (DMs, channels, threads, recent activity), group findings, and show your work. Never dismiss with a single "no activity" line if you only checked one surface.',
+    '- For broad "what happened" / "who did I talk to" / "what did I do" / "catch me up" questions, your FIRST move is `search_messages` with `from:<@OWNER_ID>` and a date filter — that covers the entire workspace, not just one channel. Only fall to read_channel / list_channels when the search returns empty OR the user asks about a specific named channel.',
+    '- Never say "no messages in the channels you belong to" — that phrasing means you only checked a subset. If `search_messages` returned empty, say "I didn\'t find any messages from you on <date>" and offer to widen (different date, broader query). If you didn\'t call `search_messages` at all, you skipped the most important tool.',
     '- Group recap-style answers cleanly by surface: 1:1 conversations with other people, channel activity (posts/threads), and the owner’s interactions with you — separately. Surface what you DID find even when the literal answer is sparse.',
     '- When asked something open-ended, default to ACTING and showing the result, not ASKING for clarification. Save questions for genuine ambiguity (multiple plausible interpretations) or anything destructive.',
     '',
@@ -132,13 +140,19 @@ export function buildTurnContextPrompt(turn: Turn): string {
 
 /**
  * Compact, comma-separated identity line for the owner — e.g.
- * `Amit Ray (Asia/Kolkata, Engineering) — id U042MBPUZ9N`. Falls back to
- * just the id when no name is available so the model never gets an empty
- * "owner:" key.
+ * `Amit Ray (@amit, Asia/Kolkata, Engineering) — id U042MBPUZ9N`.
+ *
+ * The `@<userName>` form is what `search.messages` `from:@…` filters expect;
+ * the id form (`<@U…>`) also works. We surface both so the model can
+ * construct correct queries without guessing the @-handle.
+ *
+ * Falls back to just the id when no name is available so the model never
+ * gets an empty "owner:" key.
  */
 function buildOwnerLine(owner: OwnerIdentity): string {
   const name = owner.displayName ?? owner.realName;
   const tags: string[] = [];
+  if (owner.userName !== undefined) tags.push(`@${owner.userName}`);
   if (owner.tz !== undefined) tags.push(owner.tz);
   if (owner.title !== undefined && owner.title.length > 0) tags.push(owner.title);
   const tagBlock = tags.length > 0 ? ` (${tags.join(', ')})` : '';

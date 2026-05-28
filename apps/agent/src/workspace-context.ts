@@ -115,6 +115,9 @@ export async function healthCheckTokens(ctx: WorkspaceContext): Promise<void> {
     const profile = await profileClient.usersInfo({ user: ctx.ownerSlackUserId });
     ctx.ownerProfile = {
       userId: ctx.ownerSlackUserId,
+      ...(profile.userName !== undefined && profile.userName.length > 0
+        ? { userName: profile.userName }
+        : {}),
       ...(profile.displayName !== undefined && profile.displayName.length > 0
         ? { displayName: profile.displayName }
         : {}),
@@ -125,8 +128,9 @@ export async function healthCheckTokens(ctx: WorkspaceContext): Promise<void> {
       ...(profile.tz !== undefined ? { tz: profile.tz } : {}),
     };
     const label = ctx.ownerProfile.displayName ?? ctx.ownerProfile.realName ?? ctx.ownerSlackUserId;
+    const handle = ctx.ownerProfile.userName ? `@${ctx.ownerProfile.userName}` : '(no @handle)';
     const tz = ctx.ownerProfile.tz ?? 'unknown tz';
-    console.log(`[agent] owner profile resolved — ${label} (${tz})`);
+    console.log(`[agent] owner profile resolved — ${label} ${handle} (${tz})`);
   } catch (err) {
     console.warn(
       '[agent] could not resolve owner profile — turn metadata will fall back to raw user id. Error:',

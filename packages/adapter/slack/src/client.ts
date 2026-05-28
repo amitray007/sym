@@ -92,6 +92,13 @@ export interface UsersInfoParams {
 /** Slack user profile flattened to the fields Sym surfaces. */
 export interface SlackUserProfile {
   id: SlackUserId;
+  /**
+   * Slack's stable `@-handle` for this user (e.g. `amit`). This is what works
+   * inside `search.messages` query modifiers — `from:@amit` finds their
+   * messages. NOT to be confused with `displayName` which can be anything.
+   */
+  userName?: string;
+  /** Display name as the user has it set in their Slack profile. */
   displayName?: string;
   realName?: string;
   title?: string;

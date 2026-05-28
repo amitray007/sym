@@ -92,11 +92,13 @@ describe('buildUserTurnContent', () => {
   it('embeds an "owner:" line with name, tz, and id when owner identity is supplied', () => {
     const content = buildUserTurnContent(makeTurn(), {
       userId: 'U042MBPUZ9N' as SlackUserId,
+      userName: 'amit',
       displayName: 'Amit Ray',
       tz: 'Asia/Kolkata',
       title: 'Founder',
     });
     expect(content).toContain('owner: Amit Ray');
+    expect(content).toContain('@amit');
     expect(content).toContain('Asia/Kolkata');
     expect(content).toContain('Founder');
     expect(content).toContain('U042MBPUZ9N');

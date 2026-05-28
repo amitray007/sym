@@ -358,8 +358,29 @@ const ADD_REMINDER_DESCRIPTOR: ToolDescriptor = {
 const SEARCH_MESSAGES_DESCRIPTOR: ToolDescriptor = {
   type: 'function',
   name: 'search_messages',
-  description:
-    'Search across the Slack workspace via `search.messages` — Slack\'s full-workspace search ranked by relevance. Use when the user asks about something that happened somewhere in Slack but you don\'t know which channel/thread (e.g. "find the postgres migration discussion", "who mentioned the Q3 launch plan"). Prefer this over read_channel when the location is unknown. Returns the most relevant matches with permalinks. Slack search modifiers work in the query (e.g. `from:@amit in:#general after:2026-01-01 pricing`).',
+  description: [
+    'Search ACROSS the entire Slack workspace via `search.messages`. This is your PRIMARY tool for any "what did I do" / "who did I talk to" / "what happened" / "find messages about X" question — it covers every channel and DM the owner is in, not just one. Reach for it BEFORE read_channel / list_channels when the location of the answer is unknown.',
+    '',
+    'Query syntax — Slack search modifiers (combine freely):',
+    '  - `from:<@U042MBPUZ9N>`        find messages from a user by ID (most reliable)',
+    "  - `from:@amit`                 find messages from a user by @-handle (use the owner's userName from the metadata block)",
+    '  - `to:@amit`                   messages addressed to a user',
+    '  - `in:#general`                limit to one channel',
+    '  - `after:2026-05-26`           on/after a date (YYYY-MM-DD)',
+    '  - `before:2026-05-28`          on/before a date',
+    '  - `during:yesterday`           shorthand date filters: yesterday, today, last_week, last_month',
+    '  - `has:link` / `has:reaction`  attribute filters',
+    '  - Plain words match the message content (e.g. `postgres migration`)',
+    '',
+    'Concrete worked examples:',
+    '  - "who did I talk to yesterday?"   →  `from:<@OWNER_ID> during:yesterday`',
+    '  - "all my messages today"          →  `from:<@OWNER_ID> during:today`',
+    '  - "what did I post in #eng?"       →  `from:<@OWNER_ID> in:#eng`',
+    '  - "find the postgres discussion"   →  `postgres migration`',
+    '  - "who mentioned the launch plan?" →  `launch plan`',
+    '',
+    'OWNER_ID is the owner\'s user id from the turn metadata block. Returns the most relevant matches with permalinks. An empty result means the search ran but matched nothing — say so, don\'t fall back to "channels you belong to" language.',
+  ].join('\n'),
   parameters: {
     type: 'object',
     properties: {
@@ -687,11 +708,19 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
           const sortArg = call.arguments['sort'];
           const sort: 'score' | 'timestamp' = sortArg === 'timestamp' ? 'timestamp' : 'score';
           try {
+            const startMs = Date.now();
             const { matches, total } = await slack.searchMessages({
               query: queryArg.trim(),
               count: limit,
               sort,
             });
+            // Visible-in-logs diagnostic so we can tell "didn't call it" from
+            // "called it, got empty" when triaging "Sym says no activity"
+            // reports. No message bodies — just query + count.
+            console.info(
+              `[tools] search_messages query=${JSON.stringify(queryArg.trim())} ` +
+                `→ ${matches.length}/${total} matches in ${Date.now() - startMs}ms`,
+            );
             if (matches.length === 0) {
               result = { callId: call.id, ok: true, content: '(no matching messages)' };
             } else {

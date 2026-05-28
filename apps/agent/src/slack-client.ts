@@ -327,6 +327,8 @@ export class WebApiSlackClient implements SlackClient {
     interface UserResponse extends SlackOkResponse {
       user?: {
         id?: string;
+        /** Slack's stable @-handle — what `search.messages` `from:@…` expects. */
+        name?: string;
         real_name?: string;
         deleted?: boolean;
         is_bot?: boolean;
@@ -346,6 +348,7 @@ export class WebApiSlackClient implements SlackClient {
     const p = u.profile ?? {};
     return {
       id: (u.id ?? params.user) as SlackUserId,
+      ...(u.name !== undefined && u.name !== '' ? { userName: u.name } : {}),
       ...(p.display_name !== undefined && p.display_name !== ''
         ? { displayName: p.display_name }
         : {}),
