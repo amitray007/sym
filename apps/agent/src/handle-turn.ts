@@ -4,6 +4,7 @@ import { ToolRegistry } from '@sym/kernel';
 import { createBuiltinDispatcher } from './builtin-tools.js';
 import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
+import { pickThinkingLevel } from './pi/think-router.js';
 
 import type { BehaviorConfig } from './config.js';
 import type {
@@ -252,6 +253,13 @@ async function runTurnLoop(
     baseUrl: deps.fireworks.baseUrl,
     modelId: deps.model,
   });
+  // Route reasoning effort per-turn from the user message + thread depth. Pure
+  // heuristic at ingress; the router never emits `'off'` (gpt-oss-120b on
+  // Fireworks rejects it — see loop.ts Agent construction).
+  const thinkingLevel = pickThinkingLevel({
+    text: turn.text,
+    threadDepth: history.length,
+  });
   return runLoopPi(
     turn,
     { baseUrl: deps.fireworks.baseUrl, apiKey: deps.fireworks.apiKey, model },
@@ -259,6 +267,7 @@ async function runTurnLoop(
     {
       history,
       slackClient: deps.slackClient,
+      thinkingLevel,
       ...(onDelta !== undefined ? { onDelta } : {}),
       ...(onStatus !== undefined ? { onStatus } : {}),
       ...(onToolStart !== undefined ? { onToolStart } : {}),

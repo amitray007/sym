@@ -13,6 +13,7 @@ import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kern
 import { requestConfirmation } from '../confirmations.js';
 import { bridgeTools } from './tools.js';
 
+import type { ThinkingLevel } from './think-router.js';
 import type {
   BeforeToolCallContext,
   AgentEvent,
@@ -85,6 +86,13 @@ export interface PiLoopOptions {
    * for the model to address the owner naturally instead of by Slack id.
    */
   ownerProfile?: OwnerIdentity;
+  /**
+   * Reasoning effort for this turn, picked by the ingress router
+   * (`think-router.ts`). Threaded through to Pi's `Agent.initialState.thinkingLevel`.
+   * Omit to fall back to the safe default (`'low'`) — gpt-oss-120b on Fireworks
+   * REQUIRES an explicit non-`off` value (see Agent construction below).
+   */
+  thinkingLevel?: ThinkingLevel;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,18 +371,20 @@ export async function runLoopPi(
 
   // Construct the Agent.
   //
-  // thinkingLevel: 'low' — gpt-oss-120b on Fireworks REQUIRES an explicit
-  // reasoning effort. Default 'off' makes pi-ai send `thinking: { type: 'disabled' }`,
-  // which Fireworks translates to `reasoning_effort: 'none'` and rejects with 400.
-  // We don't surface reasoning to users (thinking_delta is filtered in the
-  // subscriber below), so 'low' keeps cost down while satisfying the API.
+  // thinkingLevel: routed per-turn by `think-router.ts` (default `'low'`).
+  // gpt-oss-120b on Fireworks REQUIRES an explicit non-`off` effort: `'off'`
+  // makes pi-ai send `thinking: { type: 'disabled' }`, which Fireworks
+  // translates to `reasoning_effort: 'none'` and rejects with 400. The router
+  // never emits `'off'` (its floor is `'low'`); fall back to `'low'` if no
+  // value was supplied. We don't surface reasoning to users (thinking_delta
+  // is filtered in the subscriber below), so the cost is purely model-side.
   const agent = new Agent({
     initialState: {
       systemPrompt,
       model: modelCfg.model,
       tools: agentTools,
       messages: historyMessages,
-      thinkingLevel: 'low',
+      thinkingLevel: opts.thinkingLevel ?? 'low',
     },
     getApiKey: (_provider: string) => modelCfg.apiKey,
     beforeToolCall,
