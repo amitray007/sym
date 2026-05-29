@@ -862,6 +862,74 @@ describe('handleTurn', () => {
     expect(slack.updateCalls[0]?.text).not.toContain('Mark p1 complete');
   });
 
+  it('buffers the body and delivers it cleaned when a tool fires before any text (no flash, no chat.update)', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as {
+          onDelta?: (d: string) => Promise<void>;
+          onToolStart?: (id: string, label: string) => Promise<void>;
+        };
+        // Tool fires BEFORE any answer text → buffer mode latches.
+        await o.onToolStart?.('c1', 'reading the channel');
+        await o.onDelta?.('Mark p1 complete. The answer is 42.');
+        return makeReply({
+          markdown: 'Mark p1 complete. The answer is 42.',
+          receipt: {
+            turnId: 'turn-1' as TurnId,
+            model: 'm',
+            toolsInvoked: ['read_channel'],
+            durationMs: 5,
+          },
+        });
+      },
+    );
+    mockCleanupReply.mockResolvedValueOnce('The answer is 42.');
+
+    const slack = new MockSlackClient();
+    await handleTurn(makeTurn({ threadTs: '953.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      // Threshold 1 → task card opens the stream on the first tool.
+      behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
+    });
+
+    expect(mockCleanupReply).toHaveBeenCalledTimes(1);
+    // Only the cleaned body reached the message body — narration never streamed.
+    expect(slack.appendedText).toBe('The answer is 42.');
+    expect(slack.appendedText).not.toContain('Mark p1 complete');
+    // Buffer mode delivers once — no chat.update settle.
+    expect(slack.updateCalls).toHaveLength(0);
+    expect(slack.stopStreamCalls).toHaveLength(1);
+  });
+
+  it('streams live (no buffering, no cleanup) for a no-tool reply', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as { onDelta?: (d: string) => Promise<void> };
+        await o.onDelta?.('Hey! ');
+        await o.onDelta?.('Here is the plain answer.');
+        return makeReply({ markdown: 'Hey! Here is the plain answer.' }); // no tools
+      },
+    );
+
+    const slack = new MockSlackClient();
+    await handleTurn(makeTurn({ threadTs: '954.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
+    });
+
+    expect(mockCleanupReply).not.toHaveBeenCalled();
+    expect(slack.appendedText).toBe('Hey! Here is the plain answer.');
+    expect(slack.updateCalls).toHaveLength(0);
+  });
+
   it('skips the LLM cleanup on a single-shot reply', async () => {
     mockRunLoopPi.mockImplementationOnce(
       async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {

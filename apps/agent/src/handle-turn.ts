@@ -604,11 +604,18 @@ async function streamReply(
     let streamTs: SlackThreadTs | undefined;
     let streamOpenFailed = false;
     let buffer = '';
-    // The live stream shows the model's raw text — no hard-coded narration
-    // filtering (it false-drops real content and can't keep up with free-form
-    // AI text). Any plan narration the model leaks is removed authoritatively
-    // by the span-removal cleanup backstop after the turn (see cleanupReply),
-    // which settles the finalized message via chat.update.
+    // Stream-vs-buffer decision (see below). The model only narrates its steps
+    // when it's USING TOOLS, so we align display with that:
+    //  - NO tools → stream the answer live (typing UX; nothing to narrate).
+    //  - tools fire → the task card is the live feedback; we BUFFER the body
+    //    and deliver it once, cleaned, at the end. The raw narration is never
+    //    shown, so there's no flash and no fragile chat.update settle.
+    // `bufferMode` latches the moment a tool starts BEFORE any body text has
+    // been flushed live (the common case — gpt-oss tools first). If body text
+    // already streamed when a tool fires (rare: text-then-tool), we stay live
+    // and fall back to the cleanup-then-chat.update settle.
+    let bufferMode = false;
+    let liveBodyFlushed = false;
 
     const ensureStreamOpen = async (): Promise<boolean> => {
       if (streamTs !== undefined) return true;
@@ -661,6 +668,7 @@ async function streamReply(
       const appendParams: AppendStreamParams = { channel, ts: streamTs, markdownText: chunk };
       try {
         await deps.slackClient.chatAppendStream(appendParams);
+        liveBodyFlushed = true;
       } catch (err) {
         console.warn('[agent] appendStream failed (continuing):', err);
       }
@@ -668,7 +676,10 @@ async function streamReply(
 
     const onDelta = async (delta: string): Promise<void> => {
       if (delta.length === 0) return;
-      // Open the stream on the first real delta, then batch by FLUSH_CHARS.
+      // In buffer mode the body is held and delivered clean at the end (the
+      // task card is the live feedback). The full text is in reply.markdown.
+      if (bufferMode) return;
+      // Live path: open the stream on the first real delta, then batch by FLUSH_CHARS.
       if (!(await ensureStreamOpen())) return;
       buffer += delta;
       if (buffer.length < FLUSH_CHARS) return;
@@ -676,6 +687,11 @@ async function streamReply(
     };
 
     const onToolStart = async (toolCallId: string, friendlyLabel: string): Promise<void> => {
+      // A tool is starting. If we haven't streamed any answer text live yet,
+      // switch to buffer mode: the task card carries progress and the body is
+      // delivered cleaned at the end (no narration flash). If body text already
+      // streamed, stay live — the cleanup backstop settles it afterwards.
+      if (!liveBodyFlushed) bufferMode = true;
       await taskCard?.onToolStart(toolCallId, friendlyLabel);
     };
 
@@ -697,13 +713,53 @@ async function streamReply(
     // Settle the task card before or alongside reply delivery.
     await taskCard?.finish();
 
-    // Reply produced no streamed text (only tool calls, or empty) — the stream
-    // never opened. Post the final reply via postMessage so the user sees the
-    // answer instead of nothing.
+    const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
+    const receipt = receiptToContextBlock(reply.receipt);
+
+    // BUFFER MODE — a tool fired before any body text was shown. The body was
+    // never streamed live, so clean it once and deliver it (no flash, no
+    // chat.update settle). The task card already showed progress above.
+    if (bufferMode) {
+      const body = await cleanupReply(reply.markdown, {
+        fireworks: deps.fireworks,
+        model: deps.model,
+      });
+      if (streamTs === undefined) {
+        // Stream never opened (task card disabled / produced no chunks) — post.
+        const blocks = [markdownBlock(body), ...renderBlocks, receipt];
+        await deps.slackClient.chatPostMessage({
+          channel,
+          text: body + fallbackSuffix,
+          blocks,
+          thread_ts: threadTs,
+        });
+        return true;
+      }
+      // Stream open (task card) — append the clean body, then close beneath it.
+      if (body.length > 0) {
+        try {
+          await deps.slackClient.chatAppendStream({ channel, ts: streamTs, markdownText: body });
+        } catch (err) {
+          console.warn('[agent] appendStream (buffered body) failed (continuing):', err);
+        }
+      }
+      try {
+        await deps.slackClient.chatStopStream({
+          channel,
+          ts: streamTs,
+          blocks: [...renderBlocks, receipt],
+        });
+      } catch (err) {
+        console.warn('[agent] stopStream failed:', err);
+      }
+      return true;
+    }
+
+    // LIVE PATH — no-tool turn (streamed as-is), or the rare text-then-tool turn.
+    // No body text streamed at all (empty / tool-only with no text) → post final.
     if (streamTs === undefined) {
-      const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
       const body = await finalReplyBody(reply, ctx.planController, deps);
-      const blocks = [markdownBlock(body), ...renderBlocks, receiptToContextBlock(reply.receipt)];
+      const blocks = [markdownBlock(body), ...renderBlocks, receipt];
       await deps.slackClient.chatPostMessage({
         channel,
         text: body + fallbackSuffix,
@@ -713,12 +769,7 @@ async function streamReply(
       return true;
     }
 
-    // Final flush + close. Any hero render rides on stopStream's `blocks`, which
-    // Slack renders at the bottom of the finalized streamed message — beneath
-    // the streamed prose, above the receipt.
     await flushBuffer();
-    const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
-    const receipt = receiptToContextBlock(reply.receipt);
     try {
       await deps.slackClient.chatStopStream({
         channel,
@@ -729,11 +780,9 @@ async function streamReply(
       console.warn('[agent] stopStream failed:', err);
     }
 
-    // LLM cleanup backstop. On multi-step turns (where the model leaks plan
-    // narration) the live stream showed the raw text; run span-removal and, if
-    // it removed anything, settle the finalized message to the clean version.
-    // Non-lossy by construction — `cleanupReply` only deletes model-flagged
-    // verbatim spans, never rewrites — so a changed result is always safe.
+    // Rare case: answer text streamed live AND a tool fired afterwards. The live
+    // text may carry narration the model added later — settle the finalized
+    // message to a cleaned version if span-removal changed anything.
     if (needsLlmCleanup(reply, ctx.planController)) {
       const cleaned = await cleanupReply(reply.markdown, {
         fireworks: deps.fireworks,
@@ -745,7 +794,7 @@ async function streamReply(
             channel,
             ts: streamTs,
             text: cleaned + fallbackSuffix,
-            blocks: [markdownBlock(cleaned), ...renderBlocks, receiptToContextBlock(reply.receipt)],
+            blocks: [markdownBlock(cleaned), ...renderBlocks, receipt],
           });
         } catch (err) {
           console.warn('[agent] cleanup update failed (continuing):', err);
