@@ -3,7 +3,7 @@ import { threadToHistory } from '@sym/adapter-slack';
 import { NameResolver } from './name-resolver.js';
 
 import type { PlanController, PlanItemStatus } from './plan-controller.js';
-import type { SlackClient, SlackThreadMessage } from '@sym/adapter-slack';
+import type { SearchMessageMatch, SlackClient, SlackThreadMessage } from '@sym/adapter-slack';
 import type {
   JsonSchema,
   SlackChannelId,
@@ -204,6 +204,37 @@ async function formatTranscript(
   // resolveAuthorNames only touched author ids; mentions of OTHER users
   // inside message text still need resolution.
   return resolver.rewriteMentions(joined, slack);
+}
+
+/** A search match plus how many identical copies it collapsed. */
+interface DedupedSearchMatch {
+  match: SearchMessageMatch;
+  count: number;
+}
+
+/**
+ * Collapse identical search matches (same author + normalized text), preserving
+ * order (best-by-sort first). Slack returns every repeat of a message as its
+ * own match, so a frequently-repeated line (e.g. the same prompt sent many
+ * times) can fill the result window with copies and bury unique content — the
+ * model then sees a wall of one message and wrongly concludes "nothing here".
+ * Keeps the first occurrence and counts the rest.
+ */
+function dedupeSearchMatches(matches: SearchMessageMatch[]): DedupedSearchMatch[] {
+  const seen = new Map<string, DedupedSearchMatch>();
+  const order: string[] = [];
+  for (const m of matches) {
+    const norm = (m.text ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const key = `${m.userId ?? m.username ?? ''}|${norm}`;
+    const hit = seen.get(key);
+    if (hit) {
+      hit.count += 1;
+    } else {
+      seen.set(key, { match: m, count: 1 });
+      order.push(key);
+    }
+  }
+  return order.map((k) => seen.get(k)!);
 }
 
 /**
@@ -988,9 +1019,13 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
           } else {
             try {
               const startMs = Date.now();
-              const { matches, total } = await slack.searchMessages({
+              // Fetch headroom so dedup has room to surface unique messages even
+              // when one line is repeated many times (Slack returns each repeat
+              // as its own match). We still SHOW at most `limit` unique.
+              const fetchCount = Math.min(100, Math.max(limit, 30));
+              const { matches: rawMatches, total } = await slack.searchMessages({
                 query: queryArg.trim(),
-                count: limit,
+                count: fetchCount,
                 sort,
               });
               // Visible-in-logs diagnostic so we can tell "didn't call it" from
@@ -998,48 +1033,63 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
               // reports. No message bodies — just query + count.
               console.info(
                 `[tools] search_messages query=${JSON.stringify(queryArg.trim())} ` +
-                  `→ ${matches.length}/${total} matches in ${Date.now() - startMs}ms`,
+                  `→ ${rawMatches.length}/${total} matches in ${Date.now() - startMs}ms`,
               );
-              if (matches.length === 0) {
+              if (rawMatches.length === 0) {
                 result = { callId: call.id, ok: true, content: '(no matching messages)' };
               } else {
+                // Collapse identical repeats (same author + text) so real content
+                // isn't buried under copies, then show up to `limit` unique.
+                const deduped = dedupeSearchMatches(rawMatches).slice(0, limit);
                 const header =
-                  total > matches.length ? `(showing ${matches.length} of ${total} matches)\n` : '';
-                // Resolve author/channel ids upfront so the per-line formatting
-                // can stay synchronous. Search results often arrive without
-                // names attached; this pulls the resolver's cache up to date.
-                // SlackUserId / SlackChannelId are branded — strip to plain
-                // strings for the resolver (which speaks ids structurally).
-                const authorIds = matches
-                  .map((m) => m.userId as string | undefined)
+                  deduped.length < rawMatches.length
+                    ? `(${total} total matches; showing ${deduped.length} unique — identical repeats collapsed)\n`
+                    : total > rawMatches.length
+                      ? `(showing ${rawMatches.length} of ${total} matches)\n`
+                      : '';
+                // Resolve author/channel ids for the SHOWN matches upfront so
+                // per-line formatting stays synchronous.
+                const authorIds = deduped
+                  .map((d) => d.match.userId as string | undefined)
                   .filter((id): id is string => id !== undefined && id.length > 0);
-                const channelIds = matches
-                  .map((m) => m.channelId as string | undefined)
+                const channelIds = deduped
+                  .map((d) => d.match.channelId as string | undefined)
                   .filter((id): id is string => id !== undefined && id.length > 0);
                 await Promise.all([
                   ...authorIds.map((id) => resolver.resolveUser(id, slack)),
                   ...channelIds.map((id) => resolver.resolveChannel(id, slack)),
                 ]);
-                // Body bodies may also contain `<@U…>` / `<#C…>` references to
-                // OTHER users / channels — rewrite each match's text once.
                 const rewrittenTexts = await Promise.all(
-                  matches.map((m) => resolver.rewriteMentions(m.text, slack)),
+                  deduped.map((d) => resolver.rewriteMentions(d.match.text, slack)),
                 );
-                const body = matches
-                  .map((m, i) => {
-                    const who =
-                      (m.userId !== undefined ? resolver.getUser(m.userId) : undefined) ??
-                      m.username ??
-                      m.userId ??
-                      '(unknown)';
-                    const channelName =
-                      m.channelName ??
-                      (m.channelId !== undefined ? resolver.getChannel(m.channelId) : undefined);
-                    const where = channelName ? `#${channelName}` : (m.channelId ?? '(unknown)');
-                    const link = m.permalink ? ` <${m.permalink}|link>` : '';
-                    const raw = rewrittenTexts[i] ?? m.text;
+                // One place for the per-row fields (used by both the text body
+                // and the table render).
+                const fieldsFor = (d: DedupedSearchMatch, i: number) => {
+                  const m = d.match;
+                  const who =
+                    (m.userId !== undefined ? resolver.getUser(m.userId) : undefined) ??
+                    m.username ??
+                    m.userId ??
+                    '(unknown)';
+                  const channelName =
+                    m.channelName ??
+                    (m.channelId !== undefined ? resolver.getChannel(m.channelId) : undefined);
+                  const where = channelName ? `#${channelName}` : (m.channelId ?? '(unknown)');
+                  const rep = d.count > 1 ? ` (sent ${d.count}×)` : '';
+                  return {
+                    who,
+                    where,
+                    rep,
+                    raw: rewrittenTexts[i] ?? m.text,
+                    permalink: m.permalink,
+                  };
+                };
+                const body = deduped
+                  .map((d, i) => {
+                    const { who, where, rep, raw, permalink } = fieldsFor(d, i);
+                    const link = permalink ? ` <${permalink}|link>` : '';
                     const content = raw.length > 400 ? `${raw.slice(0, 400)}…` : raw;
-                    return `${i + 1}. ${who} in ${where}${link}\n   ${content}`;
+                    return `${i + 1}. ${who} in ${where}${link}${rep}\n   ${content}`;
                   })
                   .join('\n');
                 // Presentation hint: render the same matches as a Slack `table`
@@ -1047,22 +1097,14 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
                 const render: RenderIntent = {
                   kind: 'table',
                   columns: [{ header: 'From' }, { header: 'Channel' }, { header: 'Message' }],
-                  rows: matches.map((m, i) => {
-                    const who =
-                      (m.userId !== undefined ? resolver.getUser(m.userId) : undefined) ??
-                      m.username ??
-                      m.userId ??
-                      '(unknown)';
-                    const channelName =
-                      m.channelName ??
-                      (m.channelId !== undefined ? resolver.getChannel(m.channelId) : undefined);
-                    const where = channelName ? `#${channelName}` : (m.channelId ?? '(unknown)');
-                    const raw = rewrittenTexts[i] ?? m.text;
+                  rows: deduped.map((d, i) => {
+                    const { who, where, rep, raw, permalink } = fieldsFor(d, i);
                     const preview = raw.length > 140 ? `${raw.slice(0, 140)}…` : raw;
+                    const text = `${preview}${rep}`;
                     return [
                       { text: who },
                       { text: where },
-                      m.permalink ? { text: preview, link: m.permalink } : { text: preview },
+                      permalink ? { text, link: permalink } : { text },
                     ];
                   }),
                 };

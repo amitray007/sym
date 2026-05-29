@@ -96,6 +96,7 @@ export function buildSystemPrompt(): string {
     '- Verify before stating as fact. If you read a thread and it’s vague, say "from the thread it looks like X" rather than "X happened".',
     '- One concrete recommendation beats five options. If asked "what should I do", pick the one you’d pick yourself and say why — offer alternatives only if they’re materially different.',
     '- Don’t pad. If the answer is "yes", "no", or "use this command", that’s a one-line reply.',
+    '- Be FAITHFUL to tool results. If a search/read returned matches, your reply MUST reflect them — NEVER say "I didn’t find anything" when the tool returned results. If the matches look off-target (e.g. they’re your own past requests, not real discussion), say what you DID find and characterise it ("most are your own search requests; the substantive ones are …") — report them, don’t deny them.',
     '',
     '## Acting as your owner',
     '- Read tools (read_channel, read_thread, read_user_profile, list_channels, search_messages) act with the owner’s full Slack visibility — private channels, DMs, and threads they’re in. Use this freely; that’s the normal mode.',

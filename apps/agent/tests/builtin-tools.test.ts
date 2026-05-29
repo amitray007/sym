@@ -886,7 +886,9 @@ describe('createBuiltinDispatcher', () => {
       expect(result.content).toContain('upgrade postgres');
       expect(userCalls).toHaveLength(1);
       expect(userCalls[0]?.query).toBe('postgres migration');
-      expect(userCalls[0]?.count).toBe(5);
+      // Fetches headroom (min 30) so dedup can surface uniques even when the
+      // requested limit (5) is small; at most `limit` unique are then shown.
+      expect(userCalls[0]?.count).toBe(30);
       expect(userCalls[0]?.sort).toBe('score');
     });
 
@@ -926,6 +928,54 @@ describe('createBuiltinDispatcher', () => {
       expect(second.content).toBe(first.content); // same payload
       expect(first.callId).toBe('call_a');
       expect(second.callId).toBe('call_b'); // fresh callId so Pi matches correctly
+    });
+
+    it('collapses identical repeats and surfaces unique content with a count', async () => {
+      const dup = (ts: string) => ({
+        channelId: 'C9' as SlackChannelId,
+        channelName: 'test-stuff',
+        ts: ts as SlackThreadTs,
+        text: 'Search for anything said about pricing',
+        username: 'amit',
+        userId: 'U042' as SlackUserId,
+      });
+      const userClient = makeSlackClient({
+        searchResult: {
+          matches: [
+            dup('1.1'),
+            dup('1.2'),
+            dup('1.3'),
+            {
+              channelId: 'D1' as SlackChannelId,
+              ts: '2.1' as SlackThreadTs,
+              text: 'nice pricing change in gsf',
+              username: 'amit',
+              userId: 'U042' as SlackUserId,
+            },
+          ],
+          total: 4,
+        },
+      });
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: userClient,
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('search_messages', { query: 'pricing' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected ok');
+      const content = result.content as string;
+      // The real message surfaces despite 3 copies of the test prompt above it.
+      expect(content).toContain('nice pricing change in gsf');
+      // The repeated line is collapsed with a count, not shown 3×.
+      expect(content).toContain('(sent 3×)');
+      expect(content.match(/Search for anything said about pricing/g)?.length).toBe(1);
+      // Render table also reflects the deduped set (2 rows).
+      if (result.render?.kind !== 'table') throw new Error('expected table render');
+      expect(result.render.rows).toHaveLength(2);
     });
 
     it('returns "(no matching messages)" on empty results', async () => {
