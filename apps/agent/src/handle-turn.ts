@@ -555,9 +555,11 @@ async function streamReply(
     const startParams: StartStreamParams = {
       channel,
       threadTs,
-      // Lock task_update chunks to render as individual cards in arrival
-      // order (Slack's `timeline` mode — also the API default, but we set it
-      // explicitly so behaviour is stable if the default ever shifts).
+      // Task-card layout, resolved at open time (see ensureStreamOpen):
+      //  - `plan`     when the model has latched a plan — model-authored intent
+      //               renders as ONE grouped plan block.
+      //  - `timeline` otherwise — tool-call rows as individual cards in arrival
+      //               order (also Slack's default; set explicitly for stability).
       taskDisplayMode: 'timeline',
       ...(isAssistant
         ? {}
@@ -576,6 +578,13 @@ async function streamReply(
     const ensureStreamOpen = async (): Promise<boolean> => {
       if (streamTs !== undefined) return true;
       if (streamOpenFailed) return false;
+      // Resolve task-card layout from plan state AT OPEN TIME. `setPlan` flips
+      // the controller active synchronously, before its flush opens the stream
+      // (PlanController.setPlan sets active=true, then emits → the card's
+      // set_plan handler calls sendChunks → here). So a plan-mode turn opens as
+      // a grouped `plan` block; tool-only turns stay `timeline`. If a text delta
+      // opened the stream before any set_plan, it stays `timeline` — graceful.
+      startParams.taskDisplayMode = ctx.planController.isActive() ? 'plan' : 'timeline';
       try {
         const handle = await deps.slackClient.chatStartStream(startParams);
         streamTs = handle.ts;

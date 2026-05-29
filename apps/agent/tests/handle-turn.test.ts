@@ -50,6 +50,7 @@ import type {
   TurnId,
   WorkspaceId,
 } from '@sym/contracts';
+import type { ToolRegistry } from '@sym/kernel';
 
 // ---------------------------------------------------------------------------
 // Fake Fireworks credentials (value doesn't matter — Pi is mocked).
@@ -726,6 +727,46 @@ describe('handleTurn', () => {
 
     expect(slack.startStreamCalls).toHaveLength(1);
     expect(slack.startStreamCalls[0]?.taskDisplayMode).toBe('timeline');
+  });
+
+  it('opens the stream with task_display_mode=plan once the model latches a plan', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, reg: unknown, opts: unknown) => {
+        // Model calls set_plan early — flips the plan controller active, so the
+        // stream opens as a grouped plan block instead of a timeline of cards.
+        const dispatcher = (reg as ToolRegistry).getDispatcher();
+        await dispatcher?.dispatch(
+          {
+            id: 'c1',
+            name: 'set_plan',
+            arguments: { items: ['Find the incident', 'Summarize it'] },
+          },
+          {
+            workspaceId: 'ws-1' as WorkspaceId,
+            conversationId: 'ws-1:C1' as Turn['conversationId'],
+            channelId: 'C1' as SlackChannelId,
+            requester: 'U1' as SlackUserId,
+            turnId: 'turn-1' as TurnId,
+          },
+        );
+        const o = opts as { onDelta?: (d: string) => Promise<void> };
+        await o.onDelta?.('done');
+        return makeReply({ markdown: 'done' });
+      },
+    );
+
+    const slack = new MockSlackClient();
+    await handleTurn(makeTurn({ threadTs: '901.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
+    });
+
+    expect(slack.startStreamCalls).toHaveLength(1);
+    expect(slack.startStreamCalls[0]?.taskDisplayMode).toBe('plan');
   });
 
   // -----------------------------------------------------------------------
