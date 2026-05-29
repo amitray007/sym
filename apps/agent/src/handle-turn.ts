@@ -917,8 +917,12 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
     return;
   }
 
-  const baseHistory = await loadTurnHistory(turn, deps);
-  const viewedContext = await loadViewedChannelContext(turn, deps);
+  // Independent reads — run them concurrently to shave a round-trip off every
+  // assistant-panel turn (each does its own Slack fetch + name resolution).
+  const [baseHistory, viewedContext] = await Promise.all([
+    loadTurnHistory(turn, deps),
+    loadViewedChannelContext(turn, deps),
+  ]);
   const history = viewedContext ? [viewedContext, ...baseHistory] : baseHistory;
 
   // Rewrite the owner's own message — their text can carry raw `<@U…>` /
