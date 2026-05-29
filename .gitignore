@@ -69,3 +69,4 @@ slack/manifest.yml
 .cache
 .parcel-cache
 .eslintcache
+tmp/
