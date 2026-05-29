@@ -251,6 +251,13 @@ describe('handleTurn', () => {
     // SHIMMER_PHRASES list doesn't churn this test.
     expect(slack.setStatusCalls.length).toBeGreaterThanOrEqual(1);
     expect(slack.setStatusCalls[0]?.status).toMatch(/^is .+…$/);
+    // The opener carries a native rotation set (Slack animates through these);
+    // each entry is a shimmer phrase, capped at 10.
+    const loading = slack.setStatusCalls[0]?.loadingMessages;
+    expect(loading).toBeDefined();
+    expect(loading!.length).toBeGreaterThan(1);
+    expect(loading!.length).toBeLessThanOrEqual(10);
+    expect(loading!.every((m) => /^is .+…$/.test(m))).toBe(true);
   });
 
   it('forwards Pi-loop onStatus emissions to Slack setStatus with the right phase strings', async () => {

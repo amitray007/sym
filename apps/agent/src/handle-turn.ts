@@ -511,7 +511,11 @@ async function streamReply(
   let phaseUpdated = false;
   // Recognise opener + whimsy phrases so they don't trip the "real phase fired" flag.
   const whimsyPhrases = new Set([...WHIMSY_WORDS.map((w) => `is ${w}…`), `is ${openerPhrase}…`]);
-  const sendStatus = async (status: string): Promise<void> => {
+  // Rotation set for the open/whimsy phase — Slack animates through these
+  // client-side so the opener feels alive between the 90s keepalive re-sends,
+  // instead of sitting on one static phrase. Capped at 10 (Slack's limit).
+  const openerLoadingMessages = [openerStatus, ...WHIMSY_WORDS.slice(0, 9).map((w) => `is ${w}…`)];
+  const sendStatus = async (status: string, loadingMessages?: string[]): Promise<void> => {
     lastStatus = status;
     if (status !== '' && !whimsyPhrases.has(status)) {
       phaseUpdated = true;
@@ -521,6 +525,7 @@ async function streamReply(
         channelId: channel,
         threadTs,
         status,
+        ...(loadingMessages !== undefined ? { loadingMessages } : {}),
       });
     } catch (err) {
       console.warn('[agent] setStatus failed (continuing):', err);
@@ -531,7 +536,7 @@ async function streamReply(
   // changelog, setStatus works in channel threads with chat:write scope).
   // Uses the rotated opener phrase so consecutive turns don't all say the
   // same thing — feels more alive, same deterministic-by-turn-id guarantee.
-  await sendStatus(openerStatus);
+  await sendStatus(openerStatus, openerLoadingMessages);
 
   // Keepalive — Slack auto-clears the shimmer after 2 min, so re-send the latest
   // status every 90s. If no real phase has fired yet, rotate through whimsical
@@ -543,7 +548,8 @@ async function streamReply(
     if (phaseUpdated) {
       void sendStatus(lastStatus);
     } else {
-      void sendStatus(nextWhimsicalStatus(++whimsyTick));
+      // Still in the open phase — keep Slack's native rotation primed.
+      void sendStatus(nextWhimsicalStatus(++whimsyTick), openerLoadingMessages);
     }
   }, STATUS_KEEPALIVE_MS);
 

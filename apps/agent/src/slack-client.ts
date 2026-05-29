@@ -191,6 +191,9 @@ export class WebApiSlackClient implements SlackClient {
       channel_id: params.channelId,
       thread_ts: params.threadTs,
       status: params.status,
+      ...(params.loadingMessages !== undefined && params.loadingMessages.length > 0
+        ? { loading_messages: params.loadingMessages.slice(0, 10) }
+        : {}),
     });
   }
 

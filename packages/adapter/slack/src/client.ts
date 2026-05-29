@@ -42,6 +42,12 @@ export interface SetStatusParams {
   threadTs: SlackThreadTs;
   /** Short status string shown in Slack's assistant loading state. */
   status: string;
+  /**
+   * Optional set of phrases (≤10) Slack rotates through client-side as the
+   * shimmer animates — smoother than a single static line. Use for the
+   * open/whimsy phase; omit for a concrete phase ("is reading the thread…").
+   */
+  loadingMessages?: string[];
 }
 
 export interface ConversationsRepliesParams {
