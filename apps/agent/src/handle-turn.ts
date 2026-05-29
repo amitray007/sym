@@ -306,14 +306,17 @@ function capitalize(s: string): string {
  * same content for notifications + screen readers.
  */
 /**
- * Whether to run the LLM cleanup backstop. The model only leaks plan narration
- * on MULTI-STEP turns — a plan was set, or more than one tool ran. Single-shot
- * replies ("what time is it?") essentially never narrate, so they skip the
- * extra model call. This gate is STRUCTURAL (turn shape) — it never inspects
- * the reply text — so it still fires on narration phrasings we've never seen.
+ * Whether to run the LLM cleanup backstop. The model narrates its STEPS
+ * whenever it's doing things, so narration tracks *any* tool use — not the tool
+ * COUNT. (Observed 2026-05-30: a turn that narrated a whole fake p1/p2/p3 plan
+ * while actually invoking just `get_current_time` slipped past a `> 1` gate.)
+ * Run whenever a plan was set OR at least one tool ran. Pure no-tool text
+ * replies ("hello") have nothing to narrate, so they skip the extra call. This
+ * gate is STRUCTURAL — it never inspects the reply text — so it still fires on
+ * narration phrasings we've never seen.
  */
 function needsLlmCleanup(reply: Reply, planController: PlanController): boolean {
-  return planController.isActive() || reply.receipt.toolsInvoked.length > 1;
+  return planController.isActive() || reply.receipt.toolsInvoked.length > 0;
 }
 
 /**

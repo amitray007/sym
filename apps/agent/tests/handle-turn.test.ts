@@ -827,6 +827,41 @@ describe('handleTurn', () => {
     expect(slack.updateCalls[0]?.text).not.toContain('Now start p1');
   });
 
+  it('runs cleanup on a ONE-tool turn that narrates (regression: > 1 gate skipped it)', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as { onDelta?: (d: string) => Promise<void> };
+        await o.onDelta?.('Mark p1 complete.Now finalize.The time is 3pm.');
+        return makeReply({
+          markdown: 'Mark p1 complete.Now finalize.The time is 3pm.',
+          // Exactly ONE real tool (the model narrated a fake plan around it).
+          receipt: {
+            turnId: 'turn-1' as TurnId,
+            model: 'm',
+            toolsInvoked: ['get_current_time'],
+            durationMs: 5,
+          },
+        });
+      },
+    );
+    mockCleanupReply.mockResolvedValueOnce('The time is 3pm.');
+
+    const slack = new MockSlackClient();
+    await handleTurn(makeTurn({ threadTs: '952.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
+    });
+
+    expect(mockCleanupReply).toHaveBeenCalledTimes(1);
+    expect(slack.updateCalls).toHaveLength(1);
+    expect(slack.updateCalls[0]?.text).toContain('The time is 3pm.');
+    expect(slack.updateCalls[0]?.text).not.toContain('Mark p1 complete');
+  });
+
   it('skips the LLM cleanup on a single-shot reply', async () => {
     mockRunLoopPi.mockImplementationOnce(
       async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
