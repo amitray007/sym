@@ -168,9 +168,11 @@ describe('createBuiltinDispatcher', () => {
           'add_reminder',
           'set_plan',
           'update_task',
+          'present_card',
+          'present_table',
         ]),
       );
-      expect(tools).toHaveLength(13);
+      expect(tools).toHaveLength(15);
     });
 
     it('declares actor:"user" on every tool that should act under owner identity', () => {
@@ -300,6 +302,115 @@ describe('createBuiltinDispatcher', () => {
       if (result.ok) throw new Error('expected failure');
       expect(result.error.code).toBe('not_found');
       expect(result.error.message).toContain('unknown_tool');
+    });
+  });
+
+  describe('dispatch() — present_card', () => {
+    it('attaches a card render and keeps a model-facing content nudge', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('present_card', {
+          title: 'INC-204 · API latency',
+          body: 'Slow query identified',
+          fields: [
+            { label: 'Owner', value: 'Priya' },
+            { label: 'Status', value: 'Open' },
+          ],
+          actions: [{ label: 'Open', url: 'https://slack.com/x' }],
+        }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error('expected success');
+      expect(result.render).toEqual({
+        kind: 'card',
+        title: 'INC-204 · API latency',
+        body: 'Slow query identified',
+        fields: [
+          { label: 'Owner', value: 'Priya' },
+          { label: 'Status', value: 'Open' },
+        ],
+        actions: [{ label: 'Open', url: 'https://slack.com/x' }],
+      });
+      expect(typeof result.content).toBe('string');
+    });
+
+    it('drops malformed fields and non-http action urls', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('present_card', {
+          title: 'X',
+          fields: [{ label: 'ok', value: 'v' }, { label: 'bad' }, 'nope'],
+          actions: [
+            { label: 'js', url: 'javascript:alert(1)' },
+            { label: 'ok', url: 'https://x' },
+          ],
+        }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok || result.render?.kind !== 'card') throw new Error('expected card');
+      expect(result.render.fields).toEqual([{ label: 'ok', value: 'v' }]);
+      expect(result.render.actions).toEqual([{ label: 'ok', url: 'https://x' }]);
+    });
+
+    it('rejects an empty title', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('present_card', { title: '  ' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('invalid_arguments');
+    });
+  });
+
+  describe('dispatch() — present_table', () => {
+    it('builds a table render from columns + rows', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('present_table', {
+          caption: 'Options',
+          columns: ['Plan', 'Price'],
+          rows: [
+            ['Pro', '$20'],
+            ['Team', '$40'],
+          ],
+        }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok || result.render?.kind !== 'table') throw new Error('expected table');
+      expect(result.render.caption).toBe('Options');
+      expect(result.render.columns).toEqual([{ header: 'Plan' }, { header: 'Price' }]);
+      expect(result.render.rows[0]).toEqual([{ text: 'Pro' }, { text: '$20' }]);
+    });
+
+    it('rejects non-string rows', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('present_table', { columns: ['A'], rows: [[1, 2]] }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('invalid_arguments');
     });
   });
 

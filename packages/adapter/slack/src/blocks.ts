@@ -29,7 +29,8 @@ export interface MarkdownBlock {
 
 export interface SectionBlock {
   type: 'section';
-  text: MrkdwnElement;
+  /** Optional when `fields` is provided (Slack requires text OR fields). */
+  text?: MrkdwnElement;
   fields?: MrkdwnElement[];
 }
 
@@ -129,6 +130,23 @@ export function sectionBlock(text: string, fields?: MrkdwnElement[]): SectionBlo
 /** A `header` block with plain text. */
 export function headerBlock(text: string): HeaderBlock {
   return { type: 'header', text: plainTextElement(text, true) };
+}
+
+/** A `section` block carrying only a 2-column field grid (no body text). */
+export function fieldsSection(fields: MrkdwnElement[]): SectionBlock {
+  return { type: 'section', fields };
+}
+
+/** A URL `button` element — opens a link, no interactivity callback required. */
+export function urlButton(
+  label: string,
+  url: string,
+): {
+  type: 'button';
+  text: PlainTextElement;
+  url: string;
+} {
+  return { type: 'button', text: plainTextElement(label, true), url };
 }
 
 /** A `context` block. Elements can be mrkdwn or plain_text elements. */

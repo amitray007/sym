@@ -45,5 +45,33 @@ export interface TableRenderIntent {
   rows: RenderTableCell[][];
 }
 
+/** One `label: value` pair shown in a {@link CardRenderIntent}'s field grid. */
+export interface CardField {
+  label: string;
+  value: string;
+}
+
+/** A link button on a card. URL-only — no interactivity infra (no 3s-ack listener). */
+export interface CardAction {
+  label: string;
+  url: string;
+}
+
+/**
+ * A single record the owner will act on (incident, PR, person, channel, config).
+ * Rendered as a header + body + 2-col field grid + optional link buttons, built
+ * from confirmed `section`/`header`/`actions` blocks. (Slack's `card` block is
+ * NOT used — its message-surface support is undocumented.) Falls back to a
+ * title + bulleted label/value lines.
+ */
+export interface CardRenderIntent {
+  kind: 'card';
+  title: string;
+  /** Short decision-critical summary line. */
+  body?: string;
+  fields?: CardField[];
+  actions?: CardAction[];
+}
+
 /** The discriminated union of every supported render intent. */
-export type RenderIntent = TableRenderIntent;
+export type RenderIntent = TableRenderIntent | CardRenderIntent;

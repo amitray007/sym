@@ -8,10 +8,24 @@
  * top-level text, not interior block content).
  */
 
-import { markdownBlock, rawTextCell, linkCell, tableBlock } from './blocks.js';
+import {
+  actionsBlock,
+  fieldsSection,
+  headerBlock,
+  linkCell,
+  markdownBlock,
+  mrkdwnElement,
+  rawTextCell,
+  sectionBlock,
+  tableBlock,
+  urlButton,
+} from './blocks.js';
 
-import type { SlackBlock, TableCell, TableColumnSetting } from './blocks.js';
-import type { RenderIntent, TableRenderIntent } from '@sym/contracts';
+import type { MrkdwnElement, SlackBlock, TableCell, TableColumnSetting } from './blocks.js';
+import type { CardRenderIntent, RenderIntent, TableRenderIntent } from '@sym/contracts';
+
+/** Slack `header` block plain-text limit. */
+const MAX_HEADER_CHARS = 150;
 
 /** Slack hard limits on the `table` block. */
 const MAX_TABLE_ROWS = 100; // includes the header row
@@ -22,10 +36,12 @@ export function renderIntentToBlocks(intent: RenderIntent): SlackBlock[] {
   switch (intent.kind) {
     case 'table':
       return tableIntentToBlocks(intent);
+    case 'card':
+      return cardIntentToBlocks(intent);
     default: {
       // Exhaustiveness guard — adding a RenderIntent variant without a renderer
       // is a compile error here.
-      const _exhaustive: never = intent.kind;
+      const _exhaustive: never = intent;
       return _exhaustive;
     }
   }
@@ -36,8 +52,10 @@ export function renderIntentToFallbackText(intent: RenderIntent): string {
   switch (intent.kind) {
     case 'table':
       return tableIntentToFallback(intent);
+    case 'card':
+      return cardIntentToFallback(intent);
     default: {
-      const _exhaustive: never = intent.kind;
+      const _exhaustive: never = intent;
       return _exhaustive;
     }
   }
@@ -80,6 +98,48 @@ function tableIntentToFallback(intent: TableRenderIntent): string {
       cell.link !== undefined && cell.link.length > 0 ? `${cell.text} (${cell.link})` : cell.text,
     );
     lines.push(`• ${parts.filter((p) => p.length > 0).join(' — ')}`);
+  }
+  return lines.join('\n');
+}
+
+function cardIntentToBlocks(intent: CardRenderIntent): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+  const title =
+    intent.title.length > MAX_HEADER_CHARS
+      ? `${intent.title.slice(0, MAX_HEADER_CHARS - 1)}…`
+      : intent.title;
+  blocks.push(headerBlock(title));
+
+  if (intent.body !== undefined && intent.body.trim().length > 0) {
+    blocks.push(sectionBlock(intent.body));
+  }
+
+  if (intent.fields !== undefined && intent.fields.length > 0) {
+    // Slack renders ≤10 section fields in a 2-column grid.
+    const elements: MrkdwnElement[] = intent.fields
+      .slice(0, 10)
+      .map((f) => mrkdwnElement(`*${f.label}*\n${f.value}`));
+    blocks.push(fieldsSection(elements));
+  }
+
+  if (intent.actions !== undefined && intent.actions.length > 0) {
+    // URL buttons only — no interactivity callback. Actions block holds ≤5.
+    blocks.push(actionsBlock(intent.actions.slice(0, 5).map((a) => urlButton(a.label, a.url))));
+  }
+
+  return blocks;
+}
+
+function cardIntentToFallback(intent: CardRenderIntent): string {
+  const lines: string[] = [intent.title];
+  if (intent.body !== undefined && intent.body.trim().length > 0) {
+    lines.push(intent.body);
+  }
+  for (const f of intent.fields ?? []) {
+    lines.push(`${f.label}: ${f.value}`);
+  }
+  for (const a of intent.actions ?? []) {
+    lines.push(`${a.label}: ${a.url}`);
   }
   return lines.join('\n');
 }

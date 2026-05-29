@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { renderIntentToBlocks, renderIntentToFallbackText } from '../src/render.js';
 
-import type { TableRenderIntent } from '@sym/contracts';
+import type { CardRenderIntent, TableRenderIntent } from '@sym/contracts';
 
 const table: TableRenderIntent = {
   kind: 'table',
@@ -92,5 +92,71 @@ describe('renderIntentToFallbackText (table)', () => {
   it('includes the caption as the first line', () => {
     const text = renderIntentToFallbackText({ ...table, caption: 'Found 2 messages' });
     expect(text.split('\n')[0]).toBe('Found 2 messages');
+  });
+});
+
+const card: CardRenderIntent = {
+  kind: 'card',
+  title: 'INC-204 · API latency',
+  body: 'Slow query identified',
+  fields: [
+    { label: 'Owner', value: 'Priya' },
+    { label: 'Status', value: 'Open' },
+  ],
+  actions: [{ label: 'Open incident', url: 'https://slack.com/x' }],
+};
+
+describe('renderIntentToBlocks (card)', () => {
+  it('emits header → body section → fields section → actions', () => {
+    const blocks = renderIntentToBlocks(card);
+    expect(blocks.map((b) => b.type)).toEqual(['header', 'section', 'section', 'actions']);
+  });
+
+  it('puts the title in a header block (plain_text)', () => {
+    const header = renderIntentToBlocks(card)[0]!;
+    if (header.type !== 'header') throw new Error('expected header');
+    expect(header.text).toEqual({ type: 'plain_text', text: 'INC-204 · API latency', emoji: true });
+  });
+
+  it('renders fields as a fields-only section with bold labels', () => {
+    const fieldsBlock = renderIntentToBlocks(card)[2]!;
+    if (fieldsBlock.type !== 'section') throw new Error('expected section');
+    expect(fieldsBlock.text).toBeUndefined();
+    expect(fieldsBlock.fields).toEqual([
+      { type: 'mrkdwn', text: '*Owner*\nPriya' },
+      { type: 'mrkdwn', text: '*Status*\nOpen' },
+    ]);
+  });
+
+  it('renders actions as url buttons', () => {
+    const actions = renderIntentToBlocks(card)[3]!;
+    if (actions.type !== 'actions') throw new Error('expected actions');
+    expect(actions.elements).toEqual([
+      {
+        type: 'button',
+        text: { type: 'plain_text', text: 'Open incident', emoji: true },
+        url: 'https://slack.com/x',
+      },
+    ]);
+  });
+
+  it('omits body/fields/actions blocks when absent', () => {
+    const blocks = renderIntentToBlocks({ kind: 'card', title: 'Just a title' });
+    expect(blocks.map((b) => b.type)).toEqual(['header']);
+  });
+
+  it('truncates an over-long title to the header limit', () => {
+    const header = renderIntentToBlocks({ kind: 'card', title: 'x'.repeat(200) })[0]!;
+    if (header.type !== 'header') throw new Error('expected header');
+    expect(header.text.text.length).toBe(150);
+    expect(header.text.text.endsWith('…')).toBe(true);
+  });
+});
+
+describe('renderIntentToFallbackText (card)', () => {
+  it('lists title, body, fields, and action urls', () => {
+    expect(renderIntentToFallbackText(card)).toBe(
+      'INC-204 · API latency\nSlow query identified\nOwner: Priya\nStatus: Open\nOpen incident: https://slack.com/x',
+    );
   });
 });
