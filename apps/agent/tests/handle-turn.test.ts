@@ -117,6 +117,8 @@ class MockSlackClient implements SlackClient {
   startStreamError: Error | undefined = undefined;
   /** When truthy, chatAppendStream rejects with this error (simulates a dead stream). */
   appendStreamError: Error | undefined = undefined;
+  /** When truthy, chatStopStream rejects with this error. */
+  stopStreamError: Error | undefined = undefined;
 
   async chatPostMessage(params: PostMessageParams): Promise<PostMessageResult> {
     this.posts.push(params);
@@ -159,6 +161,7 @@ class MockSlackClient implements SlackClient {
   }
   async chatStopStream(params: StopStreamParams): Promise<void> {
     this.stopStreamCalls.push(params);
+    if (this.stopStreamError !== undefined) throw this.stopStreamError;
   }
   async chatDelete(): Promise<void> {
     /* no-op mock */
@@ -948,6 +951,45 @@ describe('handleTurn', () => {
     // The answer must STILL land — as a normal posted message.
     expect(slack.posts).toHaveLength(1);
     expect(slack.posts[0]?.text).toContain('the pricing answer');
+  });
+
+  it('does NOT double-post when buffered append succeeds but stopStream fails', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as {
+          onDelta?: (d: string) => Promise<void>;
+          onToolStart?: (id: string, label: string) => Promise<void>;
+        };
+        await o.onToolStart?.('c1', 'searching'); // buffer mode
+        await o.onDelta?.('the answer');
+        return makeReply({
+          markdown: 'the answer',
+          receipt: {
+            turnId: 'turn-1' as TurnId,
+            model: 'm',
+            toolsInvoked: ['search_messages'],
+            durationMs: 5,
+          },
+        });
+      },
+    );
+    mockCleanupReply.mockResolvedValueOnce('the answer');
+
+    const slack = new MockSlackClient();
+    // Body appends fine (visible in the stream), but the close fails.
+    slack.stopStreamError = new Error('message_not_in_streaming_state');
+    await handleTurn(makeTurn({ threadTs: '956.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
+    });
+
+    // The body was appended to the stream; a failed close must NOT re-post it.
+    expect(slack.appendedText).toBe('the answer');
+    expect(slack.posts).toHaveLength(0);
   });
 
   it('streams live (no buffering, no cleanup) for a no-tool reply', async () => {

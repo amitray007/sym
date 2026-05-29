@@ -726,26 +726,38 @@ async function streamReply(
       });
       const blocks = [markdownBlock(body), ...renderBlocks, receipt];
 
-      // Try to finish the open stream. On a LONG turn (e.g. the model timed
-      // out after several tool calls) the Slack streaming session expires, so
-      // appendStream/stopStream throw `message_not_found` /
-      // `message_not_in_streaming_state`. If anything fails, fall back to a
-      // fresh postMessage so the answer ALWAYS lands — never silently dropped.
+      // Try to finish the open stream. On a LONG turn (e.g. the model timed out
+      // after several tool calls) the Slack streaming session expires and
+      // appendStream throws `message_not_found`. Append and stop are settled
+      // SEPARATELY: once the body has been appended it is already visible, so a
+      // later stopStream failure must NOT trigger a re-post (that double-posts
+      // the answer). Only fall back to a fresh postMessage when the body was
+      // never delivered into the stream.
       if (streamTs !== undefined) {
+        let appended = false;
         try {
           if (body.length > 0) {
             await deps.slackClient.chatAppendStream({ channel, ts: streamTs, markdownText: body });
           }
-          await deps.slackClient.chatStopStream({
-            channel,
-            ts: streamTs,
-            blocks: [...renderBlocks, receipt],
-          });
-          return true;
+          appended = true;
         } catch (err) {
-          console.warn('[agent] streamed delivery failed; posting as a normal message:', err);
-          // fall through to postMessage
+          console.warn('[agent] appendStream (buffered body) failed; will post normally:', err);
         }
+        if (appended) {
+          // Body is in the stream — close it best-effort; a stopStream failure
+          // here leaves the body visible, so do NOT re-post.
+          try {
+            await deps.slackClient.chatStopStream({
+              channel,
+              ts: streamTs,
+              blocks: [...renderBlocks, receipt],
+            });
+          } catch (err) {
+            console.warn('[agent] stopStream failed after delivering body (continuing):', err);
+          }
+          return true;
+        }
+        // append failed → fall through to postMessage so the answer still lands.
       }
       await deps.slackClient.chatPostMessage({
         channel,
