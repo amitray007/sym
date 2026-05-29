@@ -8,6 +8,7 @@ import {
 import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
+import { NameResolver } from './name-resolver.js';
 import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
@@ -16,7 +17,6 @@ import { cleanupReply } from './reply-cleanup.js';
 import { pickShimmerPhrase, pickShimmerStatus } from './thinking-copy.js';
 
 import type { BehaviorConfig } from './config.js';
-import type { NameResolver } from './name-resolver.js';
 import type {
   AppendStreamParams,
   SlackBlock,
@@ -843,21 +843,27 @@ async function loadViewedChannelContext(
     const transcript = mapped
       .map((m) => (m.role === 'assistant' ? `Sym: ${m.content ?? ''}` : (m.content ?? '')))
       .join('\n');
-    // Rewrite `<@U…>` / `<#C…>` in the transcript AND in the viewed-channel
-    // id itself (so the model gets `#general` instead of `C012345`). Both
-    // are best-effort: on resolver failure the raw markup falls through.
+    // Resolve the transcript mentions AND the viewed-channel label so the model
+    // gets `#general` / `a direct message with @Name` — never a raw id. A `U…`
+    // viewed id is a DM (the other party's user id); resolve it as a user.
     let rewrittenTranscript = transcript;
-    let viewedLabel: string = viewed;
+    let viewedLabel: string;
     try {
       rewrittenTranscript = await deps.nameResolver.rewriteMentions(transcript, deps.slackClient);
-      const resolvedName = await deps.nameResolver.resolveChannel(viewed, deps.slackClient);
-      if (resolvedName !== viewed) viewedLabel = `#${resolvedName}`;
+      if (NameResolver.isUserId(viewed)) {
+        const name = await deps.nameResolver.resolveUser(viewed, deps.slackClient);
+        viewedLabel = name !== viewed ? `a direct message with ${name}` : 'a direct message';
+      } else {
+        const resolvedName = await deps.nameResolver.resolveChannel(viewed, deps.slackClient);
+        viewedLabel = resolvedName !== viewed ? `#${resolvedName}` : 'another channel';
+      }
     } catch {
-      // fall through to the raw transcript / id
+      // Never leak the raw id — fall back to a generic, id-free phrase.
+      viewedLabel = NameResolver.isUserId(viewed) ? 'a direct message' : 'another channel';
     }
     return {
       role: 'user',
-      content: `Background — the user is currently viewing channel ${viewedLabel} in Slack. Recent messages there:\n${rewrittenTranscript}`,
+      content: `Background — the user is currently viewing ${viewedLabel} in Slack. Recent messages there:\n${rewrittenTranscript}`,
     };
   } catch (err) {
     console.warn('[agent] viewed-channel context fetch failed (continuing):', err);

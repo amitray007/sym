@@ -523,11 +523,14 @@ describe('handleTurn', () => {
       },
     );
 
-    // The background context block must be the FIRST history message.
+    // The background context block must be the FIRST history message. The
+    // viewed channel id doesn't resolve in this mock → generic, id-free label
+    // (never the raw "C-VIEWED").
     const backgroundMsg = capturedHistory[0];
     expect(backgroundMsg?.content).toMatch(
-      /^Background — the user is currently viewing channel C-VIEWED in Slack\./,
+      /^Background — the user is currently viewing another channel in Slack\./,
     );
+    expect(backgroundMsg?.content).not.toContain('C-VIEWED');
     expect(backgroundMsg?.content).toContain('deploy went out');
     expect(backgroundMsg?.content).toContain('looks good to me');
   });
@@ -1085,7 +1088,7 @@ describe('handleTurn', () => {
       const backgroundMsg = capturedHistory[0]?.content ?? '';
       // Channel id rewritten to #name in the lead-in, AND `<@U…>` rewritten
       // inside the transcript body.
-      expect(backgroundMsg).toContain('viewing channel #rollout');
+      expect(backgroundMsg).toContain('viewing #rollout');
       expect(backgroundMsg).toContain('@Bob');
       expect(backgroundMsg).not.toContain('<@U999>');
     });

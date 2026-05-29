@@ -163,21 +163,41 @@ describe('NameResolver.rewriteMentions', () => {
     expect(out).toBe('unknown <@UDEAD> and <#CGHOST>');
   });
 
-  it('rewrites DM-style channel markup (`<#U…|direct message>`) using inline label', async () => {
+  it('rewrites DM-style channel markup (`<#U…|direct message>`) using inline label when the user is unresolved', async () => {
     // Slack search results sometimes carry DMs as channel-link syntax with a
-    // USER id prefix and an inline label like "direct message". The id is
-    // not a channel id at all; only the label is useful. Observed during
-    // dogfooding 2026-05-29 — raw <#U03…|direct message> markup was leaking
-    // into search-result replies.
+    // USER id prefix and an inline label like "direct message". The id is a
+    // user id, not a channel id. When the user can't be resolved, fall back to
+    // the inline label — NOT a `#`-prefixed id (that printed "#U03… (DM)").
     const conversationsList = vi.fn();
     const r = new NameResolver();
     const out = await r.rewriteMentions(
       'See <#U03U3R8232T|direct message>',
       makeClient({ conversationsList }),
     );
-    expect(out).toBe('See #direct message');
-    // Critical: U-prefix ids must NOT trigger a channel bulk-fill API call.
+    expect(out).toBe('See direct message');
+    expect(out).not.toContain('U03U3R8232T'); // raw id must never leak
+    // U-prefix ids must NOT trigger a channel bulk-fill API call.
     expect(conversationsList).not.toHaveBeenCalled();
+  });
+
+  it('resolves a DM channel-mention to the person when the user id resolves', async () => {
+    const usersInfo = vi.fn().mockResolvedValue({ displayName: 'Sarah' });
+    const r = new NameResolver();
+    const out = await r.rewriteMentions(
+      'See <#U03U3R8232T|direct message>',
+      makeClient({ usersInfo }),
+    );
+    expect(out).toBe('See @Sarah');
+    expect(out).not.toContain('U03U3R8232T');
+  });
+
+  it('never leaks a bare DM channel-mention id with no inline label', async () => {
+    // `<#U03…>` with no `|label` had NO fallback before — the raw id leaked and
+    // the model printed "#U03… (DM)". Now it becomes a generic, id-free phrase.
+    const r = new NameResolver();
+    const out = await r.rewriteMentions('opened in <#U03U3R8232T>', makeClient());
+    expect(out).toBe('opened in a direct message');
+    expect(out).not.toContain('U03U3R8232T');
   });
 
   it('handles a mix of canonical and DM-style channel links', async () => {

@@ -129,12 +129,17 @@ export class NameResolver {
     }
     for (const m of text.matchAll(CHANNEL_MENTION_RE)) {
       const id = m[1]!;
-      // Only resolve via conversations.list when the id has the canonical
-      // channel-prefix shape. DM-style channel markup (`<#U…|direct message>`)
-      // carries a USER id, not a channel id — resolving it as a channel
-      // would burn a bulk-list round-trip to learn the obvious. Rely on the
-      // inline label for those.
-      if (id.startsWith('C') && !this.channels.has(id)) channelIds.add(id);
+      if (id.startsWith('C')) {
+        // Canonical public/private channel id — resolve via the channel cache.
+        if (!this.channels.has(id)) channelIds.add(id);
+      } else if ((id.startsWith('U') || id.startsWith('W')) && !this.users.has(id)) {
+        // DM-style channel markup (`<#U…|direct message>`, or a bare `<#U…>`)
+        // carries the OTHER party's USER id, not a channel id. Resolve it as a
+        // USER so the DM renders as the person's name instead of leaking `U…`.
+        userIds.add(id);
+      }
+      // D… (DM) / G… (MPIM) channel ids: no 1-by-1 lookup; handled by the
+      // inline label or a generic fallback in the replace pass below.
     }
 
     await Promise.all([
@@ -147,11 +152,27 @@ export class NameResolver {
         const name = this.users.get(id);
         return name != null ? `@${name}` : match;
       })
-      .replace(CHANNEL_MENTION_RE, (match, id: string, inlineName?: string) => {
-        // Prefer cached canonical name → inline label → keep raw markup.
-        const name = this.channels.get(id) ?? inlineName;
-        return name != null && name.length > 0 ? `#${name}` : match;
-      });
+      .replace(CHANNEL_MENTION_RE, (match, id: string, inlineName?: string) =>
+        this.renderChannelMention(match, id, inlineName),
+      );
+  }
+
+  /**
+   * Render a `<#…|label>` channel-mention to display text. A `U…`/`W…` id is a
+   * DM (the markup carries the other party's USER id) — render the person, and
+   * NEVER fall back to the raw id (the model would print `#U03… (DM)`). A `C…`
+   * id renders as `#name`; an unresolved channel keeps its inline label or the
+   * original markup as last resort.
+   */
+  private renderChannelMention(match: string, id: string, inlineName?: string): string {
+    if (id.startsWith('U') || id.startsWith('W')) {
+      const uname = this.users.get(id);
+      if (uname != null) return `@${uname}`;
+      if (inlineName != null && inlineName.length > 0) return inlineName;
+      return 'a direct message';
+    }
+    const name = this.channels.get(id) ?? inlineName;
+    return name != null && name.length > 0 ? `#${name}` : match;
   }
 
   /**
@@ -214,10 +235,9 @@ export class NameResolver {
         const name = this.users.get(id);
         return name != null ? `@${name}` : match;
       })
-      .replace(CHANNEL_MENTION_RE, (match, id: string, inlineName?: string) => {
-        const name = this.channels.get(id) ?? inlineName;
-        return name != null && name.length > 0 ? `#${name}` : match;
-      });
+      .replace(CHANNEL_MENTION_RE, (match, id: string, inlineName?: string) =>
+        this.renderChannelMention(match, id, inlineName),
+      );
   }
 
   /** Test seam — clear all cached state. */
