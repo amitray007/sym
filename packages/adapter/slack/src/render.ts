@@ -92,7 +92,9 @@ function tableIntentToFallback(intent: TableRenderIntent): string {
   if (intent.caption !== undefined && intent.caption.trim().length > 0) {
     lines.push(intent.caption);
   }
-  for (const row of intent.rows) {
+  // Clamp to the same row budget as the rendered block so the fallback text
+  // (notifications / screen readers) matches what's shown, not more.
+  for (const row of intent.rows.slice(0, MAX_TABLE_ROWS - 1)) {
     const parts = row.map((cell) =>
       cell.link !== undefined && cell.link.length > 0 ? `${cell.text} (${cell.link})` : cell.text,
     );

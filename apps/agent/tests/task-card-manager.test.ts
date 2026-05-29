@@ -62,6 +62,37 @@ describe('TaskCardManager — plan mode', () => {
     expect(chunks).toEqual([]); // the model's plan is the card; tool rows are noise
   });
 
+  it('settles already-shown tool rows when set_plan latches afterwards (audit #17)', async () => {
+    const { chunks, send } = collector();
+    const card = new TaskCardManager(send, 1);
+    const plan = new PlanController();
+    card.bindPlan(plan);
+    await card.onToolStart('c1', 'reading the channel'); // shown, in_progress
+    chunks.length = 0;
+
+    await plan.setPlan(['Summarize']);
+
+    expect(chunks).toEqual([
+      { type: 'task_update', id: 'task-1', title: 'Reading the channel', status: 'complete' },
+      { type: 'task_update', id: 'p1', title: 'Summarize', status: 'pending' },
+    ]);
+  });
+
+  it('does not emit settle rows for tools that were never shown (below threshold)', async () => {
+    const { chunks, send } = collector();
+    const card = new TaskCardManager(send, 5); // high threshold → tool stays buffered, unshown
+    const plan = new PlanController();
+    card.bindPlan(plan);
+    await card.onToolStart('c1', 'reading the channel'); // buffered, not on the card
+    chunks.length = 0;
+
+    await plan.setPlan(['Summarize']);
+
+    expect(chunks).toEqual([
+      { type: 'task_update', id: 'p1', title: 'Summarize', status: 'pending' },
+    ]);
+  });
+
   it('finish() auto-completes pending/in_progress plan items but leaves blocked', async () => {
     const { chunks, send } = collector();
     const card = new TaskCardManager(send, 1);
