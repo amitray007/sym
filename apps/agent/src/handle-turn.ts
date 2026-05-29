@@ -124,7 +124,7 @@ interface TrackedTask {
  * All chunk sends are best-effort: errors are logged and swallowed so a card
  * failure never blocks reply delivery.
  */
-class TaskCardManager {
+export class TaskCardManager {
   private taskCounter = 0;
   /** All known tasks, keyed by Pi's toolCallId. */
   private readonly tasks = new Map<string, TrackedTask>();
