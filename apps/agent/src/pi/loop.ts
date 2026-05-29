@@ -247,7 +247,14 @@ const TOOL_VERBS: Record<string, string> = {
  * The PlanController's own `set_plan` event drives the visible rows; the
  * tool execution itself is invisible.
  */
-const SILENT_TOOLS: ReadonlySet<string> = new Set(['update_task', 'set_plan']);
+const SILENT_TOOLS: ReadonlySet<string> = new Set([
+  'update_task',
+  'set_plan',
+  // present_* render the answer itself — they aren't "work". A "using
+  // present_card" shimmer / card row is noise, so keep them invisible.
+  'present_card',
+  'present_table',
+]);
 
 function friendlyVerb(toolName: string): string {
   return TOOL_VERBS[toolName] ?? `using ${toolName}`;

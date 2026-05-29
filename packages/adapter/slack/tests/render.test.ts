@@ -107,9 +107,9 @@ const card: CardRenderIntent = {
 };
 
 describe('renderIntentToBlocks (card)', () => {
-  it('emits header → body section → fields section → actions', () => {
+  it('emits header → body markdown → fields section → actions', () => {
     const blocks = renderIntentToBlocks(card);
-    expect(blocks.map((b) => b.type)).toEqual(['header', 'section', 'section', 'actions']);
+    expect(blocks.map((b) => b.type)).toEqual(['header', 'markdown', 'section', 'actions']);
   });
 
   it('puts the title in a header block (plain_text)', () => {

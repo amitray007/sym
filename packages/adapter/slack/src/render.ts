@@ -16,7 +16,6 @@ import {
   markdownBlock,
   mrkdwnElement,
   rawTextCell,
-  sectionBlock,
   tableBlock,
   urlButton,
 } from './blocks.js';
@@ -111,7 +110,10 @@ function cardIntentToBlocks(intent: CardRenderIntent): SlackBlock[] {
   blocks.push(headerBlock(title));
 
   if (intent.body !== undefined && intent.body.trim().length > 0) {
-    blocks.push(sectionBlock(intent.body));
+    // markdown block (standard Markdown) — the model writes standard Markdown
+    // for replies, so a section's mrkdwn would render `**bold**`/`[a](b)`
+    // literally. Keep the card body consistent with the reply dialect.
+    blocks.push(markdownBlock(intent.body));
   }
 
   if (intent.fields !== undefined && intent.fields.length > 0) {

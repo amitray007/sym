@@ -137,6 +137,9 @@ export function fieldsSection(fields: MrkdwnElement[]): SectionBlock {
   return { type: 'section', fields };
 }
 
+/** Slack hard limit on button text. Exceeding it rejects the whole message. */
+const BUTTON_TEXT_MAX = 75;
+
 /** A URL `button` element — opens a link, no interactivity callback required. */
 export function urlButton(
   label: string,
@@ -146,7 +149,10 @@ export function urlButton(
   text: PlainTextElement;
   url: string;
 } {
-  return { type: 'button', text: plainTextElement(label, true), url };
+  // Clamp to Slack's 75-char button limit — an over-long label would otherwise
+  // reject the entire message, not just the button.
+  const text = label.length > BUTTON_TEXT_MAX ? `${label.slice(0, BUTTON_TEXT_MAX - 1)}…` : label;
+  return { type: 'button', text: plainTextElement(text, true), url };
 }
 
 /** A `context` block. Elements can be mrkdwn or plain_text elements. */
