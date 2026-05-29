@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { NarrationFilter } from '../src/narration-filter.js';
+import { NarrationFilter, stripNarration } from '../src/narration-filter.js';
 
 /**
  * Helper — feed a single complete string and capture everything emitted
@@ -207,5 +207,67 @@ describe('NarrationFilter — empty / whitespace', () => {
   it('preserves blank lines (paragraph breaks)', () => {
     const out = feedAll(['First paragraph.\n', '\n', 'Second paragraph.\n']);
     expect(out).toBe('First paragraph.\n\nSecond paragraph.\n');
+  });
+});
+
+describe('NarrationFilter — preamble patterns (2026-05-30 dogfood)', () => {
+  it.each([
+    'Now start p1.\n',
+    'Start p2.\n',
+    'Start p3.\n',
+    'Now get profile.\n',
+    'Now reply.\n',
+    'Now summarize the thread.\n',
+    'Search messages in #test-stuff today.\n',
+    'Summarize: many duplicate requests.\n',
+    "We'll craft the summary.\n",
+    "I'll compose the reply.\n",
+  ])('drops narration: %j', (line) => {
+    expect(feedAll([line])).toBe('');
+  });
+
+  it.each([
+    "I'll set that reminder for 5pm.\n",
+    'Now you can see the full list.\n',
+    'Now I have what I need to answer.\n',
+    'Read the docs I linked for the full API.\n',
+    "Let's keep the launch on Thursday.\n",
+  ])('keeps real reply text: %j', (line) => {
+    expect(feedAll([line])).toBe(line);
+  });
+});
+
+describe('stripNarration — full-text plan preamble (2026-05-30 dogfood)', () => {
+  const leaked =
+    'Now start p1.Start p2.Search messages in #test-stuff today from owner.' +
+    'Summarize: many duplicate requests, no other content. So today only these messages. ' +
+    "We'll craft summary.\n\nNow get profile.Start p3.Now reply." +
+    "Here's the current time (UTC and Asia/Kolkata), a recap of today's activity, and your profile.";
+
+  it('drops the planning preamble and keeps the real answer', () => {
+    const out = stripNarration(leaked);
+    expect(out).toContain("Here's the current time");
+    for (const frag of [
+      'Now start p1',
+      'Start p2',
+      'Search messages in',
+      'Summarize:',
+      "We'll craft summary",
+      'Now get profile',
+      'Start p3',
+      'Now reply',
+    ]) {
+      expect(out).not.toContain(frag);
+    }
+  });
+
+  it('leaves a clean reply untouched', () => {
+    const clean =
+      "Here's the recap: three people pinged you about the launch. I'll set the reminder for 5pm.";
+    expect(stripNarration(clean)).toBe(clean);
+  });
+
+  it('returns empty when the whole text is narration (caller falls back)', () => {
+    expect(stripNarration('Now start p1.\nStart p2.\nNow reply.\n').trim()).toBe('');
   });
 });

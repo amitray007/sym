@@ -8,7 +8,7 @@ import {
 import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
-import { NarrationFilter } from './narration-filter.js';
+import { NarrationFilter, stripNarration } from './narration-filter.js';
 import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
@@ -305,6 +305,17 @@ function capitalize(s: string): string {
  * to splice beneath the markdown body and a fallback-text suffix carrying the
  * same content for notifications + screen readers.
  */
+/**
+ * Strip plan narration from a non-streamed reply body. The live streaming path
+ * filters deltas as they arrive; the postMessage fallback paths post
+ * `reply.markdown` whole, so they need an explicit pass. Falls back to the
+ * original if cleaning would empty the reply (never post nothing).
+ */
+function cleanReplyBody(markdown: string): string {
+  const cleaned = stripNarration(markdown);
+  return cleaned.trim().length > 0 ? cleaned : markdown;
+}
+
 function heroRenderParts(reply: Reply): { renderBlocks: SlackBlock[]; fallbackSuffix: string } {
   const renders = reply.renders;
   if (renders === undefined || renders.length === 0) {
@@ -702,14 +713,11 @@ async function streamReply(
     // user sees the answer instead of nothing.
     if (streamTs === undefined) {
       const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
-      const blocks = [
-        markdownBlock(reply.markdown),
-        ...renderBlocks,
-        receiptToContextBlock(reply.receipt),
-      ];
+      const body = cleanReplyBody(reply.markdown);
+      const blocks = [markdownBlock(body), ...renderBlocks, receiptToContextBlock(reply.receipt)];
       await deps.slackClient.chatPostMessage({
         channel,
-        text: reply.markdown + fallbackSuffix,
+        text: body + fallbackSuffix,
         blocks,
         thread_ts: threadTs,
       });
@@ -866,14 +874,11 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   const reply = await runTurnLoop(rewrittenTurn, deps, registry, history);
 
   const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
-  const blocks = [
-    markdownBlock(reply.markdown),
-    ...renderBlocks,
-    receiptToContextBlock(reply.receipt),
-  ];
+  const body = cleanReplyBody(reply.markdown);
+  const blocks = [markdownBlock(body), ...renderBlocks, receiptToContextBlock(reply.receipt)];
   await deps.slackClient.chatPostMessage({
     channel: turn.channelId,
-    text: reply.markdown + fallbackSuffix,
+    text: body + fallbackSuffix,
     blocks,
     // Reply in-thread when the turn is already threaded; top-level otherwise.
     ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),

@@ -65,11 +65,33 @@ const NARRATION_PATTERNS: readonly RegExp[] = [
   // (those rarely appear; if they do, the cost is one extra line drop).
   /^(?:searching|reading|calling|fetching|looking up|checking)\s+(?:slack|the\s+(?:channel|thread|messages?|workspace)|messages|channels?|the\s+web)\b/i,
 
-  // "Now fetch profile.", "Now search again.", "Now read channel C0123." —
-  // model talking to itself with an imperative verb after "Now". Gated to
-  // a tight verb list so "Now I have the answer" stays through. Observed
-  // 2026-05-29 dogfood: "Now fetch profile.Amit's recent remarks…"
-  /^now\s+(?:fetch|search|read|check|call|run|use|look\s+up|update|mark|move\s+on)\b/i,
+  // "Now fetch profile.", "Now reply.", "Now get profile.", "Now start p1." —
+  // model talking to itself with an imperative verb after "Now". Gated to a
+  // verb list so "Now I have the answer" / "Now you can…" stay through (the
+  // word after "now" is a pronoun, not a verb). Observed 2026-05-29 dogfood:
+  // "Now fetch profile.Amit's recent remarks…", and 2026-05-30: "Now start
+  // p1.Start p2.…Now get profile.…Now reply.Here's the current time…".
+  /^now[,\s]+(?:fetch|search|read|check|call|run|use|look\s+up|update|mark|move\s+on|start|get|begin|do|reply|respond|answer|summari[sz]e|craft|compose|write|draft|gather|grab|pull|continue|proceed|verify|confirm|send|set|post|react|remind)\b/i,
+
+  // "Start p1", "Start p2.", "Begin p3", "Finish p2" — imperative plan-step
+  // narration WITHOUT a leading "now". The plan-id is the smoking gun.
+  /^(?:start|begin|do|finish|complete|skip|move\s+to|on\s+to)\s+p\d+\b/i,
+
+  // "Search messages in #x", "Read the channel", "Get profile", "Fetch the
+  // thread" — imperative retrieval verb + a Slack-mechanics object at line
+  // start (companion to the gerund "Searching…" pattern above). Gated to a
+  // retrieval object so "Read the docs I linked" type replies are rare-eaten.
+  /^(?:search|read|fetch|check|grab|pull|get|look\s+up)\s+(?:the\s+)?(?:messages?|channels?|slack|thread|workspace|profile|user|web|#\S+|[CDU][0-9A-Z]{6,})\b/i,
+
+  // "Summarize:", "Summary:" — label-style narration preamble before the model
+  // composes the answer. A real reply rarely opens with "Summarize:".
+  /^summar(?:ize|ise|y)\s*[:.]/i,
+
+  // "We'll craft the summary", "I'll compose the reply", "Let's put together
+  // the response" — the model announcing it is about to write the answer
+  // (meta), gated tightly to compose-verbs + answer-nouns so genuine promises
+  // like "I'll set that reminder" pass through untouched.
+  /^(?:we'll|we\s+will|i'll|i\s+will|let's|let\s+us)\s+(?:craft|compose|write|draft|put\s+together|prepare|build|create|formulate)\s+(?:the\s+|a\s+|an\s+)?(?:summary|recap|reply|response|answer|message)\b/i,
 
   // "Search again broader", "Search wider", "Search broader" — meta-narration
   // about the model's own retrieval strategy. Gated to "search" as the
@@ -186,4 +208,30 @@ export class NarrationFilter {
     this.buf = '';
     return out;
   }
+
+  /**
+   * Like {@link flush} but CLASSIFIES the trailing segment and drops it if it's
+   * narration. Safe only when the full text has been fed (no more deltas
+   * coming) — used by {@link stripNarration}, never on a live stream where a
+   * partial final segment could be a real-answer fragment.
+   */
+  flushClassified(): string {
+    const seg = this.buf;
+    this.buf = '';
+    return isNarration(seg) ? '' : seg;
+  }
+}
+
+/**
+ * Strip narration from a COMPLETE text (not a live stream). Classifies every
+ * segment including the last — used for the postMessage paths, where the whole
+ * reply is in hand and there's no streaming-tail ambiguity. Returns the cleaned
+ * text; callers should fall back to the original if this comes back empty (all
+ * narration) so a turn never posts nothing.
+ */
+export function stripNarration(text: string): string {
+  if (text.length === 0) return text;
+  const f = new NarrationFilter();
+  const head = f.push(text);
+  return head + f.flushClassified();
 }
