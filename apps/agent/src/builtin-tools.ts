@@ -422,20 +422,24 @@ const SEARCH_MESSAGES_DESCRIPTOR: ToolDescriptor = {
     "  - `from:@amit`                 find messages from a user by @-handle (use the owner's userName from the metadata block)",
     '  - `to:@amit`                   messages addressed to a user',
     '  - `in:#general`                limit to one channel',
-    '  - `after:2026-05-26`           on/after a date (YYYY-MM-DD)',
-    '  - `before:2026-05-28`          on/before a date',
-    '  - `during:yesterday`           shorthand date filters: yesterday, today, last_week, last_month',
+    '  - `after:2026-05-26`           AFTER a date (exclusive), YYYY-MM-DD',
+    '  - `before:2026-05-28`          BEFORE a date (exclusive), YYYY-MM-DD',
+    '  - `on:2026-05-27`              a single calendar day',
     '  - `has:link` / `has:reaction`  attribute filters',
     '  - Plain words match the message content (e.g. `postgres migration`)',
     '',
+    'Dates: prefer EXPLICIT `after:`/`before:`/`on:` with YYYY-MM-DD (call get_current_time first if you need today\'s date) — they are far more reliable than relative words. For "today", bound it with `after:<yesterday> before:<tomorrow>` or `on:<today>`. Note `after:`/`before:` are EXCLUSIVE, so widen by a day on each side when you want a full day inclusive.',
+    'Sort: defaults to relevance (`score`). For ANY recency-oriented ask — "today", "recent", "latest", "what did I just", a date range — pass `sort=timestamp` so newest comes first and nothing recent gets buried below the relevance cutoff.',
+    '',
     'Concrete worked examples:',
-    '  - "who did I talk to yesterday?"   →  `from:<@OWNER_ID> during:yesterday`',
-    '  - "all my messages today"          →  `from:<@OWNER_ID> during:today`',
+    '  - "what did I do today?"           →  query `from:<@OWNER_ID> on:<today>`, sort=timestamp',
+    '  - "who did I talk to yesterday?"   →  query `from:<@OWNER_ID> on:<yesterday>`, sort=timestamp',
     '  - "what did I post in #eng?"       →  `from:<@OWNER_ID> in:#eng`',
     '  - "find the postgres discussion"   →  `postgres migration`',
     '  - "who mentioned the launch plan?" →  `launch plan`',
     '',
-    'OWNER_ID is the owner\'s user id from the turn metadata block. Returns the most relevant matches with permalinks. An empty result means the search ran but matched nothing — say so, don\'t fall back to "channels you belong to" language.',
+    "OWNER_ID is the owner's user id from the turn metadata block. Returns the most relevant matches with permalinks.",
+    'RELIABILITY: search is an INDEX — a message sent in the last minute or two may not be searchable yet. If you expect a very recent message and search comes back empty, read the channel directly with read_channel instead of concluding nothing happened. If a query with modifiers returns nothing, retry once with the plain keywords (drop from:/in:/dates) before giving up. An empty result after that means it genuinely matched nothing — say so plainly; don\'t fall back to "channels you belong to" language.',
   ].join('\n'),
   parameters: {
     type: 'object',
@@ -447,7 +451,8 @@ const SEARCH_MESSAGES_DESCRIPTOR: ToolDescriptor = {
       },
       limit: {
         type: 'number',
-        description: 'Max results (default 10, max 100).',
+        description:
+          'Max results (default 20, max 100). Raise to 50+ for "everything I did" sweeps.',
       },
       sort: {
         type: 'string',
@@ -960,7 +965,7 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
           };
         } else {
           const limitArg = call.arguments['limit'];
-          const rawLimit = typeof limitArg === 'number' ? limitArg : 10;
+          const rawLimit = typeof limitArg === 'number' ? limitArg : 20;
           const limit = Math.max(1, Math.min(100, rawLimit));
           const sortArg = call.arguments['sort'];
           const sort: 'score' | 'timestamp' = sortArg === 'timestamp' ? 'timestamp' : 'score';
