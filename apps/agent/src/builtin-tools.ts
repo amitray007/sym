@@ -9,6 +9,7 @@ import type {
   SlackChannelId,
   SlackThreadTs,
   SlackUserId,
+  RenderIntent,
   ToolCall,
   ToolDescriptor,
   ToolDispatcher,
@@ -911,7 +912,31 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
                   return `${i + 1}. ${who} in ${where}${link}\n   ${content}`;
                 })
                 .join('\n');
-              result = { callId: call.id, ok: true, content: `${header}${body}` };
+              // Presentation hint: render the same matches as a Slack `table`
+              // (code-owned blocks; the model still reasons over `content`).
+              const render: RenderIntent = {
+                kind: 'table',
+                columns: [{ header: 'From' }, { header: 'Channel' }, { header: 'Message' }],
+                rows: matches.map((m, i) => {
+                  const who =
+                    (m.userId !== undefined ? resolver.getUser(m.userId) : undefined) ??
+                    m.username ??
+                    m.userId ??
+                    '(unknown)';
+                  const channelName =
+                    m.channelName ??
+                    (m.channelId !== undefined ? resolver.getChannel(m.channelId) : undefined);
+                  const where = channelName ? `#${channelName}` : (m.channelId ?? '(unknown)');
+                  const raw = rewrittenTexts[i] ?? m.text;
+                  const preview = raw.length > 140 ? `${raw.slice(0, 140)}…` : raw;
+                  return [
+                    { text: who },
+                    { text: where },
+                    m.permalink ? { text: preview, link: m.permalink } : { text: preview },
+                  ];
+                }),
+              };
+              result = { callId: call.id, ok: true, content: `${header}${body}`, render };
             }
           } catch (err: unknown) {
             const message = err instanceof Error ? err.message : String(err);

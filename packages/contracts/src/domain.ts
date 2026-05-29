@@ -7,6 +7,7 @@ import type {
   WorkspaceId,
 } from './ids.js';
 import type { Usage } from './provider.js';
+import type { RenderIntent } from './render.js';
 import type { SlackEntrySurface } from './slack.js';
 
 /**
@@ -46,4 +47,10 @@ export interface Reply {
   /** Slack-flavored markdown (rendered to a `markdown` block by the adapter). */
   markdown: string;
   receipt: Receipt;
+  /**
+   * Render intents collected from tool results during the turn. The adapter
+   * renders the LAST one as the turn's single "hero" surface beneath the
+   * markdown body. Absent when no tool attached a render.
+   */
+  renders?: RenderIntent[];
 }

@@ -17,8 +17,11 @@
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { TSchema } from '@earendil-works/pi-ai';
-import type { JsonObject, ToolDescriptor, ToolRuntimeContext } from '@sym/contracts';
+import type { JsonObject, RenderIntent, ToolDescriptor, ToolRuntimeContext } from '@sym/contracts';
 import type { ToolRegistry } from '@sym/kernel';
+
+/** Sink for render intents attached to tool results (collected by the loop). */
+export type RenderSink = (render: RenderIntent) => void;
 
 /**
  * Convert a single Sym `ToolDescriptor` into a Pi `AgentTool`.
@@ -33,6 +36,7 @@ function bridgeTool(
   descriptor: ToolDescriptor,
   registry: ToolRegistry,
   ctx: ToolRuntimeContext,
+  onRender?: RenderSink,
 ): AgentTool {
   return {
     name: descriptor.name,
@@ -63,6 +67,12 @@ function bridgeTool(
         throw new Error(`[${result.error.code}]: ${result.error.message}`);
       }
 
+      // Side-channel the presentation hint out to the loop. Pi only consumes
+      // the text `content` below; `render` would otherwise be swallowed here.
+      if (result.render !== undefined) {
+        onRender?.(result.render);
+      }
+
       const text =
         typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
 
@@ -85,7 +95,8 @@ export function bridgeTools(
   registry: ToolRegistry,
   ctx: ToolRuntimeContext,
   descriptors?: ReturnType<ToolRegistry['listTools']>,
+  onRender?: RenderSink,
 ): AgentTool[] {
   const list = descriptors ?? registry.listTools();
-  return list.map((d) => bridgeTool(d, registry, ctx));
+  return list.map((d) => bridgeTool(d, registry, ctx, onRender));
 }

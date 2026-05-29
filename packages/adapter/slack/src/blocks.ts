@@ -52,13 +52,47 @@ export interface ActionsBlock {
   elements: unknown[];
 }
 
+// --- Table block (Block Kit; usable in messages — verified 2026-05-29) -------
+
+/** A `raw_text` table cell — plain, unformatted text. */
+export interface RawTextCell {
+  type: 'raw_text';
+  text: string;
+}
+
+/** A `rich_text` table cell carrying a single hyperlink (the only rich form we emit). */
+export interface RichTextLinkCell {
+  type: 'rich_text';
+  elements: [
+    {
+      type: 'rich_text_section';
+      elements: [{ type: 'link'; url: string; text: string }];
+    },
+  ];
+}
+
+export type TableCell = RawTextCell | RichTextLinkCell;
+
+export interface TableColumnSetting {
+  align?: 'left' | 'center' | 'right';
+  is_wrapped?: boolean;
+}
+
+export interface TableBlock {
+  type: 'table';
+  /** First row is the header row. Max 100 rows, 20 cells/row (Slack limits). */
+  rows: TableCell[][];
+  column_settings?: TableColumnSetting[];
+}
+
 export type SlackBlock =
   | MarkdownBlock
   | SectionBlock
   | HeaderBlock
   | ContextBlock
   | DividerBlock
-  | ActionsBlock;
+  | ActionsBlock
+  | TableBlock;
 
 // --- Element builders -------------------------------------------------------
 
@@ -110,4 +144,26 @@ export function dividerBlock(): DividerBlock {
 /** An `actions` block. Elements are typed as `unknown` to allow any action element shape. */
 export function actionsBlock(elements: unknown[]): ActionsBlock {
   return { type: 'actions', elements };
+}
+
+/** A `raw_text` table cell. */
+export function rawTextCell(text: string): RawTextCell {
+  return { type: 'raw_text', text };
+}
+
+/** A `rich_text` table cell that renders `text` as a link to `url`. */
+export function linkCell(text: string, url: string): RichTextLinkCell {
+  return {
+    type: 'rich_text',
+    elements: [{ type: 'rich_text_section', elements: [{ type: 'link', url, text }] }],
+  };
+}
+
+/** A `table` block. First row should be the header row. */
+export function tableBlock(rows: TableCell[][], columnSettings?: TableColumnSetting[]): TableBlock {
+  const block: TableBlock = { type: 'table', rows };
+  if (columnSettings !== undefined) {
+    block.column_settings = columnSettings;
+  }
+  return block;
 }

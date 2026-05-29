@@ -23,6 +23,7 @@ import type { AssistantMessage, UserMessage, Model } from '@earendil-works/pi-ai
 import type { SlackClient } from '@sym/adapter-slack';
 import type {
   ChatMessage,
+  RenderIntent,
   Reply,
   SlackChannelId,
   SlackThreadTs,
@@ -325,9 +326,13 @@ export async function runLoopPi(
   // metadata block so the model knows who it's talking to.
   const userText = buildUserTurnContent(turn, opts.ownerProfile);
 
+  // Render intents attached to tool results during the turn (search → table,
+  // present_* tools). Collected here because Pi otherwise swallows the result.
+  const renders: RenderIntent[] = [];
+
   // Bridge the built-in tools as native Pi tools (full schemas visible up front).
   const descriptors = registry.listTools();
-  const agentTools = bridgeTools(registry, ctx, descriptors);
+  const agentTools = bridgeTools(registry, ctx, descriptors, (r) => renders.push(r));
 
   // Build a name → ToolDescriptor map so beforeToolCall can look up destructive hints.
   const descriptorMap = new Map<string, ToolDescriptor>(descriptors.map((d) => [d.name, d]));
@@ -513,5 +518,6 @@ export async function runLoopPi(
     turnId: turn.id,
     markdown: finalMarkdown,
     receipt,
+    ...(renders.length > 0 ? { renders } : {}),
   };
 }

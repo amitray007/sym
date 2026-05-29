@@ -1,5 +1,6 @@
 import type { ConversationId, SlackChannelId, SlackUserId, TurnId, WorkspaceId } from './ids.js';
 import type { JsonObject, JsonSchema, JsonValue } from './json.js';
+import type { RenderIntent } from './render.js';
 
 /**
  * A function-tool the model may call. OpenAI-compatible shape (Fireworks
@@ -53,6 +54,13 @@ export interface ToolSuccess {
   callId: string;
   ok: true;
   content: JsonValue | string;
+  /**
+   * Optional presentation hint. `content` always carries the model-facing text
+   * (the model reasons over it unchanged); `render`, when set, is surfaced to
+   * the user as Block Kit by the Slack adapter. Code owns the blocks — the
+   * model never authors them. Ignored by consumers that only read `content`.
+   */
+  render?: RenderIntent;
 }
 
 export interface ToolFailure {

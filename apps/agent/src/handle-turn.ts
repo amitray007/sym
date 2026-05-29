@@ -1,4 +1,10 @@
-import { markdownBlock, receiptToContextBlock, threadToHistory } from '@sym/adapter-slack';
+import {
+  markdownBlock,
+  receiptToContextBlock,
+  renderIntentToBlocks,
+  renderIntentToFallbackText,
+  threadToHistory,
+} from '@sym/adapter-slack';
 import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
@@ -13,6 +19,7 @@ import type { BehaviorConfig } from './config.js';
 import type { NameResolver } from './name-resolver.js';
 import type {
   AppendStreamParams,
+  SlackBlock,
   SlackClient,
   StartStreamParams,
   TaskUpdateChunk,
@@ -289,6 +296,28 @@ class TaskCardManager {
 
 function capitalize(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+}
+
+/**
+ * The turn's single "hero" render. A turn may collect multiple render intents
+ * (e.g. two searches); we surface only the LAST one — one structured surface
+ * per message — and log the others as an over-render signal. Returns the blocks
+ * to splice beneath the markdown body and a fallback-text suffix carrying the
+ * same content for notifications + screen readers.
+ */
+function heroRenderParts(reply: Reply): { renderBlocks: SlackBlock[]; fallbackSuffix: string } {
+  const renders = reply.renders;
+  if (renders === undefined || renders.length === 0) {
+    return { renderBlocks: [], fallbackSuffix: '' };
+  }
+  if (renders.length > 1) {
+    console.info(`[render] ${renders.length} intents this turn; using last (over-render signal)`);
+  }
+  const hero = renders[renders.length - 1]!;
+  return {
+    renderBlocks: renderIntentToBlocks(hero),
+    fallbackSuffix: `\n\n${renderIntentToFallbackText(hero)}`,
+  };
 }
 
 /** Max characters in a derived assistant-thread title (Slack truncates long ones). */
@@ -657,21 +686,33 @@ async function streamReply(
     // calls). Either way, we never opened the stream — post normally so the
     // user sees the answer instead of nothing.
     if (streamTs === undefined) {
-      const blocks = [markdownBlock(reply.markdown), receiptToContextBlock(reply.receipt)];
+      const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
+      const blocks = [
+        markdownBlock(reply.markdown),
+        ...renderBlocks,
+        receiptToContextBlock(reply.receipt),
+      ];
       await deps.slackClient.chatPostMessage({
         channel,
-        text: reply.markdown,
+        text: reply.markdown + fallbackSuffix,
         blocks,
         thread_ts: threadTs,
       });
       return true;
     }
 
-    // Final flush + close.
+    // Final flush + close. Any hero render rides on stopStream's `blocks`, which
+    // Slack renders at the bottom of the finalized streamed message — beneath
+    // the streamed prose, above the receipt.
     await flushBuffer();
+    const { renderBlocks } = heroRenderParts(reply);
     const receipt = receiptToContextBlock(reply.receipt);
     try {
-      await deps.slackClient.chatStopStream({ channel, ts: streamTs, blocks: [receipt] });
+      await deps.slackClient.chatStopStream({
+        channel,
+        ts: streamTs,
+        blocks: [...renderBlocks, receipt],
+      });
     } catch (err) {
       console.warn('[agent] stopStream failed:', err);
     }
@@ -809,10 +850,15 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   // Non-threaded or stream fallback: run the loop and post normally.
   const reply = await runTurnLoop(rewrittenTurn, deps, registry, history);
 
-  const blocks = [markdownBlock(reply.markdown), receiptToContextBlock(reply.receipt)];
+  const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
+  const blocks = [
+    markdownBlock(reply.markdown),
+    ...renderBlocks,
+    receiptToContextBlock(reply.receipt),
+  ];
   await deps.slackClient.chatPostMessage({
     channel: turn.channelId,
-    text: reply.markdown,
+    text: reply.markdown + fallbackSuffix,
     blocks,
     // Reply in-thread when the turn is already threaded; top-level otherwise.
     ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),
