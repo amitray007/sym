@@ -115,6 +115,8 @@ class MockSlackClient implements SlackClient {
 
   /** When truthy, chatStartStream rejects with this error. */
   startStreamError: Error | undefined = undefined;
+  /** When truthy, chatAppendStream rejects with this error (simulates a dead stream). */
+  appendStreamError: Error | undefined = undefined;
 
   async chatPostMessage(params: PostMessageParams): Promise<PostMessageResult> {
     this.posts.push(params);
@@ -150,6 +152,7 @@ class MockSlackClient implements SlackClient {
     return { channel: params.channel, ts: '111.stream' as SlackThreadTs };
   }
   async chatAppendStream(params: AppendStreamParams): Promise<void> {
+    if (this.appendStreamError !== undefined) throw this.appendStreamError;
     if (params.markdownText !== undefined) {
       this.appendedText += params.markdownText;
     }
@@ -906,6 +909,45 @@ describe('handleTurn', () => {
     // Buffer mode delivers once — no chat.update settle.
     expect(slack.updateCalls).toHaveLength(0);
     expect(slack.stopStreamCalls).toHaveLength(1);
+  });
+
+  it('falls back to postMessage when the buffered stream is dead (long turn / timeout)', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as {
+          onDelta?: (d: string) => Promise<void>;
+          onToolStart?: (id: string, label: string) => Promise<void>;
+        };
+        await o.onToolStart?.('c1', 'searching'); // buffer mode
+        await o.onDelta?.('the pricing answer');
+        return makeReply({
+          markdown: 'the pricing answer',
+          receipt: {
+            turnId: 'turn-1' as TurnId,
+            model: 'm',
+            toolsInvoked: ['search_messages'],
+            durationMs: 5,
+          },
+        });
+      },
+    );
+    mockCleanupReply.mockResolvedValueOnce('the pricing answer');
+
+    const slack = new MockSlackClient();
+    // Stream opens (task card), but the streaming session has expired → append fails.
+    slack.appendStreamError = new Error('message_not_found');
+    await handleTurn(makeTurn({ threadTs: '955.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
+    });
+
+    // The answer must STILL land — as a normal posted message.
+    expect(slack.posts).toHaveLength(1);
+    expect(slack.posts[0]?.text).toContain('the pricing answer');
   });
 
   it('streams live (no buffering, no cleanup) for a no-tool reply', async () => {

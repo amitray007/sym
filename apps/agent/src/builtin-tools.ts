@@ -685,6 +685,13 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
   // wires the shared one via `loadWorkspaceContext` for cross-turn reuse.
   const resolver = deps.nameResolver ?? new NameResolver();
 
+  // Per-turn search dedup. The model sometimes re-runs the IDENTICAL query
+  // several times in one turn — each costs ~400ms and re-bloats the context,
+  // pushing the turn toward a request timeout. This dispatcher lives for one
+  // turn, so caching by exact (query+sort+limit) is safe: results can't
+  // meaningfully change mid-turn. Cached on success only.
+  const searchCache = new Map<string, ToolResult>();
+
   return {
     list(): ToolDescriptor[] {
       return ALL_BUILTIN_DESCRIPTORS;
@@ -969,95 +976,107 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
           const limit = Math.max(1, Math.min(100, rawLimit));
           const sortArg = call.arguments['sort'];
           const sort: 'score' | 'timestamp' = sortArg === 'timestamp' ? 'timestamp' : 'score';
-          try {
-            const startMs = Date.now();
-            const { matches, total } = await slack.searchMessages({
-              query: queryArg.trim(),
-              count: limit,
-              sort,
-            });
-            // Visible-in-logs diagnostic so we can tell "didn't call it" from
-            // "called it, got empty" when triaging "Sym says no activity"
-            // reports. No message bodies — just query + count.
+          const cacheKey = `${queryArg.trim()}|${sort}|${limit}`;
+          const cachedSearch = searchCache.get(cacheKey);
+          if (cachedSearch !== undefined && cachedSearch.ok) {
+            // Identical query already run this turn — reuse the payload with a
+            // FRESH callId (Pi matches tool results by callId).
             console.info(
-              `[tools] search_messages query=${JSON.stringify(queryArg.trim())} ` +
-                `→ ${matches.length}/${total} matches in ${Date.now() - startMs}ms`,
+              `[tools] search_messages query=${JSON.stringify(queryArg.trim())} → cache hit (this turn)`,
             );
-            if (matches.length === 0) {
-              result = { callId: call.id, ok: true, content: '(no matching messages)' };
-            } else {
-              const header =
-                total > matches.length ? `(showing ${matches.length} of ${total} matches)\n` : '';
-              // Resolve author/channel ids upfront so the per-line formatting
-              // can stay synchronous. Search results often arrive without
-              // names attached; this pulls the resolver's cache up to date.
-              // SlackUserId / SlackChannelId are branded — strip to plain
-              // strings for the resolver (which speaks ids structurally).
-              const authorIds = matches
-                .map((m) => m.userId as string | undefined)
-                .filter((id): id is string => id !== undefined && id.length > 0);
-              const channelIds = matches
-                .map((m) => m.channelId as string | undefined)
-                .filter((id): id is string => id !== undefined && id.length > 0);
-              await Promise.all([
-                ...authorIds.map((id) => resolver.resolveUser(id, slack)),
-                ...channelIds.map((id) => resolver.resolveChannel(id, slack)),
-              ]);
-              // Body bodies may also contain `<@U…>` / `<#C…>` references to
-              // OTHER users / channels — rewrite each match's text once.
-              const rewrittenTexts = await Promise.all(
-                matches.map((m) => resolver.rewriteMentions(m.text, slack)),
+            result = { ...cachedSearch, callId: call.id };
+          } else {
+            try {
+              const startMs = Date.now();
+              const { matches, total } = await slack.searchMessages({
+                query: queryArg.trim(),
+                count: limit,
+                sort,
+              });
+              // Visible-in-logs diagnostic so we can tell "didn't call it" from
+              // "called it, got empty" when triaging "Sym says no activity"
+              // reports. No message bodies — just query + count.
+              console.info(
+                `[tools] search_messages query=${JSON.stringify(queryArg.trim())} ` +
+                  `→ ${matches.length}/${total} matches in ${Date.now() - startMs}ms`,
               );
-              const body = matches
-                .map((m, i) => {
-                  const who =
-                    (m.userId !== undefined ? resolver.getUser(m.userId) : undefined) ??
-                    m.username ??
-                    m.userId ??
-                    '(unknown)';
-                  const channelName =
-                    m.channelName ??
-                    (m.channelId !== undefined ? resolver.getChannel(m.channelId) : undefined);
-                  const where = channelName ? `#${channelName}` : (m.channelId ?? '(unknown)');
-                  const link = m.permalink ? ` <${m.permalink}|link>` : '';
-                  const raw = rewrittenTexts[i] ?? m.text;
-                  const content = raw.length > 400 ? `${raw.slice(0, 400)}…` : raw;
-                  return `${i + 1}. ${who} in ${where}${link}\n   ${content}`;
-                })
-                .join('\n');
-              // Presentation hint: render the same matches as a Slack `table`
-              // (code-owned blocks; the model still reasons over `content`).
-              const render: RenderIntent = {
-                kind: 'table',
-                columns: [{ header: 'From' }, { header: 'Channel' }, { header: 'Message' }],
-                rows: matches.map((m, i) => {
-                  const who =
-                    (m.userId !== undefined ? resolver.getUser(m.userId) : undefined) ??
-                    m.username ??
-                    m.userId ??
-                    '(unknown)';
-                  const channelName =
-                    m.channelName ??
-                    (m.channelId !== undefined ? resolver.getChannel(m.channelId) : undefined);
-                  const where = channelName ? `#${channelName}` : (m.channelId ?? '(unknown)');
-                  const raw = rewrittenTexts[i] ?? m.text;
-                  const preview = raw.length > 140 ? `${raw.slice(0, 140)}…` : raw;
-                  return [
-                    { text: who },
-                    { text: where },
-                    m.permalink ? { text: preview, link: m.permalink } : { text: preview },
-                  ];
-                }),
+              if (matches.length === 0) {
+                result = { callId: call.id, ok: true, content: '(no matching messages)' };
+              } else {
+                const header =
+                  total > matches.length ? `(showing ${matches.length} of ${total} matches)\n` : '';
+                // Resolve author/channel ids upfront so the per-line formatting
+                // can stay synchronous. Search results often arrive without
+                // names attached; this pulls the resolver's cache up to date.
+                // SlackUserId / SlackChannelId are branded — strip to plain
+                // strings for the resolver (which speaks ids structurally).
+                const authorIds = matches
+                  .map((m) => m.userId as string | undefined)
+                  .filter((id): id is string => id !== undefined && id.length > 0);
+                const channelIds = matches
+                  .map((m) => m.channelId as string | undefined)
+                  .filter((id): id is string => id !== undefined && id.length > 0);
+                await Promise.all([
+                  ...authorIds.map((id) => resolver.resolveUser(id, slack)),
+                  ...channelIds.map((id) => resolver.resolveChannel(id, slack)),
+                ]);
+                // Body bodies may also contain `<@U…>` / `<#C…>` references to
+                // OTHER users / channels — rewrite each match's text once.
+                const rewrittenTexts = await Promise.all(
+                  matches.map((m) => resolver.rewriteMentions(m.text, slack)),
+                );
+                const body = matches
+                  .map((m, i) => {
+                    const who =
+                      (m.userId !== undefined ? resolver.getUser(m.userId) : undefined) ??
+                      m.username ??
+                      m.userId ??
+                      '(unknown)';
+                    const channelName =
+                      m.channelName ??
+                      (m.channelId !== undefined ? resolver.getChannel(m.channelId) : undefined);
+                    const where = channelName ? `#${channelName}` : (m.channelId ?? '(unknown)');
+                    const link = m.permalink ? ` <${m.permalink}|link>` : '';
+                    const raw = rewrittenTexts[i] ?? m.text;
+                    const content = raw.length > 400 ? `${raw.slice(0, 400)}…` : raw;
+                    return `${i + 1}. ${who} in ${where}${link}\n   ${content}`;
+                  })
+                  .join('\n');
+                // Presentation hint: render the same matches as a Slack `table`
+                // (code-owned blocks; the model still reasons over `content`).
+                const render: RenderIntent = {
+                  kind: 'table',
+                  columns: [{ header: 'From' }, { header: 'Channel' }, { header: 'Message' }],
+                  rows: matches.map((m, i) => {
+                    const who =
+                      (m.userId !== undefined ? resolver.getUser(m.userId) : undefined) ??
+                      m.username ??
+                      m.userId ??
+                      '(unknown)';
+                    const channelName =
+                      m.channelName ??
+                      (m.channelId !== undefined ? resolver.getChannel(m.channelId) : undefined);
+                    const where = channelName ? `#${channelName}` : (m.channelId ?? '(unknown)');
+                    const raw = rewrittenTexts[i] ?? m.text;
+                    const preview = raw.length > 140 ? `${raw.slice(0, 140)}…` : raw;
+                    return [
+                      { text: who },
+                      { text: where },
+                      m.permalink ? { text: preview, link: m.permalink } : { text: preview },
+                    ];
+                  }),
+                };
+                result = { callId: call.id, ok: true, content: `${header}${body}`, render };
+              }
+              searchCache.set(cacheKey, result);
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err);
+              result = {
+                callId: call.id,
+                ok: false,
+                error: { code: 'execution_failed', message },
               };
-              result = { callId: call.id, ok: true, content: `${header}${body}`, render };
             }
-          } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : String(err);
-            result = {
-              callId: call.id,
-              ok: false,
-              error: { code: 'execution_failed', message },
-            };
           }
         }
       } else if (call.name === 'post_as_owner') {

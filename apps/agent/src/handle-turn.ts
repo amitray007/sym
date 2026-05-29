@@ -724,34 +724,35 @@ async function streamReply(
         fireworks: deps.fireworks,
         model: deps.model,
       });
-      if (streamTs === undefined) {
-        // Stream never opened (task card disabled / produced no chunks) — post.
-        const blocks = [markdownBlock(body), ...renderBlocks, receipt];
-        await deps.slackClient.chatPostMessage({
-          channel,
-          text: body + fallbackSuffix,
-          blocks,
-          thread_ts: threadTs,
-        });
-        return true;
-      }
-      // Stream open (task card) — append the clean body, then close beneath it.
-      if (body.length > 0) {
+      const blocks = [markdownBlock(body), ...renderBlocks, receipt];
+
+      // Try to finish the open stream. On a LONG turn (e.g. the model timed
+      // out after several tool calls) the Slack streaming session expires, so
+      // appendStream/stopStream throw `message_not_found` /
+      // `message_not_in_streaming_state`. If anything fails, fall back to a
+      // fresh postMessage so the answer ALWAYS lands — never silently dropped.
+      if (streamTs !== undefined) {
         try {
-          await deps.slackClient.chatAppendStream({ channel, ts: streamTs, markdownText: body });
+          if (body.length > 0) {
+            await deps.slackClient.chatAppendStream({ channel, ts: streamTs, markdownText: body });
+          }
+          await deps.slackClient.chatStopStream({
+            channel,
+            ts: streamTs,
+            blocks: [...renderBlocks, receipt],
+          });
+          return true;
         } catch (err) {
-          console.warn('[agent] appendStream (buffered body) failed (continuing):', err);
+          console.warn('[agent] streamed delivery failed; posting as a normal message:', err);
+          // fall through to postMessage
         }
       }
-      try {
-        await deps.slackClient.chatStopStream({
-          channel,
-          ts: streamTs,
-          blocks: [...renderBlocks, receipt],
-        });
-      } catch (err) {
-        console.warn('[agent] stopStream failed:', err);
-      }
+      await deps.slackClient.chatPostMessage({
+        channel,
+        text: body + fallbackSuffix,
+        blocks,
+        thread_ts: threadTs,
+      });
       return true;
     }
 
@@ -770,6 +771,7 @@ async function streamReply(
     }
 
     await flushBuffer();
+    let streamClosed = true;
     try {
       await deps.slackClient.chatStopStream({
         channel,
@@ -777,13 +779,28 @@ async function streamReply(
         blocks: [...renderBlocks, receipt],
       });
     } catch (err) {
+      streamClosed = false;
       console.warn('[agent] stopStream failed:', err);
+    }
+
+    // If the stream died and NOTHING was ever delivered live, post the reply so
+    // it still lands (same long-turn expiry as the buffer path).
+    if (!streamClosed && !liveBodyFlushed) {
+      const body = await finalReplyBody(reply, ctx.planController, deps);
+      await deps.slackClient.chatPostMessage({
+        channel,
+        text: body + fallbackSuffix,
+        blocks: [markdownBlock(body), ...renderBlocks, receipt],
+        thread_ts: threadTs,
+      });
+      return true;
     }
 
     // Rare case: answer text streamed live AND a tool fired afterwards. The live
     // text may carry narration the model added later — settle the finalized
-    // message to a cleaned version if span-removal changed anything.
-    if (needsLlmCleanup(reply, ctx.planController)) {
+    // message to a cleaned version if span-removal changed anything. Only when
+    // the stream is still alive (a dead stream can't be updated).
+    if (streamClosed && needsLlmCleanup(reply, ctx.planController)) {
       const cleaned = await cleanupReply(reply.markdown, {
         fireworks: deps.fireworks,
         model: deps.model,

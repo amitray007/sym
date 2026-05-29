@@ -890,6 +890,44 @@ describe('createBuiltinDispatcher', () => {
       expect(userCalls[0]?.sort).toBe('score');
     });
 
+    it('dedupes an identical search within a turn — one API call, fresh callId', async () => {
+      const userCalls: SearchMessagesParams[] = [];
+      const userClient = makeSlackClient({
+        searchCalls: userCalls,
+        searchResult: {
+          matches: [
+            {
+              channelId: 'C1' as SlackChannelId,
+              channelName: 'eng',
+              ts: '900.1' as SlackThreadTs,
+              text: 'pricing notes',
+              username: 'amit',
+            },
+          ],
+          total: 1,
+        },
+      });
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        userSlackClient: userClient,
+        botUserId: BOT,
+      });
+      const first = await dispatcher.dispatch(
+        makeCall('search_messages', { query: 'pricing', limit: 5 }, 'call_a'),
+        makeCtx(),
+      );
+      const second = await dispatcher.dispatch(
+        makeCall('search_messages', { query: 'pricing', limit: 5 }, 'call_b'),
+        makeCtx(),
+      );
+      // Second identical call served from the per-turn cache — no extra API hit.
+      expect(userCalls).toHaveLength(1);
+      if (!first.ok || !second.ok) throw new Error('expected ok');
+      expect(second.content).toBe(first.content); // same payload
+      expect(first.callId).toBe('call_a');
+      expect(second.callId).toBe('call_b'); // fresh callId so Pi matches correctly
+    });
+
     it('returns "(no matching messages)" on empty results', async () => {
       const dispatcher = createBuiltinDispatcher({
         slackClient: makeSlackClient({}),
