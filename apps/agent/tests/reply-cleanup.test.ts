@@ -41,7 +41,10 @@ describe('applyRemovals — non-lossy span deletion', () => {
 
 describe('parseRemovals — tolerant JSON extraction', () => {
   it('parses a bare JSON object', () => {
-    expect(parseRemovals('{"remove":["a","b"]}')).toEqual(['a', 'b']);
+    expect(parseRemovals('{"remove":["Now start p1.","Now reply."]}')).toEqual([
+      'Now start p1.',
+      'Now reply.',
+    ]);
   });
 
   it('parses JSON wrapped in a fenced code block', () => {
@@ -57,7 +60,11 @@ describe('parseRemovals — tolerant JSON extraction', () => {
     expect(parseRemovals('{ not valid json ]')).toEqual([]);
   });
 
-  it('drops non-string and blank entries', () => {
-    expect(parseRemovals('{"remove":["ok", 3, "  ", null, "two"]}')).toEqual(['ok', 'two']);
+  it('drops non-string, blank, and too-short fragments (audit #16 safety)', () => {
+    // '.', 'the', 'I', 'ok' are below the min length and must not be acted on
+    // (they would strip real answer text). Full phrases pass.
+    expect(
+      parseRemovals('{"remove":["Now reply.", ".", "the", "I", "ok", 3, null, "Mark p1 done."]}'),
+    ).toEqual(['Now reply.', 'Mark p1 done.']);
   });
 });

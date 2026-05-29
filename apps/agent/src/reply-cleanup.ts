@@ -41,6 +41,14 @@ export interface ReplyCleanupDeps {
 }
 
 /** Tolerantly parse `{"remove": string[]}` from a model response (may be fenced). */
+/**
+ * Minimum fragment length to act on. Narration the model flags is full
+ * phrases/sentences ("Now reply.", "Mark p1 complete."); a 1–5 char fragment
+ * ('.', 'the', 'I') would `split().join('')` ALL its occurrences out of the
+ * real answer too. Below this we leave it (fail toward keeping content).
+ */
+const MIN_FRAGMENT_LEN = 6;
+
 export function parseRemovals(raw: string): string[] {
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
@@ -48,7 +56,9 @@ export function parseRemovals(raw: string): string[] {
   try {
     const obj = JSON.parse(raw.slice(start, end + 1)) as { remove?: unknown };
     if (!Array.isArray(obj.remove)) return [];
-    return obj.remove.filter((f): f is string => typeof f === 'string' && f.trim().length > 0);
+    return obj.remove.filter(
+      (f): f is string => typeof f === 'string' && f.trim().length >= MIN_FRAGMENT_LEN,
+    );
   } catch {
     return [];
   }
