@@ -47,6 +47,27 @@ const USER_MENTION_RE = /<@([UW][A-Z0-9]+)>/g;
  */
 const CHANNEL_MENTION_RE = /<#([A-Z][A-Z0-9]+)(?:\|([^>]*))?>/g;
 
+/**
+ * True only for a DEFINITIVE "user not found" Slack error — the only case worth
+ * caching as a sticky miss. Transient failures (rate_limited / network / 5xx)
+ * return false so the resolver retries them on a later turn instead of pinning
+ * the user to their raw id for the whole process. SlackError carries the raw
+ * Slack error string on `.message`; we also check `.code` / `.cause.code`.
+ */
+function isDefinitiveUserNotFound(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const parts: string[] = [];
+  const rec = err as Record<string, unknown>;
+  if (typeof rec['message'] === 'string') parts.push(rec['message']);
+  if (typeof rec['code'] === 'string') parts.push(rec['code']);
+  const cause = rec['cause'];
+  if (typeof cause === 'object' && cause !== null) {
+    const c = (cause as Record<string, unknown>)['code'];
+    if (typeof c === 'string') parts.push(c);
+  }
+  return /\busers?_not_found\b/.test(parts.join(' '));
+}
+
 export class NameResolver {
   private readonly users = new Map<string, CacheValue>();
   private readonly channels = new Map<string, CacheValue>();
@@ -85,8 +106,15 @@ export class NameResolver {
       const name = p.displayName ?? p.realName ?? p.userName ?? null;
       this.users.set(id, name);
       return name ?? id;
-    } catch {
-      this.users.set(id, null);
+    } catch (err) {
+      // Only make the miss STICKY for a definitive user-not-found. A transient
+      // failure (rate_limited / network / 5xx) must NOT poison the cache for
+      // the process lifetime — leave it uncached so a later turn retries.
+      // (Previously any failure cached null → a rate-limit burst permanently
+      // pinned many users to their raw id — audit #5.)
+      if (isDefinitiveUserNotFound(err)) {
+        this.users.set(id, null);
+      }
       return id;
     }
   }

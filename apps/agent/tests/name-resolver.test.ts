@@ -50,7 +50,7 @@ describe('NameResolver.resolveUser', () => {
     expect(await r.resolveUser('U042', makeClient({ usersInfo }))).toBe('amit');
   });
 
-  it('caches failures as null and returns the raw id', async () => {
+  it('caches a definitive user_not_found as null and returns the raw id', async () => {
     const usersInfo = vi.fn().mockRejectedValue(new Error('user_not_found'));
     const r = new NameResolver();
 
@@ -59,6 +59,19 @@ describe('NameResolver.resolveUser', () => {
     // Sticky: second call doesn't re-hit the API.
     await r.resolveUser('UDEAD', makeClient({ usersInfo }));
     expect(usersInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT cache a transient failure (rate_limited) — retries next time (audit #5)', async () => {
+    const usersInfo = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('rate_limited'), { code: 'rate_limited' }));
+    const r = new NameResolver();
+    const client = makeClient({ usersInfo });
+
+    expect(await r.resolveUser('U042', client)).toBe('U042'); // raw id, uncached
+    expect(await r.resolveUser('U042', client)).toBe('U042');
+    // Re-hit the API on the second call — the miss was NOT made sticky.
+    expect(usersInfo).toHaveBeenCalledTimes(2);
   });
 
   it('returns the raw id when users.info reports no usable name fields', async () => {
