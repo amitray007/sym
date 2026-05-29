@@ -697,7 +697,12 @@ async function streamReply(
     // streaming path is preserved (rather than silently degrading to
     // postMessage, which is observable in tests AND in the receipt-block
     // delivery shape).
-    const tail = narration.flush();
+    // At TRUE end-of-stream the trailing partial is a complete segment, so we
+    // classify it (flushClassified) rather than emitting it raw — closes the
+    // last live-path leak where a narration line without a trailing newline
+    // ("Now reply") would otherwise slip through. A real short answer
+    // ("The time is now.") isn't narration, so it's kept.
+    const tail = narration.flushClassified();
     if (tail.length > 0) {
       if (streamTs !== undefined) {
         buffer += tail;
