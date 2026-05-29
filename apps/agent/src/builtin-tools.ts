@@ -1,6 +1,7 @@
 import { threadToHistory } from '@sym/adapter-slack';
 
 import { NameResolver } from './name-resolver.js';
+import { safeFetch } from './safe-fetch.js';
 
 import type { PlanController, PlanItemStatus } from './plan-controller.js';
 import type { SearchMessageMatch, SlackClient, SlackThreadMessage } from '@sym/adapter-slack';
@@ -890,9 +891,10 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
             const controller = new AbortController();
             const timer = setTimeout(() => controller.abort(), FETCH_URL_TIMEOUT_MS);
             try {
-              const res = await fetch(parsed.toString(), {
+              // SSRF-guarded: blocks private/reserved/metadata hosts and
+              // re-validates every redirect hop. See safe-fetch.ts.
+              const res = await safeFetch(parsed.toString(), {
                 signal: controller.signal,
-                redirect: 'follow',
                 headers: { 'user-agent': 'Sym/1.0 (+slack-agent)' },
               });
               if (!res.ok) {
