@@ -26,6 +26,17 @@ import * as piLoopModule from '../src/pi/loop.js';
 const mockRunLoopPi = (piLoopModule as unknown as { __mockRunLoopPi: ReturnType<typeof vi.fn> })
   .__mockRunLoopPi;
 
+// Mock the LLM cleanup backstop so tests are hermetic. Default: returns the
+// draft unchanged (no settling update); individual tests override per call.
+vi.mock('../src/reply-cleanup.js', () => {
+  const mockFn = vi.fn(async (draft: string) => draft);
+  return { cleanupReply: mockFn, __mockCleanupReply: mockFn };
+});
+import * as replyCleanupModule from '../src/reply-cleanup.js';
+const mockCleanupReply = (
+  replyCleanupModule as unknown as { __mockCleanupReply: ReturnType<typeof vi.fn> }
+).__mockCleanupReply;
+
 import type {
   AppendStreamParams,
   ConversationsHistoryResult,
@@ -39,6 +50,7 @@ import type {
   StartStreamParams,
   StopStreamParams,
   StreamHandle,
+  UpdateMessageParams,
 } from '@sym/adapter-slack';
 import type {
   ChatMessage,
@@ -108,8 +120,9 @@ class MockSlackClient implements SlackClient {
     this.posts.push(params);
     return { ts: '111.222' as SlackThreadTs, channel: params.channel };
   }
-  async chatUpdate(): Promise<void> {
-    /* no-op mock */
+  readonly updateCalls: UpdateMessageParams[] = [];
+  async chatUpdate(params: UpdateMessageParams): Promise<void> {
+    this.updateCalls.push(params);
   }
   async reactionsAdd(): Promise<void> {
     /* no-op mock */
@@ -774,6 +787,67 @@ describe('handleTurn', () => {
 
     expect(slack.startStreamCalls).toHaveLength(1);
     expect(slack.startStreamCalls[0]?.taskDisplayMode).toBe('plan');
+  });
+
+  it('settles a multi-step streamed reply to the LLM-cleaned version', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as { onDelta?: (d: string) => Promise<void> };
+        await o.onDelta?.('Now start p1. Here is the answer.');
+        return makeReply({
+          markdown: 'Now start p1. Here is the answer.',
+          // >1 tool → needsLlmCleanup fires.
+          receipt: {
+            turnId: 'turn-1' as TurnId,
+            model: 'm',
+            toolsInvoked: ['search_messages', 'read_channel'],
+            durationMs: 5,
+          },
+        });
+      },
+    );
+    mockCleanupReply.mockResolvedValueOnce('Here is the answer.');
+
+    const slack = new MockSlackClient();
+    await handleTurn(makeTurn({ threadTs: '950.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
+    });
+
+    expect(mockCleanupReply).toHaveBeenCalledWith(
+      'Now start p1. Here is the answer.',
+      expect.anything(),
+    );
+    expect(slack.updateCalls).toHaveLength(1);
+    expect(slack.updateCalls[0]?.text).toContain('Here is the answer.');
+    expect(slack.updateCalls[0]?.text).not.toContain('Now start p1');
+  });
+
+  it('skips the LLM cleanup on a single-shot reply', async () => {
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as { onDelta?: (d: string) => Promise<void> };
+        await o.onDelta?.('The time is 3pm.');
+        return makeReply({ markdown: 'The time is 3pm.' }); // no tools, no plan
+      },
+    );
+
+    const slack = new MockSlackClient();
+    await handleTurn(makeTurn({ threadTs: '951.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
+    });
+
+    expect(mockCleanupReply).not.toHaveBeenCalled();
+    expect(slack.updateCalls).toHaveLength(0);
   });
 
   // -----------------------------------------------------------------------

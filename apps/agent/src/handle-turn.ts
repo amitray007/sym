@@ -13,6 +13,7 @@ import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
 import { PlanController } from './plan-controller.js';
+import { cleanupReply } from './reply-cleanup.js';
 import { pickShimmerPhrase, pickShimmerStatus } from './thinking-copy.js';
 
 import type { BehaviorConfig } from './config.js';
@@ -314,6 +315,36 @@ function capitalize(s: string): string {
 function cleanReplyBody(markdown: string): string {
   const cleaned = stripNarration(markdown);
   return cleaned.trim().length > 0 ? cleaned : markdown;
+}
+
+/**
+ * Whether to run the (costly) LLM cleanup backstop. Plan narration leaks on
+ * MULTI-STEP turns — a plan was set, or more than one tool ran. Single-shot
+ * replies ("what time is it?") essentially never narrate, so they skip the
+ * extra model call and rely on the cheap regex pass. This gate is structural
+ * (turn shape), not pattern-based, so it still fires on novel narration.
+ */
+function needsLlmCleanup(reply: Reply, planController: PlanController): boolean {
+  return planController.isActive() || reply.receipt.toolsInvoked.length > 1;
+}
+
+/**
+ * The body to post for the non-streamed paths: LLM-cleaned on multi-step turns,
+ * cheap regex otherwise. Both fail safe to the raw draft.
+ */
+async function finalReplyBody(
+  reply: Reply,
+  planController: PlanController,
+  deps: HandleTurnDeps,
+): Promise<string> {
+  if (needsLlmCleanup(reply, planController)) {
+    const cleaned = await cleanupReply(reply.markdown, {
+      fireworks: deps.fireworks,
+      model: deps.model,
+    });
+    if (cleaned.trim().length > 0) return cleaned;
+  }
+  return cleanReplyBody(reply.markdown);
 }
 
 function heroRenderParts(reply: Reply): { renderBlocks: SlackBlock[]; fallbackSuffix: string } {
@@ -718,7 +749,7 @@ async function streamReply(
     // user sees the answer instead of nothing.
     if (streamTs === undefined) {
       const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
-      const body = cleanReplyBody(reply.markdown);
+      const body = await finalReplyBody(reply, ctx.planController, deps);
       const blocks = [markdownBlock(body), ...renderBlocks, receiptToContextBlock(reply.receipt)];
       await deps.slackClient.chatPostMessage({
         channel,
@@ -733,7 +764,7 @@ async function streamReply(
     // Slack renders at the bottom of the finalized streamed message — beneath
     // the streamed prose, above the receipt.
     await flushBuffer();
-    const { renderBlocks } = heroRenderParts(reply);
+    const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
     const receipt = receiptToContextBlock(reply.receipt);
     try {
       await deps.slackClient.chatStopStream({
@@ -743,6 +774,29 @@ async function streamReply(
       });
     } catch (err) {
       console.warn('[agent] stopStream failed:', err);
+    }
+
+    // LLM cleanup backstop. On multi-step turns (where the model leaks plan
+    // narration) verify the finalized message and settle it to a clean version
+    // if the cleanup changed anything. The live stream already showed the
+    // regex-filtered text; this is the authoritative pass.
+    if (needsLlmCleanup(reply, ctx.planController)) {
+      const cleaned = await cleanupReply(reply.markdown, {
+        fireworks: deps.fireworks,
+        model: deps.model,
+      });
+      if (cleaned.trim().length > 0 && cleaned.trim() !== reply.markdown.trim()) {
+        try {
+          await deps.slackClient.chatUpdate({
+            channel,
+            ts: streamTs,
+            text: cleaned + fallbackSuffix,
+            blocks: [markdownBlock(cleaned), ...renderBlocks, receiptToContextBlock(reply.receipt)],
+          });
+        } catch (err) {
+          console.warn('[agent] cleanup update failed (continuing):', err);
+        }
+      }
     }
 
     return true;
@@ -879,7 +933,7 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   const reply = await runTurnLoop(rewrittenTurn, deps, registry, history);
 
   const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
-  const body = cleanReplyBody(reply.markdown);
+  const body = await finalReplyBody(reply, planController, deps);
   const blocks = [markdownBlock(body), ...renderBlocks, receiptToContextBlock(reply.receipt)];
   await deps.slackClient.chatPostMessage({
     channel: turn.channelId,
