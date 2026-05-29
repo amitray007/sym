@@ -52,10 +52,57 @@ export interface RequestConfirmationParams {
   threadTs?: SlackThreadTs;
   /** Human-readable tool name shown in the message. */
   toolName: string;
-  /** Short preview of the arguments (pre-truncated by the caller). */
-  argsPreview: string;
+  /** Raw tool arguments — formatted field-by-field for the prompt (see below). */
+  args: Record<string, unknown>;
   /** How long to wait for a response before resolving false (default 120 000 ms). */
   timeoutMs?: number;
+}
+
+/**
+ * Targeting / identity fields — the load-bearing answer to "where / to whom does
+ * this act". Pinned to the TOP of the preview and never truncated, so a long
+ * free-text field (e.g. a message body) can never push the destination out of
+ * the owner's view and turn the approve gate into a blind rubber-stamp.
+ */
+const HIGH_RISK_KEYS = [
+  'channel_id',
+  'channel',
+  'thread_ts',
+  'user_id',
+  'target',
+  'status_text',
+  'status_emoji',
+  'emoji',
+  'name',
+];
+
+/** Per-field cap for non-targeting values (targeting fields are short and never cut). */
+const VALUE_CAP = 280;
+
+/**
+ * Render tool args as a field-per-line preview: targeting fields first (never
+ * truncated), then the rest with long values capped individually. Never a single
+ * truncated JSON blob — that could hide the field that matters.
+ */
+export function formatArgsForConfirmation(args: Record<string, unknown>): string {
+  const entries = Object.entries(args ?? {});
+  if (entries.length === 0) return '(no arguments)';
+  const rank = (k: string) => {
+    const i = HIGH_RISK_KEYS.indexOf(k);
+    return i === -1 ? HIGH_RISK_KEYS.length : i;
+  };
+  return [...entries]
+    .sort((a, b) => rank(a[0]) - rank(b[0]))
+    .map(([k, v]) => {
+      const raw = typeof v === 'string' ? v : JSON.stringify(v);
+      const oneLine = raw.replace(/\s+/g, ' ').trim();
+      const value =
+        HIGH_RISK_KEYS.includes(k) || oneLine.length <= VALUE_CAP
+          ? oneLine
+          : `${oneLine.slice(0, VALUE_CAP - 1)}…`;
+      return `${k}: ${value}`;
+    })
+    .join('\n');
 }
 
 /**
@@ -67,12 +114,12 @@ export interface RequestConfirmationParams {
  * interactivity endpoint) or the timeout fires.
  */
 export async function requestConfirmation(params: RequestConfirmationParams): Promise<boolean> {
-  const { slackClient, channel, threadTs, toolName, argsPreview, timeoutMs = 120_000 } = params;
+  const { slackClient, channel, threadTs, toolName, args, timeoutMs = 120_000 } = params;
 
   const id = crypto.randomUUID();
 
-  // Build the Slack message.
-  const preview = argsPreview.length > 200 ? `${argsPreview.slice(0, 197)}…` : argsPreview;
+  // Field-by-field preview: targeting fields pinned + never truncated.
+  const preview = formatArgsForConfirmation(args);
 
   const blocks = [
     sectionBlock(`⚠️ Sym wants to run *${toolName}* — approve?\n\`\`\`\n${preview}\n\`\`\``),

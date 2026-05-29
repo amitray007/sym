@@ -373,14 +373,12 @@ export async function runLoopPi(
       return { block: true, reason: 'Confirmation channel unavailable.' };
     }
 
-    const argsPreview = JSON.stringify(context.args ?? {});
-
     const approved = await requestConfirmation({
       slackClient: opts.slackClient,
       channel: channelId as SlackChannelId,
       ...(turn.threadTs !== undefined ? { threadTs: turn.threadTs as SlackThreadTs } : {}),
       toolName,
-      argsPreview,
+      args: (context.args ?? {}) as Record<string, unknown>,
     });
 
     if (!approved) {
