@@ -78,6 +78,19 @@ describe('verifySlackSignature', () => {
     expect(result).toEqual({ ok: false, reason: 'stale_timestamp' });
   });
 
+  it('rejects a non-numeric timestamp (NaN must not bypass the replay window)', () => {
+    const body = 'payload=evil';
+    const result = verifySlackSignature({
+      signingSecret: SECRET,
+      headers: {
+        'x-slack-request-timestamp': 'not-a-number',
+        'x-slack-signature': sign('not-a-number', body),
+      },
+      rawBody: body,
+    });
+    expect(result).toEqual({ ok: false, reason: 'stale_timestamp' });
+  });
+
   it('returns stale_timestamp for a future timestamp > 5 minutes', () => {
     const ts = makeTimestamp(301); // 5 minutes and 1 second in the future
     const body = 'payload=future';

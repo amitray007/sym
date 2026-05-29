@@ -29,10 +29,12 @@ export function verifySlackSignature(opts: {
   const ts = headers['x-slack-request-timestamp'];
   const provided = headers['x-slack-signature'];
 
-  // Check timestamp skew first (cheap, before crypto work).
+  // Check timestamp skew first (cheap, before crypto work). A non-numeric
+  // timestamp makes Number(ts) NaN, and `NaN > window` is false — which would
+  // SKIP the replay check. Reject a non-finite timestamp explicitly.
   const tsNum = Number(ts);
   const nowS = Math.floor(Date.now() / 1000);
-  if (Math.abs(nowS - tsNum) > FIVE_MINUTES_S) {
+  if (!Number.isFinite(tsNum) || Math.abs(nowS - tsNum) > FIVE_MINUTES_S) {
     return { ok: false, reason: 'stale_timestamp' };
   }
 
