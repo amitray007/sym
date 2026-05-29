@@ -74,6 +74,23 @@ describe('NameResolver.resolveUser', () => {
     expect(usersInfo).toHaveBeenCalledTimes(2);
   });
 
+  it('coalesces concurrent resolves of the same id into one API call (audit #11)', async () => {
+    let resolveFn!: (v: { displayName: string }) => void;
+    const inflight = new Promise<{ displayName: string }>((res) => {
+      resolveFn = res;
+    });
+    const usersInfo = vi.fn().mockReturnValue(inflight);
+    const r = new NameResolver();
+    const client = makeClient({ usersInfo });
+
+    const p1 = r.resolveUser('U042', client);
+    const p2 = r.resolveUser('U042', client);
+    resolveFn({ displayName: 'Amit' });
+    expect(await p1).toBe('Amit');
+    expect(await p2).toBe('Amit');
+    expect(usersInfo).toHaveBeenCalledTimes(1);
+  });
+
   it('returns the raw id when users.info reports no usable name fields', async () => {
     const usersInfo = vi
       .fn()

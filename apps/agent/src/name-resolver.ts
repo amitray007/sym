@@ -71,6 +71,8 @@ function isDefinitiveUserNotFound(err: unknown): boolean {
 export class NameResolver {
   private readonly users = new Map<string, CacheValue>();
   private readonly channels = new Map<string, CacheValue>();
+  /** In-flight user lookups, coalesced so concurrent resolves of the same id share one API call. */
+  private readonly inflightUsers = new Map<string, Promise<string>>();
   private channelBulkFill: Promise<void> | null = null;
   private channelBulkFillStarted = false;
 
@@ -91,32 +93,40 @@ export class NameResolver {
   }
 
   /**
-   * Resolve a single user id to a display name, hitting `users.info` on
-   * cache miss. Failure is cached as `null` and surfaces as the raw id
-   * fallback (callers receive the input id back). Safe to call concurrently
-   * on the same id — duplicate API calls aren't deduped (rare race, cheap
-   * cost; the second writer just overwrites with the same value).
+   * Resolve a single user id to a display name, hitting `users.info` on cache
+   * miss. Concurrent resolves of the SAME id are coalesced into one API call
+   * (a turn often references the same author many times). On failure: a
+   * definitive user-not-found is cached as a sticky null; transient errors are
+   * left uncached so a later turn retries. Callers get the raw id on a miss.
    */
   async resolveUser(id: string, slack: SlackClient): Promise<string> {
     if (this.users.has(id)) {
       return this.users.get(id) ?? id;
     }
-    try {
-      const p = await slack.usersInfo({ user: id as SlackUserId });
-      const name = p.displayName ?? p.realName ?? p.userName ?? null;
-      this.users.set(id, name);
-      return name ?? id;
-    } catch (err) {
-      // Only make the miss STICKY for a definitive user-not-found. A transient
-      // failure (rate_limited / network / 5xx) must NOT poison the cache for
-      // the process lifetime — leave it uncached so a later turn retries.
-      // (Previously any failure cached null → a rate-limit burst permanently
-      // pinned many users to their raw id — audit #5.)
-      if (isDefinitiveUserNotFound(err)) {
-        this.users.set(id, null);
+    const existing = this.inflightUsers.get(id);
+    if (existing !== undefined) return existing;
+
+    const inflight = (async (): Promise<string> => {
+      try {
+        const p = await slack.usersInfo({ user: id as SlackUserId });
+        const name = p.displayName ?? p.realName ?? p.userName ?? null;
+        this.users.set(id, name);
+        return name ?? id;
+      } catch (err) {
+        // Only make the miss STICKY for a definitive user-not-found. A transient
+        // failure (rate_limited / network / 5xx) must NOT poison the cache for
+        // the process lifetime — leave it uncached so a later turn retries
+        // (audit #5).
+        if (isDefinitiveUserNotFound(err)) {
+          this.users.set(id, null);
+        }
+        return id;
+      } finally {
+        this.inflightUsers.delete(id);
       }
-      return id;
-    }
+    })();
+    this.inflightUsers.set(id, inflight);
+    return inflight;
   }
 
   /**
@@ -272,6 +282,7 @@ export class NameResolver {
   clearForTests(): void {
     this.users.clear();
     this.channels.clear();
+    this.inflightUsers.clear();
     this.channelBulkFill = null;
     this.channelBulkFillStarted = false;
   }
