@@ -8,7 +8,6 @@ import {
 import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
-import { NarrationFilter, stripNarration } from './narration-filter.js';
 import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
@@ -307,30 +306,20 @@ function capitalize(s: string): string {
  * same content for notifications + screen readers.
  */
 /**
- * Strip plan narration from a non-streamed reply body. The live streaming path
- * filters deltas as they arrive; the postMessage fallback paths post
- * `reply.markdown` whole, so they need an explicit pass. Falls back to the
- * original if cleaning would empty the reply (never post nothing).
- */
-function cleanReplyBody(markdown: string): string {
-  const cleaned = stripNarration(markdown);
-  return cleaned.trim().length > 0 ? cleaned : markdown;
-}
-
-/**
- * Whether to run the (costly) LLM cleanup backstop. Plan narration leaks on
- * MULTI-STEP turns — a plan was set, or more than one tool ran. Single-shot
+ * Whether to run the LLM cleanup backstop. The model only leaks plan narration
+ * on MULTI-STEP turns — a plan was set, or more than one tool ran. Single-shot
  * replies ("what time is it?") essentially never narrate, so they skip the
- * extra model call and rely on the cheap regex pass. This gate is structural
- * (turn shape), not pattern-based, so it still fires on novel narration.
+ * extra model call. This gate is STRUCTURAL (turn shape) — it never inspects
+ * the reply text — so it still fires on narration phrasings we've never seen.
  */
 function needsLlmCleanup(reply: Reply, planController: PlanController): boolean {
   return planController.isActive() || reply.receipt.toolsInvoked.length > 1;
 }
 
 /**
- * The body to post for the non-streamed paths: LLM-cleaned on multi-step turns,
- * cheap regex otherwise. Both fail safe to the raw draft.
+ * Body for the non-streamed paths: span-removal cleanup on multi-step turns,
+ * the raw draft otherwise. `cleanupReply` fails open to the draft, so this
+ * never loses the answer.
  */
 async function finalReplyBody(
   reply: Reply,
@@ -338,13 +327,9 @@ async function finalReplyBody(
   deps: HandleTurnDeps,
 ): Promise<string> {
   if (needsLlmCleanup(reply, planController)) {
-    const cleaned = await cleanupReply(reply.markdown, {
-      fireworks: deps.fireworks,
-      model: deps.model,
-    });
-    if (cleaned.trim().length > 0) return cleaned;
+    return cleanupReply(reply.markdown, { fireworks: deps.fireworks, model: deps.model });
   }
-  return cleanReplyBody(reply.markdown);
+  return reply.markdown;
 }
 
 function heroRenderParts(reply: Reply): { renderBlocks: SlackBlock[]; fallbackSuffix: string } {
@@ -616,12 +601,11 @@ async function streamReply(
     let streamTs: SlackThreadTs | undefined;
     let streamOpenFailed = false;
     let buffer = '';
-    // Defensive narration filter — strips plan-mechanics self-talk
-    // ("marking p1 complete", "now searching slack", "calling
-    // search_messages") from streamed deltas before they reach Slack. The
-    // prompt asks the model not to narrate; this is the structural belt
-    // to that suspenders. See narration-filter.ts for the design notes.
-    const narration = new NarrationFilter();
+    // The live stream shows the model's raw text — no hard-coded narration
+    // filtering (it false-drops real content and can't keep up with free-form
+    // AI text). Any plan narration the model leaks is removed authoritatively
+    // by the span-removal cleanup backstop after the turn (see cleanupReply),
+    // which settles the finalized message via chat.update.
 
     const ensureStreamOpen = async (): Promise<boolean> => {
       if (streamTs !== undefined) return true;
@@ -681,15 +665,9 @@ async function streamReply(
 
     const onDelta = async (delta: string): Promise<void> => {
       if (delta.length === 0) return;
-      // Run the raw delta through the narration filter FIRST. The filter is
-      // line-buffered internally — it may return empty string for a delta
-      // whose content is mid-segment, even though the model produced text.
-      // That's fine: we hold the stream open and wait for the boundary.
-      const filtered = narration.push(delta);
-      if (filtered.length === 0) return;
-      // Open the stream on the FIRST real delta that survived the filter.
+      // Open the stream on the first real delta, then batch by FLUSH_CHARS.
       if (!(await ensureStreamOpen())) return;
-      buffer += filtered;
+      buffer += delta;
       if (buffer.length < FLUSH_CHARS) return;
       await flushBuffer();
     };
@@ -716,37 +694,9 @@ async function streamReply(
     // Settle the task card before or alongside reply delivery.
     await taskCard?.finish();
 
-    // Flush the narration filter's tail. The final partial line may be a
-    // real reply that didn't end with a newline (Slack mrkdwn doesn't
-    // require one) — we emit it unchanged rather than risk eating the
-    // owner's answer. See narration-filter.ts for the trade-off rationale.
-    //
-    // This runs BEFORE the no-stream fallback check because the model may
-    // have produced a single short delta ("The time is now.") with no
-    // boundary char — the filter held all of it, so streamTs is still
-    // undefined. We need to open the stream and emit the tail so the
-    // streaming path is preserved (rather than silently degrading to
-    // postMessage, which is observable in tests AND in the receipt-block
-    // delivery shape).
-    // At TRUE end-of-stream the trailing partial is a complete segment, so we
-    // classify it (flushClassified) rather than emitting it raw — closes the
-    // last live-path leak where a narration line without a trailing newline
-    // ("Now reply") would otherwise slip through. A real short answer
-    // ("The time is now.") isn't narration, so it's kept.
-    const tail = narration.flushClassified();
-    if (tail.length > 0) {
-      if (streamTs !== undefined) {
-        buffer += tail;
-      } else if (await ensureStreamOpen()) {
-        buffer += tail;
-      }
-      // If the stream couldn't be opened, fall through to the no-stream
-      // fallback below — `reply.markdown` is the authoritative full text.
-    }
-
-    // Reply produced no streamed deltas (empty/very-short reply, or only tool
-    // calls). Either way, we never opened the stream — post normally so the
-    // user sees the answer instead of nothing.
+    // Reply produced no streamed text (only tool calls, or empty) — the stream
+    // never opened. Post the final reply via postMessage so the user sees the
+    // answer instead of nothing.
     if (streamTs === undefined) {
       const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
       const body = await finalReplyBody(reply, ctx.planController, deps);
@@ -777,9 +727,10 @@ async function streamReply(
     }
 
     // LLM cleanup backstop. On multi-step turns (where the model leaks plan
-    // narration) verify the finalized message and settle it to a clean version
-    // if the cleanup changed anything. The live stream already showed the
-    // regex-filtered text; this is the authoritative pass.
+    // narration) the live stream showed the raw text; run span-removal and, if
+    // it removed anything, settle the finalized message to the clean version.
+    // Non-lossy by construction — `cleanupReply` only deletes model-flagged
+    // verbatim spans, never rewrites — so a changed result is always safe.
     if (needsLlmCleanup(reply, ctx.planController)) {
       const cleaned = await cleanupReply(reply.markdown, {
         fireworks: deps.fireworks,
