@@ -574,7 +574,12 @@ async function streamReply(
   // has fired ("is reading the thread…"), re-send it verbatim — don't override
   // real phase info with whimsy.
   let whimsyTick = 0;
+  // Set in `finally` before the shimmer is cleared; guards the keepalive so a
+  // tick that fires during teardown can't re-issue a non-empty status AFTER the
+  // clear and leave the shimmer stuck until Slack's 2-min timeout (audit #12).
+  let turnEnded = false;
   const keepaliveTimer = setInterval(() => {
+    if (turnEnded) return;
     if (phaseUpdated) {
       void sendStatus(lastStatus);
     } else {
@@ -833,6 +838,7 @@ async function streamReply(
 
     return true;
   } finally {
+    turnEnded = true; // stop any keepalive tick from re-issuing status after the clear
     clearInterval(keepaliveTimer);
     // Explicitly clear the shimmer — Slack only auto-clears setStatus on
     // chat.postMessage, NOT on chat.stopStream, so a streamed reply leaves
