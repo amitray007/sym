@@ -721,23 +721,38 @@ async function streamReply(
     const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
     const receipt = receiptToContextBlock(reply.receipt);
 
-    // BUFFER MODE — a tool fired before any body text was shown. The body was
-    // never streamed live, so clean it once and deliver it (no flash, no
-    // chat.update settle). The task card already showed progress above.
-    if (bufferMode) {
-      const body = await cleanupReply(reply.markdown, {
-        fireworks: deps.fireworks,
-        model: deps.model,
+    // --- Delivery helpers (shared by the three delivery cases below) ---------
+    // Post the final reply as a fresh message — the universal fallback that
+    // guarantees the answer lands even when the stream is unusable.
+    const postFinal = async (body: string): Promise<void> => {
+      await deps.slackClient.chatPostMessage({
+        channel,
+        text: body + fallbackSuffix,
+        blocks: [markdownBlock(body), ...renderBlocks, receipt],
+        thread_ts: threadTs,
       });
-      const blocks = [markdownBlock(body), ...renderBlocks, receipt];
+    };
+    // Close the open stream (render + receipt at the bottom). Returns false if
+    // the stream had already expired/closed.
+    const closeStream = async (ts: SlackThreadTs): Promise<boolean> => {
+      try {
+        await deps.slackClient.chatStopStream({ channel, ts, blocks: [...renderBlocks, receipt] });
+        return true;
+      } catch (err) {
+        console.warn('[agent] stopStream failed:', err);
+        return false;
+      }
+    };
+    const cleanBody = (): Promise<string> =>
+      cleanupReply(reply.markdown, { fireworks: deps.fireworks, model: deps.model });
 
-      // Try to finish the open stream. On a LONG turn (e.g. the model timed out
-      // after several tool calls) the Slack streaming session expires and
-      // appendStream throws `message_not_found`. Append and stop are settled
-      // SEPARATELY: once the body has been appended it is already visible, so a
-      // later stopStream failure must NOT trigger a re-post (that double-posts
-      // the answer). Only fall back to a fresh postMessage when the body was
-      // never delivered into the stream.
+    // CASE 1 — BUFFER MODE: a tool fired before any body text was shown, so the
+    // body was never streamed. Clean it once and deliver: append into the open
+    // stream then close (append/close settled separately — once appended the
+    // body is visible, so a later close failure must NOT re-post). If the
+    // append fails (or no stream), postFinal so the answer still lands.
+    if (bufferMode) {
+      const body = await cleanBody();
       if (streamTs !== undefined) {
         let appended = false;
         try {
@@ -749,79 +764,34 @@ async function streamReply(
           console.warn('[agent] appendStream (buffered body) failed; will post normally:', err);
         }
         if (appended) {
-          // Body is in the stream — close it best-effort; a stopStream failure
-          // here leaves the body visible, so do NOT re-post.
-          try {
-            await deps.slackClient.chatStopStream({
-              channel,
-              ts: streamTs,
-              blocks: [...renderBlocks, receipt],
-            });
-          } catch (err) {
-            console.warn('[agent] stopStream failed after delivering body (continuing):', err);
-          }
+          await closeStream(streamTs);
           return true;
         }
-        // append failed → fall through to postMessage so the answer still lands.
       }
-      await deps.slackClient.chatPostMessage({
-        channel,
-        text: body + fallbackSuffix,
-        blocks,
-        thread_ts: threadTs,
-      });
+      await postFinal(body);
       return true;
     }
 
-    // LIVE PATH — no-tool turn (streamed as-is), or the rare text-then-tool turn.
-    // No body text streamed at all (empty / tool-only with no text) → post final.
+    // CASE 2 — LIVE, no stream ever opened (empty / tool-only with no text):
+    // post the final reply directly.
     if (streamTs === undefined) {
-      const body = await finalReplyBody(reply, ctx.planController, deps);
-      const blocks = [markdownBlock(body), ...renderBlocks, receipt];
-      await deps.slackClient.chatPostMessage({
-        channel,
-        text: body + fallbackSuffix,
-        blocks,
-        thread_ts: threadTs,
-      });
+      await postFinal(await finalReplyBody(reply, ctx.planController, deps));
       return true;
     }
 
+    // CASE 3 — LIVE with an open stream (text streamed as it arrived). Flush the
+    // tail and close. If the stream had died and nothing actually landed, post
+    // the reply so it isn't lost. Otherwise, on the rare text-then-tool turn,
+    // settle the finalized message to a narration-free version (only while the
+    // stream is alive — a dead stream can't be updated).
     await flushBuffer();
-    let streamClosed = true;
-    try {
-      await deps.slackClient.chatStopStream({
-        channel,
-        ts: streamTs,
-        blocks: [...renderBlocks, receipt],
-      });
-    } catch (err) {
-      streamClosed = false;
-      console.warn('[agent] stopStream failed:', err);
-    }
-
-    // If the stream died and NOTHING was ever delivered live, post the reply so
-    // it still lands (same long-turn expiry as the buffer path).
+    const streamClosed = await closeStream(streamTs);
     if (!streamClosed && !liveBodyFlushed) {
-      const body = await finalReplyBody(reply, ctx.planController, deps);
-      await deps.slackClient.chatPostMessage({
-        channel,
-        text: body + fallbackSuffix,
-        blocks: [markdownBlock(body), ...renderBlocks, receipt],
-        thread_ts: threadTs,
-      });
+      await postFinal(await finalReplyBody(reply, ctx.planController, deps));
       return true;
     }
-
-    // Rare case: answer text streamed live AND a tool fired afterwards. The live
-    // text may carry narration the model added later — settle the finalized
-    // message to a cleaned version if span-removal changed anything. Only when
-    // the stream is still alive (a dead stream can't be updated).
     if (streamClosed && needsLlmCleanup(reply, ctx.planController)) {
-      const cleaned = await cleanupReply(reply.markdown, {
-        fireworks: deps.fireworks,
-        model: deps.model,
-      });
+      const cleaned = await cleanBody();
       if (cleaned.trim().length > 0 && cleaned.trim() !== reply.markdown.trim()) {
         try {
           await deps.slackClient.chatUpdate({
@@ -835,7 +805,6 @@ async function streamReply(
         }
       }
     }
-
     return true;
   } finally {
     turnEnded = true; // stop any keepalive tick from re-issuing status after the clear
