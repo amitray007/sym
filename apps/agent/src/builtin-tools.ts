@@ -834,9 +834,9 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
             if (profile.statusText) {
               const emoji = profile.statusEmoji ? `${profile.statusEmoji} ` : '';
               // Statuses occasionally contain `<@U…>` references (e.g. "in
-              // a 1:1 with <@U042>"). Rewrite through the resolver so the
-              // model gets `@DisplayName`. Best-effort; raw text falls
-              // through on resolver miss.
+              // a 1:1 with <@U042>"). Run through the resolver so DM-style
+              // ids normalize to `<@USERID>` tokens (Slack-renderable) and no
+              // raw `D…` leaks. Best-effort; raw text falls through on miss.
               const statusText = await resolver
                 .rewriteMentions(profile.statusText, slack)
                 .catch(() => profile.statusText ?? '');
@@ -1049,8 +1049,10 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
                     : total > rawMatches.length
                       ? `(showing ${rawMatches.length} of ${total} matches)\n`
                       : '';
-                // Resolve author/channel ids for the SHOWN matches upfront so
-                // per-line formatting stays synchronous.
+                // Resolve author + channel/DM ids for the SHOWN matches upfront
+                // so per-line formatting stays synchronous. A DM channel (`D…`)
+                // resolves to its counterpart user; a real channel (`C…`) to its
+                // name. A raw id must NEVER reach the model or the owner.
                 const authorIds = deduped
                   .map((d) => d.match.userId as string | undefined)
                   .filter((id): id is string => id !== undefined && id.length > 0);
@@ -1059,39 +1061,57 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
                   .filter((id): id is string => id !== undefined && id.length > 0);
                 await Promise.all([
                   ...authorIds.map((id) => resolver.resolveUser(id, slack)),
-                  ...channelIds.map((id) => resolver.resolveChannel(id, slack)),
+                  ...channelIds.map((id) =>
+                    NameResolver.isDmId(id)
+                      ? resolver.resolveDmParticipant(id, slack)
+                      : resolver.resolveChannel(id, slack),
+                  ),
                 ]);
                 const rewrittenTexts = await Promise.all(
                   deduped.map((d) => resolver.rewriteMentions(d.match.text, slack)),
                 );
-                // One place for the per-row fields (used by both the text body
-                // and the table render).
-                const fieldsFor = (d: DedupedSearchMatch, i: number) => {
+                // Per-row fields in two flavors:
+                //  - `*Tag` for the prose body → Slack mrkdwn renders `<@U…>` /
+                //    `<#C…>` as clickable, notifying mentions (native tagging);
+                //  - `*Cell` for the `table` render → raw_text cells can't render
+                //    tokens, so they get plain names (via `flattenToNames`).
+                const fieldsFor = (d: DedupedSearchMatch) => {
                   const m = d.match;
-                  const who =
-                    (m.userId !== undefined ? resolver.getUser(m.userId) : undefined) ??
-                    m.username ??
-                    m.userId ??
-                    '(unknown)';
-                  const channelName =
-                    m.channelName ??
-                    (m.channelId !== undefined ? resolver.getChannel(m.channelId) : undefined);
-                  const where = channelName ? `#${channelName}` : (m.channelId ?? '(unknown)');
+                  const name = m.userId !== undefined ? resolver.getUser(m.userId) : undefined;
+                  const whoTag =
+                    m.userId !== undefined ? `<@${m.userId}>` : (m.username ?? '(unknown)');
+                  const whoCell = name ?? m.username ?? '(unknown)';
+                  const cid = m.channelId;
+                  let whereTag: string;
+                  let whereCell: string;
+                  if (cid !== undefined && NameResolver.isDmId(cid)) {
+                    const dm = resolver.getDmParticipant(cid);
+                    whereTag = dm.userId !== undefined ? `a DM with <@${dm.userId}>` : 'a DM';
+                    whereCell = dm.name !== undefined ? `DM with ${dm.name}` : 'Direct message';
+                  } else {
+                    const channelName =
+                      m.channelName ?? (cid !== undefined ? resolver.getChannel(cid) : undefined);
+                    if (cid !== undefined && NameResolver.isChannelId(cid)) {
+                      whereTag = `<#${cid}>`;
+                      whereCell = channelName ? `#${channelName}` : '#channel';
+                    } else if (channelName) {
+                      whereTag = `#${channelName}`;
+                      whereCell = `#${channelName}`;
+                    } else {
+                      whereTag = 'a conversation';
+                      whereCell = 'a conversation';
+                    }
+                  }
                   const rep = d.count > 1 ? ` (sent ${d.count}×)` : '';
-                  return {
-                    who,
-                    where,
-                    rep,
-                    raw: rewrittenTexts[i] ?? m.text,
-                    permalink: m.permalink,
-                  };
+                  return { whoTag, whoCell, whereTag, whereCell, rep, permalink: m.permalink };
                 };
                 const body = deduped
                   .map((d, i) => {
-                    const { who, where, rep, raw, permalink } = fieldsFor(d, i);
-                    const link = permalink ? ` <${permalink}|link>` : '';
+                    const { whoTag, whereTag, rep, permalink } = fieldsFor(d);
+                    const raw = rewrittenTexts[i] ?? d.match.text;
+                    const link = permalink ? ` [link](${permalink})` : '';
                     const content = raw.length > 400 ? `${raw.slice(0, 400)}…` : raw;
-                    return `${i + 1}. ${who} in ${where}${link}${rep}\n   ${content}`;
+                    return `${i + 1}. ${whoTag} in ${whereTag}${link}${rep}\n   ${content}`;
                   })
                   .join('\n');
                 // Presentation hint: render the same matches as a Slack `table`
@@ -1100,12 +1120,14 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
                   kind: 'table',
                   columns: [{ header: 'From' }, { header: 'Channel' }, { header: 'Message' }],
                   rows: deduped.map((d, i) => {
-                    const { who, where, rep, raw, permalink } = fieldsFor(d, i);
+                    const { whoCell, whereCell, rep, permalink } = fieldsFor(d);
+                    // Plain names in cells — tokens would render literally here.
+                    const raw = resolver.flattenToNames(rewrittenTexts[i] ?? d.match.text);
                     const preview = raw.length > 140 ? `${raw.slice(0, 140)}…` : raw;
                     const text = `${preview}${rep}`;
                     return [
-                      { text: who },
-                      { text: where },
+                      { text: whoCell },
+                      { text: whereCell },
                       permalink ? { text, link: permalink } : { text },
                     ];
                   }),

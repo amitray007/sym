@@ -157,18 +157,30 @@ export class TaskCardManager {
     this.boundPlan = controller;
     controller.subscribe(async (event) => {
       if (event.type === 'set_plan') {
-        // Latch into plan-mode and render every item at `pending`. This is
-        // the activation moment for the card — even if tool calls already
-        // fired, their rows are discarded and replaced by the plan view.
+        // Latch into plan-mode and render every item at `pending`, the
+        // activation moment for the card.
+        //
+        // If tool rows were ALREADY shown (a non-silent tool fired before the
+        // model called set_plan), settle them to `complete` first — plan-mode
+        // suppresses their onToolEnd, so otherwise they'd sit stuck in_progress
+        // above the plan (audit #17). We can't remove rows from a Slack stream,
+        // but settling them stops them reading as failed/hung.
+        const hadVisibleToolRows = this.active;
         this.planMode = true;
         this.active = true;
-        const chunks: TaskUpdateChunk[] = event.items.map((item) => ({
+        const settle: TaskUpdateChunk[] = hadVisibleToolRows
+          ? this.taskOrder
+              .map((tid) => this.tasks.get(tid))
+              .filter((t): t is TrackedTask => t !== undefined && t.status === 'in_progress')
+              .map((t) => ({ type: 'task_update', id: t.id, title: t.title, status: 'complete' }))
+          : [];
+        const planChunks: TaskUpdateChunk[] = event.items.map((item) => ({
           type: 'task_update',
           id: item.id,
           title: item.title,
           status: 'pending',
         }));
-        await this.sendChunks(chunks).catch((err) =>
+        await this.sendChunks([...settle, ...planChunks]).catch((err) =>
           console.warn('[agent] plan set_plan flush failed (continuing):', err),
         );
         return;
@@ -391,7 +403,18 @@ async function maybeSetThreadTitleFromTurn(
   if (turn.channelId === undefined || turn.threadTs === undefined) return;
   const hasPriorUserTurn = history.some((m) => m.role === 'user');
   if (hasPriorUserTurn) return;
-  const title = deriveTitle(turn.text ?? '');
+  // The turn text carries preserved `<@U…>` / `<#C…>` tokens; flatten them to
+  // plain `@Name` / `#name` first, because the title is NOT Slack mrkdwn —
+  // `deriveTitle` would otherwise strip the whole token and drop the name.
+  // Best-effort: a resolver miss falls through to the raw text (deriveTitle
+  // strips the tag markup either way).
+  let titleSource = turn.text ?? '';
+  try {
+    titleSource = deps.nameResolver.flattenToNames(titleSource);
+  } catch {
+    // fall through with the raw turn text
+  }
+  const title = deriveTitle(titleSource);
   try {
     await deps.slackClient.assistantThreadsSetTitle({
       channelId: turn.channelId as SlackChannelId,
@@ -848,8 +871,10 @@ async function loadViewedChannelContext(
       .map((m) => (m.role === 'assistant' ? `Sym: ${m.content ?? ''}` : (m.content ?? '')))
       .join('\n');
     // Resolve the transcript mentions AND the viewed-channel label so the model
-    // gets `#general` / `a direct message with @Name` — never a raw id. A `U…`
-    // viewed id is a DM (the other party's user id); resolve it as a user.
+    // gets `#general` / `a direct message with @Name` — never a raw id. The
+    // viewed id is a DM when it's a `U…` (the other party's user id, as Slack
+    // sometimes reports it) or a `D…` (a real DM channel id we resolve to its
+    // counterpart).
     let rewrittenTranscript = transcript;
     let viewedLabel: string;
     try {
@@ -857,13 +882,19 @@ async function loadViewedChannelContext(
       if (NameResolver.isUserId(viewed)) {
         const name = await deps.nameResolver.resolveUser(viewed, deps.slackClient);
         viewedLabel = name !== viewed ? `a direct message with ${name}` : 'a direct message';
+      } else if (NameResolver.isDmId(viewed)) {
+        const name = await deps.nameResolver.resolveDmParticipant(viewed, deps.slackClient);
+        viewedLabel = name !== undefined ? `a direct message with ${name}` : 'a direct message';
       } else {
         const resolvedName = await deps.nameResolver.resolveChannel(viewed, deps.slackClient);
         viewedLabel = resolvedName !== viewed ? `#${resolvedName}` : 'another channel';
       }
     } catch {
       // Never leak the raw id — fall back to a generic, id-free phrase.
-      viewedLabel = NameResolver.isUserId(viewed) ? 'a direct message' : 'another channel';
+      viewedLabel =
+        NameResolver.isUserId(viewed) || NameResolver.isDmId(viewed)
+          ? 'a direct message'
+          : 'another channel';
     }
     return {
       role: 'user',

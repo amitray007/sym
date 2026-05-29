@@ -148,13 +148,18 @@ export async function healthCheckTokens(ctx: WorkspaceContext): Promise<void> {
     );
   }
 
-  // Warm the channel cache — non-blocking. The user-token client has wider
-  // visibility (private channels the owner is in); fall back to the bot
-  // client when no user token. Failure is benign; the resolver continues
-  // lazily on cache miss.
-  const channelListClient = ctx.userSlackClient ?? ctx.slackClient;
+  // Warm the channel + user name caches — non-blocking. The user-token client
+  // has wider visibility (private channels the owner is in); fall back to the
+  // bot client when no user token. Failures are benign; the resolver continues
+  // lazily on cache miss. Warming users at boot means `<@U…>` ids render as
+  // names without a per-id `users.info` round-trip on the hot path.
+  const directoryClient = ctx.userSlackClient ?? ctx.slackClient;
   void ctx.nameResolver
-    .populateChannels(channelListClient)
+    .populateChannels(directoryClient)
     .then(() => console.log('[agent] channel name cache warmed'))
     .catch((err) => console.warn('[agent] channel cache warm failed (continuing lazy):', err));
+  void ctx.nameResolver
+    .populateUsers(directoryClient)
+    .then(() => console.log('[agent] user name cache warmed'))
+    .catch((err) => console.warn('[agent] user cache warm failed (continuing lazy):', err));
 }

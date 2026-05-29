@@ -140,6 +140,34 @@ export interface ConversationsListResult {
   channels: SlackChannelSummary[];
 }
 
+export interface UsersListParams {
+  /** Page-size cap (Slack's `limit`; impl bounds it and paginates to here). */
+  limit?: number;
+}
+
+export interface UsersListResult {
+  users: SlackUserProfile[];
+}
+
+export interface ConversationsInfoParams {
+  channel: SlackChannelId;
+}
+
+/**
+ * Flattened `conversations.info`. The fields Sym needs to turn a DM/MPIM
+ * channel id into a human label: `isIm` + the single counterpart `userId`
+ * for a 1:1 DM (Slack returns the OTHER party's user id on an `im`).
+ */
+export interface ConversationsInfoResult {
+  id: SlackChannelId;
+  isIm: boolean;
+  isMpim: boolean;
+  /** For an `im`, the other participant's user id. Absent for non-DMs. */
+  userId?: SlackUserId;
+  /** Channel name for public/private channels (absent for DMs). */
+  name?: string;
+}
+
 // --- Assistant container (Agents & AI Apps) --------------------------------
 
 export interface SuggestedPrompt {
@@ -333,8 +361,20 @@ export interface SlackClient {
   chatStopStream(params: StopStreamParams): Promise<void>;
   /** Fetch a user's profile (requires `users:read`; email needs `users:read.email`). */
   usersInfo(params: UsersInfoParams): Promise<SlackUserProfile>;
+  /**
+   * Bulk-list workspace members (`users.list`, paginated). Used to warm the
+   * name cache at boot so `<@U…>` ids resolve to names without a per-id
+   * `users.info` round-trip. Requires `users:read`.
+   */
+  usersList(params: UsersListParams): Promise<UsersListResult>;
   /** List channels the bot can see (requires `channels:read` / `groups:read`). */
   conversationsList(params: ConversationsListParams): Promise<ConversationsListResult>;
+  /**
+   * Fetch one conversation's metadata (`conversations.info`). Sym uses it to
+   * resolve a DM channel id (`D…`) to its counterpart user. Requires the
+   * matching read scope for the conversation type.
+   */
+  conversationsInfo(params: ConversationsInfoParams): Promise<ConversationsInfoResult>;
   /**
    * Verify the token is valid and discover the identity it's acting as.
    * Cheap; usable as a startup health check.

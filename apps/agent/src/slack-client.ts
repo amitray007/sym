@@ -5,6 +5,8 @@ import type {
   AuthTestResult,
   ConversationsHistoryParams,
   ConversationsHistoryResult,
+  ConversationsInfoParams,
+  ConversationsInfoResult,
   ConversationsListParams,
   ConversationsListResult,
   ConversationsRepliesParams,
@@ -31,6 +33,8 @@ import type {
   StreamHandle,
   UpdateMessageParams,
   UsersInfoParams,
+  UsersListParams,
+  UsersListResult,
   UsersProfileSetParams,
 } from '@sym/adapter-slack';
 import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
@@ -368,6 +372,79 @@ export class WebApiSlackClient implements SlackClient {
       ...(u.tz !== undefined ? { tz: u.tz } : {}),
       ...(u.is_bot !== undefined ? { isBot: u.is_bot } : {}),
       ...(u.deleted !== undefined ? { deleted: u.deleted } : {}),
+    };
+  }
+
+  async usersList(params: UsersListParams): Promise<UsersListResult> {
+    interface UsersListResponse extends SlackOkResponse {
+      members?: {
+        id?: string;
+        name?: string;
+        real_name?: string;
+        deleted?: boolean;
+        is_bot?: boolean;
+        tz?: string;
+        profile?: { display_name?: string; real_name?: string; title?: string };
+      }[];
+      response_metadata?: { next_cursor?: string };
+    }
+    // Page through users.list (Slack caps a single page at 200) until the
+    // caller's ceiling or the workspace runs out. Large workspaces have
+    // thousands of members; the ceiling keeps boot bounded.
+    const ceiling = params.limit ?? 2000;
+    const members: NonNullable<UsersListResponse['members']> = [];
+    let cursor: string | undefined;
+    do {
+      const json = await this.callForm<UsersListResponse>('users.list', {
+        limit: Math.min(SLACK_PAGE_LIMIT, ceiling - members.length),
+        ...(cursor !== undefined ? { cursor } : {}),
+      });
+      for (const m of json.members ?? []) members.push(m);
+      cursor = json.response_metadata?.next_cursor || undefined;
+    } while (cursor !== undefined && members.length < ceiling);
+
+    const users: SlackUserProfile[] = members.map((u) => {
+      const p = u.profile ?? {};
+      return {
+        id: (u.id ?? '') as SlackUserId,
+        ...(u.name !== undefined && u.name !== '' ? { userName: u.name } : {}),
+        ...(p.display_name !== undefined && p.display_name !== ''
+          ? { displayName: p.display_name }
+          : {}),
+        ...(p.real_name !== undefined || u.real_name !== undefined
+          ? { realName: (p.real_name ?? u.real_name) as string }
+          : {}),
+        ...(p.title !== undefined && p.title !== '' ? { title: p.title } : {}),
+        ...(u.tz !== undefined ? { tz: u.tz } : {}),
+        ...(u.is_bot !== undefined ? { isBot: u.is_bot } : {}),
+        ...(u.deleted !== undefined ? { deleted: u.deleted } : {}),
+      };
+    });
+    return { users };
+  }
+
+  async conversationsInfo(params: ConversationsInfoParams): Promise<ConversationsInfoResult> {
+    // conversations.info returns `channel` as the conversation OBJECT, which
+    // collides with SlackOkResponse's `channel?: string`. Fetch with the base
+    // type, then narrow the payload via a cast.
+    interface InfoChannel {
+      id?: string;
+      name?: string;
+      is_im?: boolean;
+      is_mpim?: boolean;
+      /** On an `im`, Slack returns the OTHER participant's user id here. */
+      user?: string;
+    }
+    const json = (await this.callForm('conversations.info', {
+      channel: params.channel,
+    })) as { channel?: InfoChannel };
+    const c = json.channel ?? {};
+    return {
+      id: (c.id ?? params.channel) as SlackChannelId,
+      isIm: c.is_im === true,
+      isMpim: c.is_mpim === true,
+      ...(c.user !== undefined && c.user !== '' ? { userId: c.user as SlackUserId } : {}),
+      ...(c.name !== undefined && c.name !== '' ? { name: c.name } : {}),
     };
   }
 

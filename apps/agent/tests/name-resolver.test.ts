@@ -16,7 +16,9 @@ import type { SlackClient } from '@sym/adapter-slack';
 function makeClient(overrides: Partial<SlackClient> = {}): SlackClient {
   return {
     usersInfo: vi.fn(),
+    usersList: vi.fn(),
     conversationsList: vi.fn(),
+    conversationsInfo: vi.fn(),
     ...overrides,
   } as unknown as SlackClient;
 }
@@ -155,31 +157,35 @@ describe('NameResolver.resolveChannel', () => {
 });
 
 describe('NameResolver.rewriteMentions', () => {
-  it('rewrites user mentions to @DisplayName', async () => {
+  it('preserves canonical user mention tokens so Slack renders clickable @mentions', async () => {
     const r = new NameResolver();
     r.primeForTests({ U042: 'Amit', U999: 'Sarah' }, {});
     const out = await r.rewriteMentions(
       'hey <@U042> can you ping <@U999> about the deploy?',
       makeClient(),
     );
-    expect(out).toBe('hey @Amit can you ping @Sarah about the deploy?');
+    // Tokens pass through untouched — Slack's markdown_text renders them as the
+    // live, clickable names (and notifies, which is intended).
+    expect(out).toBe('hey <@U042> can you ping <@U999> about the deploy?');
   });
 
-  it('rewrites channel links to #name, preferring cached name over inline label', async () => {
+  it('keeps canonical channel tokens and drops stale inline labels', async () => {
     const r = new NameResolver();
     r.primeForTests({}, { C100: 'general', C101: 'eng' });
     const out = await r.rewriteMentions('see <#C100|outdated-label> and <#C101>', makeClient());
-    expect(out).toBe('see #general and #eng');
+    // `<#C…>` renders the LIVE channel name in Slack — keep the token, drop the
+    // possibly-stale inline label.
+    expect(out).toBe('see <#C100> and <#C101>');
   });
 
-  it('uses inline channel label as fallback when no cache entry exists', async () => {
+  it('keeps the canonical channel token even when the name is not cached', async () => {
     const conversationsList = vi.fn().mockResolvedValue({ channels: [] });
     const r = new NameResolver();
     const out = await r.rewriteMentions(
       'see <#CGHOST|frozen-name>',
       makeClient({ conversationsList }),
     );
-    expect(out).toBe('see #frozen-name');
+    expect(out).toBe('see <#CGHOST>');
   });
 
   it('leaves unresolvable mentions intact rather than dropping them', async () => {
@@ -193,54 +199,58 @@ describe('NameResolver.rewriteMentions', () => {
     expect(out).toBe('unknown <@UDEAD> and <#CGHOST>');
   });
 
-  it('rewrites DM-style channel markup (`<#U…|direct message>`) using inline label when the user is unresolved', async () => {
+  it('rewrites DM-style channel markup (`<#U…|…>`) to a `<@U…>` mention token', async () => {
     // Slack search results sometimes carry DMs as channel-link syntax with a
-    // USER id prefix and an inline label like "direct message". The id is a
-    // user id, not a channel id. When the user can't be resolved, fall back to
-    // the inline label — NOT a `#`-prefixed id (that printed "#U03… (DM)").
+    // USER id prefix. The id is a user id — emit it as a `<@U…>` mention token
+    // (Slack renders the person's name even if WE never resolved it). NEVER a
+    // raw `#U…` id.
     const conversationsList = vi.fn();
     const r = new NameResolver();
     const out = await r.rewriteMentions(
       'See <#U03U3R8232T|direct message>',
       makeClient({ conversationsList }),
     );
-    expect(out).toBe('See direct message');
-    expect(out).not.toContain('U03U3R8232T'); // raw id must never leak
+    expect(out).toBe('See <@U03U3R8232T>');
     // U-prefix ids must NOT trigger a channel bulk-fill API call.
     expect(conversationsList).not.toHaveBeenCalled();
   });
 
-  it('resolves a DM channel-mention to the person when the user id resolves', async () => {
-    const usersInfo = vi.fn().mockResolvedValue({ displayName: 'Sarah' });
-    const r = new NameResolver();
-    const out = await r.rewriteMentions(
-      'See <#U03U3R8232T|direct message>',
-      makeClient({ usersInfo }),
-    );
-    expect(out).toBe('See @Sarah');
-    expect(out).not.toContain('U03U3R8232T');
-  });
-
-  it('never leaks a bare DM channel-mention id with no inline label', async () => {
-    // `<#U03…>` with no `|label` had NO fallback before — the raw id leaked and
-    // the model printed "#U03… (DM)". Now it becomes a generic, id-free phrase.
+  it('emits a `<@U…>` token for bare DM-style markup with no inline label', async () => {
+    // `<#U03…>` with no `|label` had NO fallback before — the raw id leaked.
+    // Now it becomes a clickable mention token Slack resolves at render time.
     const r = new NameResolver();
     const out = await r.rewriteMentions('opened in <#U03U3R8232T>', makeClient());
-    expect(out).toBe('opened in a direct message');
-    expect(out).not.toContain('U03U3R8232T');
+    expect(out).toBe('opened in <@U03U3R8232T>');
   });
 
-  it('handles a mix of canonical and DM-style channel links', async () => {
+  it('resolves a `<#D…>` DM channel link to its counterpart `<@U…>` token', async () => {
+    const conversationsInfo = vi.fn().mockResolvedValue({
+      id: 'D04ABC',
+      isIm: true,
+      isMpim: false,
+      userId: 'U777',
+    });
     const r = new NameResolver();
-    r.primeForTests({}, { C100: 'general' });
     const out = await r.rewriteMentions(
-      'posted in <#C100> and via <#D04ABC|dm with sarah>',
-      makeClient(),
+      'posted via <#D04ABC|dm with sarah>',
+      makeClient({ conversationsInfo }),
     );
-    expect(out).toBe('posted in #general and via #dm with sarah');
+    expect(out).toBe('posted via <@U777>');
+    expect(conversationsInfo).toHaveBeenCalledTimes(1);
   });
 
-  it('resolves unknown user ids lazily during a rewrite', async () => {
+  it('falls back to the inline label for an unresolvable `<#D…>` DM link', async () => {
+    const conversationsInfo = vi.fn().mockRejectedValue(new Error('channel_not_found'));
+    const r = new NameResolver();
+    const out = await r.rewriteMentions(
+      'posted via <#D04ABC|dm with sarah>',
+      makeClient({ conversationsInfo }),
+    );
+    expect(out).toBe('posted via dm with sarah');
+    expect(out).not.toContain('D04ABC'); // raw DM id must never leak
+  });
+
+  it('still resolves unknown user ids (warms the cache) while preserving the token', async () => {
     const usersInfo = vi.fn().mockResolvedValue({
       displayName: 'Sarah',
       realName: 'Sarah K',
@@ -248,8 +258,10 @@ describe('NameResolver.rewriteMentions', () => {
     });
     const r = new NameResolver();
     const out = await r.rewriteMentions('ping <@U999>', makeClient({ usersInfo }));
-    expect(out).toBe('ping @Sarah');
+    expect(out).toBe('ping <@U999>');
     expect(usersInfo).toHaveBeenCalledTimes(1);
+    // The name was cached as a side effect (used by flattenToNames / table cells).
+    expect(r.getUser('U999')).toBe('Sarah');
   });
 
   it('handles a mix of known and unknown ids in one pass', async () => {
@@ -264,7 +276,7 @@ describe('NameResolver.rewriteMentions', () => {
       '<@U042> in <#C100> told <@U999> to look',
       makeClient({ usersInfo }),
     );
-    expect(out).toBe('@Amit in #general told @Sarah to look');
+    expect(out).toBe('<@U042> in <#C100> told <@U999> to look');
     expect(usersInfo).toHaveBeenCalledTimes(1); // only U999, not U042
   });
 
@@ -275,12 +287,102 @@ describe('NameResolver.rewriteMentions', () => {
 });
 
 describe('NameResolver.rewriteMentionsCached', () => {
-  it('rewrites only what is already cached, leaving misses raw', () => {
+  it('preserves canonical tokens regardless of cache state', () => {
     const r = new NameResolver();
     r.primeForTests({ U042: 'Amit' }, { C100: 'general' });
+    // `<@U…>` / `<#C…>` are passed through (cached or not) — Slack renders them.
     expect(r.rewriteMentionsCached('<@U042> in <#C100> mentioned <@U999>')).toBe(
-      '@Amit in #general mentioned <@U999>',
+      '<@U042> in <#C100> mentioned <@U999>',
     );
+  });
+
+  it('rewrites a cached `<#D…>` DM link to its counterpart token', () => {
+    const r = new NameResolver();
+    r.primeForTests({ U777: 'Sarah' }, {}, { D04ABC: 'U777' });
+    expect(r.rewriteMentionsCached('in <#D04ABC|dm>')).toBe('in <@U777>');
+  });
+});
+
+describe('NameResolver.flattenToNames', () => {
+  it('flattens tokens to plain names for non-mrkdwn surfaces (titles)', () => {
+    const r = new NameResolver();
+    r.primeForTests({ U042: 'Amit', U777: 'Sarah' }, { C100: 'general' }, { D04ABC: 'U777' });
+    expect(r.flattenToNames('<@U042> in <#C100> dм <#D04ABC|x>')).toBe(
+      '@Amit in #general dм @Sarah',
+    );
+  });
+
+  it('drops unknown ids rather than leaking them into a title', () => {
+    const r = new NameResolver();
+    expect(r.flattenToNames('hi <@U999> see <#C404>')).toBe('hi  see ');
+  });
+});
+
+describe('NameResolver.resolveDmParticipant', () => {
+  it('maps a `D…` channel id to its counterpart display name and caches it', async () => {
+    const conversationsInfo = vi
+      .fn()
+      .mockResolvedValue({ id: 'D04ABC', isIm: true, isMpim: false, userId: 'U777' });
+    const usersInfo = vi.fn().mockResolvedValue({ displayName: 'Sarah' });
+    const r = new NameResolver();
+    const client = makeClient({ conversationsInfo, usersInfo });
+    expect(await r.resolveDmParticipant('D04ABC', client)).toBe('Sarah');
+    expect(r.getDmParticipant('D04ABC')).toEqual({ userId: 'U777', name: 'Sarah' });
+    // Second call is fully cached — no extra API calls.
+    await r.resolveDmParticipant('D04ABC', client);
+    expect(conversationsInfo).toHaveBeenCalledTimes(1);
+    expect(usersInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns undefined for an MPIM (no single counterpart) without leaking', async () => {
+    const conversationsInfo = vi
+      .fn()
+      .mockResolvedValue({ id: 'D04ABC', isIm: false, isMpim: true });
+    const r = new NameResolver();
+    expect(
+      await r.resolveDmParticipant('D04ABC', makeClient({ conversationsInfo })),
+    ).toBeUndefined();
+  });
+
+  it('sticky-caches a definitive channel_not_found miss', async () => {
+    const conversationsInfo = vi.fn().mockRejectedValue(new Error('channel_not_found'));
+    const r = new NameResolver();
+    const client = makeClient({ conversationsInfo });
+    expect(await r.resolveDmParticipant('DGONE', client)).toBeUndefined();
+    expect(await r.resolveDmParticipant('DGONE', client)).toBeUndefined();
+    expect(conversationsInfo).toHaveBeenCalledTimes(1); // sticky — not retried
+  });
+
+  it('does NOT sticky-cache a transient failure', async () => {
+    const conversationsInfo = vi.fn().mockRejectedValue(new Error('rate_limited'));
+    const r = new NameResolver();
+    const client = makeClient({ conversationsInfo });
+    expect(await r.resolveDmParticipant('DTEMP', client)).toBeUndefined();
+    expect(await r.resolveDmParticipant('DTEMP', client)).toBeUndefined();
+    expect(conversationsInfo).toHaveBeenCalledTimes(2); // retried
+  });
+});
+
+describe('NameResolver.populateUsers', () => {
+  it('warms the user cache; skips deleted members; resolves become sync', async () => {
+    const usersList = vi.fn().mockResolvedValue({
+      users: [
+        { id: 'U042', displayName: 'Amit' },
+        { id: 'U777', realName: 'Sarah K' },
+        { id: 'UGONE', displayName: 'Ghost', deleted: true },
+      ],
+    });
+    const r = new NameResolver();
+    await r.populateUsers(makeClient({ usersList }));
+    expect(r.getUser('U042')).toBe('Amit');
+    expect(r.getUser('U777')).toBe('Sarah K');
+    expect(r.getUser('UGONE')).toBeUndefined();
+  });
+
+  it('swallows API failure and continues in lazy mode', async () => {
+    const usersList = vi.fn().mockRejectedValue(new Error('rate_limited'));
+    const r = new NameResolver();
+    await expect(r.populateUsers(makeClient({ usersList }))).resolves.not.toThrow();
   });
 });
 

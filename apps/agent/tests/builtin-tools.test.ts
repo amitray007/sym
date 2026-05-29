@@ -5,6 +5,8 @@ import { NameResolver } from '../src/name-resolver.js';
 
 import type {
   ConversationsHistoryResult,
+  ConversationsInfoParams,
+  ConversationsInfoResult,
   ConversationsListResult,
   ConversationsRepliesResult,
   PostMessageParams,
@@ -16,6 +18,7 @@ import type {
   SlackClient,
   SlackThreadMessage,
   SlackUserProfile,
+  UsersListResult,
   UsersProfileSetParams,
 } from '@sym/adapter-slack';
 import type {
@@ -60,6 +63,9 @@ function makeSlackClient(opts: {
   userError?: Error;
   listResult?: ConversationsListResult;
   listError?: Error;
+  usersListResult?: UsersListResult;
+  infoResult?: ConversationsInfoResult;
+  infoError?: Error;
   searchResult?: SearchMessagesResult;
   searchError?: Error;
   searchCalls?: SearchMessagesParams[];
@@ -87,9 +93,16 @@ function makeSlackClient(opts: {
       if (opts.userError !== undefined) throw opts.userError;
       return opts.userProfile ?? { id: 'U0' as SlackUserId };
     },
+    async usersList(): Promise<UsersListResult> {
+      return opts.usersListResult ?? { users: [] };
+    },
     async conversationsList(): Promise<ConversationsListResult> {
       if (opts.listError !== undefined) throw opts.listError;
       return opts.listResult ?? { channels: [] };
+    },
+    async conversationsInfo(params: ConversationsInfoParams): Promise<ConversationsInfoResult> {
+      if (opts.infoError !== undefined) throw opts.infoError;
+      return opts.infoResult ?? { id: params.channel, isIm: false, isMpim: false };
     },
     async chatPostMessage(params: PostMessageParams) {
       opts.postCalls?.push(params);
@@ -881,9 +894,14 @@ describe('createBuiltinDispatcher', () => {
       );
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error('expected ok');
+      // Prose body: author (no userId here → @-handle) + channel as a clickable
+      // `<#C…>` token + the message text.
       expect(result.content).toContain('amit');
-      expect(result.content).toContain('eng');
+      expect(result.content).toContain('<#C1>');
       expect(result.content).toContain('upgrade postgres');
+      // Table render uses the readable channel name in its plain cell.
+      const rows = result.render?.kind === 'table' ? result.render.rows : [];
+      expect(JSON.stringify(rows)).toContain('#eng');
       expect(userCalls).toHaveLength(1);
       expect(userCalls[0]?.query).toBe('postgres migration');
       // Fetches headroom (min 30) so dedup can surface uniques even when the
@@ -1338,12 +1356,13 @@ describe('createBuiltinDispatcher', () => {
   // -----------------------------------------------------------------------
   // ID-resolution coverage — verifies that `<@U…>` / `<#C…>` markup that
   // arrives via tool outputs (list_channels topics, read_user_profile
-  // status) gets rewritten by the workspace resolver BEFORE the dispatcher
-  // hands the result to the model. The prompt asks the model not to echo
-  // raw Slack ids; this is the structural defence behind that ask.
+  // status) is NORMALIZED by the workspace resolver BEFORE the dispatcher
+  // hands the result to the model: canonical `<@U…>` / `<#C…>` tokens are kept
+  // verbatim (Slack renders them as clickable mentions), while DM-style ids
+  // and bare `D…` ids are turned into tokens — so no UNWRAPPED id ever leaks.
   // -----------------------------------------------------------------------
-  describe('dispatch() — resolver rewrites raw Slack ids in tool outputs', () => {
-    it('list_channels rewrites `<@U…>` and `<#C…>` markup inside channel topics', async () => {
+  describe('dispatch() — resolver normalizes Slack ids in tool outputs', () => {
+    it('list_channels preserves `<@U…>` tokens and canonicalizes `<#C…>` in topics', async () => {
       const resolver = new NameResolver();
       resolver.primeForTests({ U042: 'Amit' }, { C999: 'design' });
       const dispatcher = createBuiltinDispatcher({
@@ -1366,14 +1385,14 @@ describe('createBuiltinDispatcher', () => {
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error('expected ok');
       const content = result.content as string;
-      // Display names replaced the raw ids; no `<@U…>` / `<#C…>` leak.
-      expect(content).toContain('owned by @Amit');
-      expect(content).toContain('#design');
-      expect(content).not.toContain('<@U042>');
-      expect(content).not.toContain('<#C999');
+      // Tokens are kept (Slack renders @Amit / #design); the stale inline label
+      // on the channel link is dropped in favor of the canonical token.
+      expect(content).toContain('owned by <@U042>');
+      expect(content).toContain('<#C999>');
+      expect(content).not.toContain('<#C999|design>');
     });
 
-    it('read_user_profile rewrites `<@U…>` markup inside the status text', async () => {
+    it('read_user_profile keeps the `<@U…>` token inside the status text', async () => {
       const resolver = new NameResolver();
       resolver.primeForTests({ U777: 'Sarah' }, {});
       const dispatcher = createBuiltinDispatcher({
@@ -1395,8 +1414,7 @@ describe('createBuiltinDispatcher', () => {
       expect(result.ok).toBe(true);
       if (!result.ok) throw new Error('expected ok');
       const content = result.content as string;
-      expect(content).toContain('status: :speech_balloon: in a 1:1 with @Sarah');
-      expect(content).not.toContain('<@U777>');
+      expect(content).toContain('status: :speech_balloon: in a 1:1 with <@U777>');
     });
 
     it('list_channels leaves clean topics unchanged', async () => {

@@ -169,8 +169,14 @@ class MockSlackClient implements SlackClient {
   async usersInfo() {
     return { id: 'U0' as SlackUserId };
   }
+  async usersList() {
+    return { users: [] };
+  }
   async conversationsList() {
     return { channels: [] };
+  }
+  async conversationsInfo() {
+    return { id: 'D0' as SlackChannelId, isIm: false, isMpim: false };
   }
   async authTest() {
     return { userId: 'U0' as SlackUserId, teamId: 'T-TEST' };
@@ -1046,7 +1052,7 @@ describe('handleTurn', () => {
   // `<@U…>` / `<#C…>` markup never reaches the loop. See name-resolver.ts.
   // -----------------------------------------------------------------------
   describe('name resolver — rewrites raw Slack ids before the loop sees them', () => {
-    it("rewrites `<@U…>` mentions in the owner's own turn text before the loop receives it", async () => {
+    it("keeps `<@U…>` tokens in the owner's own turn text so the reply can tag them", async () => {
       // Capture the turn the loop was invoked with so we can assert on the
       // text that actually gets embedded in the user-turn metadata block.
       let capturedTurn: Turn | undefined;
@@ -1077,8 +1083,9 @@ describe('handleTurn', () => {
         },
       );
 
-      expect(capturedTurn?.text).toBe('draft a reply to @Sarah about the rollout');
-      expect(capturedTurn?.text).not.toContain('<@U777>');
+      // The canonical mention token is preserved verbatim — the model can pass
+      // it straight through so the reply renders a live @Sarah mention.
+      expect(capturedTurn?.text).toBe('draft a reply to <@U777> about the rollout');
     });
 
     it('rewrites `<@U…>` / `<#C…>` markup inside history message bodies', async () => {
@@ -1121,15 +1128,15 @@ describe('handleTurn', () => {
         },
       );
 
-      // Loop received history with rewritten bodies.
+      // Loop received history with normalized bodies — canonical tokens kept
+      // (Slack renders them), stale inline channel label dropped.
       const histText = capturedHistory.map((m) => m.content ?? '').join('\n');
-      expect(histText).toContain('@Amit');
-      expect(histText).toContain('#design');
-      expect(histText).not.toContain('<@U042>');
-      expect(histText).not.toContain('<#C999');
+      expect(histText).toContain('<@U042>');
+      expect(histText).toContain('<#C999>');
+      expect(histText).not.toContain('<#C999|design>');
     });
 
-    it('rewrites `<@U…>` markup in the viewed-channel background block', async () => {
+    it('keeps `<@U…>` tokens in the viewed-channel background block', async () => {
       let capturedHistory: ChatMessage[] = [];
       mockRunLoopPi.mockImplementationOnce(
         async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
@@ -1170,11 +1177,10 @@ describe('handleTurn', () => {
       );
 
       const backgroundMsg = capturedHistory[0]?.content ?? '';
-      // Channel id rewritten to #name in the lead-in, AND `<@U…>` rewritten
-      // inside the transcript body.
+      // Channel id resolved to #name in the id-free lead-in, AND the `<@U…>`
+      // token kept verbatim inside the transcript body (Slack renders @Bob).
       expect(backgroundMsg).toContain('viewing #rollout');
-      expect(backgroundMsg).toContain('@Bob');
-      expect(backgroundMsg).not.toContain('<@U999>');
+      expect(backgroundMsg).toContain('<@U999>');
     });
   });
 });
