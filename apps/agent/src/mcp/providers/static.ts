@@ -104,25 +104,21 @@ function applyInjections(secret: SecretMaterial, injections: Injection[]): Resol
     throw new Error(`Unknown injection target: ${JSON.stringify(_exhaustive)}`);
   }
 
-  // Return the appropriate resolved credential.
-  // When both env and argv are present, return env (more common; argv is additive).
-  if (Object.keys(envVars).length > 0 && argvArgs.length > 0) {
-    // Merge into env — this scenario means the caller configured both env and
-    // argv injections. Both apply types will be handled by buildTransport which
-    // inspects the credential.
-    // For now, env takes priority as the resolved credential type; argv is a
-    // secondary concern. This is a rare configuration and may be revisited.
-    return { apply: 'env', vars: envVars };
+  const hasEnv = Object.keys(envVars).length > 0;
+  const hasArgv = argvArgs.length > 0;
+
+  // A single ResolvedCredential carries one apply channel, so env + argv on the
+  // same connector can't both be expressed. Fail loud rather than silently
+  // dropping one. (Non-secret flags belong in transport.args / transport.env.)
+  if (hasEnv && hasArgv) {
+    throw new Error(
+      "StaticProvider: a connector's injections must all target one channel " +
+        '(all env or all argv); mixing env + argv is not supported',
+    );
   }
 
-  if (Object.keys(envVars).length > 0) {
-    return { apply: 'env', vars: envVars };
-  }
-
-  if (argvArgs.length > 0) {
-    return { apply: 'argv', args: argvArgs };
-  }
-
+  if (hasEnv) return { apply: 'env', vars: envVars };
+  if (hasArgv) return { apply: 'argv', args: argvArgs };
   return { apply: 'none' };
 }
 
@@ -176,13 +172,15 @@ function interpolateTemplate(
   resolvedValue: string,
   secret: SecretMaterial,
 ): string {
-  return template.replace(/\{\{([^}]+)\}\}/g, (_match, key: string) => {
+  return template.replace(/\{\{([^}]+)\}\}/g, (match: string, key: string) => {
     const k = key.trim();
     if (k === 'token' || k === 'secret') return resolvedValue;
-    // For record secrets, allow field-name placeholders too.
+    // For record secrets, allow field-name placeholders.
     if (typeof secret === 'object' && k in secret) {
-      return (secret as Record<string, string>)[k] ?? resolvedValue;
+      return (secret as Record<string, string>)[k]!;
     }
-    return resolvedValue; // fallback — use the resolved value for any unknown placeholder
+    // Unknown placeholder — leave it as-is so a typo fails loudly downstream
+    // instead of silently substituting the secret value.
+    return match;
   });
 }

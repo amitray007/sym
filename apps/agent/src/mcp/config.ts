@@ -79,8 +79,8 @@ export type AuthConfig =
 /**
  * Service-agnostic connector config. Each entry in `MCP_SERVERS` is one connector.
  *
- * Replaces `StdioMcpServerConfig` / `McpServerConfig` from Chunk 1 with a
- * structured shape that separates transport, auth, and injection concerns.
+ * Replaces the flat Chunk-1 stdio config with a structured shape that
+ * separates transport, auth, and injection concerns.
  */
 export interface ConnectorConfig {
   /** Logical name — used as the tool-name prefix: `<name>__<toolName>`. */
@@ -102,15 +102,6 @@ export interface ConnectorConfig {
   /** Optional allowlist of tool names to expose from this server. Stored; enforcement optional. */
   tools?: { allow?: string[] };
 }
-
-/**
- * Union alias kept for back-compat inside the package.
- * External callers that imported `McpServerConfig` or `StdioMcpServerConfig`
- * are updated in the same PR; aliases are removed once all consumers migrated.
- */
-export type McpServerConfig = ConnectorConfig;
-/** @deprecated Use ConnectorConfig directly. */
-export type StdioMcpServerConfig = ConnectorConfig;
 
 // ---------------------------------------------------------------------------
 // Parsing
@@ -174,18 +165,14 @@ function parseEntry(entry: unknown, index: number): ConnectorConfig | null {
   const trimmedName = name.trim();
 
   // ---------------------------------------------------------------------------
-  // Transport — detect legacy flat shape vs new nested shape.
-  //
-  // Legacy flat: transport absent, null, or string 'stdio'; command at top level.
-  // New nested:  transport is an object with a 'kind' field.
+  // Transport (required) — a nested object with a 'kind' field.
   // ---------------------------------------------------------------------------
   const transportRaw = e['transport'];
-  const isLegacyFlat =
-    transportRaw === undefined || transportRaw === null || transportRaw === 'stdio';
-
-  if (isLegacyFlat) {
-    // Delegate entirely to legacy parser which reads command/args/env from top level.
-    return parseLegacyFlatEntry(e, index);
+  if (transportRaw === undefined || transportRaw === null) {
+    console.warn(
+      `[mcp] MCP_SERVERS[${index}] ('${trimmedName}') missing required 'transport' — skipping`,
+    );
+    return null;
   }
 
   const transport = parseTransport(transportRaw, index, trimmedName);
@@ -235,9 +222,7 @@ function parseEntry(entry: unknown, index: number): ConnectorConfig | null {
 }
 
 /**
- * Parse the `transport` field. Accepts both the new nested shape
- * `{ kind: 'stdio', command, args?, env? }` AND the legacy flat shape
- * `{ command, args?, env?, transport?: 'stdio' }` for zero-friction migration.
+ * Parse the `transport` field — a nested object `{ kind: 'stdio' | 'http', ... }`.
  *
  * Returns null if parsing fails (logged).
  */
@@ -556,61 +541,4 @@ function parseStringRecord(raw: unknown, label: string): Record<string, string> 
     return false;
   }
   return raw as Record<string, string>;
-}
-
-// ---------------------------------------------------------------------------
-// Legacy flat-shape compatibility
-// Re-exported so parseEntry can call it after detecting __LEGACY__ sentinel.
-// ---------------------------------------------------------------------------
-
-/**
- * Parse a legacy flat-shaped entry (Chunk 1 format):
- * `{ name, command, args?, env?, transport?: 'stdio', trust? }`
- *
- * Converts to the new `ConnectorConfig` shape. Called by parseEntry when the
- * 'transport' field is absent, null, or the string 'stdio'.
- */
-export function parseLegacyFlatEntry(
-  e: Record<string, unknown>,
-  index: number,
-): ConnectorConfig | null {
-  const name = e['name'];
-  if (typeof name !== 'string' || name.trim().length === 0) {
-    console.warn(`[mcp] MCP_SERVERS[${index}] missing required 'name' string — skipping`);
-    return null;
-  }
-  const trimmedName = name.trim();
-
-  const command = e['command'];
-  if (typeof command !== 'string' || command.trim().length === 0) {
-    console.warn(
-      `[mcp] MCP_SERVERS[${index}] ('${trimmedName}') missing required 'command' string — skipping`,
-    );
-    return null;
-  }
-
-  const args = parseStringArray(e['args'], `MCP_SERVERS[${index}].args`);
-  if (args === false) return null;
-
-  const env = parseStringRecord(e['env'], `MCP_SERVERS[${index}].env`);
-  if (env === false) return null;
-
-  const trust = e['trust'];
-  if (trust !== undefined && typeof trust !== 'boolean') {
-    console.warn(
-      `[mcp] MCP_SERVERS[${index}] ('${trimmedName}') 'trust' must be a boolean — skipping`,
-    );
-    return null;
-  }
-
-  return {
-    name: trimmedName,
-    transport: {
-      kind: 'stdio',
-      command: command.trim(),
-      ...(args !== null ? { args } : {}),
-      ...(env !== null ? { env } : {}),
-    },
-    ...(trust === true ? { trust: true } : {}),
-  };
 }

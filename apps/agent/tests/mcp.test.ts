@@ -232,40 +232,6 @@ describe('parseMcpServers', () => {
     expect(result[0]?.auth).toMatchObject({ kind: 'oauth' });
   });
 
-  // --- Legacy flat shape (back-compat) ---
-
-  it('parses a legacy flat-shape entry (no nested transport)', () => {
-    const raw = JSON.stringify([{ name: 'legacy', command: '/usr/bin/server' }]);
-    const result = parseMcpServers(raw);
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
-      name: 'legacy',
-      transport: { kind: 'stdio', command: '/usr/bin/server' },
-    });
-  });
-
-  it('parses a legacy flat-shape entry with args, env, and trust', () => {
-    const raw = JSON.stringify([
-      {
-        name: 'full',
-        command: '/bin/full',
-        args: ['--port', '9000'],
-        env: { TOKEN: 'abc123' },
-        trust: true,
-      },
-    ]);
-    const result = parseMcpServers(raw);
-    expect(result).toHaveLength(1);
-    const cfg = result[0]!;
-    expect(cfg.transport).toMatchObject({
-      kind: 'stdio',
-      command: '/bin/full',
-      args: ['--port', '9000'],
-      env: { TOKEN: 'abc123' },
-    });
-    expect(cfg.trust).toBe(true);
-  });
-
   it('skips entries missing required name', () => {
     const raw = JSON.stringify([{ transport: { kind: 'stdio', command: '/bin/server' } }]);
     expect(parseMcpServers(raw)).toEqual([]);
@@ -276,7 +242,7 @@ describe('parseMcpServers', () => {
     expect(parseMcpServers(raw)).toEqual([]);
   });
 
-  it('skips entries missing required command (legacy shape)', () => {
+  it('skips entries missing transport entirely', () => {
     const raw = JSON.stringify([{ name: 'x' }]);
     expect(parseMcpServers(raw)).toEqual([]);
   });
@@ -390,6 +356,28 @@ describe('StaticProvider', () => {
       apply: 'env',
       vars: { TOKEN_A: 'shared-token', TOKEN_B: 'shared-token' },
     });
+  });
+
+  it('mixing env + argv injections → throws (no silent drop)', async () => {
+    const provider = new StaticProvider({
+      kind: 'static',
+      secret: 'tok',
+      inject: [
+        { at: 'env', name: 'TOKEN' },
+        { at: 'argv', template: '--token={{token}}' },
+      ],
+    });
+    await expect(provider.resolve()).rejects.toThrow(/all env or all argv/);
+  });
+
+  it('argv template with an unknown placeholder is left as-is (typo fails loud)', async () => {
+    const provider = new StaticProvider({
+      kind: 'static',
+      secret: 'sk-12345',
+      inject: { at: 'argv', template: '--key={{toklen}}' },
+    });
+    const cred = await provider.resolve();
+    expect(cred).toEqual({ apply: 'argv', args: ['--key={{toklen}}'] });
   });
 
   it('secretRef only (no inline secret) → NotImplementedError', async () => {
