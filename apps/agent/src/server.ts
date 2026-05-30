@@ -11,6 +11,7 @@ import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { resolveConfirmation } from './confirmations.js';
 import { handleTurn, type HandleTurnDeps } from './handle-turn.js';
+import { completeOAuth } from './mcp/oauth-registry.js';
 import { buildOwnerDeclineMessage, checkOwnerAccess } from './owner-gate.js';
 import { healthCheckTokens, loadWorkspaceContext } from './workspace-context.js';
 
@@ -466,7 +467,96 @@ export function createServer(deps: ServerDeps): Hono {
     return c.body(null, 200);
   });
 
+  // --- OAuth callback (MCP connector authorization) -------------------------
+  // The authorization server redirects here after the user authorizes.
+  // Shape: GET /oauth/callback/:slug?code=<authcode>&state=<state>
+  //
+  // Security:
+  //   - `state` is verified BEFORE `code` is used (CSRF protection).
+  //   - `code` and `state` are NEVER echoed into logs or the response page.
+  //   - This endpoint does not require Slack signature verification because
+  //     it is driven by the OAuth authorization server, not Slack.
+  app.get('/oauth/callback/:slug', async (c) => {
+    const slug = c.req.param('slug') ?? '';
+    const code = c.req.query('code') ?? '';
+    const state = c.req.query('state') ?? '';
+
+    if (!slug || !code || !state) {
+      return c.html(
+        htmlPage(
+          'Authorization Failed',
+          '<p>Missing required parameters (slug, code, or state). ' +
+            'This link may be invalid or expired.</p>',
+          false,
+        ),
+        400,
+      );
+    }
+
+    try {
+      await completeOAuth(slug, code, state);
+      console.info(`[oauth] connector '${slug}' successfully authorized`);
+      return c.html(
+        htmlPage(
+          'Authorization Successful',
+          `<p>Connector <strong>${escapeHtml(slug)}</strong> has been authorized. ` +
+            'You can close this window and return to Slack.</p>',
+          true,
+        ),
+        200,
+      );
+    } catch (err) {
+      // Log the error server-side; show a minimal error to the browser.
+      // Never include code/state/tokens in the response.
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error(`[oauth] completeOAuth failed for connector '${slug}':`, message);
+      return c.html(
+        htmlPage(
+          'Authorization Failed',
+          `<p>Could not complete authorization for connector <strong>${escapeHtml(slug)}</strong>. ` +
+            'Please try again or contact your administrator.</p>',
+          false,
+        ),
+        400,
+      );
+    }
+  });
+
   app.get('/health', (c) => c.json({ ok: true }));
 
   return app;
+}
+
+// ---------------------------------------------------------------------------
+// OAuth callback page helpers (no external dependencies)
+// ---------------------------------------------------------------------------
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function htmlPage(title: string, body: string, success: boolean): string {
+  const icon = success ? '✅' : '❌';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 80px auto; padding: 0 24px; color: #1a1a1a; }
+    h1 { font-size: 1.4rem; }
+    p { color: #444; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h1>${icon} ${escapeHtml(title)}</h1>
+  ${body}
+</body>
+</html>`;
 }

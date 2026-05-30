@@ -6,12 +6,11 @@
  *
  * Implemented now:
  *   'static'  → StaticProvider (inline secret, env/argv injection)
- *
- * Stubs (typed seams, throw NotImplementedError):
- *   'oauth'   → C3
+ *   'oauth'   → OAuthProvider (C3 — encrypted SQLite token store + SDK OAuthClientProvider)
  *   undefined → null (no auth — no provider created)
  */
 
+import { makeOAuthProvider } from './oauth.js';
 import { StaticProvider } from './static.js';
 
 import type { AuthConfig } from '../config.js';
@@ -67,6 +66,17 @@ export interface MakeProviderDeps {
    * Defaults to the singleton `defaultMaterializer` when absent.
    */
   materializer?: Materializer;
+  /**
+   * Connector name — required for OAuth providers (used as key in the
+   * credential store and in the OAuth callback URL slug).
+   * Ignored for non-OAuth auth kinds.
+   */
+  connectorName?: string;
+  /**
+   * Override SYM_PUBLIC_URL for OAuth callback URL derivation.
+   * Defaults to process.env['SYM_PUBLIC_URL'].
+   */
+  publicUrl?: string;
 }
 
 /**
@@ -90,7 +100,11 @@ export function makeProvider(
   }
 
   if (auth.kind === 'oauth') {
-    throw new NotImplementedError('oauth CredentialProvider — C3');
+    // C3 implemented: OAuthProvider backed by encrypted SQLite store.
+    // `connectorName` from deps is required for correct store key + callback URL.
+    // The dispatcher passes it. Fallback to 'unknown' for any other caller
+    // that doesn't have the name (their store entry will be keyed 'unknown').
+    return makeOAuthProvider(deps?.connectorName ?? 'unknown', undefined, deps?.publicUrl);
   }
 
   // TypeScript exhaustiveness check — if a new kind is added to AuthConfig

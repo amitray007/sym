@@ -543,10 +543,10 @@ describe('buildTransport', () => {
     );
   });
 
-  it('native credential → NotImplementedError (C3)', () => {
+  it('native credential on stdio → throws (OAuth not supported over stdio)', () => {
     expect(() =>
       buildTransport({ kind: 'stdio', command: '/bin/srv' }, { apply: 'native', oauth: {} }),
-    ).toThrow(NotImplementedError);
+    ).toThrow(/OAuth.*stdio/i);
   });
 });
 
@@ -568,9 +568,22 @@ describe('makeProvider', () => {
     expect(provider).toBeInstanceOf(StaticProvider);
   });
 
-  it('oauth auth → NotImplementedError (C3)', () => {
-    expect(() => makeProvider({ kind: 'oauth' })).toThrow(NotImplementedError);
-    expect(() => makeProvider({ kind: 'oauth' })).toThrow(/C3/);
+  it('oauth auth → OAuthProvider (C3 implemented)', () => {
+    // C3 is now implemented — makeProvider returns an OAuthProvider (not null, not throw).
+    // SYM_ENCRYPTION_KEY is required by the store; mock it for this unit test.
+    const origKey = process.env['SYM_ENCRYPTION_KEY'];
+    process.env['SYM_ENCRYPTION_KEY'] = Buffer.alloc(32).toString('base64');
+    try {
+      const provider = makeProvider({ kind: 'oauth' });
+      expect(provider).not.toBeNull();
+      expect(typeof provider?.resolve).toBe('function');
+    } finally {
+      if (origKey === undefined) {
+        delete process.env['SYM_ENCRYPTION_KEY'];
+      } else {
+        process.env['SYM_ENCRYPTION_KEY'] = origKey;
+      }
+    }
   });
 });
 

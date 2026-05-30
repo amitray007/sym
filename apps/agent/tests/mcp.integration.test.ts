@@ -413,14 +413,17 @@ describe('Integration — HTTP header injection', () => {
 
 describe('buildTransport — http arm (pure unit checks)', () => {
   it('no auth → returns a valid Transport (no throw)', () => {
-    const t = buildTransport({ kind: 'http', url: 'https://example.com/mcp' }, { apply: 'none' });
+    const { transport: t } = buildTransport(
+      { kind: 'http', url: 'https://example.com/mcp' },
+      { apply: 'none' },
+    );
     expect(typeof t.start).toBe('function');
     expect(typeof t.send).toBe('function');
     expect(typeof t.close).toBe('function');
   });
 
   it('headers credential → returns a valid Transport (no throw)', () => {
-    const t = buildTransport(
+    const { transport: t } = buildTransport(
       { kind: 'http', url: 'https://example.com/mcp' },
       { apply: 'headers', headers: { Authorization: 'Bearer tok' } },
     );
@@ -448,7 +451,7 @@ describe('buildTransport — http arm (pure unit checks)', () => {
   it('transport.headers (static) merged with credential headers — credential wins on collision', () => {
     // Just verifies no throw and returns a valid transport.
     // Header content verification happens in the real-wire test (B2).
-    const t = buildTransport(
+    const { transport: t } = buildTransport(
       {
         kind: 'http',
         url: 'https://example.com/mcp',

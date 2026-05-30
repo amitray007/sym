@@ -26,9 +26,12 @@
  *   whether to skip confirmation — those are attacker-controlled.
  */
 
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 import { buildTransport } from './inject.js';
+import { getPendingAuth } from './oauth-registry.js';
+import { makeOAuthProvider, type OAuthProvider } from './providers/oauth.js';
 import { makeProvider } from './providers/provider.js';
 
 import type { ConnectorConfig } from './config.js';
@@ -114,10 +117,18 @@ function stripPrefix(qualifiedName: string, connectorName: string): string | nul
  * Acquisition → Injection → Transport → Connect → ListTools, all bounded
  * by CONNECT_TIMEOUT_MS. Returns a `PoolEntry` with `ok: false` and an
  * empty tool list when anything goes wrong (FAIL OPEN).
+ *
+ * OAuth special case: when the SDK's `transport.start()` throws
+ * `UnauthorizedError`, the OAuthProvider's `redirectToAuthorization` has
+ * already fired and registered the pending auth in the module-level registry.
+ * We log the authorize URL for observability (C3b will surface it to Slack)
+ * and fail-open with zero tools for this turn — the connector reconnects
+ * after `completeOAuth` is called.
  */
 async function connectServer(config: ConnectorConfig): Promise<PoolEntry> {
   const label = `[mcp:${config.name}]`;
   let client: Client | undefined;
+  let oauthProvider: OAuthProvider | undefined;
   try {
     // C2.5 stub gate: prepare command is not yet implemented.
     if (config.prepare !== undefined) {
@@ -127,11 +138,27 @@ async function connectServer(config: ConnectorConfig): Promise<PoolEntry> {
     }
 
     // Acquisition: resolve credentials via provider.
-    const provider = makeProvider(config.auth);
+    // For oauth kind, use makeOAuthProvider directly so the connector name is
+    // available for the store key + callback URL slug.
+    let provider;
+    if (config.auth?.kind === 'oauth') {
+      oauthProvider = makeOAuthProvider(config.name);
+      provider = oauthProvider;
+    } else {
+      provider = makeProvider(config.auth, { connectorName: config.name });
+    }
+
     const cred = provider !== null ? await provider.resolve() : { apply: 'none' as const };
 
     // Injection + Transport construction: pure, no side effects.
-    const transport = buildTransport(config.transport, cred);
+    const { transport, httpTransport } = buildTransport(config.transport, cred);
+
+    // For OAuth: wire the transport into the OAuthProvider so that
+    // `redirectToAuthorization` can register it in the pending-auth registry.
+    // This MUST happen before client.connect.
+    if (oauthProvider !== undefined && httpTransport !== undefined) {
+      oauthProvider.wireTransport(httpTransport);
+    }
 
     // Connect + list tools, bounded by timeout.
     client = new Client({ name: 'sym', version: '1.0.0' });
@@ -166,6 +193,28 @@ async function connectServer(config: ConnectorConfig): Promise<PoolEntry> {
 
     return { client, tools, ok: true };
   } catch (err) {
+    // OAuth-specific: UnauthorizedError means the user must authorize first.
+    // redirectToAuthorization has already fired → the auth URL is in the registry.
+    // Fail-open (0 tools) so this turn proceeds; C3b will surface the URL to Slack.
+    if (err instanceof UnauthorizedError) {
+      const pending = getPendingAuth(config.name);
+      const authorizeUrl = pending?.authorizeUrl.toString() ?? '(authorize URL not yet available)';
+      console.warn(
+        `${label} OAuth authorization required — authorize URL: ${authorizeUrl}\n` +
+          `  → Visit the URL above, then the callback will complete the flow. ` +
+          `This connector contributes 0 tools until authorized.`,
+      );
+      // Close client if opened before the error.
+      if (client !== undefined) {
+        client.close().catch(() => undefined);
+      }
+      return {
+        client: client ?? new Client({ name: 'sym', version: '1.0.0' }),
+        tools: [],
+        ok: false,
+      };
+    }
+
     console.warn(`${label} failed to connect or list tools — contributing zero tools:`, err);
     // If the client was created but connect/listTools failed, attempt a clean close.
     if (client !== undefined) {
