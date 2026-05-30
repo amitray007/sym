@@ -10,7 +10,7 @@
 //     pnpm --filter @sym/agent qa:mcp
 //
 // Optional single tool call (proves the dispatch path too):
-//   QA_TOOL='x__search_docs_chunks' QA_ARGS='{"prompt":"hello"}' ... pnpm --filter @sym/agent qa:mcp
+//   SYM_QA_TOOL='x__search_docs_chunks' SYM_QA_ARGS='{"prompt":"hello"}' ... pnpm --filter @sym/agent qa:mcp
 //
 // Slow first run (cold `npx` download) — bump SYM_MCP_CONNECT_TIMEOUT_MS, e.g. 60000.
 import { parseMcpServers, McpDispatcher } from '../dist/mcp/index.js';
@@ -44,14 +44,14 @@ for (const t of tools) {
 }
 
 let dispatchLabel = '';
-const toolName = process.env.QA_TOOL;
+const toolName = process.env.SYM_QA_TOOL;
 if (toolName !== undefined && toolName !== '') {
   let args = {};
-  if (process.env.QA_ARGS !== undefined) {
+  if (process.env.SYM_QA_ARGS !== undefined) {
     try {
-      args = JSON.parse(process.env.QA_ARGS);
+      args = JSON.parse(process.env.SYM_QA_ARGS);
     } catch {
-      console.error('[qa] QA_ARGS is not valid JSON');
+      console.error('[qa] SYM_QA_ARGS is not valid JSON');
       process.exit(3);
     }
   }
