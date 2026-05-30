@@ -329,7 +329,16 @@ export async function initMcpPool(configs: ConnectorConfig[]): Promise<void> {
 // Test-only pool reset (not exported from index.ts)
 // ---------------------------------------------------------------------------
 
-/** Clear the module-level pool. Used in tests to isolate pool state. */
+/**
+ * Close all pooled clients and clear the pool.
+ *
+ * Used in tests to tear down open transport connections (e.g. SSE streams
+ * held open by StreamableHTTPClientTransport) so test servers can shut down
+ * without waiting for connection timeouts.
+ */
 export function _resetPoolForTesting(): void {
+  for (const entry of pool.values()) {
+    entry.client.close().catch(() => undefined);
+  }
   pool.clear();
 }

@@ -18,6 +18,7 @@ export default [
       '**/*.tsbuildinfo',
       'pnpm-lock.yaml',
       'scripts/**',
+      '**/tests/fixtures/**',
     ],
   },
   js.configs.recommended,

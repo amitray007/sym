@@ -6,11 +6,10 @@
  * instance ready to pass to `client.connect()`.
  *
  * Implemented:
- *   stdio + env/argv injection
+ *   stdio  + env/argv/files injection
+ *   http   + header injection (C2)
  *
  * Stubbed (throw NotImplementedError, naming the chunk):
- *   http    → C2
- *   files   → C2.5
  *   native  → C3
  *
  * Design notes:
@@ -20,11 +19,15 @@
  *     authoritative over static env).
  *   - argv append: `transport.args` (static args) come first; `resolved.args`
  *     (credential args) are appended. Order matters for many CLI tools.
+ *   - http headers merge: `transport.headers` (non-secret static headers) come
+ *     first; injected credential headers overlay on top. Credentials win on key
+ *     collision (same principle as env).
  *   - The function is pure — it never has side effects and always returns a new
  *     transport instance. Idempotent to call multiple times.
  */
 
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 import { NotImplementedError } from './providers/provider.js';
 
@@ -52,7 +55,7 @@ export function buildTransport(
   }
 
   if (transport.kind === 'http') {
-    throw new NotImplementedError('http transport — C2');
+    return buildHttpTransport(transport, resolved);
   }
 
   // TypeScript exhaustiveness guard.
@@ -89,7 +92,9 @@ function buildStdioTransport(
 
   // Reject apply types that require a non-stdio path.
   if (resolved.apply === 'headers') {
-    throw new NotImplementedError('header credential apply on stdio transport — C2');
+    throw new Error(
+      'header credential injection requires an http transport; stdio transports use env/argv/file injection',
+    );
   }
   if (resolved.apply === 'native') {
     throw new NotImplementedError('native (OAuth) credential apply — C3');
@@ -119,4 +124,54 @@ function buildStdioTransport(
     ...(mergedArgs !== undefined ? { args: mergedArgs } : {}),
     ...(mergedEnv !== undefined ? { env: mergedEnv } : {}),
   });
+}
+
+// ---------------------------------------------------------------------------
+// http transport builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a StreamableHTTPClientTransport from an http transport config and
+ * a resolved credential.
+ *
+ * Header merge: transport.headers (non-secret static headers) come first;
+ * resolved.headers (credential headers) overlay on top. This matches the
+ * env-merge convention: credentials win on key collision.
+ *
+ * Credential apply types that are stdio-only (env/argv/files) are rejected
+ * with a clear error — those channels are meaningless over HTTP.
+ *
+ * native (OAuth) is stubbed for C3.
+ */
+function buildHttpTransport(
+  transport: Extract<TransportConfig, { kind: 'http' }>,
+  resolved: ResolvedCredential,
+): Transport {
+  // Reject stdio-only apply types.
+  if (resolved.apply === 'env' || resolved.apply === 'argv' || resolved.apply === 'files') {
+    throw new Error(
+      `env/argv/file injection is stdio-only; http servers use header or oauth injection` +
+        ` (got apply='${resolved.apply}' for url '${transport.url}')`,
+    );
+  }
+
+  if (resolved.apply === 'native') {
+    throw new NotImplementedError('native (OAuth) credential apply on http transport — C3');
+  }
+
+  // Merge static transport headers (non-secret) with credential headers (secret on top).
+  const mergedHeaders: Record<string, string> = {
+    ...(transport.headers ?? {}),
+    ...(resolved.apply === 'headers' ? resolved.headers : {}),
+  };
+
+  const hasHeaders = Object.keys(mergedHeaders).length > 0;
+
+  // Cast to Transport: StreamableHTTPClientTransport's sessionId getter returns
+  // `string | undefined` which conflicts with Transport's `sessionId?: string`
+  // under exactOptionalPropertyTypes. Both are functionally equivalent; the
+  // cast is safe — the SDK implements the full Transport interface.
+  return new StreamableHTTPClientTransport(new URL(transport.url), {
+    ...(hasHeaders ? { requestInit: { headers: mergedHeaders } } : {}),
+  }) as unknown as Transport;
 }

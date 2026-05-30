@@ -211,7 +211,7 @@ describe('parseMcpServers', () => {
     expect(Array.isArray((cfg.auth as { inject: unknown }).inject)).toBe(true);
   });
 
-  it('accepts http transport structurally (C2 stub — logs info)', () => {
+  it('accepts http transport (C2 implemented — parses as first-class)', () => {
     const raw = JSON.stringify([
       { name: 'remote', transport: { kind: 'http', url: 'https://example.com/mcp' } },
     ]);
@@ -363,7 +363,7 @@ describe('StaticProvider', () => {
     });
   });
 
-  it('mixing env + argv injections → throws (no silent drop)', async () => {
+  it('mixing env + argv injections → throws (one-channel rule)', async () => {
     const provider = new StaticProvider({
       kind: 'static',
       secret: 'tok',
@@ -372,7 +372,7 @@ describe('StaticProvider', () => {
         { at: 'argv', template: '--token={{token}}' },
       ],
     });
-    await expect(provider.resolve()).rejects.toThrow(/all env or all argv/);
+    await expect(provider.resolve()).rejects.toThrow(/one channel/);
   });
 
   it('argv template with an unknown placeholder is left as-is (typo fails loud)', async () => {
@@ -395,14 +395,14 @@ describe('StaticProvider', () => {
     await expect(provider.resolve()).rejects.toThrow(/C2\.5/);
   });
 
-  it('header injection → NotImplementedError (C2)', async () => {
+  it('header injection → resolves to headers credential (C2 implemented)', async () => {
     const provider = new StaticProvider({
       kind: 'static',
       secret: 'tok',
       inject: { at: 'header', name: 'Authorization', valueTemplate: 'Bearer {{token}}' },
     });
-    await expect(provider.resolve()).rejects.toThrow(NotImplementedError);
-    await expect(provider.resolve()).rejects.toThrow(/C2/);
+    const cred = await provider.resolve();
+    expect(cred).toEqual({ apply: 'headers', headers: { Authorization: 'Bearer tok' } });
   });
 
   it('file injection with string secret → resolves (implemented in C2.5)', async () => {
@@ -485,22 +485,44 @@ describe('buildTransport', () => {
     });
   });
 
-  it('http transport → NotImplementedError (C2)', () => {
+  it('http transport with no auth → builds StreamableHTTPClientTransport (C2 implemented)', () => {
+    // Does not throw — C2 is implemented.
     expect(() =>
       buildTransport({ kind: 'http', url: 'https://x.example.com/mcp' }, { apply: 'none' }),
-    ).toThrow(NotImplementedError);
-    expect(() =>
-      buildTransport({ kind: 'http', url: 'https://x.example.com/mcp' }, { apply: 'none' }),
-    ).toThrow(/C2/);
+    ).not.toThrow();
   });
 
-  it('headers credential on stdio transport → NotImplementedError (C2)', () => {
+  it('http transport with headers credential → builds transport (C2 implemented)', () => {
+    expect(() =>
+      buildTransport(
+        { kind: 'http', url: 'https://x.example.com/mcp' },
+        { apply: 'headers', headers: { Authorization: 'Bearer tok' } },
+      ),
+    ).not.toThrow();
+  });
+
+  it('http transport with stdio-only credential (env) → throws clear error', () => {
+    expect(() =>
+      buildTransport(
+        { kind: 'http', url: 'https://x.example.com/mcp' },
+        { apply: 'env', vars: { TOKEN: 'tok' } },
+      ),
+    ).toThrow(/stdio-only/);
+  });
+
+  it('headers credential on stdio transport → throws clear error (not NotImplementedError)', () => {
     expect(() =>
       buildTransport(
         { kind: 'stdio', command: '/bin/srv' },
         { apply: 'headers', headers: { Authorization: 'Bearer tok' } },
       ),
-    ).toThrow(NotImplementedError);
+    ).toThrow(/http transport/);
+    expect(() =>
+      buildTransport(
+        { kind: 'stdio', command: '/bin/srv' },
+        { apply: 'headers', headers: { Authorization: 'Bearer tok' } },
+      ),
+    ).not.toThrow(NotImplementedError);
   });
 
   it('files credential on stdio → builds transport with merged vars (C2.5 implemented)', () => {

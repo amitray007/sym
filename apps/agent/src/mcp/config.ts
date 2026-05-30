@@ -18,18 +18,17 @@
  * ```
  *
  * Three axes:
- *  - Transport:    stdio (implemented) | http (C2 stub)
+ *  - Transport:    stdio (implemented) | http (implemented — C2)
  *  - Acquisition:  static inline (implemented) | secretRef store (C2.5 stub) | oauth (C3 stub)
- *  - Injection:    env (implemented) | argv (implemented) | header (C2 stub) | file (C2.5 stub)
+ *  - Injection:    env (implemented) | argv (implemented) | header (implemented — C2) | file (C2.5 stub)
  *
  * `trust: true` means the owner has opted this server's tools into skipping
  * the confirm-before-destructive gate. Owner-set only — never derived from
  * server-reported annotations.
  *
- * Unsupported transports ('http') and auth kinds ('oauth') are accepted
- * structurally by the parser and logged at parse time; the connect step will
- * fail-open later via buildTransport / makeProvider. This keeps the parse
- * path simple and the error message closer to the fault site.
+ * Unsupported auth kinds ('oauth') are accepted structurally by the parser and
+ * logged at parse time; the connect step will fail-open later via makeProvider.
+ * This keeps the parse path simple and the error message closer to the fault site.
  */
 
 // ---------------------------------------------------------------------------
@@ -37,7 +36,7 @@
 // ---------------------------------------------------------------------------
 
 export type Injection =
-  | { at: 'header'; name: string; valueTemplate: string } // http (C2) — stub in injector
+  | { at: 'header'; name: string; valueTemplate: string } // http — IMPLEMENTED (C2)
   | { at: 'env'; name: string; field?: string } // stdio — IMPLEMENTED
   | { at: 'argv'; template: string; field?: string } // stdio — IMPLEMENTED
   | { at: 'file'; path: string; pointerEnv?: string }; // stdio + Materializer (C2.5) — stub
@@ -48,7 +47,7 @@ export type Injection =
 
 export type TransportConfig =
   | { kind: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
-  | { kind: 'http'; url: string; headers?: Record<string, string> }; // C2 — stub
+  | { kind: 'http'; url: string; headers?: Record<string, string> }; // IMPLEMENTED (C2)
 
 // ---------------------------------------------------------------------------
 // Auth / credential types
@@ -114,9 +113,8 @@ export interface ConnectorConfig {
  * returns an empty array (no MCP tools, no crash). Invalid env never throws
  * into the server startup path.
  *
- * Transport 'http' and auth 'oauth' are accepted structurally here but will
- * fail-open at connect time (C2 / C3 stubs). A log line is emitted at parse
- * time so operators know these are not yet active.
+ * Auth kind 'oauth' is accepted structurally here but will fail-open at
+ * connect time (C3 stub). A log line is emitted at parse time.
  */
 export function parseMcpServers(raw: string | undefined): ConnectorConfig[] {
   if (raw === undefined || raw.trim().length === 0) return [];
@@ -239,7 +237,6 @@ function parseTransport(raw: unknown, index: number, name: string): TransportCon
     }
 
     if (kind === 'http') {
-      // Accepted structurally; logs that it's a C2 stub — fail-open at connect.
       const url = t['url'];
       if (typeof url !== 'string' || url.trim().length === 0) {
         console.warn(`[mcp] ${label} transport.kind='http' missing required 'url' — skipping`);
@@ -247,9 +244,6 @@ function parseTransport(raw: unknown, index: number, name: string): TransportCon
       }
       const headers = parseStringRecord(t['headers'], `${label}.transport.headers`);
       if (headers === false) return null;
-      console.info(
-        `[mcp] ${label} transport.kind='http' — HTTP transport is a C2 stub; connect will fail-open`,
-      );
       return {
         kind: 'http',
         url: url.trim(),
@@ -438,8 +432,6 @@ function parseInjection(raw: unknown, label: string): Injection | null {
       );
       return null;
     }
-    // Accepted structurally; injector will throw NotImplementedError at C2.
-    console.info(`[mcp] ${label} inject.at='header' — header injection is a C2 stub`);
     return { at: 'header', name: headerName.trim(), valueTemplate };
   }
 

@@ -6,29 +6,36 @@
  *   - `secretRef` only (no inline secret) — C2.5 stub; throws NotImplementedError.
  *
  * Injection targets implemented:
- *   - `env`  → { apply: 'env', vars: { [name]: value } }
- *   - `argv` → { apply: 'argv', args: [interpolated-template] }
- *   - `file` → { apply: 'files', dir, vars: { [pointerEnv]: absPath } }
- *
- * Injection targets stubbed:
- *   - `header` → C2 (HTTP transport)
+ *   - `env`    → { apply: 'env', vars: { [name]: value } }
+ *   - `argv`   → { apply: 'argv', args: [interpolated-template] }
+ *   - `file`   → { apply: 'files', dir, vars: { [pointerEnv]: absPath } }
+ *   - `header` → { apply: 'headers', headers: { [name]: rendered } }  (C2)
  *
  * Template interpolation:
  *   - String secret: `{{token}}` or `{{secret}}` → the string value.
  *   - Record secret: `{{fieldName}}` → that field's value.
- *   - `field?:` on env/argv selects which field of a record secret.
+ *   - `field?:` on env/argv/header selects which field of a record secret.
  *
  * When multiple injections are configured (inject is an array), each one is
  * resolved independently and the results are merged: env vars accumulate,
- * argv args accumulate. If injections produce mixed apply types (e.g. one
- * env + one argv), the result with the most entries wins — the injector
- * applies each apply type separately. In practice, callers produce a single
- * apply type per connector (one kind of injection per auth block).
+ * argv args accumulate, header vars accumulate. If injections produce mixed
+ * apply types (e.g. one env + one argv), the result with the most entries wins
+ * — the injector applies each apply type separately. In practice, callers
+ * produce a single apply type per connector (one kind of injection per auth
+ * block).
+ *
+ * One-channel rule: env/argv/files/headers must not be mixed in a single inject
+ * array. Header injection (http) cannot be combined with env/argv/file (stdio).
  *
  * File injection is self-contained: the materialized dir + pointerEnv var are
  * returned together as a `files` credential. A `file` injection cannot be
- * combined with `env` or `argv` in the same inject array (one channel per
- * ResolvedCredential).
+ * combined with any other injection type.
+ *
+ * Note on Basic-over-http: the header injection resolves a secret value (or
+ * record field via `field?`) and interpolates `valueTemplate`. A Basic auth
+ * header requires a pre-encoded `username:password` value in the secret —
+ * the static provider does NOT base64-encode it automatically (none of the
+ * currently supported services need Basic-over-http). Defer if needed.
  */
 
 import * as path from 'node:path';
@@ -132,19 +139,23 @@ export class StaticProvider implements CredentialProvider {
 /**
  * Apply one or more injection targets to a resolved secret.
  *
- * When all injections are the same type (all env, all argv), they are merged
- * into a single `ResolvedCredential`. Mixed-type arrays (e.g. env + argv)
- * are unusual but supported by accumulating each type separately and
- * returning the env result when both are present (env is the more common case
- * and a single credential can only carry one `apply` discriminant).
+ * One-channel rule: all injections in a single inject array must target the
+ * same channel (all env, all argv, all header). Mixed-type arrays (e.g. env +
+ * argv, or env + header) throw a clear error.
+ *
+ * Multiple injections of the same type accumulate:
+ *   - env:    multiple env vars merged into one record.
+ *   - argv:   multiple rendered args appended to the arg list.
+ *   - header: multiple headers merged into one record.
  *
  * In practice, most connectors have a single injection; the array form is
  * provided for multi-field credentials (e.g. a record secret that spreads
- * into multiple env vars).
+ * into multiple env vars or headers).
  */
 function applyInjections(secret: SecretMaterial, injections: Injection[]): ResolvedCredential {
   const envVars: Record<string, string> = {};
   const argvArgs: string[] = [];
+  const headerMap: Record<string, string> = {};
 
   for (const inj of injections) {
     if (inj.at === 'env') {
@@ -161,11 +172,24 @@ function applyInjections(secret: SecretMaterial, injections: Injection[]): Resol
     }
 
     if (inj.at === 'header') {
-      throw new NotImplementedError('header injection — C2');
+      // header injection: interpolate the valueTemplate against the secret.
+      // For a string secret, {{token}} / {{secret}} expand to the string.
+      // For a record secret, {{fieldName}} expands to that field's value.
+      // The `resolvedValue` arg to interpolateTemplate is used for {{token}}/{{secret}};
+      // for record secrets that have no single "main" value we pass an empty
+      // string — record field access goes through the {{field}} substitution
+      // branch of interpolateTemplate instead.
+      const resolvedValue = typeof secret === 'string' ? secret : '';
+      const rendered = interpolateTemplate(inj.valueTemplate, resolvedValue, secret);
+      headerMap[inj.name] = rendered;
+      continue;
     }
 
     if (inj.at === 'file') {
-      throw new NotImplementedError('file injection — C2.5');
+      // Unreachable: file injection is handled earlier via applyFileInjection.
+      throw new Error(
+        'StaticProvider: file injection must be the only injection and is handled separately',
+      );
     }
 
     // TypeScript exhaustiveness — new at values will be caught at compile time.
@@ -175,19 +199,21 @@ function applyInjections(secret: SecretMaterial, injections: Injection[]): Resol
 
   const hasEnv = Object.keys(envVars).length > 0;
   const hasArgv = argvArgs.length > 0;
+  const hasHeaders = Object.keys(headerMap).length > 0;
 
-  // A single ResolvedCredential carries one apply channel, so env + argv on the
-  // same connector can't both be expressed. Fail loud rather than silently
-  // dropping one. (Non-secret flags belong in transport.args / transport.env.)
-  if (hasEnv && hasArgv) {
+  // One-channel rule: mixing channels in a single inject array is not allowed.
+  // (Non-secret flags belong in transport.args / transport.env / transport.headers.)
+  const channelCount = [hasEnv, hasArgv, hasHeaders].filter(Boolean).length;
+  if (channelCount > 1) {
     throw new Error(
       "StaticProvider: a connector's injections must all target one channel " +
-        '(all env or all argv); mixing env + argv is not supported',
+        '(all env, all argv, or all header); mixing channels is not supported',
     );
   }
 
   if (hasEnv) return { apply: 'env', vars: envVars };
   if (hasArgv) return { apply: 'argv', args: argvArgs };
+  if (hasHeaders) return { apply: 'headers', headers: headerMap };
   return { apply: 'none' };
 }
 
