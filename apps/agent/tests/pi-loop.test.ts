@@ -90,14 +90,15 @@ function makeModelCfg(): {
 /** Registry exposing one tool named `read_thread`. */
 function makeRegistryWithOneTool(): ToolRegistry {
   const descriptor: ToolDescriptor = {
+    type: 'function',
     name: 'read_thread',
     description: 'read a thread',
-    inputSchema: { type: 'object' as const, properties: {} },
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
   };
   return new ToolRegistry({
     list: () => [descriptor],
-    async dispatch() {
-      return { content: 'ok' };
+    async dispatch(call) {
+      return { callId: call.id, ok: true, content: 'ok' };
     },
   });
 }

@@ -148,6 +148,7 @@ export function createServer(deps: ServerDeps): Hono {
       // completes, every subsequent turn picks it up).
       ...(ctx.ownerProfile !== undefined ? { ownerProfile: ctx.ownerProfile } : {}),
       nameResolver: ctx.nameResolver,
+      mcpConfigs: ctx.mcpServers,
     };
   }
 

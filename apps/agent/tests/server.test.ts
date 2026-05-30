@@ -18,6 +18,12 @@ const config: AgentConfig = {
   fireworksApiKey: 'fw-key',
   fireworksModel: 'test-model',
   fireworksBaseUrl: 'http://fake.fireworks',
+  behavior: {
+    taskCardThreshold: 1,
+    taskCardAfter: 'delete',
+    ownerPostMarker: true,
+  },
+  mcpServers: [],
 };
 
 function sign(ts: string, body: string): string {

@@ -3,6 +3,10 @@
  * in dev via the entrypoint's dotenv load). Single-tenant: one Slack workspace,
  * one owner, one model provider. No secrets are logged.
  */
+
+import { parseMcpServers } from './mcp/config.js';
+
+import type { McpServerConfig } from './mcp/config.js';
 /** Runtime behavior knobs — all optional, all have safe defaults. */
 export interface BehaviorConfig {
   /**
@@ -53,6 +57,11 @@ export interface AgentConfig {
   fireworksBaseUrl: string;
   /** Runtime behavior toggles. */
   behavior: BehaviorConfig;
+  /**
+   * MCP server configs parsed from `MCP_SERVERS` (JSON array env var).
+   * Empty array when not configured — no MCP tools, no crash.
+   */
+  mcpServers: McpServerConfig[];
 }
 
 const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
@@ -90,5 +99,6 @@ export function loadAgentConfig(): AgentConfig {
       taskCardAfter: taskCardAfter(process.env['TASK_CARD_AFTER']),
       ownerPostMarker: process.env['OWNER_POST_MARKER'] !== 'false',
     },
+    mcpServers: parseMcpServers(process.env['MCP_SERVERS']),
   };
 }

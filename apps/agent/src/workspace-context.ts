@@ -2,6 +2,7 @@ import { NameResolver } from './name-resolver.js';
 import { WebApiSlackClient } from './slack-client.js';
 
 import type { AgentConfig } from './config.js';
+import type { McpServerConfig } from './mcp/config.js';
 import type { SlackClient } from '@sym/adapter-slack';
 import type { SlackUserId, WorkspaceId } from '@sym/contracts';
 import type { OwnerIdentity } from '@sym/kernel';
@@ -43,6 +44,11 @@ export interface WorkspaceContext {
     baseUrl: string;
     apiKey: string;
   };
+  /**
+   * Parsed MCP server configs from `MCP_SERVERS` env var.
+   * Passed through to `HandleTurnDeps.mcpConfigs`.
+   */
+  mcpServers: McpServerConfig[];
 }
 
 /**
@@ -63,6 +69,7 @@ export function loadWorkspaceContext(config: AgentConfig): WorkspaceContext {
       baseUrl: config.fireworksBaseUrl,
       apiKey: config.fireworksApiKey,
     },
+    mcpServers: config.mcpServers,
   };
   if (config.slackUserToken !== undefined) {
     ctx.userSlackClient = new WebApiSlackClient(config.slackUserToken);

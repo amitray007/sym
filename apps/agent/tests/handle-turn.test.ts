@@ -74,6 +74,7 @@ const FAKE_BEHAVIOR = {
   taskCardAfter: 'delete' as const,
   ownerPostMarker: true,
 };
+const FAKE_RESOLVER = new NameResolver();
 
 // ---------------------------------------------------------------------------
 // Default reply returned by the mock loop unless overridden.
@@ -223,6 +224,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     expect(slack.posts).toHaveLength(1);
@@ -255,6 +257,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     // Streaming path was taken — no chatPostMessage.
@@ -308,6 +311,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     const statuses = slack.setStatusCalls.map((c) => c.status);
@@ -342,6 +346,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     // setStatus: initial rotated opener ("is X…") + trailing '' clear after stopStream.
@@ -389,6 +394,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     // Fell back to postMessage.
@@ -412,6 +418,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
     expect(slack.posts).toHaveLength(0);
     // runLoopPi must not be called when there is no channelId.
@@ -455,6 +462,7 @@ describe('handleTurn', () => {
         botUserId: BOT,
         slackTeamId: 'T-TEST',
         behavior: FAKE_BEHAVIOR,
+        nameResolver: FAKE_RESOLVER,
       },
     );
 
@@ -490,6 +498,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     // Pi was called exactly once.
@@ -532,6 +541,7 @@ describe('handleTurn', () => {
         slackTeamId: 'T-TEST',
         behavior: FAKE_BEHAVIOR,
         viewedChannelId: 'C-VIEWED',
+        nameResolver: FAKE_RESOLVER,
       },
     );
 
@@ -565,6 +575,7 @@ describe('handleTurn', () => {
         botUserId: BOT,
         slackTeamId: 'T-TEST',
         behavior: FAKE_BEHAVIOR,
+        nameResolver: FAKE_RESOLVER,
       },
     );
 
@@ -602,6 +613,7 @@ describe('handleTurn', () => {
         botUserId: BOT,
         slackTeamId: 'T-TEST',
         behavior: FAKE_BEHAVIOR,
+        nameResolver: FAKE_RESOLVER,
       },
     );
 
@@ -623,6 +635,7 @@ describe('handleTurn', () => {
         botUserId: BOT,
         slackTeamId: 'T-TEST',
         behavior: FAKE_BEHAVIOR,
+        nameResolver: FAKE_RESOLVER,
       },
     );
 
@@ -670,6 +683,7 @@ describe('handleTurn', () => {
       slackTeamId: 'T-TEST',
       // Threshold 1 so the single tool triggers the card immediately.
       behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
+      nameResolver: FAKE_RESOLVER,
     });
 
     // We expect at least an in_progress chunk then an error chunk for task-1.
@@ -722,6 +736,7 @@ describe('handleTurn', () => {
       // Production-default threshold of 3 — the threshold-flush happens at
       // the third start, which is the case that was broken.
       behavior: { taskCardThreshold: 3, taskCardAfter: 'delete' as const, ownerPostMarker: true },
+      nameResolver: FAKE_RESOLVER,
     });
 
     // All three tasks must end in `complete` (or `error`) state in the chunks.
@@ -758,6 +773,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     expect(slack.startStreamCalls).toHaveLength(1);
@@ -798,6 +814,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     expect(slack.startStreamCalls).toHaveLength(1);
@@ -831,6 +848,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     expect(mockCleanupReply).toHaveBeenCalledWith(
@@ -869,6 +887,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     expect(mockCleanupReply).toHaveBeenCalledTimes(1);
@@ -909,6 +928,7 @@ describe('handleTurn', () => {
       slackTeamId: 'T-TEST',
       // Threshold 1 → task card opens the stream on the first tool.
       behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
+      nameResolver: FAKE_RESOLVER,
     });
 
     expect(mockCleanupReply).toHaveBeenCalledTimes(1);
@@ -952,6 +972,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
+      nameResolver: FAKE_RESOLVER,
     });
 
     // The answer must STILL land — as a normal posted message.
@@ -991,6 +1012,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
+      nameResolver: FAKE_RESOLVER,
     });
 
     // The body was appended to the stream; a failed close must NOT re-post it.
@@ -1016,6 +1038,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     expect(mockCleanupReply).not.toHaveBeenCalled();
@@ -1040,6 +1063,7 @@ describe('handleTurn', () => {
       botUserId: BOT,
       slackTeamId: 'T-TEST',
       behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
     });
 
     expect(mockCleanupReply).not.toHaveBeenCalled();

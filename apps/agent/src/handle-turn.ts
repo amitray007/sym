@@ -8,6 +8,7 @@ import {
 import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
+import { CompositeDispatcher, McpDispatcher, initMcpPool } from './mcp/index.js';
 import { NameResolver } from './name-resolver.js';
 import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
@@ -17,6 +18,7 @@ import { cleanupReply } from './reply-cleanup.js';
 import { pickShimmerPhrase, pickShimmerStatus } from './thinking-copy.js';
 
 import type { BehaviorConfig } from './config.js';
+import type { parseMcpServers } from './mcp/index.js';
 import type {
   AppendStreamParams,
   SlackBlock,
@@ -67,6 +69,12 @@ export interface HandleTurnDeps {
    * raw `<@U…>` / `<#C…>` markup.
    */
   nameResolver: NameResolver;
+  /**
+   * Parsed MCP server configs from `MCP_SERVERS` env var.
+   * When empty, no MCP tools are registered (zero-config safe default).
+   * When present, MCP tools are available alongside builtin tools.
+   */
+  mcpConfigs?: ReturnType<typeof parseMcpServers>;
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
@@ -969,7 +977,21 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
     planController,
     nameResolver: deps.nameResolver,
   });
-  const registry = new ToolRegistry(builtin);
+
+  // MCP tool layer — lazy-connects stdio servers on first use. When no MCP
+  // servers are configured (mcpConfigs is empty or absent), this contributes
+  // zero tools and the composite is functionally identical to builtin alone.
+  // Pool init runs once (pool is module-level); subsequent calls are cheap.
+  const mcpConfigs = deps.mcpConfigs ?? [];
+  if (mcpConfigs.length > 0) {
+    // Fire-and-forget the pool warm; list() returns whatever is cached so far.
+    // For the first turn the pool warms before the loop starts because we
+    // await initMcpPool here (serial with the loop start).
+    await initMcpPool(mcpConfigs);
+  }
+  const mcp = new McpDispatcher(mcpConfigs);
+  const dispatcher = mcpConfigs.length > 0 ? new CompositeDispatcher(builtin, mcp) : builtin;
+  const registry = new ToolRegistry(dispatcher);
 
   // Threaded turns: try streaming; fall through to postMessage only if it fails.
   if (turn.threadTs !== undefined) {
