@@ -234,7 +234,14 @@ async function connectServer(config: ConnectorConfig): Promise<PoolEntry> {
  */
 async function ensureEntry(config: ConnectorConfig): Promise<PoolEntry> {
   const existing = pool.get(config.name);
-  if (existing !== undefined) return existing;
+  // Retry failed OAuth connectors: the first connect throws UnauthorizedError
+  // and caches ok:false; after the owner completes /oauth/callback the tokens
+  // are in the store, so a fresh connect can now succeed and the connector comes
+  // online without a process restart. Non-oauth failures stay cached to avoid
+  // per-turn retry storms against a genuinely-down server.
+  if (existing !== undefined && (existing.ok || config.auth?.kind !== 'oauth')) {
+    return existing;
+  }
 
   const entry = await connectServer(config);
   pool.set(config.name, entry);

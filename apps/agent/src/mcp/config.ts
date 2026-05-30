@@ -19,16 +19,16 @@
  *
  * Three axes:
  *  - Transport:    stdio (implemented) | http (implemented — C2)
- *  - Acquisition:  static inline (implemented) | secretRef store (C2.5 stub) | oauth (C3 stub)
- *  - Injection:    env (implemented) | argv (implemented) | header (implemented — C2) | file (C2.5 stub)
+ *  - Acquisition:  static inline (implemented) | oauth (implemented) | secretRef store (stub — later)
+ *  - Injection:    env (implemented) | argv (implemented) | header (implemented) | file (implemented)
  *
  * `trust: true` means the owner has opted this server's tools into skipping
  * the confirm-before-destructive gate. Owner-set only — never derived from
  * server-reported annotations.
  *
- * Unsupported auth kinds ('oauth') are accepted structurally by the parser and
- * logged at parse time; the connect step will fail-open later via makeProvider.
- * This keeps the parse path simple and the error message closer to the fault site.
+ * Still stubbed (parsed structurally; fail cleanly at connect time, never crash):
+ * `secretRef` static credentials (the store isn't wired for them yet) and
+ * `prepare` (the gcloud-style pre-connect command). Everything else is implemented.
  */
 
 // ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ export type Injection =
   | { at: 'header'; name: string; valueTemplate: string } // http — IMPLEMENTED (C2)
   | { at: 'env'; name: string; field?: string } // stdio — IMPLEMENTED
   | { at: 'argv'; template: string; field?: string } // stdio — IMPLEMENTED
-  | { at: 'file'; path: string; pointerEnv?: string }; // stdio + Materializer (C2.5) — stub
+  | { at: 'file'; path: string; pointerEnv?: string }; // stdio + Materializer (C2.5)
 
 // ---------------------------------------------------------------------------
 // Transport types
@@ -69,7 +69,7 @@ export type AuthConfig =
       /** Where to inject the resolved credential. One or many injection targets. */
       inject: Injection | Injection[];
     }
-  | { kind: 'oauth' }; // C3 — stub; throws NotImplementedError at connect time
+  | { kind: 'oauth' }; // C3 — SdkOAuthAdapter + encrypted token store
 
 // ---------------------------------------------------------------------------
 // ConnectorConfig — the top-level shape
@@ -113,8 +113,8 @@ export interface ConnectorConfig {
  * returns an empty array (no MCP tools, no crash). Invalid env never throws
  * into the server startup path.
  *
- * Auth kind 'oauth' is accepted structurally here but will fail-open at
- * connect time (C3 stub). A log line is emitted at parse time.
+ * `secretRef` static creds and `prepare` are parsed structurally but fail
+ * cleanly at connect time (not yet wired); everything else is implemented.
  */
 export function parseMcpServers(raw: string | undefined): ConnectorConfig[] {
   if (raw === undefined || raw.trim().length === 0) return [];
@@ -313,10 +313,7 @@ function parseAuth(raw: unknown, index: number, name: string): AuthConfig | null
   }
 
   if (kind === 'oauth') {
-    // Accepted structurally; logs C3 stub — fail-open at makeProvider.
-    console.info(
-      `[mcp] ${label} kind='oauth' — OAuth is a C3 stub; makeProvider will throw NotImplementedError`,
-    );
+    // OAuth is implemented (SdkOAuthAdapter + encrypted store).
     return { kind: 'oauth' };
   }
 
@@ -448,8 +445,6 @@ function parseInjection(raw: unknown, label: string): Injection | null {
       );
       return null;
     }
-    // Accepted structurally; injector will throw NotImplementedError at C2.5.
-    console.info(`[mcp] ${label} inject.at='file' — file injection is a C2.5 stub`);
     return {
       at: 'file',
       path: path.trim(),

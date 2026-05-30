@@ -18,7 +18,7 @@ import { cleanupReply } from './reply-cleanup.js';
 import { pickShimmerPhrase, pickShimmerStatus } from './thinking-copy.js';
 
 import type { BehaviorConfig } from './config.js';
-import type { parseMcpServers } from './mcp/index.js';
+import type { ConnectorConfig } from './mcp/index.js';
 import type {
   AppendStreamParams,
   SlackBlock,
@@ -74,7 +74,7 @@ export interface HandleTurnDeps {
    * When empty, no MCP tools are registered (zero-config safe default).
    * When present, MCP tools are available alongside builtin tools.
    */
-  mcpConfigs?: ReturnType<typeof parseMcpServers>;
+  mcpConfigs?: ConnectorConfig[];
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */

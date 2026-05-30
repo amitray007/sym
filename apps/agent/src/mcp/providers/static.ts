@@ -16,13 +16,10 @@
  *   - Record secret: `{{fieldName}}` → that field's value.
  *   - `field?:` on env/argv/header selects which field of a record secret.
  *
- * When multiple injections are configured (inject is an array), each one is
- * resolved independently and the results are merged: env vars accumulate,
- * argv args accumulate, header vars accumulate. If injections produce mixed
- * apply types (e.g. one env + one argv), the result with the most entries wins
- * — the injector applies each apply type separately. In practice, callers
- * produce a single apply type per connector (one kind of injection per auth
- * block).
+ * When multiple injections are configured (inject is an array), they must all
+ * target the SAME channel — e.g. several env vars (basic-auth user+pass) which
+ * accumulate. Mixing channels (env + argv, or file + anything) THROWS: a single
+ * ResolvedCredential carries exactly one apply channel.
  *
  * One-channel rule: env/argv/files/headers must not be mixed in a single inject
  * array. Header injection (http) cannot be combined with env/argv/file (stdio).

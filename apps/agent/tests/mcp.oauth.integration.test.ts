@@ -554,10 +554,9 @@ describe('C2: Full OAuth handshake with mock MCP server + mock AS', () => {
       // Our test store is a separate instance, so we verify via the module store.
       await completeOAuth(CONNECTOR_NAME, code, returnedState);
 
-      // --- Reset pool → force reconnect ---
-      _resetPoolForTesting();
-
       // --- Second connect: tokens available → should succeed ---
+      // No manual pool reset: ensureEntry() retries failed OAuth connectors, so
+      // the next listAsync reconnects with the now-stored tokens and comes online.
       // The dispatcher uses the module-level store (getStore()) which was
       // initialized with SYM_ENCRYPTION_KEY. The tokens are stored there.
       const dispatcher2 = new McpDispatcher([config]);

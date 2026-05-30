@@ -77,8 +77,11 @@ export class Materializer {
     _registerDir(dir);
 
     for (const file of files) {
-      // Reject absolute paths or path traversal in file.path.
-      if (path.isAbsolute(file.path) || file.path.includes('..')) {
+      // Reject absolute paths and parent-dir traversal. Check path SEGMENTS for
+      // a literal '..' (handles both / and \) rather than a naive substring
+      // match, so legitimate names like 'key..json' are allowed.
+      const segments = file.path.split(/[/\\]/);
+      if (path.isAbsolute(file.path) || segments.some((s) => s === '..')) {
         // Clean up the dir we just created before throwing.
         await _removeDir(dir);
         _unregisterDir(dir);
