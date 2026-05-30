@@ -17,7 +17,7 @@ export default [
       '**/coverage/**',
       '**/*.tsbuildinfo',
       'pnpm-lock.yaml',
-      'scripts/**',
+      '**/scripts/**',
       '**/tests/fixtures/**',
     ],
   },
