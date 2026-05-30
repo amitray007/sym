@@ -70,7 +70,7 @@ export interface HandleTurnDeps {
    */
   nameResolver: NameResolver;
   /**
-   * Parsed MCP server configs from `MCP_SERVERS` env var.
+   * Parsed MCP server configs from `SYM_MCP_SERVERS` env var.
    * When empty, no MCP tools are registered (zero-config safe default).
    * When present, MCP tools are available alongside builtin tools.
    */

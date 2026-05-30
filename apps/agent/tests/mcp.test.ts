@@ -2,7 +2,7 @@
  * Tests for the MCP client module — ConnectorConfig base refactor.
  *
  * Covers:
- *  1.  Config parsing (valid/invalid/empty MCP_SERVERS values)
+ *  1.  Config parsing (valid/invalid/empty SYM_MCP_SERVERS values)
  *  2.  StaticProvider.resolve — string secret, record secret, argv, array
  *  3.  buildTransport — env merge order, argv append, stub arms
  *  4.  makeProvider — static→provider, oauth→throw, undefined→null

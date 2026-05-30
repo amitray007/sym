@@ -45,7 +45,7 @@ export interface WorkspaceContext {
     apiKey: string;
   };
   /**
-   * Parsed MCP connector configs from `MCP_SERVERS` env var.
+   * Parsed MCP connector configs from `SYM_MCP_SERVERS` env var.
    * Passed through to `HandleTurnDeps.mcpConfigs`.
    */
   mcpServers: ConnectorConfig[];

@@ -58,7 +58,7 @@ export interface AgentConfig {
   /** Runtime behavior toggles. */
   behavior: BehaviorConfig;
   /**
-   * MCP connector configs parsed from `MCP_SERVERS` (JSON array env var).
+   * MCP connector configs parsed from `SYM_MCP_SERVERS` (JSON array env var).
    * Empty array when not configured — no MCP tools, no crash.
    */
   mcpServers: ConnectorConfig[];
@@ -99,6 +99,6 @@ export function loadAgentConfig(): AgentConfig {
       taskCardAfter: taskCardAfter(process.env['TASK_CARD_AFTER']),
       ownerPostMarker: process.env['OWNER_POST_MARKER'] !== 'false',
     },
-    mcpServers: parseMcpServers(process.env['MCP_SERVERS']),
+    mcpServers: parseMcpServers(process.env['SYM_MCP_SERVERS']),
   };
 }

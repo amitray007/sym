@@ -1,5 +1,5 @@
 /**
- * MCP connector config — parsed from the `MCP_SERVERS` env var.
+ * MCP connector config — parsed from the `SYM_MCP_SERVERS` env var.
  *
  * Shape (JSON array):
  * ```json
@@ -76,7 +76,7 @@ export type AuthConfig =
 // ---------------------------------------------------------------------------
 
 /**
- * Service-agnostic connector config. Each entry in `MCP_SERVERS` is one connector.
+ * Service-agnostic connector config. Each entry in `SYM_MCP_SERVERS` is one connector.
  *
  * Replaces the flat Chunk-1 stdio config with a structured shape that
  * separates transport, auth, and injection concerns.
@@ -107,7 +107,7 @@ export interface ConnectorConfig {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse `MCP_SERVERS` (raw JSON string) into typed connector configs.
+ * Parse `SYM_MCP_SERVERS` (raw JSON string) into typed connector configs.
  *
  * Fail-open: any malformed entry is logged and skipped; missing/empty env var
  * returns an empty array (no MCP tools, no crash). Invalid env never throws
@@ -123,12 +123,12 @@ export function parseMcpServers(raw: string | undefined): ConnectorConfig[] {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    console.warn('[mcp] MCP_SERVERS is not valid JSON — ignoring all MCP servers:', err);
+    console.warn('[mcp] SYM_MCP_SERVERS is not valid JSON — ignoring all MCP servers:', err);
     return [];
   }
 
   if (!Array.isArray(parsed)) {
-    console.warn('[mcp] MCP_SERVERS must be a JSON array — ignoring all MCP servers');
+    console.warn('[mcp] SYM_MCP_SERVERS must be a JSON array — ignoring all MCP servers');
     return [];
   }
 
@@ -149,7 +149,7 @@ export function parseMcpServers(raw: string | undefined): ConnectorConfig[] {
 
 function parseEntry(entry: unknown, index: number): ConnectorConfig | null {
   if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
-    console.warn(`[mcp] MCP_SERVERS[${index}] is not an object — skipping`);
+    console.warn(`[mcp] SYM_MCP_SERVERS[${index}] is not an object — skipping`);
     return null;
   }
 
@@ -157,7 +157,7 @@ function parseEntry(entry: unknown, index: number): ConnectorConfig | null {
 
   const name = e['name'];
   if (typeof name !== 'string' || name.trim().length === 0) {
-    console.warn(`[mcp] MCP_SERVERS[${index}] missing required 'name' string — skipping`);
+    console.warn(`[mcp] SYM_MCP_SERVERS[${index}] missing required 'name' string — skipping`);
     return null;
   }
   const trimmedName = name.trim();
@@ -168,7 +168,7 @@ function parseEntry(entry: unknown, index: number): ConnectorConfig | null {
   const transportRaw = e['transport'];
   if (transportRaw === undefined || transportRaw === null) {
     console.warn(
-      `[mcp] MCP_SERVERS[${index}] ('${trimmedName}') missing required 'transport' — skipping`,
+      `[mcp] SYM_MCP_SERVERS[${index}] ('${trimmedName}') missing required 'transport' — skipping`,
     );
     return null;
   }
@@ -196,7 +196,7 @@ function parseEntry(entry: unknown, index: number): ConnectorConfig | null {
   const trust = e['trust'];
   if (trust !== undefined && typeof trust !== 'boolean') {
     console.warn(
-      `[mcp] MCP_SERVERS[${index}] ('${trimmedName}') 'trust' must be a boolean — skipping`,
+      `[mcp] SYM_MCP_SERVERS[${index}] ('${trimmedName}') 'trust' must be a boolean — skipping`,
     );
     return null;
   }
@@ -225,7 +225,7 @@ function parseEntry(entry: unknown, index: number): ConnectorConfig | null {
  * Returns null if parsing fails (logged).
  */
 function parseTransport(raw: unknown, index: number, name: string): TransportConfig | null {
-  const label = `MCP_SERVERS[${index}] ('${name}')`;
+  const label = `SYM_MCP_SERVERS[${index}] ('${name}')`;
 
   // New nested shape: { kind: 'stdio' | 'http', ... }
   if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -298,7 +298,7 @@ function parseStdioTransport(t: Record<string, unknown>, label: string): Transpo
  */
 function parseAuth(raw: unknown, index: number, name: string): AuthConfig | null | false {
   if (raw === undefined || raw === null) return null;
-  const label = `MCP_SERVERS[${index}] ('${name}').auth`;
+  const label = `SYM_MCP_SERVERS[${index}] ('${name}').auth`;
 
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     console.warn(`[mcp] ${label} must be an object — skipping entry`);
@@ -462,7 +462,7 @@ function parsePrepare(
   name: string,
 ): { command: string; args?: string[] } | null | false {
   if (raw === undefined || raw === null) return null;
-  const label = `MCP_SERVERS[${index}] ('${name}').prepare`;
+  const label = `SYM_MCP_SERVERS[${index}] ('${name}').prepare`;
 
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     console.warn(`[mcp] ${label} must be an object — skipping entry`);
@@ -492,7 +492,7 @@ function parseToolsAllowlist(
   name: string,
 ): { allow?: string[] } | null | false {
   if (raw === undefined || raw === null) return null;
-  const label = `MCP_SERVERS[${index}] ('${name}').tools`;
+  const label = `SYM_MCP_SERVERS[${index}] ('${name}').tools`;
 
   if (typeof raw !== 'object' || Array.isArray(raw)) {
     console.warn(`[mcp] ${label} must be an object — skipping entry`);

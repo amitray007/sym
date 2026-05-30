@@ -1,4 +1,4 @@
-// QA harness — drive Sym's REAL MCP client against the servers in MCP_SERVERS.
+// QA harness — drive Sym's REAL MCP client against the servers in SYM_MCP_SERVERS.
 //
 // Exercises the full parse -> connect -> listTools -> (optional) dispatch path
 // over the real wire (spawns stdio subprocesses / opens http transports), using
@@ -6,7 +6,7 @@
 // actually working?" check — not a mocked unit test.
 //
 // Usage:
-//   MCP_SERVERS='[{"name":"x","transport":{"kind":"stdio","command":"npx","args":["-y","@shopify/dev-mcp@latest"]},"trust":true}]' \
+//   SYM_MCP_SERVERS='[{"name":"x","transport":{"kind":"stdio","command":"npx","args":["-y","@shopify/dev-mcp@latest"]},"trust":true}]' \
 //     pnpm --filter @sym/agent qa:mcp
 //
 // Optional single tool call (proves the dispatch path too):
@@ -15,9 +15,9 @@
 // Slow first run (cold `npx` download) — bump MCP_CONNECT_TIMEOUT_MS, e.g. 60000.
 import { parseMcpServers, McpDispatcher } from '../dist/mcp/index.js';
 
-const raw = process.env.MCP_SERVERS;
+const raw = process.env.SYM_MCP_SERVERS;
 if (raw === undefined || raw.trim() === '') {
-  console.error('[qa] set MCP_SERVERS to a JSON array of connector configs');
+  console.error('[qa] set SYM_MCP_SERVERS to a JSON array of connector configs');
   process.exit(1);
 }
 
@@ -27,7 +27,7 @@ console.log(
 );
 if (configs.length === 0) {
   console.error(
-    '[qa] FAIL: no connectors parsed — check the MCP_SERVERS shape and the [mcp] warnings above',
+    '[qa] FAIL: no connectors parsed — check the SYM_MCP_SERVERS shape and the [mcp] warnings above',
   );
   process.exit(2);
 }

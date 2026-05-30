@@ -16,13 +16,13 @@ function main(): void {
   loadDotenv({ path: resolve(repoRoot, '.env'), override: true });
 
   const config = loadAgentConfig();
-  // Boot visibility: make it obvious whether MCP_SERVERS was picked up. An unset
+  // Boot visibility: make it obvious whether SYM_MCP_SERVERS was picked up. An unset
   // var otherwise produces no log at all, which makes "why no MCP tools?" murky.
   const mcpNames = config.mcpServers.map((s) => s.name);
   console.info(
     mcpNames.length > 0
       ? `[mcp] ${mcpNames.length} connector(s) configured: ${mcpNames.join(', ')}`
-      : '[mcp] no MCP servers configured (MCP_SERVERS unset or empty)',
+      : '[mcp] no MCP servers configured (SYM_MCP_SERVERS unset or empty)',
   );
   const app = createServer({ config });
   serve({ fetch: app.fetch, port: config.port }, (info) => {
