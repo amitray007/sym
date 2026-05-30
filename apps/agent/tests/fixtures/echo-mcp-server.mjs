@@ -11,20 +11,18 @@
  *   get_env       — returns process.env[NAME] for the given NAME argument
  *   read_cred_file — reads the file at process.env.GOOGLE_APPLICATION_CREDENTIALS
  *
- * Imports use absolute symlink paths so this script can be invoked with
- * plain `node` from any working directory.
+ * Imports use bare specifiers — Node resolves them relative to THIS file's
+ * location (apps/agent/node_modules), independent of the working directory the
+ * script is spawned from. (A previous hardcoded absolute path broke CI.)
  *
  * @see apps/agent/tests/mcp.integration.test.ts
  */
 
-const SDK_BASE =
-  '/Users/maverick/code/projects/sym/apps/agent/node_modules/@modelcontextprotocol/sdk/dist/esm';
-
-const { Server } = await import(`${SDK_BASE}/server/index.js`);
-const { StdioServerTransport } = await import(`${SDK_BASE}/server/stdio.js`);
-const { CallToolRequestSchema, ListToolsRequestSchema } = await import(`${SDK_BASE}/types.js`);
-
 import { readFile } from 'node:fs/promises';
+
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 const server = new Server(
   { name: 'echo-fixture', version: '1.0.0' },
