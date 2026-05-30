@@ -1,30 +1,37 @@
 /**
- * McpDispatcher — implements `ToolDispatcher` over one or more stdio MCP servers.
+ * McpDispatcher — implements `ToolDispatcher` over one or more MCP connectors.
  *
- * Each server's tools are namespaced as `<serverName>__<toolName>` in the
- * tool list so the model can tell them apart. The prefix is stripped on
- * dispatch and routed to the right client.
+ * Each connector's tools are namespaced as `<name>__<toolName>` in the tool
+ * list so the model can tell them apart. The prefix is stripped on dispatch
+ * and routed to the right client.
  *
  * Pool design:
- *   Module-level `Map<name, Client>` — clients are created once per named
- *   server and reused across turns. The agent process is long-lived; stdio
- *   child processes survive it. On first `list()` call (lazy connect), the
- *   client connects and caches its tool list. A server that fails to connect
- *   or errors on `listTools` contributes zero tools (FAIL OPEN) and is never
- *   retried within the same process lifetime — keeps the pool cheap.
+ *   Module-level `Map<name, PoolEntry>` — clients are created once per named
+ *   connector and reused across turns. The agent process is long-lived. On
+ *   first `list()` call (lazy connect), the client connects and caches its
+ *   tool list. A server that fails to connect or errors on `listTools`
+ *   contributes zero tools (FAIL OPEN) and is never retried within the same
+ *   process lifetime — keeps the pool cheap.
+ *
+ * Connect timeout:
+ *   `connect + listTools` is bounded by `CONNECT_TIMEOUT_MS` (default 10s).
+ *   A server that HANGS (not just errors) fails open instead of blocking the
+ *   first turn forever. Configured via `MCP_CONNECT_TIMEOUT_MS` env var.
  *
  * Security invariant:
  *   The `destructiveHint` on every MCP tool descriptor is forced to `true`
- *   unless the server config has `trust: true` (owner-set). This ensures
+ *   unless the connector config has `trust: true` (owner-set). This ensures
  *   all MCP tool calls go through the confirm-before-destructive gate by
  *   default. We NEVER read the MCP server's own annotations to decide
  *   whether to skip confirmation — those are attacker-controlled.
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-import type { StdioMcpServerConfig } from './config.js';
+import { buildTransport } from './inject.js';
+import { makeProvider } from './providers/provider.js';
+
+import type { ConnectorConfig } from './config.js';
 import type {
   ToolCall,
   ToolDescriptor,
@@ -32,6 +39,40 @@ import type {
   ToolResult,
   ToolRuntimeContext,
 } from '@sym/contracts';
+
+// ---------------------------------------------------------------------------
+// Connect timeout
+// ---------------------------------------------------------------------------
+
+/** Default maximum time to wait for connect + listTools, in milliseconds. */
+const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+
+const CONNECT_TIMEOUT_MS =
+  process.env['MCP_CONNECT_TIMEOUT_MS'] !== undefined
+    ? Math.max(1000, Number(process.env['MCP_CONNECT_TIMEOUT_MS']))
+    : DEFAULT_CONNECT_TIMEOUT_MS;
+
+/**
+ * Race `work` against a hard timeout. Rejects with a `TimeoutError` when the
+ * timeout elapses, regardless of whether `work` resolves later.
+ */
+async function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label}: timed out after ${ms}ms`));
+    }, ms);
+    work.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Module-level client pool (reused across turns)
@@ -45,48 +86,64 @@ interface PoolEntry {
   ok: boolean;
 }
 
-// One entry per server name, populated lazily on first list() call.
+// One entry per connector name, populated lazily on first list() call.
 const pool = new Map<string, PoolEntry>();
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** The separator between server name and tool name in the public tool namespace. */
+/** The separator between connector name and tool name in the public tool namespace. */
 export const MCP_TOOL_SEPARATOR = '__';
 
 /** Build the namespaced tool name visible to the model. */
-function namespacedName(serverName: string, toolName: string): string {
-  return `${serverName}${MCP_TOOL_SEPARATOR}${toolName}`;
+function namespacedName(connectorName: string, toolName: string): string {
+  return `${connectorName}${MCP_TOOL_SEPARATOR}${toolName}`;
 }
 
-/** Strip the server prefix from a namespaced tool name. */
-function stripPrefix(qualifiedName: string, serverName: string): string | null {
-  const prefix = `${serverName}${MCP_TOOL_SEPARATOR}`;
+/** Strip the connector prefix from a namespaced tool name. */
+function stripPrefix(qualifiedName: string, connectorName: string): string | null {
+  const prefix = `${connectorName}${MCP_TOOL_SEPARATOR}`;
   if (!qualifiedName.startsWith(prefix)) return null;
   return qualifiedName.slice(prefix.length);
 }
 
 /**
- * Connect a single stdio MCP server and discover its tools.
+ * Connect a single MCP connector and discover its tools.
  *
- * Returns a `PoolEntry` with `ok: false` and an empty tool list when anything
- * goes wrong (FAIL OPEN — the server contributes zero tools, never throws).
+ * Acquisition → Injection → Transport → Connect → ListTools, all bounded
+ * by CONNECT_TIMEOUT_MS. Returns a `PoolEntry` with `ok: false` and an
+ * empty tool list when anything goes wrong (FAIL OPEN).
  */
-async function connectServer(config: StdioMcpServerConfig): Promise<PoolEntry> {
+async function connectServer(config: ConnectorConfig): Promise<PoolEntry> {
   const label = `[mcp:${config.name}]`;
   let client: Client | undefined;
   try {
-    const transport = new StdioClientTransport({
-      command: config.command,
-      ...(config.args !== undefined ? { args: config.args } : {}),
-      ...(config.env !== undefined ? { env: config.env } : {}),
-    });
+    // C2.5 stub gate: prepare command is not yet implemented.
+    if (config.prepare !== undefined) {
+      throw new Error(
+        `${label} 'prepare' command is not yet implemented — C2.5 stub. Skipping connector.`,
+      );
+    }
 
+    // Acquisition: resolve credentials via provider.
+    const provider = makeProvider(config.auth);
+    const cred = provider !== null ? await provider.resolve() : { apply: 'none' as const };
+
+    // Injection + Transport construction: pure, no side effects.
+    const transport = buildTransport(config.transport, cred);
+
+    // Connect + list tools, bounded by timeout.
     client = new Client({ name: 'sym', version: '1.0.0' });
-    await client.connect(transport);
 
-    const { tools: rawTools } = await client.listTools();
+    const { tools: rawTools } = await withTimeout(
+      (async () => {
+        await client!.connect(transport);
+        return client!.listTools();
+      })(),
+      CONNECT_TIMEOUT_MS,
+      label,
+    );
 
     // Map each MCP tool to a Sym ToolDescriptor.
     // Security: destructiveHint is set based on owner-config `trust`, not on
@@ -96,7 +153,6 @@ async function connectServer(config: StdioMcpServerConfig): Promise<PoolEntry> {
       name: namespacedName(config.name, rawTool.name),
       description: rawTool.description ?? `MCP tool ${rawTool.name} from server ${config.name}`,
       // Pass the MCP tool's inputSchema straight through as-is.
-      // The Pi bridge casts it to TSchema (structurally identical at runtime).
       parameters: rawTool.inputSchema as ToolDescriptor['parameters'],
       // Security invariant: trust is owner-set. MCP server annotations are ignored.
       // Without trust: destructiveHint=true → confirm gate fires for every call.
@@ -127,7 +183,7 @@ async function connectServer(config: StdioMcpServerConfig): Promise<PoolEntry> {
  * Ensure the pool entry for `config` exists (lazy connect on first use).
  * Returns the entry (ok=false on any connection failure).
  */
-async function ensureEntry(config: StdioMcpServerConfig): Promise<PoolEntry> {
+async function ensureEntry(config: ConnectorConfig): Promise<PoolEntry> {
   const existing = pool.get(config.name);
   if (existing !== undefined) return existing;
 
@@ -141,17 +197,17 @@ async function ensureEntry(config: StdioMcpServerConfig): Promise<PoolEntry> {
 // ---------------------------------------------------------------------------
 
 /**
- * `ToolDispatcher` over a set of stdio MCP servers.
+ * `ToolDispatcher` over a set of MCP connectors.
  *
- * `list()` — lazily connects all configured servers, returns their tools
+ * `list()` — lazily connects all configured connectors, returns their tools
  *   namespaced as `<name>__<toolName>` (builtin-first is the caller's job).
  *
- * `dispatch()` — strips the prefix, routes to the right server, maps the
+ * `dispatch()` — strips the prefix, routes to the right connector, maps the
  *   MCP `CallToolResult` content into `ToolResult`. A `callTool` error
  *   returns `ok: false`, never throws into the Pi loop.
  */
 export class McpDispatcher implements ToolDispatcher {
-  constructor(private readonly configs: StdioMcpServerConfig[]) {}
+  constructor(private readonly configs: ConnectorConfig[]) {}
 
   async listAsync(): Promise<ToolDescriptor[]> {
     const results = await Promise.all(this.configs.map((c) => ensureEntry(c)));
@@ -160,7 +216,7 @@ export class McpDispatcher implements ToolDispatcher {
 
   // ToolDispatcher.list() is synchronous — return whatever the pool has cached.
   // On the first turn the pool may be empty; callers that need up-to-date tools
-  // must call `initPool()` before `list()`. The handle-turn wiring does this.
+  // must call `initMcpPool()` before `list()`. The handle-turn wiring does this.
   list(): ToolDescriptor[] {
     const out: ToolDescriptor[] = [];
     for (const config of this.configs) {
@@ -235,10 +291,6 @@ export class McpDispatcher implements ToolDispatcher {
 
 /**
  * Extract a text summary from MCP CallToolResult content array.
- *
- * Concatenates all `type:'text'` items (the common case). Falls back to
- * JSON stringify for non-text items (images, resources, etc.) so the model
- * always gets SOMETHING to reason over.
  */
 function extractText(content: unknown): string {
   if (!Array.isArray(content)) {
@@ -263,12 +315,21 @@ function extractText(content: unknown): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Eagerly connect all configured servers and warm the tool cache.
+ * Eagerly connect all configured connectors and warm the tool cache.
  *
  * Called once from `handle-turn.ts` during the first turn (or at startup).
- * Subsequent calls are cheap — already-connected servers are skipped.
+ * Subsequent calls are cheap — already-connected connectors are skipped.
  * Fails open: a server that won't connect simply contributes zero tools.
  */
-export async function initMcpPool(configs: StdioMcpServerConfig[]): Promise<void> {
+export async function initMcpPool(configs: ConnectorConfig[]): Promise<void> {
   await Promise.all(configs.map((c) => ensureEntry(c)));
+}
+
+// ---------------------------------------------------------------------------
+// Test-only pool reset (not exported from index.ts)
+// ---------------------------------------------------------------------------
+
+/** Clear the module-level pool. Used in tests to isolate pool state. */
+export function _resetPoolForTesting(): void {
+  pool.clear();
 }

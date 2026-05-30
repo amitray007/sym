@@ -1,22 +1,41 @@
 /**
- * Tests for the MCP client module (Chunk 1 — stdio dispatcher + composite).
+ * Tests for the MCP client module — ConnectorConfig base refactor.
  *
  * Covers:
- *  1. Config parsing (valid/invalid/empty MCP_SERVERS values)
- *  2. CompositeDispatcher prefix routing (builtin vs MCP)
- *  3. MCP result → ToolResult mapping
- *  4. FAIL OPEN (down server → zero tools, no throw)
+ *  1.  Config parsing (valid/invalid/empty MCP_SERVERS values)
+ *  2.  StaticProvider.resolve — string secret, record secret, argv, array
+ *  3.  buildTransport — env merge order, argv append, stub arms
+ *  4.  makeProvider — static→provider, oauth→throw, undefined→null
+ *  5.  CompositeDispatcher prefix routing
+ *  6.  McpDispatcher — MCP result → ToolResult mapping + security annotations
+ *  7.  FAIL OPEN — down server → zero tools, no throw
+ *  8.  Connect TIMEOUT — hanging server fails open within bound
  *
  * MCP Client/Transport are fully mocked — no real subprocess is spawned.
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+// Module mocks must be declared before imports (hoisted by vitest).
+vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
+  return { Client: vi.fn() };
+});
+vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
+  return {
+    StdioClientTransport: vi.fn().mockImplementation((opts: unknown) => ({ _opts: opts })),
+  };
+});
+
+import { Client as MockClient } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport as MockStdioTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CompositeDispatcher } from '../src/mcp/composite.js';
 import { parseMcpServers } from '../src/mcp/config.js';
-import { McpDispatcher, MCP_TOOL_SEPARATOR } from '../src/mcp/dispatcher.js';
+import { McpDispatcher, MCP_TOOL_SEPARATOR, _resetPoolForTesting } from '../src/mcp/dispatcher.js';
+import { buildTransport } from '../src/mcp/inject.js';
+import { makeProvider, NotImplementedError } from '../src/mcp/providers/provider.js';
+import { StaticProvider } from '../src/mcp/providers/static.js';
 
-import type { StdioMcpServerConfig } from '../src/mcp/config.js';
+import type { ConnectorConfig } from '../src/mcp/config.js';
 import type {
   ConversationId,
   JsonObject,
@@ -96,18 +115,136 @@ describe('parseMcpServers', () => {
     expect(result).toEqual([]);
   });
 
-  it('parses a minimal valid stdio config', () => {
-    const raw = JSON.stringify([{ name: 'my-server', command: '/usr/bin/server' }]);
+  // --- New nested shape ---
+
+  it('parses a minimal stdio connector (new nested shape)', () => {
+    const raw = JSON.stringify([
+      { name: 'my-server', transport: { kind: 'stdio', command: '/usr/bin/server' } },
+    ]);
     const result = parseMcpServers(raw);
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
-      transport: 'stdio',
       name: 'my-server',
-      command: '/usr/bin/server',
+      transport: { kind: 'stdio', command: '/usr/bin/server' },
     });
   });
 
-  it('parses a full stdio config with args, env, and trust', () => {
+  it('parses a stdio connector with args and env in transport', () => {
+    const raw = JSON.stringify([
+      {
+        name: 'full',
+        transport: {
+          kind: 'stdio',
+          command: '/bin/full',
+          args: ['--port', '9000'],
+          env: { X: '1' },
+        },
+        trust: true,
+      },
+    ]);
+    const result = parseMcpServers(raw);
+    expect(result).toHaveLength(1);
+    const cfg = result[0]!;
+    expect(cfg.transport).toMatchObject({
+      kind: 'stdio',
+      command: '/bin/full',
+      args: ['--port', '9000'],
+      env: { X: '1' },
+    });
+    expect(cfg.trust).toBe(true);
+  });
+
+  it('parses a stdio connector with static env auth', () => {
+    const raw = JSON.stringify([
+      {
+        name: 'authed',
+        transport: { kind: 'stdio', command: '/bin/srv' },
+        auth: { kind: 'static', secret: 'tok-abc', inject: { at: 'env', name: 'API_KEY' } },
+      },
+    ]);
+    const result = parseMcpServers(raw);
+    expect(result).toHaveLength(1);
+    const cfg = result[0]!;
+    expect(cfg.auth).toMatchObject({
+      kind: 'static',
+      secret: 'tok-abc',
+      inject: { at: 'env', name: 'API_KEY' },
+    });
+  });
+
+  it('parses a stdio connector without auth', () => {
+    const raw = JSON.stringify([
+      { name: 'no-auth', transport: { kind: 'stdio', command: '/bin/x' } },
+    ]);
+    const result = parseMcpServers(raw);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.auth).toBeUndefined();
+  });
+
+  it('parses a record-secret static auth with two inject targets', () => {
+    const raw = JSON.stringify([
+      {
+        name: 'basic-auth',
+        transport: { kind: 'stdio', command: '/bin/srv' },
+        auth: {
+          kind: 'static',
+          secret: { user: 'alice', pass: 'hunter2' },
+          inject: [
+            { at: 'env', name: 'BASIC_USER', field: 'user' },
+            { at: 'env', name: 'BASIC_PASS', field: 'pass' },
+          ],
+        },
+      },
+    ]);
+    const result = parseMcpServers(raw);
+    expect(result).toHaveLength(1);
+    const cfg = result[0]!;
+    expect(cfg.auth).toMatchObject({
+      kind: 'static',
+      secret: { user: 'alice', pass: 'hunter2' },
+    });
+    expect(Array.isArray((cfg.auth as { inject: unknown }).inject)).toBe(true);
+  });
+
+  it('accepts http transport structurally (C2 stub — logs info)', () => {
+    const raw = JSON.stringify([
+      { name: 'remote', transport: { kind: 'http', url: 'https://example.com/mcp' } },
+    ]);
+    const result = parseMcpServers(raw);
+    // http is accepted at parse time (fail-open at connect); entry is included
+    expect(result).toHaveLength(1);
+    expect(result[0]?.transport).toMatchObject({
+      kind: 'http',
+      url: 'https://example.com/mcp',
+    });
+  });
+
+  it('accepts oauth auth structurally (C3 stub — logs info)', () => {
+    const raw = JSON.stringify([
+      {
+        name: 'oauth-srv',
+        transport: { kind: 'stdio', command: '/bin/srv' },
+        auth: { kind: 'oauth' },
+      },
+    ]);
+    const result = parseMcpServers(raw);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.auth).toMatchObject({ kind: 'oauth' });
+  });
+
+  // --- Legacy flat shape (back-compat) ---
+
+  it('parses a legacy flat-shape entry (no nested transport)', () => {
+    const raw = JSON.stringify([{ name: 'legacy', command: '/usr/bin/server' }]);
+    const result = parseMcpServers(raw);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      name: 'legacy',
+      transport: { kind: 'stdio', command: '/usr/bin/server' },
+    });
+  });
+
+  it('parses a legacy flat-shape entry with args, env, and trust', () => {
     const raw = JSON.stringify([
       {
         name: 'full',
@@ -119,47 +256,57 @@ describe('parseMcpServers', () => {
     ]);
     const result = parseMcpServers(raw);
     expect(result).toHaveLength(1);
-    const cfg = result[0] as StdioMcpServerConfig;
-    expect(cfg.args).toEqual(['--port', '9000']);
-    expect(cfg.env).toEqual({ TOKEN: 'abc123' });
+    const cfg = result[0]!;
+    expect(cfg.transport).toMatchObject({
+      kind: 'stdio',
+      command: '/bin/full',
+      args: ['--port', '9000'],
+      env: { TOKEN: 'abc123' },
+    });
     expect(cfg.trust).toBe(true);
   });
 
   it('skips entries missing required name', () => {
-    const raw = JSON.stringify([{ command: '/bin/server' }]);
+    const raw = JSON.stringify([{ transport: { kind: 'stdio', command: '/bin/server' } }]);
     expect(parseMcpServers(raw)).toEqual([]);
   });
 
-  it('skips entries missing required command', () => {
+  it('skips entries missing required command (new shape)', () => {
+    const raw = JSON.stringify([{ name: 'x', transport: { kind: 'stdio' } }]);
+    expect(parseMcpServers(raw)).toEqual([]);
+  });
+
+  it('skips entries missing required command (legacy shape)', () => {
     const raw = JSON.stringify([{ name: 'x' }]);
     expect(parseMcpServers(raw)).toEqual([]);
   });
 
-  it('skips unsupported transports', () => {
-    const raw = JSON.stringify([{ name: 'x', command: '/bin/x', transport: 'http' }]);
+  it('skips entries where transport.args is not an array of strings', () => {
+    const raw = JSON.stringify([
+      { name: 'x', transport: { kind: 'stdio', command: '/bin/x', args: [1, 2] } },
+    ]);
     expect(parseMcpServers(raw)).toEqual([]);
   });
 
-  it('skips entries where args is not an array of strings', () => {
-    const raw = JSON.stringify([{ name: 'x', command: '/bin/x', args: [1, 2] }]);
-    expect(parseMcpServers(raw)).toEqual([]);
-  });
-
-  it('skips entries where env is not a string record', () => {
-    const raw = JSON.stringify([{ name: 'x', command: '/bin/x', env: { k: 42 } }]);
+  it('skips entries where transport.env is not a string record', () => {
+    const raw = JSON.stringify([
+      { name: 'x', transport: { kind: 'stdio', command: '/bin/x', env: { k: 42 } } },
+    ]);
     expect(parseMcpServers(raw)).toEqual([]);
   });
 
   it('skips entries where trust is not boolean', () => {
-    const raw = JSON.stringify([{ name: 'x', command: '/bin/x', trust: 'yes' }]);
+    const raw = JSON.stringify([
+      { name: 'x', transport: { kind: 'stdio', command: '/bin/x' }, trust: 'yes' },
+    ]);
     expect(parseMcpServers(raw)).toEqual([]);
   });
 
-  it('skips invalid entries while keeping valid ones', () => {
+  it('skips invalid entries while keeping valid ones (per-entry fail-open)', () => {
     const raw = JSON.stringify([
-      { name: 'good', command: '/bin/good' },
-      { command: '/bin/no-name' },
-      { name: 'also-good', command: '/bin/also-good' },
+      { name: 'good', transport: { kind: 'stdio', command: '/bin/good' } },
+      { transport: { kind: 'stdio', command: '/bin/no-name' } }, // missing name
+      { name: 'also-good', transport: { kind: 'stdio', command: '/bin/also-good' } },
     ]);
     const result = parseMcpServers(raw);
     expect(result).toHaveLength(2);
@@ -168,20 +315,231 @@ describe('parseMcpServers', () => {
   });
 
   it('does not set trust when trust is false or absent', () => {
-    const raw = JSON.stringify([{ name: 'x', command: '/bin/x', trust: false }]);
+    const raw = JSON.stringify([
+      { name: 'x', transport: { kind: 'stdio', command: '/bin/x' }, trust: false },
+    ]);
     const result = parseMcpServers(raw);
     expect(result[0]).not.toHaveProperty('trust');
   });
 
-  it('defaults transport to stdio when absent', () => {
-    const raw = JSON.stringify([{ name: 'x', command: '/bin/x' }]);
-    const result = parseMcpServers(raw);
-    expect(result[0]).toMatchObject({ transport: 'stdio' });
+  it('skips entries with unknown transport kind', () => {
+    const raw = JSON.stringify([{ name: 'x', transport: { kind: 'websocket', url: 'ws://x' } }]);
+    expect(parseMcpServers(raw)).toEqual([]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. CompositeDispatcher routing
+// 2. StaticProvider.resolve
+// ---------------------------------------------------------------------------
+
+describe('StaticProvider', () => {
+  it('string secret → env: resolves to { apply: env, vars: { NAME: value } }', async () => {
+    const provider = new StaticProvider({
+      kind: 'static',
+      secret: 'tok-abc',
+      inject: { at: 'env', name: 'API_KEY' },
+    });
+    const cred = await provider.resolve();
+    expect(cred).toEqual({ apply: 'env', vars: { API_KEY: 'tok-abc' } });
+  });
+
+  it('record secret → multiple env vars', async () => {
+    const provider = new StaticProvider({
+      kind: 'static',
+      secret: { user: 'alice', pass: 'hunter2' },
+      inject: [
+        { at: 'env', name: 'BASIC_USER', field: 'user' },
+        { at: 'env', name: 'BASIC_PASS', field: 'pass' },
+      ],
+    });
+    const cred = await provider.resolve();
+    expect(cred).toEqual({ apply: 'env', vars: { BASIC_USER: 'alice', BASIC_PASS: 'hunter2' } });
+  });
+
+  it('argv injection with {{token}} template', async () => {
+    const provider = new StaticProvider({
+      kind: 'static',
+      secret: 'sk-12345',
+      inject: { at: 'argv', template: '--api-key={{token}}' },
+    });
+    const cred = await provider.resolve();
+    expect(cred).toEqual({ apply: 'argv', args: ['--api-key=sk-12345'] });
+  });
+
+  it('argv injection with {{secret}} alias', async () => {
+    const provider = new StaticProvider({
+      kind: 'static',
+      secret: 'my-secret',
+      inject: { at: 'argv', template: '{{secret}}' },
+    });
+    const cred = await provider.resolve();
+    expect(cred).toEqual({ apply: 'argv', args: ['my-secret'] });
+  });
+
+  it('inject array with both env targets produces merged env', async () => {
+    const provider = new StaticProvider({
+      kind: 'static',
+      secret: 'shared-token',
+      inject: [
+        { at: 'env', name: 'TOKEN_A' },
+        { at: 'env', name: 'TOKEN_B' },
+      ],
+    });
+    const cred = await provider.resolve();
+    expect(cred).toEqual({
+      apply: 'env',
+      vars: { TOKEN_A: 'shared-token', TOKEN_B: 'shared-token' },
+    });
+  });
+
+  it('secretRef only (no inline secret) → NotImplementedError', async () => {
+    const provider = new StaticProvider({
+      kind: 'static',
+      secretRef: 'my-ref',
+      inject: { at: 'env', name: 'X' },
+    });
+    await expect(provider.resolve()).rejects.toThrow(NotImplementedError);
+    await expect(provider.resolve()).rejects.toThrow(/C2\.5/);
+  });
+
+  it('header injection → NotImplementedError (C2)', async () => {
+    const provider = new StaticProvider({
+      kind: 'static',
+      secret: 'tok',
+      inject: { at: 'header', name: 'Authorization', valueTemplate: 'Bearer {{token}}' },
+    });
+    await expect(provider.resolve()).rejects.toThrow(NotImplementedError);
+    await expect(provider.resolve()).rejects.toThrow(/C2/);
+  });
+
+  it('file injection → NotImplementedError (C2.5)', async () => {
+    const provider = new StaticProvider({
+      kind: 'static',
+      secret: 'tok',
+      inject: { at: 'file', path: '/tmp/cred' },
+    });
+    await expect(provider.resolve()).rejects.toThrow(NotImplementedError);
+    await expect(provider.resolve()).rejects.toThrow(/C2\.5/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. buildTransport
+// ---------------------------------------------------------------------------
+
+describe('buildTransport', () => {
+  beforeEach(() => {
+    vi.mocked(MockStdioTransport).mockClear();
+  });
+
+  it('stdio + no auth → passes command through unchanged', () => {
+    buildTransport({ kind: 'stdio', command: '/bin/srv' }, { apply: 'none' });
+    expect(vi.mocked(MockStdioTransport)).toHaveBeenCalledWith({
+      command: '/bin/srv',
+    });
+  });
+
+  it('stdio + env: transport.env first, then resolved.vars on top (credential wins on collision)', () => {
+    buildTransport(
+      { kind: 'stdio', command: '/bin/srv', env: { BASE: 'base', KEY: 'old' } },
+      { apply: 'env', vars: { KEY: 'new', EXTRA: 'extra' } },
+    );
+    expect(vi.mocked(MockStdioTransport)).toHaveBeenCalledWith({
+      command: '/bin/srv',
+      env: { BASE: 'base', KEY: 'new', EXTRA: 'extra' },
+    });
+  });
+
+  it('stdio + env: only transport.env, no credential vars', () => {
+    buildTransport({ kind: 'stdio', command: '/bin/srv', env: { X: '1' } }, { apply: 'none' });
+    expect(vi.mocked(MockStdioTransport)).toHaveBeenCalledWith({
+      command: '/bin/srv',
+      env: { X: '1' },
+    });
+  });
+
+  it('stdio + argv: transport.args first, resolved.args appended', () => {
+    buildTransport(
+      { kind: 'stdio', command: '/bin/srv', args: ['--port', '9000'] },
+      { apply: 'argv', args: ['--api-key=secret'] },
+    );
+    expect(vi.mocked(MockStdioTransport)).toHaveBeenCalledWith({
+      command: '/bin/srv',
+      args: ['--port', '9000', '--api-key=secret'],
+    });
+  });
+
+  it('stdio + argv: no base args, only resolved args', () => {
+    buildTransport(
+      { kind: 'stdio', command: '/bin/srv' },
+      { apply: 'argv', args: ['--token=abc'] },
+    );
+    expect(vi.mocked(MockStdioTransport)).toHaveBeenCalledWith({
+      command: '/bin/srv',
+      args: ['--token=abc'],
+    });
+  });
+
+  it('http transport → NotImplementedError (C2)', () => {
+    expect(() =>
+      buildTransport({ kind: 'http', url: 'https://x.example.com/mcp' }, { apply: 'none' }),
+    ).toThrow(NotImplementedError);
+    expect(() =>
+      buildTransport({ kind: 'http', url: 'https://x.example.com/mcp' }, { apply: 'none' }),
+    ).toThrow(/C2/);
+  });
+
+  it('headers credential on stdio transport → NotImplementedError (C2)', () => {
+    expect(() =>
+      buildTransport(
+        { kind: 'stdio', command: '/bin/srv' },
+        { apply: 'headers', headers: { Authorization: 'Bearer tok' } },
+      ),
+    ).toThrow(NotImplementedError);
+  });
+
+  it('files credential → NotImplementedError (C2.5)', () => {
+    expect(() =>
+      buildTransport(
+        { kind: 'stdio', command: '/bin/srv' },
+        { apply: 'files', dir: '/tmp', vars: {} },
+      ),
+    ).toThrow(NotImplementedError);
+  });
+
+  it('native credential → NotImplementedError (C3)', () => {
+    expect(() =>
+      buildTransport({ kind: 'stdio', command: '/bin/srv' }, { apply: 'native', oauth: {} }),
+    ).toThrow(NotImplementedError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. makeProvider
+// ---------------------------------------------------------------------------
+
+describe('makeProvider', () => {
+  it('undefined auth → null (no provider)', () => {
+    expect(makeProvider(undefined)).toBeNull();
+  });
+
+  it('static auth → StaticProvider instance', () => {
+    const provider = makeProvider({
+      kind: 'static',
+      secret: 'tok',
+      inject: { at: 'env', name: 'X' },
+    });
+    expect(provider).toBeInstanceOf(StaticProvider);
+  });
+
+  it('oauth auth → NotImplementedError (C3)', () => {
+    expect(() => makeProvider({ kind: 'oauth' })).toThrow(NotImplementedError);
+    expect(() => makeProvider({ kind: 'oauth' })).toThrow(/C3/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. CompositeDispatcher routing
 // ---------------------------------------------------------------------------
 
 describe('CompositeDispatcher', () => {
@@ -229,23 +587,8 @@ describe('CompositeDispatcher', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. MCP result → ToolResult mapping + security annotations
+// 6. McpDispatcher — MCP result → ToolResult mapping + security annotations
 // ---------------------------------------------------------------------------
-
-// We mock the @modelcontextprotocol/sdk Client to avoid spawning processes.
-vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
-  return {
-    Client: vi.fn(),
-  };
-});
-vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
-  return {
-    StdioClientTransport: vi.fn(),
-  };
-});
-
-import { Client as MockClient } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport as MockTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 /** Build a mock Client that returns the given tools and callTool results. */
 function makeMockClient(
@@ -264,11 +607,17 @@ function makeMockClient(
   return client as unknown as InstanceType<typeof MockClient>;
 }
 
+function makeConnector(overrides: Partial<ConnectorConfig> & { name: string }): ConnectorConfig {
+  return {
+    transport: { kind: 'stdio', command: '/bin/srv' },
+    ...overrides,
+  };
+}
+
 describe('McpDispatcher', () => {
   beforeEach(() => {
-    // Clear the module-level pool between tests.
-    // We do this by resetting the mock so each test controls its own client.
     vi.clearAllMocks();
+    _resetPoolForTesting();
   });
 
   it('list() returns namespaced tool descriptors for a healthy server', async () => {
@@ -280,12 +629,10 @@ describe('McpDispatcher', () => {
       },
     ]);
     vi.mocked(MockClient).mockReturnValue(mockClient);
-    vi.mocked(MockTransport).mockReturnValue({} as unknown as InstanceType<typeof MockTransport>);
 
-    const config: StdioMcpServerConfig = { transport: 'stdio', name: 'srv', command: '/bin/srv' };
+    const config = makeConnector({ name: 'srv' });
     const dispatcher = new McpDispatcher([config]);
 
-    // Warm the pool directly.
     await dispatcher.listAsync();
 
     const tools = dispatcher.list();
@@ -299,9 +646,8 @@ describe('McpDispatcher', () => {
       { name: 'do_thing', inputSchema: { type: 'object', properties: {} } },
     ]);
     vi.mocked(MockClient).mockReturnValue(mockClient);
-    vi.mocked(MockTransport).mockReturnValue({} as unknown as InstanceType<typeof MockTransport>);
 
-    const config: StdioMcpServerConfig = { transport: 'stdio', name: 'srv2', command: '/bin/srv' };
+    const config = makeConnector({ name: 'srv2' });
     const dispatcher = new McpDispatcher([config]);
     await dispatcher.listAsync();
 
@@ -314,14 +660,8 @@ describe('McpDispatcher', () => {
       { name: 'do_thing', inputSchema: { type: 'object', properties: {} } },
     ]);
     vi.mocked(MockClient).mockReturnValue(mockClient);
-    vi.mocked(MockTransport).mockReturnValue({} as unknown as InstanceType<typeof MockTransport>);
 
-    const config: StdioMcpServerConfig = {
-      transport: 'stdio',
-      name: 'trusted',
-      command: '/bin/srv',
-      trust: true,
-    };
+    const config = makeConnector({ name: 'trusted', trust: true });
     const dispatcher = new McpDispatcher([config]);
     await dispatcher.listAsync();
 
@@ -335,14 +675,8 @@ describe('McpDispatcher', () => {
       { content: [{ type: 'text', text: 'Hello, world!' }], isError: false },
     );
     vi.mocked(MockClient).mockReturnValue(mockClient);
-    vi.mocked(MockTransport).mockReturnValue({} as unknown as InstanceType<typeof MockTransport>);
 
-    const config: StdioMcpServerConfig = {
-      transport: 'stdio',
-      name: 'greeter',
-      command: '/bin/greeter',
-      trust: true,
-    };
+    const config = makeConnector({ name: 'greeter', trust: true });
     const dispatcher = new McpDispatcher([config]);
     await dispatcher.listAsync();
 
@@ -363,14 +697,8 @@ describe('McpDispatcher', () => {
       { content: [{ type: 'text', text: 'something broke' }], isError: true },
     );
     vi.mocked(MockClient).mockReturnValue(mockClient);
-    vi.mocked(MockTransport).mockReturnValue({} as unknown as InstanceType<typeof MockTransport>);
 
-    const config: StdioMcpServerConfig = {
-      transport: 'stdio',
-      name: 'failer',
-      command: '/bin/failer',
-      trust: true,
-    };
+    const config = makeConnector({ name: 'failer', trust: true });
     const dispatcher = new McpDispatcher([config]);
     await dispatcher.listAsync();
 
@@ -391,18 +719,11 @@ describe('McpDispatcher', () => {
       new Error('network error'),
     );
     vi.mocked(MockClient).mockReturnValue(mockClient);
-    vi.mocked(MockTransport).mockReturnValue({} as unknown as InstanceType<typeof MockTransport>);
 
-    const config: StdioMcpServerConfig = {
-      transport: 'stdio',
-      name: 'boomer',
-      command: '/bin/boomer',
-      trust: true,
-    };
+    const config = makeConnector({ name: 'boomer', trust: true });
     const dispatcher = new McpDispatcher([config]);
     await dispatcher.listAsync();
 
-    // Should NOT throw — fail open as ToolFailure.
     const result = await dispatcher.dispatch(
       makeCall(`boomer${MCP_TOOL_SEPARATOR}boom`, {}, 'call_boom'),
       makeCtx(),
@@ -412,15 +733,39 @@ describe('McpDispatcher', () => {
       expect(result.error.message).toContain('network error');
     }
   });
+
+  it('injects env credential into transport (passes env to StdioClientTransport)', async () => {
+    const mockClient = makeMockClient([
+      { name: 'work', inputSchema: { type: 'object', properties: {} } },
+    ]);
+    vi.mocked(MockClient).mockReturnValue(mockClient);
+
+    const config = makeConnector({
+      name: 'env-srv',
+      transport: { kind: 'stdio', command: '/bin/srv', env: { BASE: 'base' } },
+      auth: { kind: 'static', secret: 'tok-123', inject: { at: 'env', name: 'API_KEY' } },
+    });
+    const dispatcher = new McpDispatcher([config]);
+    await dispatcher.listAsync();
+
+    // StdioClientTransport should have been called with merged env
+    expect(vi.mocked(MockStdioTransport)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: '/bin/srv',
+        env: { BASE: 'base', API_KEY: 'tok-123' },
+      }),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
-// 4. FAIL OPEN — down server → zero tools, no throw
+// 7. FAIL OPEN — down server → zero tools, no throw
 // ---------------------------------------------------------------------------
 
 describe('McpDispatcher — FAIL OPEN', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetPoolForTesting();
   });
 
   it('contributes zero tools when connect() throws', async () => {
@@ -431,16 +776,10 @@ describe('McpDispatcher — FAIL OPEN', () => {
       callTool: vi.fn(),
     };
     vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
-    vi.mocked(MockTransport).mockReturnValue({} as unknown as InstanceType<typeof MockTransport>);
 
-    const config: StdioMcpServerConfig = {
-      transport: 'stdio',
-      name: 'down_srv',
-      command: '/bin/down',
-    };
+    const config = makeConnector({ name: 'down_srv' });
     const dispatcher = new McpDispatcher([config]);
 
-    // Should not throw.
     await expect(dispatcher.listAsync()).resolves.toEqual([]);
     expect(dispatcher.list()).toEqual([]);
   });
@@ -453,13 +792,8 @@ describe('McpDispatcher — FAIL OPEN', () => {
       callTool: vi.fn(),
     };
     vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
-    vi.mocked(MockTransport).mockReturnValue({} as unknown as InstanceType<typeof MockTransport>);
 
-    const config: StdioMcpServerConfig = {
-      transport: 'stdio',
-      name: 'list_fail_srv',
-      command: '/bin/listfail',
-    };
+    const config = makeConnector({ name: 'list_fail_srv' });
     const dispatcher = new McpDispatcher([config]);
 
     await expect(dispatcher.listAsync()).resolves.toEqual([]);
@@ -474,13 +808,8 @@ describe('McpDispatcher — FAIL OPEN', () => {
       callTool: vi.fn(),
     };
     vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
-    vi.mocked(MockTransport).mockReturnValue({} as unknown as InstanceType<typeof MockTransport>);
 
-    const config: StdioMcpServerConfig = {
-      transport: 'stdio',
-      name: 'conn_fail',
-      command: '/bin/fail',
-    };
+    const config = makeConnector({ name: 'conn_fail' });
     const dispatcher = new McpDispatcher([config]);
     await dispatcher.listAsync(); // fails internally — pool entry ok=false
 
@@ -492,5 +821,51 @@ describe('McpDispatcher — FAIL OPEN', () => {
     if (!result.ok) {
       expect(result.error.code).toBe('execution_failed');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. Connect TIMEOUT — hanging server fails open within bound
+// ---------------------------------------------------------------------------
+
+describe('McpDispatcher — connect TIMEOUT', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetPoolForTesting();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('fails open (zero tools, no throw) when connect() never resolves within timeout', async () => {
+    let resolveHang!: () => void;
+    const hangingPromise = new Promise<void>((resolve) => {
+      resolveHang = resolve;
+    });
+    const mockClient = {
+      // connect never resolves — simulates a hung server
+      connect: vi.fn().mockReturnValue(hangingPromise),
+      close: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn(),
+      callTool: vi.fn(),
+    };
+    vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
+
+    const config = makeConnector({ name: 'hanging_srv' });
+    const dispatcher = new McpDispatcher([config]);
+
+    // Start the connect attempt and advance time past the timeout.
+    const connectPromise = dispatcher.listAsync();
+    // Advance past the default 10s timeout
+    vi.advanceTimersByTime(11_000);
+
+    const result = await connectPromise;
+    expect(result).toEqual([]);
+    expect(dispatcher.list()).toEqual([]);
+
+    // Clean up the hanging promise so node doesn't complain
+    resolveHang();
   });
 });

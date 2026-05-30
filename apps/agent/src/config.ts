@@ -6,7 +6,7 @@
 
 import { parseMcpServers } from './mcp/config.js';
 
-import type { McpServerConfig } from './mcp/config.js';
+import type { ConnectorConfig } from './mcp/config.js';
 /** Runtime behavior knobs — all optional, all have safe defaults. */
 export interface BehaviorConfig {
   /**
@@ -58,10 +58,10 @@ export interface AgentConfig {
   /** Runtime behavior toggles. */
   behavior: BehaviorConfig;
   /**
-   * MCP server configs parsed from `MCP_SERVERS` (JSON array env var).
+   * MCP connector configs parsed from `MCP_SERVERS` (JSON array env var).
    * Empty array when not configured — no MCP tools, no crash.
    */
-  mcpServers: McpServerConfig[];
+  mcpServers: ConnectorConfig[];
 }
 
 const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';

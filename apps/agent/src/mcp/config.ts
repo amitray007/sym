@@ -1,91 +1,133 @@
 /**
- * MCP server config — parsed from the `MCP_SERVERS` env var.
+ * MCP connector config — parsed from the `MCP_SERVERS` env var.
  *
  * Shape (JSON array):
  * ```json
  * [
  *   {
  *     "name": "my-server",
- *     "command": "/usr/local/bin/my-mcp-server",
- *     "args": ["--flag"],
- *     "env": { "API_KEY": "..." },
+ *     "transport": { "kind": "stdio", "command": "/usr/local/bin/my-mcp-server", "args": ["--flag"] },
+ *     "auth": {
+ *       "kind": "static",
+ *       "secret": "sk-abc123",
+ *       "inject": { "at": "env", "name": "API_KEY" }
+ *     },
  *     "trust": true
  *   }
  * ]
  * ```
  *
- * `trust: true` means the owner has explicitly opted this server's tools in
- * to skip the confirm-before-destructive gate. It MUST be owner-set in the
- * deployment env — never derived from server-reported annotations.
+ * Three axes:
+ *  - Transport:    stdio (implemented) | http (C2 stub)
+ *  - Acquisition:  static inline (implemented) | secretRef store (C2.5 stub) | oauth (C3 stub)
+ *  - Injection:    env (implemented) | argv (implemented) | header (C2 stub) | file (C2.5 stub)
  *
- * The `transport` discriminant is ready for Chunk 2 (HTTP). Only `"stdio"` is
- * implemented here; an unknown transport is rejected at parse time, ensuring
- * the config shape is always well-typed before use.
+ * `trust: true` means the owner has opted this server's tools into skipping
+ * the confirm-before-destructive gate. Owner-set only — never derived from
+ * server-reported annotations.
+ *
+ * Unsupported transports ('http') and auth kinds ('oauth') are accepted
+ * structurally by the parser and logged at parse time; the connect step will
+ * fail-open later via buildTransport / makeProvider. This keeps the parse
+ * path simple and the error message closer to the fault site.
  */
 
 // ---------------------------------------------------------------------------
-// Types
+// Injection types
+// ---------------------------------------------------------------------------
+
+export type Injection =
+  | { at: 'header'; name: string; valueTemplate: string } // http (C2) — stub in injector
+  | { at: 'env'; name: string; field?: string } // stdio — IMPLEMENTED
+  | { at: 'argv'; template: string; field?: string } // stdio — IMPLEMENTED
+  | { at: 'file'; path: string; pointerEnv?: string }; // stdio + Materializer (C2.5) — stub
+
+// ---------------------------------------------------------------------------
+// Transport types
+// ---------------------------------------------------------------------------
+
+export type TransportConfig =
+  | { kind: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
+  | { kind: 'http'; url: string; headers?: Record<string, string> }; // C2 — stub
+
+// ---------------------------------------------------------------------------
+// Auth / credential types
+// ---------------------------------------------------------------------------
+
+/** Inline secret: a plain string token, or a multi-field record (e.g. user+pass). */
+export type SecretMaterial = string | Record<string, string>;
+
+export type AuthConfig =
+  | {
+      kind: 'static';
+      /** Inline secret value (string or multi-field record). */
+      secret?: SecretMaterial;
+      /**
+       * Reference to a named credential in the credential store.
+       * C2.5 — not yet implemented; throws NotImplementedError at connect time.
+       */
+      secretRef?: string;
+      /** Where to inject the resolved credential. One or many injection targets. */
+      inject: Injection | Injection[];
+    }
+  | { kind: 'oauth' }; // C3 — stub; throws NotImplementedError at connect time
+
+// ---------------------------------------------------------------------------
+// ConnectorConfig — the top-level shape
 // ---------------------------------------------------------------------------
 
 /**
- * Stdio MCP server — Chunk 1 transport.
+ * Service-agnostic connector config. Each entry in `MCP_SERVERS` is one connector.
  *
- * The `transport` field is explicit and required so Chunk 2 can add:
- * `{ transport: "http", url: string, headers?: Record<string,string>, trust?: boolean }`
- * without changing any existing code paths.
+ * Replaces `StdioMcpServerConfig` / `McpServerConfig` from Chunk 1 with a
+ * structured shape that separates transport, auth, and injection concerns.
  */
-export interface StdioMcpServerConfig {
-  transport: 'stdio';
+export interface ConnectorConfig {
   /** Logical name — used as the tool-name prefix: `<name>__<toolName>`. */
   name: string;
-  /** Executable path or name on PATH. */
-  command: string;
-  /** CLI arguments passed to the command. */
-  args?: string[];
-  /** Additional env vars merged into the child process environment. */
-  env?: Record<string, string>;
+  /** How to connect to this server. */
+  transport: TransportConfig;
+  /** How to acquire and inject credentials. Absent ⇒ no auth. */
+  auth?: AuthConfig;
   /**
-   * Owner-set trust flag.
-   *
-   * When `true`, this server's tools skip the confirm-before-destructive gate.
-   * The decision is owned by the deployment config (this file), NOT by any
-   * hint the MCP server sends (`destructiveHint` / `readOnlyHint` are
-   * attacker-controlled and MUST NOT influence the gate decision).
-   *
-   * Default: `false` — all MCP tools go through confirmation.
+   * Pre-connect command (C2.5 stub). Execution is not yet implemented;
+   * presence is noted and will throw NotImplementedError at connect time.
+   */
+  prepare?: { command: string; args?: string[] };
+  /**
+   * Owner opt-in: skip the confirm-before-destructive gate for this server's tools.
+   * Default: false — all MCP tools require confirmation.
    */
   trust?: boolean;
+  /** Optional allowlist of tool names to expose from this server. Stored; enforcement optional. */
+  tools?: { allow?: string[] };
 }
 
 /**
- * Union of all supported MCP server configs.
- *
- * Chunk 2 adds:
- * ```ts
- * export interface HttpMcpServerConfig {
- *   transport: 'http';
- *   name: string;
- *   url: string;
- *   headers?: Record<string, string>;
- *   trust?: boolean;
- * }
- * export type McpServerConfig = StdioMcpServerConfig | HttpMcpServerConfig;
- * ```
+ * Union alias kept for back-compat inside the package.
+ * External callers that imported `McpServerConfig` or `StdioMcpServerConfig`
+ * are updated in the same PR; aliases are removed once all consumers migrated.
  */
-export type McpServerConfig = StdioMcpServerConfig;
+export type McpServerConfig = ConnectorConfig;
+/** @deprecated Use ConnectorConfig directly. */
+export type StdioMcpServerConfig = ConnectorConfig;
 
 // ---------------------------------------------------------------------------
 // Parsing
 // ---------------------------------------------------------------------------
 
 /**
- * Parse `MCP_SERVERS` (raw JSON string) into typed server configs.
+ * Parse `MCP_SERVERS` (raw JSON string) into typed connector configs.
  *
  * Fail-open: any malformed entry is logged and skipped; missing/empty env var
  * returns an empty array (no MCP tools, no crash). Invalid env never throws
  * into the server startup path.
+ *
+ * Transport 'http' and auth 'oauth' are accepted structurally here but will
+ * fail-open at connect time (C2 / C3 stubs). A log line is emitted at parse
+ * time so operators know these are not yet active.
  */
-export function parseMcpServers(raw: string | undefined): McpServerConfig[] {
+export function parseMcpServers(raw: string | undefined): ConnectorConfig[] {
   if (raw === undefined || raw.trim().length === 0) return [];
 
   let parsed: unknown;
@@ -101,7 +143,7 @@ export function parseMcpServers(raw: string | undefined): McpServerConfig[] {
     return [];
   }
 
-  const configs: McpServerConfig[] = [];
+  const configs: ConnectorConfig[] = [];
   for (let i = 0; i < parsed.length; i++) {
     const entry = parsed[i];
     const result = parseEntry(entry, i);
@@ -112,7 +154,11 @@ export function parseMcpServers(raw: string | undefined): McpServerConfig[] {
   return configs;
 }
 
-function parseEntry(entry: unknown, index: number): McpServerConfig | null {
+// ---------------------------------------------------------------------------
+// Internal parse helpers
+// ---------------------------------------------------------------------------
+
+function parseEntry(entry: unknown, index: number): ConnectorConfig | null {
   if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
     console.warn(`[mcp] MCP_SERVERS[${index}] is not an object — skipping`);
     return null;
@@ -120,52 +166,372 @@ function parseEntry(entry: unknown, index: number): McpServerConfig | null {
 
   const e = entry as Record<string, unknown>;
 
-  // Resolve transport — default to 'stdio' when absent for forwards compat.
-  const transport = e['transport'] ?? 'stdio';
-
-  if (transport !== 'stdio') {
-    // Reserved for Chunk 2 (HTTP). Unknown transports are rejected cleanly.
-    console.warn(
-      `[mcp] MCP_SERVERS[${index}] has unsupported transport '${String(transport)}' — skipping (only 'stdio' is supported in this build)`,
-    );
-    return null;
-  }
-
   const name = e['name'];
   if (typeof name !== 'string' || name.trim().length === 0) {
     console.warn(`[mcp] MCP_SERVERS[${index}] missing required 'name' string — skipping`);
     return null;
   }
+  const trimmedName = name.trim();
 
-  const command = e['command'];
-  if (typeof command !== 'string' || command.trim().length === 0) {
+  // ---------------------------------------------------------------------------
+  // Transport — detect legacy flat shape vs new nested shape.
+  //
+  // Legacy flat: transport absent, null, or string 'stdio'; command at top level.
+  // New nested:  transport is an object with a 'kind' field.
+  // ---------------------------------------------------------------------------
+  const transportRaw = e['transport'];
+  const isLegacyFlat =
+    transportRaw === undefined || transportRaw === null || transportRaw === 'stdio';
+
+  if (isLegacyFlat) {
+    // Delegate entirely to legacy parser which reads command/args/env from top level.
+    return parseLegacyFlatEntry(e, index);
+  }
+
+  const transport = parseTransport(transportRaw, index, trimmedName);
+  if (transport === null) return null;
+
+  // ---------------------------------------------------------------------------
+  // Auth (optional)
+  // ---------------------------------------------------------------------------
+  const authResult = parseAuth(e['auth'], index, trimmedName);
+  if (authResult === false) return null; // malformed
+  const auth = authResult ?? undefined; // null ⇒ absent ⇒ undefined
+
+  // ---------------------------------------------------------------------------
+  // Prepare (optional, C2.5 stub — just validate shape)
+  // ---------------------------------------------------------------------------
+  const prepareResult = parsePrepare(e['prepare'], index, trimmedName);
+  if (prepareResult === false) return null;
+  const prepare = prepareResult ?? undefined;
+
+  // ---------------------------------------------------------------------------
+  // trust
+  // ---------------------------------------------------------------------------
+  const trust = e['trust'];
+  if (trust !== undefined && typeof trust !== 'boolean') {
     console.warn(
-      `[mcp] MCP_SERVERS[${index}] ('${name}') missing required 'command' string — skipping`,
+      `[mcp] MCP_SERVERS[${index}] ('${trimmedName}') 'trust' must be a boolean — skipping`,
     );
     return null;
   }
 
-  const args = parseStringArray(e['args'], `MCP_SERVERS[${index}].args`);
-  if (args === false) return null; // logged inside
+  // ---------------------------------------------------------------------------
+  // tools allowlist (optional)
+  // ---------------------------------------------------------------------------
+  const toolsResult = parseToolsAllowlist(e['tools'], index, trimmedName);
+  if (toolsResult === false) return null;
+  const tools = toolsResult ?? undefined;
 
-  const env = parseStringRecord(e['env'], `MCP_SERVERS[${index}].env`);
-  if (env === false) return null; // logged inside
+  const config: ConnectorConfig = {
+    name: trimmedName,
+    transport,
+    ...(auth !== undefined ? { auth } : {}),
+    ...(prepare !== undefined ? { prepare } : {}),
+    ...(trust === true ? { trust: true } : {}),
+    ...(tools !== undefined ? { tools } : {}),
+  };
+  return config;
+}
 
-  const trust = e['trust'];
-  if (trust !== undefined && typeof trust !== 'boolean') {
-    console.warn(`[mcp] MCP_SERVERS[${index}] ('${name}') 'trust' must be a boolean — skipping`);
+/**
+ * Parse the `transport` field. Accepts both the new nested shape
+ * `{ kind: 'stdio', command, args?, env? }` AND the legacy flat shape
+ * `{ command, args?, env?, transport?: 'stdio' }` for zero-friction migration.
+ *
+ * Returns null if parsing fails (logged).
+ */
+function parseTransport(raw: unknown, index: number, name: string): TransportConfig | null {
+  const label = `MCP_SERVERS[${index}] ('${name}')`;
+
+  // New nested shape: { kind: 'stdio' | 'http', ... }
+  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+    const t = raw as Record<string, unknown>;
+    const kind = t['kind'];
+
+    if (kind === 'stdio') {
+      return parseStdioTransport(t, label);
+    }
+
+    if (kind === 'http') {
+      // Accepted structurally; logs that it's a C2 stub — fail-open at connect.
+      const url = t['url'];
+      if (typeof url !== 'string' || url.trim().length === 0) {
+        console.warn(`[mcp] ${label} transport.kind='http' missing required 'url' — skipping`);
+        return null;
+      }
+      const headers = parseStringRecord(t['headers'], `${label}.transport.headers`);
+      if (headers === false) return null;
+      console.info(
+        `[mcp] ${label} transport.kind='http' — HTTP transport is a C2 stub; connect will fail-open`,
+      );
+      return {
+        kind: 'http',
+        url: url.trim(),
+        ...(headers !== null ? { headers } : {}),
+      };
+    }
+
+    if (kind !== undefined) {
+      console.warn(`[mcp] ${label} transport.kind='${String(kind)}' is not supported — skipping`);
+      return null;
+    }
+
+    // Object with no 'kind' — malformed.
+    console.warn(`[mcp] ${label} 'transport' object missing required 'kind' field — skipping`);
     return null;
   }
 
-  const config: StdioMcpServerConfig = {
-    transport: 'stdio',
-    name: name.trim(),
-    command,
+  if (typeof raw === 'string') {
+    console.warn(
+      `[mcp] ${label} transport='${raw}' is not supported as a string — skipping (use { kind: 'stdio', command: '...' })`,
+    );
+    return null;
+  }
+
+  console.warn(`[mcp] ${label} 'transport' must be an object with a 'kind' field — skipping`);
+  return null;
+}
+
+function parseStdioTransport(t: Record<string, unknown>, label: string): TransportConfig | null {
+  const command = t['command'];
+  if (typeof command !== 'string' || command.trim().length === 0) {
+    console.warn(`[mcp] ${label} transport.kind='stdio' missing required 'command' — skipping`);
+    return null;
+  }
+
+  const args = parseStringArray(t['args'], `${label}.transport.args`);
+  if (args === false) return null;
+
+  const env = parseStringRecord(t['env'], `${label}.transport.env`);
+  if (env === false) return null;
+
+  return {
+    kind: 'stdio',
+    command: command.trim(),
     ...(args !== null ? { args } : {}),
     ...(env !== null ? { env } : {}),
-    ...(trust === true ? { trust: true } : {}),
   };
-  return config;
+}
+
+/**
+ * Parse auth. Returns the parsed AuthConfig, null (absent), or false (invalid).
+ */
+function parseAuth(raw: unknown, index: number, name: string): AuthConfig | null | false {
+  if (raw === undefined || raw === null) return null;
+  const label = `MCP_SERVERS[${index}] ('${name}').auth`;
+
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    console.warn(`[mcp] ${label} must be an object — skipping entry`);
+    return false;
+  }
+
+  const a = raw as Record<string, unknown>;
+  const kind = a['kind'];
+
+  if (kind === 'static') {
+    return parseStaticAuth(a, label);
+  }
+
+  if (kind === 'oauth') {
+    // Accepted structurally; logs C3 stub — fail-open at makeProvider.
+    console.info(
+      `[mcp] ${label} kind='oauth' — OAuth is a C3 stub; makeProvider will throw NotImplementedError`,
+    );
+    return { kind: 'oauth' };
+  }
+
+  console.warn(`[mcp] ${label} kind='${String(kind)}' is not recognised — skipping entry`);
+  return false;
+}
+
+function parseStaticAuth(a: Record<string, unknown>, label: string): AuthConfig | false {
+  // secret: string | Record<string,string> | absent
+  const secret = a['secret'];
+  if (secret !== undefined && secret !== null) {
+    if (typeof secret !== 'string' && (typeof secret !== 'object' || Array.isArray(secret))) {
+      console.warn(
+        `[mcp] ${label} 'secret' must be a string or Record<string,string> — skipping entry`,
+      );
+      return false;
+    }
+    if (typeof secret === 'object') {
+      // Validate all values are strings
+      if (!Object.values(secret as object).every((v) => typeof v === 'string')) {
+        console.warn(`[mcp] ${label} 'secret' record values must all be strings — skipping entry`);
+        return false;
+      }
+    }
+  }
+
+  const secretRef = a['secretRef'];
+  if (secretRef !== undefined && typeof secretRef !== 'string') {
+    console.warn(`[mcp] ${label} 'secretRef' must be a string — skipping entry`);
+    return false;
+  }
+
+  // inject: one or many
+  const injectRaw = a['inject'];
+  if (injectRaw === undefined || injectRaw === null) {
+    console.warn(`[mcp] ${label} missing required 'inject' — skipping entry`);
+    return false;
+  }
+
+  const injectArr = Array.isArray(injectRaw) ? injectRaw : [injectRaw];
+  const injections: Injection[] = [];
+  for (const inj of injectArr) {
+    const parsed = parseInjection(inj, label);
+    if (parsed === null) return false;
+    injections.push(parsed);
+  }
+
+  const inject: Injection | Injection[] = injections.length === 1 ? injections[0]! : injections;
+
+  return {
+    kind: 'static',
+    ...(secret !== undefined && secret !== null ? { secret: secret as SecretMaterial } : {}),
+    ...(typeof secretRef === 'string' ? { secretRef } : {}),
+    inject,
+  };
+}
+
+function parseInjection(raw: unknown, label: string): Injection | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    console.warn(`[mcp] ${label} 'inject' entry must be an object — skipping entry`);
+    return null;
+  }
+
+  const i = raw as Record<string, unknown>;
+  const at = i['at'];
+
+  if (at === 'env') {
+    const envName = i['name'];
+    if (typeof envName !== 'string' || envName.trim().length === 0) {
+      console.warn(`[mcp] ${label} inject.at='env' missing required 'name' — skipping entry`);
+      return null;
+    }
+    const field = i['field'];
+    if (field !== undefined && typeof field !== 'string') {
+      console.warn(`[mcp] ${label} inject.at='env' 'field' must be a string — skipping entry`);
+      return null;
+    }
+    return {
+      at: 'env',
+      name: envName.trim(),
+      ...(typeof field === 'string' ? { field } : {}),
+    };
+  }
+
+  if (at === 'argv') {
+    const template = i['template'];
+    if (typeof template !== 'string' || template.trim().length === 0) {
+      console.warn(`[mcp] ${label} inject.at='argv' missing required 'template' — skipping entry`);
+      return null;
+    }
+    const field = i['field'];
+    if (field !== undefined && typeof field !== 'string') {
+      console.warn(`[mcp] ${label} inject.at='argv' 'field' must be a string — skipping entry`);
+      return null;
+    }
+    return {
+      at: 'argv',
+      template: template.trim(),
+      ...(typeof field === 'string' ? { field } : {}),
+    };
+  }
+
+  if (at === 'header') {
+    const headerName = i['name'];
+    const valueTemplate = i['valueTemplate'];
+    if (typeof headerName !== 'string' || headerName.trim().length === 0) {
+      console.warn(`[mcp] ${label} inject.at='header' missing required 'name' — skipping entry`);
+      return null;
+    }
+    if (typeof valueTemplate !== 'string') {
+      console.warn(
+        `[mcp] ${label} inject.at='header' missing required 'valueTemplate' — skipping entry`,
+      );
+      return null;
+    }
+    // Accepted structurally; injector will throw NotImplementedError at C2.
+    console.info(`[mcp] ${label} inject.at='header' — header injection is a C2 stub`);
+    return { at: 'header', name: headerName.trim(), valueTemplate };
+  }
+
+  if (at === 'file') {
+    const path = i['path'];
+    if (typeof path !== 'string' || path.trim().length === 0) {
+      console.warn(`[mcp] ${label} inject.at='file' missing required 'path' — skipping entry`);
+      return null;
+    }
+    const pointerEnv = i['pointerEnv'];
+    if (pointerEnv !== undefined && typeof pointerEnv !== 'string') {
+      console.warn(
+        `[mcp] ${label} inject.at='file' 'pointerEnv' must be a string — skipping entry`,
+      );
+      return null;
+    }
+    // Accepted structurally; injector will throw NotImplementedError at C2.5.
+    console.info(`[mcp] ${label} inject.at='file' — file injection is a C2.5 stub`);
+    return {
+      at: 'file',
+      path: path.trim(),
+      ...(typeof pointerEnv === 'string' ? { pointerEnv } : {}),
+    };
+  }
+
+  console.warn(`[mcp] ${label} inject.at='${String(at)}' is not recognised — skipping entry`);
+  return null;
+}
+
+function parsePrepare(
+  raw: unknown,
+  index: number,
+  name: string,
+): { command: string; args?: string[] } | null | false {
+  if (raw === undefined || raw === null) return null;
+  const label = `MCP_SERVERS[${index}] ('${name}').prepare`;
+
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    console.warn(`[mcp] ${label} must be an object — skipping entry`);
+    return false;
+  }
+
+  const p = raw as Record<string, unknown>;
+  const command = p['command'];
+  if (typeof command !== 'string' || command.trim().length === 0) {
+    console.warn(`[mcp] ${label} missing required 'command' — skipping entry`);
+    return false;
+  }
+
+  const args = parseStringArray(p['args'], `${label}.args`);
+  if (args === false) return false;
+
+  console.info(`[mcp] ${label} found — 'prepare' execution is a C2.5 stub`);
+  return {
+    command: command.trim(),
+    ...(args !== null ? { args } : {}),
+  };
+}
+
+function parseToolsAllowlist(
+  raw: unknown,
+  index: number,
+  name: string,
+): { allow?: string[] } | null | false {
+  if (raw === undefined || raw === null) return null;
+  const label = `MCP_SERVERS[${index}] ('${name}').tools`;
+
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    console.warn(`[mcp] ${label} must be an object — skipping entry`);
+    return false;
+  }
+
+  const t = raw as Record<string, unknown>;
+  const allow = parseStringArray(t['allow'], `${label}.allow`);
+  if (allow === false) return false;
+
+  return { ...(allow !== null ? { allow } : {}) };
 }
 
 /** Returns the array, null (absent/undefined), or false (present but invalid). */
@@ -190,4 +556,61 @@ function parseStringRecord(raw: unknown, label: string): Record<string, string> 
     return false;
   }
   return raw as Record<string, string>;
+}
+
+// ---------------------------------------------------------------------------
+// Legacy flat-shape compatibility
+// Re-exported so parseEntry can call it after detecting __LEGACY__ sentinel.
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a legacy flat-shaped entry (Chunk 1 format):
+ * `{ name, command, args?, env?, transport?: 'stdio', trust? }`
+ *
+ * Converts to the new `ConnectorConfig` shape. Called by parseEntry when the
+ * 'transport' field is absent, null, or the string 'stdio'.
+ */
+export function parseLegacyFlatEntry(
+  e: Record<string, unknown>,
+  index: number,
+): ConnectorConfig | null {
+  const name = e['name'];
+  if (typeof name !== 'string' || name.trim().length === 0) {
+    console.warn(`[mcp] MCP_SERVERS[${index}] missing required 'name' string — skipping`);
+    return null;
+  }
+  const trimmedName = name.trim();
+
+  const command = e['command'];
+  if (typeof command !== 'string' || command.trim().length === 0) {
+    console.warn(
+      `[mcp] MCP_SERVERS[${index}] ('${trimmedName}') missing required 'command' string — skipping`,
+    );
+    return null;
+  }
+
+  const args = parseStringArray(e['args'], `MCP_SERVERS[${index}].args`);
+  if (args === false) return null;
+
+  const env = parseStringRecord(e['env'], `MCP_SERVERS[${index}].env`);
+  if (env === false) return null;
+
+  const trust = e['trust'];
+  if (trust !== undefined && typeof trust !== 'boolean') {
+    console.warn(
+      `[mcp] MCP_SERVERS[${index}] ('${trimmedName}') 'trust' must be a boolean — skipping`,
+    );
+    return null;
+  }
+
+  return {
+    name: trimmedName,
+    transport: {
+      kind: 'stdio',
+      command: command.trim(),
+      ...(args !== null ? { args } : {}),
+      ...(env !== null ? { env } : {}),
+    },
+    ...(trust === true ? { trust: true } : {}),
+  };
 }
