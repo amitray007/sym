@@ -16,7 +16,7 @@
  * Connect timeout:
  *   `connect + listTools` is bounded by `CONNECT_TIMEOUT_MS` (default 10s).
  *   A server that HANGS (not just errors) fails open instead of blocking the
- *   first turn forever. Configured via `MCP_CONNECT_TIMEOUT_MS` env var.
+ *   first turn forever. Configured via `SYM_MCP_CONNECT_TIMEOUT_MS` env var.
  *
  * Security invariant:
  *   The `destructiveHint` on every MCP tool descriptor is forced to `true`
@@ -51,8 +51,8 @@ import type {
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 
 const CONNECT_TIMEOUT_MS =
-  process.env['MCP_CONNECT_TIMEOUT_MS'] !== undefined
-    ? Math.max(1000, Number(process.env['MCP_CONNECT_TIMEOUT_MS']))
+  process.env['SYM_MCP_CONNECT_TIMEOUT_MS'] !== undefined
+    ? Math.max(1000, Number(process.env['SYM_MCP_CONNECT_TIMEOUT_MS']))
     : DEFAULT_CONNECT_TIMEOUT_MS;
 
 /**

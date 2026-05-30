@@ -12,7 +12,7 @@
 // Optional single tool call (proves the dispatch path too):
 //   QA_TOOL='x__search_docs_chunks' QA_ARGS='{"prompt":"hello"}' ... pnpm --filter @sym/agent qa:mcp
 //
-// Slow first run (cold `npx` download) — bump MCP_CONNECT_TIMEOUT_MS, e.g. 60000.
+// Slow first run (cold `npx` download) — bump SYM_MCP_CONNECT_TIMEOUT_MS, e.g. 60000.
 import { parseMcpServers, McpDispatcher } from '../dist/mcp/index.js';
 
 const raw = process.env.SYM_MCP_SERVERS;
