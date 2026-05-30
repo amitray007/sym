@@ -91,11 +91,25 @@ function buildStdioTransport(
   if (resolved.apply === 'headers') {
     throw new NotImplementedError('header credential apply on stdio transport — C2');
   }
-  if (resolved.apply === 'files') {
-    throw new NotImplementedError('files credential apply — C2.5');
-  }
   if (resolved.apply === 'native') {
     throw new NotImplementedError('native (OAuth) credential apply — C3');
+  }
+
+  // files credential: the files are already on disk (materialized in resolve()).
+  // Merge the pointer env-vars into the child env so the child can locate them.
+  // Precedence: transport.env (base) → resolved.vars (pointer vars) on top.
+  if (resolved.apply === 'files') {
+    const filesEnv: Record<string, string> = {
+      ...(transport.env ?? {}),
+      ...resolved.vars,
+    };
+    // Only pass env if there is something to pass (vars may be empty).
+    const hasEnv = Object.keys(filesEnv).length > 0;
+    return new StdioClientTransport({
+      command: transport.command,
+      ...(mergedArgs !== undefined ? { args: mergedArgs } : {}),
+      ...(hasEnv ? { env: filesEnv } : {}),
+    });
   }
 
   // resolved.apply === 'env' | 'argv' | 'none' — all handled above.

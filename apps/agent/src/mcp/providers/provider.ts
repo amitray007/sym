@@ -15,6 +15,7 @@
 import { StaticProvider } from './static.js';
 
 import type { AuthConfig } from '../config.js';
+import type { Materializer } from '../materialize.js';
 
 // ---------------------------------------------------------------------------
 // ResolvedCredential
@@ -57,17 +58,35 @@ export interface CredentialProvider {
 // ---------------------------------------------------------------------------
 
 /**
+ * Optional deps for makeProvider — used for testing (inject a custom Materializer).
+ * All fields are optional; defaults are applied when absent.
+ */
+export interface MakeProviderDeps {
+  /**
+   * Materializer instance to use for file injection.
+   * Defaults to the singleton `defaultMaterializer` when absent.
+   */
+  materializer?: Materializer;
+}
+
+/**
  * Create a `CredentialProvider` from an `AuthConfig`, or return `null` if no
  * auth is configured.
  *
  * `makeProvider` is the ONLY place that switches on `auth.kind`. Consumers
  * call this once and use the provider interface from then on.
+ *
+ * @param auth - The auth config, or undefined for no auth.
+ * @param deps - Optional dependency overrides (e.g. custom Materializer for tests).
  */
-export function makeProvider(auth: AuthConfig | undefined): CredentialProvider | null {
+export function makeProvider(
+  auth: AuthConfig | undefined,
+  deps?: MakeProviderDeps,
+): CredentialProvider | null {
   if (auth === undefined) return null;
 
   if (auth.kind === 'static') {
-    return new StaticProvider(auth);
+    return new StaticProvider(auth, deps?.materializer);
   }
 
   if (auth.kind === 'oauth') {

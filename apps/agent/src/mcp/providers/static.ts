@@ -8,10 +8,10 @@
  * Injection targets implemented:
  *   - `env`  → { apply: 'env', vars: { [name]: value } }
  *   - `argv` → { apply: 'argv', args: [interpolated-template] }
+ *   - `file` → { apply: 'files', dir, vars: { [pointerEnv]: absPath } }
  *
  * Injection targets stubbed:
  *   - `header` → C2 (HTTP transport)
- *   - `file`   → C2.5 (Materializer)
  *
  * Template interpolation:
  *   - String secret: `{{token}}` or `{{secret}}` → the string value.
@@ -24,17 +24,33 @@
  * env + one argv), the result with the most entries wins — the injector
  * applies each apply type separately. In practice, callers produce a single
  * apply type per connector (one kind of injection per auth block).
+ *
+ * File injection is self-contained: the materialized dir + pointerEnv var are
+ * returned together as a `files` credential. A `file` injection cannot be
+ * combined with `env` or `argv` in the same inject array (one channel per
+ * ResolvedCredential).
  */
 
+import * as path from 'node:path';
+
+import { defaultMaterializer } from '../materialize.js';
 import { NotImplementedError } from './provider.js';
 
 import type { AuthConfig, Injection, SecretMaterial } from '../config.js';
+import type { Materializer } from '../materialize.js';
 import type { CredentialProvider, ResolvedCredential } from './provider.js';
 
 type StaticAuth = Extract<AuthConfig, { kind: 'static' }>;
 
 export class StaticProvider implements CredentialProvider {
-  constructor(private readonly auth: StaticAuth) {}
+  private readonly materializer: Materializer;
+
+  constructor(
+    private readonly auth: StaticAuth,
+    materializer?: Materializer,
+  ) {
+    this.materializer = materializer ?? defaultMaterializer;
+  }
 
   async resolve(): Promise<ResolvedCredential> {
     const { secret, secretRef, inject } = this.auth;
@@ -52,7 +68,60 @@ export class StaticProvider implements CredentialProvider {
 
     // Injection step — apply each injection to the resolved secret.
     const injections = Array.isArray(inject) ? inject : [inject];
+
+    // Detect file injection — must be a single-element array (no mixing).
+    const fileInj = injections.find((i) => i.at === 'file');
+    if (fileInj !== undefined) {
+      return this.applyFileInjection(
+        secret!,
+        fileInj as Extract<Injection, { at: 'file' }>,
+        injections,
+      );
+    }
+
     return applyInjections(secret!, injections);
+  }
+
+  /**
+   * Handle a `file` injection: write the secret content to a temp file via
+   * the Materializer and return a `files` credential.
+   *
+   * Constraints:
+   *  - secret must be a STRING (a file is a single blob; records are rejected).
+   *  - `file` must not be mixed with `env` or `argv` in the same inject array.
+   */
+  private async applyFileInjection(
+    secret: SecretMaterial,
+    inj: Extract<Injection, { at: 'file' }>,
+    allInjections: Injection[],
+  ): Promise<ResolvedCredential> {
+    // A file injection must be the only injection (one channel per credential).
+    if (allInjections.length > 1) {
+      throw new Error(
+        "StaticProvider: a connector's injections must all target one channel " +
+          '(all env, all argv, or a single file); mixing file + env/argv is not supported',
+      );
+    }
+
+    // Records are not supported for file injection — a file is a single blob.
+    if (typeof secret !== 'string') {
+      throw new Error(
+        'StaticProvider: file injection requires a string secret (the file content); ' +
+          'Record secrets are not supported for file injection',
+      );
+    }
+
+    const { dir, cleanup: _cleanup } = await this.materializer.materialize(
+      // Use the inject path's basename as a hint in connector naming
+      'connector',
+      [{ path: inj.path, content: secret }],
+    );
+
+    const absPath = path.join(dir, inj.path);
+    const vars: Record<string, string> =
+      inj.pointerEnv !== undefined ? { [inj.pointerEnv]: absPath } : {};
+
+    return { apply: 'files', dir, vars };
   }
 }
 

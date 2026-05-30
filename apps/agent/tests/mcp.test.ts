@@ -24,6 +24,10 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
   };
 });
 
+import * as fsPromises from 'node:fs/promises';
+import * as nodeOs from 'node:os';
+import * as nodePath from 'node:path';
+
 import { Client as MockClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport as MockStdioTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -32,10 +36,11 @@ import { CompositeDispatcher } from '../src/mcp/composite.js';
 import { parseMcpServers } from '../src/mcp/config.js';
 import { McpDispatcher, MCP_TOOL_SEPARATOR, _resetPoolForTesting } from '../src/mcp/dispatcher.js';
 import { buildTransport } from '../src/mcp/inject.js';
+import { Materializer, _getActiveDirsForTesting } from '../src/mcp/materialize.js';
 import { makeProvider, NotImplementedError } from '../src/mcp/providers/provider.js';
 import { StaticProvider } from '../src/mcp/providers/static.js';
 
-import type { ConnectorConfig } from '../src/mcp/config.js';
+import type { ConnectorConfig, Injection, SecretMaterial } from '../src/mcp/config.js';
 import type {
   ConversationId,
   JsonObject,
@@ -400,14 +405,26 @@ describe('StaticProvider', () => {
     await expect(provider.resolve()).rejects.toThrow(/C2/);
   });
 
-  it('file injection → NotImplementedError (C2.5)', async () => {
-    const provider = new StaticProvider({
-      kind: 'static',
-      secret: 'tok',
-      inject: { at: 'file', path: '/tmp/cred' },
-    });
-    await expect(provider.resolve()).rejects.toThrow(NotImplementedError);
-    await expect(provider.resolve()).rejects.toThrow(/C2\.5/);
+  it('file injection with string secret → resolves (implemented in C2.5)', async () => {
+    // File injection is now implemented — no longer throws NotImplementedError.
+    // We verify it resolves without throwing; full coverage is in the Materializer tests.
+    const m = new Materializer(nodeOs.tmpdir());
+    const provider = new StaticProvider(
+      {
+        kind: 'static',
+        secret: '{"type":"service_account"}',
+        inject: { at: 'file', path: 'key.json', pointerEnv: 'GOOGLE_APPLICATION_CREDENTIALS' },
+      },
+      m,
+    );
+    const cred = await provider.resolve();
+    expect(cred.apply).toBe('files');
+    if (cred.apply === 'files') {
+      expect(typeof cred.dir).toBe('string');
+      expect(cred.vars['GOOGLE_APPLICATION_CREDENTIALS']).toContain('key.json');
+      // Clean up
+      await fsPromises.rm(cred.dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -486,13 +503,22 @@ describe('buildTransport', () => {
     ).toThrow(NotImplementedError);
   });
 
-  it('files credential → NotImplementedError (C2.5)', () => {
-    expect(() =>
-      buildTransport(
-        { kind: 'stdio', command: '/bin/srv' },
-        { apply: 'files', dir: '/tmp', vars: {} },
-      ),
-    ).toThrow(NotImplementedError);
+  it('files credential on stdio → builds transport with merged vars (C2.5 implemented)', () => {
+    // files credential is now implemented — buildTransport merges vars into env.
+    buildTransport(
+      { kind: 'stdio', command: '/bin/srv', env: { BASE: 'val' } },
+      {
+        apply: 'files',
+        dir: '/tmp/mcp-dir',
+        vars: { GOOGLE_APPLICATION_CREDENTIALS: '/tmp/mcp-dir/key.json' },
+      },
+    );
+    expect(vi.mocked(MockStdioTransport)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: '/bin/srv',
+        env: { BASE: 'val', GOOGLE_APPLICATION_CREDENTIALS: '/tmp/mcp-dir/key.json' },
+      }),
+    );
   });
 
   it('native credential → NotImplementedError (C3)', () => {
@@ -855,5 +881,234 @@ describe('McpDispatcher — connect TIMEOUT', () => {
 
     // Clean up the hanging promise so node doesn't complain
     resolveHang();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Materializer (C2.5)
+// ---------------------------------------------------------------------------
+
+describe('Materializer', () => {
+  // Use os.tmpdir() in tests — never touch real /dev/shm.
+
+  it('writes a file with the given content', async () => {
+    const m = new Materializer(nodeOs.tmpdir());
+    const { dir, cleanup } = await m.materialize('test-conn', [
+      { path: 'key.json', content: '{"type":"service_account"}' },
+    ]);
+    try {
+      const abs = nodePath.join(dir, 'key.json');
+      const content = await fsPromises.readFile(abs, 'utf8');
+      expect(content).toBe('{"type":"service_account"}');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('dir is 0700 and file is 0600', async () => {
+    const m = new Materializer(nodeOs.tmpdir());
+    const { dir, cleanup } = await m.materialize('mode-conn', [
+      { path: 'secret.txt', content: 'hunter2' },
+    ]);
+    try {
+      const abs = nodePath.join(dir, 'secret.txt');
+      const dirStat = await fsPromises.stat(dir);
+      const fileStat = await fsPromises.stat(abs);
+      // Mode bits: last 12 bits, masked to permissions only
+      expect(dirStat.mode & 0o777).toBe(0o700);
+      expect(fileStat.mode & 0o777).toBe(0o600);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('cleanup() removes the directory', async () => {
+    const m = new Materializer(nodeOs.tmpdir());
+    const { dir, cleanup } = await m.materialize('cleanup-conn', [
+      { path: 'f.txt', content: 'data' },
+    ]);
+    await cleanup();
+    await expect(fsPromises.access(dir)).rejects.toThrow();
+  });
+
+  it('registers created dirs in the active set, and cleanup unregisters them', async () => {
+    const m = new Materializer(nodeOs.tmpdir());
+    const active = _getActiveDirsForTesting();
+    const sizeBefore = active.size;
+
+    const { dir, cleanup } = await m.materialize('reg-conn', [{ path: 'f', content: 'x' }]);
+    expect(active.size).toBe(sizeBefore + 1);
+    expect(active.has(dir)).toBe(true);
+
+    await cleanup();
+    expect(active.has(dir)).toBe(false);
+  });
+
+  it('multiple dirs can be materialized and cleaned up independently', async () => {
+    const m = new Materializer(nodeOs.tmpdir());
+    const r1 = await m.materialize('multi-a', [{ path: 'a.txt', content: 'aaa' }]);
+    const r2 = await m.materialize('multi-b', [{ path: 'b.txt', content: 'bbb' }]);
+    try {
+      // Both dirs exist.
+      await expect(fsPromises.access(r1.dir)).resolves.toBeUndefined();
+      await expect(fsPromises.access(r2.dir)).resolves.toBeUndefined();
+    } finally {
+      await r1.cleanup();
+      await r2.cleanup();
+    }
+    // Both cleaned up.
+    await expect(fsPromises.access(r1.dir)).rejects.toThrow();
+    await expect(fsPromises.access(r2.dir)).rejects.toThrow();
+  });
+
+  it('rejects absolute file paths to prevent path traversal', async () => {
+    const m = new Materializer(nodeOs.tmpdir());
+    await expect(m.materialize('sec', [{ path: '/etc/passwd', content: 'x' }])).rejects.toThrow(
+      /relative/,
+    );
+  });
+
+  it('rejects .. path traversal', async () => {
+    const m = new Materializer(nodeOs.tmpdir());
+    await expect(m.materialize('sec', [{ path: '../escape', content: 'x' }])).rejects.toThrow(
+      /parent/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. StaticProvider — file injection (C2.5)
+// ---------------------------------------------------------------------------
+
+describe('StaticProvider — file injection', () => {
+  function makeFileProvider(secret: SecretMaterial, inject: Injection | Injection[]) {
+    const m = new Materializer(nodeOs.tmpdir());
+    const provider = new StaticProvider({ kind: 'static', secret, inject }, m);
+    return provider;
+  }
+
+  it('string secret + file inject → apply:files, vars contains pointerEnv, file has correct content', async () => {
+    const saKeyJson = '{"type":"service_account","project_id":"my-proj"}';
+    const provider = makeFileProvider(saKeyJson, {
+      at: 'file',
+      path: 'key.json',
+      pointerEnv: 'GOOGLE_APPLICATION_CREDENTIALS',
+    });
+    const cred = await provider.resolve();
+    expect(cred.apply).toBe('files');
+    if (cred.apply === 'files') {
+      expect(typeof cred.dir).toBe('string');
+      const gacPath = cred.vars['GOOGLE_APPLICATION_CREDENTIALS'];
+      expect(gacPath).toBeDefined();
+      expect(gacPath).toBe(nodePath.join(cred.dir, 'key.json'));
+      const content = await fsPromises.readFile(gacPath!, 'utf8');
+      expect(content).toBe(saKeyJson);
+      // Clean up.
+      await fsPromises.rm(cred.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('file inject without pointerEnv → vars is empty (no env pointer)', async () => {
+    const provider = makeFileProvider('my-key-content', {
+      at: 'file',
+      path: 'key.pem',
+      // no pointerEnv
+    });
+    const cred = await provider.resolve();
+    expect(cred.apply).toBe('files');
+    if (cred.apply === 'files') {
+      expect(Object.keys(cred.vars)).toHaveLength(0);
+      await fsPromises.rm(cred.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('record secret + file inject → throws (records not supported for file injection)', async () => {
+    const provider = makeFileProvider(
+      { user: 'alice', pass: 'hunter2' },
+      { at: 'file', path: 'key.json', pointerEnv: 'KEY_PATH' },
+    );
+    await expect(provider.resolve()).rejects.toThrow(/Record secrets are not supported/);
+  });
+
+  it('file inject mixed with env in same array → throws (one channel)', async () => {
+    const provider = makeFileProvider('secret', [
+      { at: 'file', path: 'key.json', pointerEnv: 'KEY_PATH' },
+      { at: 'env', name: 'EXTRA' },
+    ]);
+    await expect(provider.resolve()).rejects.toThrow(/one channel/);
+  });
+
+  it('file inject mixed with argv in same array → throws (one channel)', async () => {
+    const provider = makeFileProvider('secret', [
+      { at: 'file', path: 'key.json' },
+      { at: 'argv', template: '--flag={{token}}' },
+    ]);
+    await expect(provider.resolve()).rejects.toThrow(/one channel/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 11. buildTransport — files arm (C2.5)
+// ---------------------------------------------------------------------------
+
+describe('buildTransport — files arm', () => {
+  beforeEach(() => {
+    vi.mocked(MockStdioTransport).mockClear();
+  });
+
+  it('files credential on stdio merges vars into child env with transport.env as base', () => {
+    buildTransport(
+      { kind: 'stdio', command: 'gcloud', env: { BASE_VAR: 'base' } },
+      {
+        apply: 'files',
+        dir: '/dev/shm/sym-mcp-gcp-abc',
+        vars: { GOOGLE_APPLICATION_CREDENTIALS: '/dev/shm/sym-mcp-gcp-abc/key.json' },
+      },
+    );
+    expect(vi.mocked(MockStdioTransport)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: 'gcloud',
+        env: {
+          BASE_VAR: 'base',
+          GOOGLE_APPLICATION_CREDENTIALS: '/dev/shm/sym-mcp-gcp-abc/key.json',
+        },
+      }),
+    );
+  });
+
+  it('files credential with no transport.env, only vars', () => {
+    buildTransport(
+      { kind: 'stdio', command: '/usr/bin/server' },
+      {
+        apply: 'files',
+        dir: '/tmp/sym-mcp-x-123',
+        vars: { CRED_PATH: '/tmp/sym-mcp-x-123/cred.json' },
+      },
+    );
+    expect(vi.mocked(MockStdioTransport)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: '/usr/bin/server',
+        env: { CRED_PATH: '/tmp/sym-mcp-x-123/cred.json' },
+      }),
+    );
+  });
+
+  it('files credential with empty vars and no transport.env → no env key in call', () => {
+    buildTransport(
+      { kind: 'stdio', command: '/usr/bin/server' },
+      { apply: 'files', dir: '/tmp/sym-mcp-x-empty', vars: {} },
+    );
+    // env should not be passed when there's nothing to set
+    const call = vi.mocked(MockStdioTransport).mock.calls[0]![0] as Record<string, unknown>;
+    expect(call).not.toHaveProperty('env');
+  });
+
+  it('files credential does NOT throw (NotImplementedError is gone)', () => {
+    expect(() =>
+      buildTransport(
+        { kind: 'stdio', command: '/bin/srv' },
+        { apply: 'files', dir: '/tmp/dir', vars: { X: '/tmp/dir/k' } },
+      ),
+    ).not.toThrow();
   });
 });
