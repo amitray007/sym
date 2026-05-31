@@ -503,6 +503,41 @@ const SEARCH_MESSAGES_DESCRIPTOR: ToolDescriptor = {
 };
 
 // ---------------------------------------------------------------------------
+// Self-maintenance — Sym deleting its OWN messages (bot token)
+// ---------------------------------------------------------------------------
+//
+// Unlike the act-as-owner tools above, this acts as SYM itself (bot token —
+// the default actor, NOT the owner's user token). Slack's `chat.delete` with a
+// bot token can only remove messages the bot itself posted; targeting anyone
+// else's message fails at the API, so the "own messages only" rule is enforced
+// by Slack, not by us. Destructive + irreversible → rides the existing
+// confirm-before-destructive flow (the owner approves via a Slack button).
+
+const DELETE_MESSAGE_DESCRIPTOR: ToolDescriptor = {
+  type: 'function',
+  name: 'delete_message',
+  description:
+    'Delete one of SYM\'S OWN Slack messages — a message Sym previously posted. Use when the owner asks to remove/delete/take down something SYM said: "delete that", "remove your last message", "take down the reply you just posted". You CAN do this — never claim you cannot delete your own messages. Identify the target with `channel_id` (C0123 / D0123) and `message_ts`, read from the current thread, a search result, or a Slack permalink (the digits after `/p` form the ts: `p1780221572271599` → `1780221572.271599`). Sym can ONLY delete its own messages; targeting another author\'s message fails. Irreversible — the owner confirms via a Slack button before it runs.',
+  parameters: {
+    type: 'object',
+    properties: {
+      channel_id: {
+        type: 'string',
+        description: 'Channel or DM containing the message (C0123 / D0123).',
+      },
+      message_ts: {
+        type: 'string',
+        description: "The target message's `ts`, e.g. 1780221572.271599.",
+      },
+    },
+    required: ['channel_id', 'message_ts'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
+  destructiveHint: true,
+  // actor defaults to 'bot' — Sym deletes its own messages with the bot token.
+};
+
+// ---------------------------------------------------------------------------
 // Planning tools — model-authored intent (mode-switches the task card)
 // ---------------------------------------------------------------------------
 //
@@ -692,6 +727,7 @@ const ALL_BUILTIN_DESCRIPTORS: ToolDescriptor[] = [
   REACT_AS_OWNER_DESCRIPTOR,
   SET_STATUS_DESCRIPTOR,
   ADD_REMINDER_DESCRIPTOR,
+  DELETE_MESSAGE_DESCRIPTOR,
   SET_PLAN_DESCRIPTOR,
   UPDATE_TASK_DESCRIPTOR,
   PRESENT_CARD_DESCRIPTOR,
@@ -1305,6 +1341,50 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
               callId: call.id,
               ok: false,
               error: { code: 'execution_failed', message },
+            };
+          }
+        }
+      } else if (call.name === 'delete_message') {
+        const channelArg = call.arguments['channel_id'];
+        const tsArg = call.arguments['message_ts'];
+        if (typeof channelArg !== 'string' || channelArg.length === 0) {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: { code: 'invalid_arguments', message: 'channel_id must be a non-empty string' },
+          };
+        } else if (typeof tsArg !== 'string' || tsArg.length === 0) {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: { code: 'invalid_arguments', message: 'message_ts must be a non-empty string' },
+          };
+        } else {
+          try {
+            // Bot-token delete — `slack` is the bot client (delete_message has
+            // no actor:'user', so pickClient returned it). Slack only permits
+            // deleting messages this bot authored.
+            await slack.chatDelete({
+              channel: channelArg as SlackChannelId,
+              ts: tsArg as SlackThreadTs,
+            });
+            result = {
+              callId: call.id,
+              ok: true,
+              content: `deleted Sym's message ${tsArg} in ${channelArg}`,
+            };
+          } catch (err: unknown) {
+            // Slack returns `cant_delete_message` / `message_not_found` when the
+            // target isn't Sym's own message (or it's already gone). Surface the
+            // raw Slack reason plus the one constraint the model can act on.
+            const reason = err instanceof Error ? err.message : String(err);
+            result = {
+              callId: call.id,
+              ok: false,
+              error: {
+                code: 'execution_failed',
+                message: `${reason} — Sym can only delete messages it posted itself.`,
+              },
             };
           }
         }

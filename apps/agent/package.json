@@ -10,7 +10,8 @@
     "test": "vitest run",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "qa:mcp": "tsc -p tsconfig.json && node scripts/qa-connector.mjs"
+    "qa:mcp": "tsc -p tsconfig.json && node scripts/qa-connector.mjs",
+    "qa:delete": "tsc -p tsconfig.json && node scripts/qa-delete.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.75.5",

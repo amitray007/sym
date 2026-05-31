@@ -231,6 +231,7 @@ const TOOL_VERBS: Record<string, string> = {
   react_as_owner: 'reacting as you',
   set_status: 'updating your status',
   add_reminder: 'setting a reminder',
+  delete_message: 'deleting its message',
   // NOTE: no entry for set_plan / present_* — they're in SILENT_TOOLS, so a
   // verb here would be dead (their start never reaches the shimmer/card).
 };

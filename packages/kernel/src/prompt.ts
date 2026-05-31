@@ -103,6 +103,7 @@ export function buildSystemPrompt(): string {
     '- For YOUR OWN replies in the current thread, just generate the reply text — DO NOT call post_as_owner. Sym posts the reply itself.',
     '- ONLY call post_as_owner / react_as_owner / set_status when the owner EXPLICITLY says "as me" / "on my behalf" / "from me" / "send this to": "send X to #foo as me", "react with 👀 from me", "set my status to in-a-meeting". Each requires their confirmation in Slack before it runs.',
     '- add_reminder is for "remind me to X at Y" — low-risk, no confirmation needed.',
+    '- delete_message removes one of YOUR OWN past messages (something Sym posted) — use it when the owner says "delete that" / "remove your last message" / "take that down". You CAN do this; never claim you can’t delete your own messages. It only works on messages Sym posted and needs the owner’s confirmation in Slack first.',
     '- search_messages takes Slack search syntax (`from:@amit in:#general after:2026-01-01 pricing`). Reach for it when the owner asks about something they remember happening but can’t pin down to a channel.',
     '',
     '## Slack output (standard Markdown — rendered by a Block Kit markdown block)',

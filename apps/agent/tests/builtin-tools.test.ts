@@ -9,6 +9,7 @@ import type {
   ConversationsInfoResult,
   ConversationsListResult,
   ConversationsRepliesResult,
+  DeleteMessageParams,
   PostMessageParams,
   ReactionsAddParams,
   RemindersAddParams,
@@ -79,6 +80,8 @@ function makeSlackClient(opts: {
   reminderCalls?: RemindersAddParams[];
   reminderError?: Error;
   reminderResult?: RemindersAddResult;
+  deleteCalls?: DeleteMessageParams[];
+  deleteError?: Error;
 }): SlackClient {
   return {
     async conversationsHistory(): Promise<ConversationsHistoryResult> {
@@ -134,8 +137,9 @@ function makeSlackClient(opts: {
     async chatStopStream() {
       /* no-op */
     },
-    async chatDelete() {
-      /* no-op */
+    async chatDelete(params: DeleteMessageParams) {
+      opts.deleteCalls?.push(params);
+      if (opts.deleteError !== undefined) throw opts.deleteError;
     },
     async authTest() {
       return { userId: 'U0' as SlackUserId, teamId: 'T0' };
@@ -179,13 +183,14 @@ describe('createBuiltinDispatcher', () => {
           'react_as_owner',
           'set_status',
           'add_reminder',
+          'delete_message',
           'set_plan',
           'update_task',
           'present_card',
           'present_table',
         ]),
       );
-      expect(tools).toHaveLength(15);
+      expect(tools).toHaveLength(16);
     });
 
     it('declares actor:"user" on every tool that should act under owner identity', () => {
@@ -209,6 +214,18 @@ describe('createBuiltinDispatcher', () => {
         'search_messages',
         'set_status',
       ]);
+      // delete_message acts as SYM (bot token), NOT the owner — it deletes
+      // Sym's own messages, so it must NOT be in the user-actor set above.
+      expect(userActorNames).not.toContain('delete_message');
+    });
+
+    it('delete_message acts as the bot (no actor:"user") — deletes Sym\'s own messages', () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const byName = new Map(dispatcher.list().map((t) => [t.name, t]));
+      expect(byName.get('delete_message')?.actor).toBeUndefined();
     });
 
     it('marks act-as-owner WRITE tools as destructive (rides confirm flow), reads are not', () => {
@@ -221,6 +238,8 @@ describe('createBuiltinDispatcher', () => {
       expect(byName.get('post_as_owner')?.destructiveHint).toBe(true);
       expect(byName.get('react_as_owner')?.destructiveHint).toBe(true);
       expect(byName.get('set_status')?.destructiveHint).toBe(true);
+      // delete_message is irreversible → also rides the confirm flow.
+      expect(byName.get('delete_message')?.destructiveHint).toBe(true);
       // Reads + reminders: non-destructive.
       expect(byName.get('add_reminder')?.destructiveHint).toBeUndefined();
       expect(byName.get('read_channel')?.destructiveHint).toBeUndefined();
@@ -1178,6 +1197,73 @@ describe('createBuiltinDispatcher', () => {
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error('expected failure');
       expect(result.error.code).toBe('execution_failed');
+    });
+  });
+
+  describe('dispatch() — delete_message', () => {
+    it('deletes via the BOT client (Sym deletes its own message), passing channel + ts', async () => {
+      const deletes: DeleteMessageParams[] = [];
+      const dispatcher = createBuiltinDispatcher({
+        // Bot client records; a user client is present to prove routing ignores it.
+        slackClient: makeSlackClient({ deleteCalls: deletes }),
+        userSlackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('delete_message', {
+          channel_id: 'C05RSJB13JB',
+          message_ts: '1780221572.271599',
+        }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(true);
+      expect(deletes).toHaveLength(1);
+      expect(deletes[0]?.channel).toBe('C05RSJB13JB');
+      expect(deletes[0]?.ts).toBe('1780221572.271599');
+    });
+
+    it('returns invalid_arguments when channel_id is missing', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('delete_message', { message_ts: '900.1' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('invalid_arguments');
+    });
+
+    it('returns invalid_arguments when message_ts is missing', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('delete_message', { channel_id: 'C1' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('invalid_arguments');
+    });
+
+    it('surfaces a clean execution_failed (with the own-messages constraint) when Slack rejects', async () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({ deleteError: new Error('cant_delete_message') }),
+        botUserId: BOT,
+      });
+      const result = await dispatcher.dispatch(
+        makeCall('delete_message', { channel_id: 'C1', message_ts: '900.1' }),
+        makeCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected failure');
+      expect(result.error.code).toBe('execution_failed');
+      expect(result.error.message).toContain('cant_delete_message');
+      expect(result.error.message).toContain('only delete messages it posted itself');
     });
   });
 
