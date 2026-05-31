@@ -1,7 +1,9 @@
 import { threadToHistory } from '@sym/adapter-slack';
 
 import { NameResolver } from './name-resolver.js';
+import { runCli } from './run-cli.js';
 import { safeFetch } from './safe-fetch.js';
+import { webSearch } from './web-search.js';
 
 import type { PlanController, PlanItemStatus } from './plan-controller.js';
 import type { SearchMessageMatch, SlackClient, SlackThreadMessage } from '@sym/adapter-slack';
@@ -133,6 +135,45 @@ const FETCH_URL_DESCRIPTOR: ToolDescriptor = {
     additionalProperties: false,
   } satisfies JsonSchema,
   readOnlyHint: true,
+};
+
+const WEB_SEARCH_DESCRIPTOR: ToolDescriptor = {
+  type: 'function',
+  name: 'web_search',
+  // READ tool: keyless DuckDuckGo web search. Returns ranked title/url/snippet.
+  description:
+    'Search the web (DuckDuckGo, no API key). Returns ranked results with title, URL, and snippet. Use for current information, finding docs, or locating a URL to then read with fetch_url. Best-effort — may occasionally return nothing.',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Search query' },
+      limit: { type: 'number', description: 'Max results (default 8, max 10)' },
+    },
+    required: ['query'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
+  readOnlyHint: true,
+};
+
+const RUN_CLI_DESCRIPTOR: ToolDescriptor = {
+  type: 'function',
+  name: 'run_cli',
+  // Runs an allowlisted CLI by argv (no shell). NOT confirm-gated (no
+  // destructiveHint) — the binary allowlist (SYM_CLI_ALLOWLIST) is the boundary.
+  description:
+    'Run an allowlisted command-line tool (e.g. gog, gcloud, sentry-cli, gh, jq) by argv array — no shell, so no pipes/redirects. To learn a CLI you do not know, FIRST run it with --help (e.g. ["gog","gmail","--help"]) or "<subcommand> --help", then run the real command. Returns stdout, stderr, and exit code. argv[0] must be a bare allowlisted binary name.',
+  parameters: {
+    type: 'object',
+    properties: {
+      argv: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Command and arguments, e.g. ["gcloud","run","services","list"]',
+      },
+    },
+    required: ['argv'],
+    additionalProperties: false,
+  } satisfies JsonSchema,
 };
 
 const LIST_CHANNELS_DESCRIPTOR: ToolDescriptor = {
@@ -721,6 +762,8 @@ const ALL_BUILTIN_DESCRIPTORS: ToolDescriptor[] = [
   READ_THREAD_DESCRIPTOR,
   READ_USER_PROFILE_DESCRIPTOR,
   FETCH_URL_DESCRIPTOR,
+  WEB_SEARCH_DESCRIPTOR,
+  RUN_CLI_DESCRIPTOR,
   LIST_CHANNELS_DESCRIPTOR,
   SEARCH_MESSAGES_DESCRIPTOR,
   POST_AS_OWNER_DESCRIPTOR,
@@ -968,6 +1011,76 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
             } finally {
               clearTimeout(timer);
             }
+          }
+        }
+      } else if (call.name === 'web_search') {
+        const queryArg = call.arguments['query'];
+        if (typeof queryArg !== 'string' || queryArg.trim().length === 0) {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: { code: 'invalid_arguments', message: 'query must be a non-empty string' },
+          };
+        } else {
+          const limitArg = call.arguments['limit'];
+          const limit = Math.max(1, Math.min(10, typeof limitArg === 'number' ? limitArg : 8));
+          try {
+            const hits = await webSearch(queryArg, { limit });
+            if (hits.length === 0) {
+              result = {
+                callId: call.id,
+                ok: true,
+                content: `No web results for "${queryArg.trim()}".`,
+              };
+            } else {
+              const body = hits
+                .map(
+                  (h, i) =>
+                    `${i + 1}. ${h.title}\n   ${h.url}${h.snippet ? `\n   ${h.snippet}` : ''}`,
+                )
+                .join('\n');
+              result = { callId: call.id, ok: true, content: body };
+            }
+          } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            result = { callId: call.id, ok: false, error: { code: 'execution_failed', message } };
+          }
+        }
+      } else if (call.name === 'run_cli') {
+        const argvArg = call.arguments['argv'];
+        if (
+          !Array.isArray(argvArg) ||
+          argvArg.length === 0 ||
+          !argvArg.every((a) => typeof a === 'string')
+        ) {
+          result = {
+            callId: call.id,
+            ok: false,
+            error: {
+              code: 'invalid_arguments',
+              message: 'argv must be a non-empty string array, e.g. ["gog","gmail","--help"]',
+            },
+          };
+        } else {
+          const argv = argvArg as string[];
+          const r = await runCli(argv);
+          if (r.error !== undefined && r.code === null && !r.timedOut) {
+            // Allowlist/spawn failure — the command never ran.
+            result = {
+              callId: call.id,
+              ok: false,
+              error: { code: 'execution_failed', message: r.error },
+            };
+          } else {
+            const out = r.stdout.length > 0 ? `\nstdout:\n${r.stdout}` : '';
+            const errOut = r.stderr.length > 0 ? `\nstderr:\n${r.stderr}` : '';
+            // ok:true even on non-zero exit so the model can read stderr / --help
+            // output and adapt (e.g. fix a wrong subcommand).
+            result = {
+              callId: call.id,
+              ok: true,
+              content: `$ ${argv.join(' ')}\nexit: ${r.timedOut ? 'TIMEOUT' : r.code}${out}${errOut}`,
+            };
           }
         }
       } else if (call.name === 'list_channels') {

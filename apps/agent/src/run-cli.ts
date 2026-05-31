@@ -1,0 +1,127 @@
+/**
+ * run_cli — execute an allowlisted CLI by argv (no shell).
+ *
+ * Full freedom WITHIN a binary allowlist: the allowlist is the safety boundary,
+ * and inside it the agent may run any subcommand (reads and writes) without a
+ * per-command confirmation. Guardrails that always apply:
+ *   - argv array, spawned directly (NO shell) → no injection, no pipes/redirects.
+ *   - argv[0] must be a bare allowlisted binary name (no paths).
+ *   - hard timeout + output cap; every invocation is logged for audit.
+ *
+ * The allowlist comes from SYM_CLI_ALLOWLIST (comma-separated bare names);
+ * `*` permits any binary. Default: the CLIs we install on /data/bin.
+ */
+
+import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
+
+export interface RunCliResult {
+  ok: boolean;
+  binary: string;
+  stdout: string;
+  stderr: string;
+  code: number | null;
+  timedOut: boolean;
+  /** Set for allowlist/spawn failures (the command never ran). */
+  error?: string;
+}
+
+export type Allowlist = Set<string> | '*';
+
+const DEFAULT_ALLOWLIST = 'gog,gcloud,gsutil,bq,sentry-cli,gh,jq';
+const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_MAX_CHARS = 20_000;
+
+/** Parse SYM_CLI_ALLOWLIST into a Set (or `'*'` for unrestricted). */
+export function parseAllowlist(raw: string | undefined): Allowlist {
+  const value = (raw ?? DEFAULT_ALLOWLIST).trim();
+  if (value === '*') return '*';
+  return new Set(
+    value
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+  );
+}
+
+function isAllowed(list: Allowlist, binary: string): boolean {
+  return list === '*' || list.has(binary);
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
+}
+
+function fail(binary: string, error: string): RunCliResult {
+  return { ok: false, binary, stdout: '', stderr: '', code: null, timedOut: false, error };
+}
+
+export async function runCli(
+  argv: string[],
+  opts: { allowlist?: Allowlist; timeoutMs?: number; maxChars?: number; cwd?: string } = {},
+): Promise<RunCliResult> {
+  const allowlist = opts.allowlist ?? parseAllowlist(process.env['SYM_CLI_ALLOWLIST']);
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
+
+  const binary = argv[0];
+  if (binary === undefined || binary.length === 0) {
+    return fail('', 'argv must be a non-empty array, e.g. ["gog","gmail","--help"]');
+  }
+  if (binary.includes('/') || binary.includes('\\')) {
+    return fail(
+      binary,
+      'binary must be a bare command name (no path), e.g. "gcloud" not "/usr/bin/gcloud"',
+    );
+  }
+  if (!isAllowed(allowlist, binary)) {
+    const names = allowlist === '*' ? '*' : [...allowlist].join(', ');
+    return fail(
+      binary,
+      `'${binary}' is not in the CLI allowlist (${names}). Set SYM_CLI_ALLOWLIST to permit it.`,
+    );
+  }
+
+  // Audit: every command the agent runs is logged.
+  console.info(`[run_cli] ${argv.join(' ')}`);
+
+  return new Promise<RunCliResult>((resolve) => {
+    const child = spawn(binary, argv.slice(1), {
+      cwd: opts.cwd ?? tmpdir(),
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+
+    child.stdout.on('data', (d: Buffer) => {
+      stdout += d.toString();
+    });
+    child.stderr.on('data', (d: Buffer) => {
+      stderr += d.toString();
+    });
+    child.on('error', (err: Error) => {
+      clearTimeout(timer);
+      resolve(fail(binary, `spawn failed: ${err.message}`));
+    });
+    child.on('close', (code: number | null) => {
+      clearTimeout(timer);
+      resolve({
+        ok: !timedOut && code === 0,
+        binary,
+        stdout: truncate(stdout, maxChars),
+        stderr: truncate(stderr, maxChars),
+        code,
+        timedOut,
+        ...(timedOut ? { error: `timed out after ${timeoutMs}ms` } : {}),
+      });
+    });
+  });
+}

@@ -177,6 +177,8 @@ describe('createBuiltinDispatcher', () => {
           'read_thread',
           'read_user_profile',
           'fetch_url',
+          'web_search',
+          'run_cli',
           'list_channels',
           'search_messages',
           'post_as_owner',
@@ -190,7 +192,7 @@ describe('createBuiltinDispatcher', () => {
           'present_table',
         ]),
       );
-      expect(tools).toHaveLength(16);
+      expect(tools).toHaveLength(18);
     });
 
     it('declares actor:"user" on every tool that should act under owner identity', () => {
