@@ -186,3 +186,38 @@ export function resolveConfirmation(confirmationId: string, approved: boolean): 
   entry.resolve(approved);
   return true;
 }
+
+/**
+ * Build the message that REPLACES the confirmation prompt after the owner
+ * decides. Keeps the original question + action detail (so the thread history
+ * records WHAT was approved/cancelled) and swaps the buttons for a decision
+ * line — instead of collapsing the whole message to a bare "Approved ✅".
+ *
+ * Slack echoes the original message in the block_actions payload, so we rebuild
+ * from `original.blocks`: drop the `actions` (buttons) block and append a
+ * decision context block. Falls back to the message text, then a bare line.
+ */
+export function buildResolvedConfirmationMessage(
+  original: { blocks?: unknown[]; text?: string },
+  approved: boolean,
+): { text: string; blocks: unknown[] } {
+  const decisionLine = approved ? '✅ *Approved*' : '✋ *Cancelled*';
+  const decisionBlock = { type: 'context', elements: [{ type: 'mrkdwn', text: decisionLine }] };
+
+  const origBlocks = Array.isArray(original.blocks) ? original.blocks : [];
+  // Drop the actions (buttons) block — the decision has been made.
+  const kept = origBlocks.filter((b) => (b as { type?: string } | null)?.type !== 'actions');
+
+  let blocks: unknown[];
+  if (kept.length > 0) {
+    blocks = [...kept, decisionBlock];
+  } else if (typeof original.text === 'string' && original.text.length > 0) {
+    blocks = [{ type: 'section', text: { type: 'mrkdwn', text: original.text } }, decisionBlock];
+  } else {
+    blocks = [decisionBlock];
+  }
+
+  const base =
+    typeof original.text === 'string' && original.text.length > 0 ? original.text : 'Confirmation';
+  return { text: `${base} — ${approved ? 'Approved' : 'Cancelled'}`, blocks };
+}

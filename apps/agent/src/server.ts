@@ -9,7 +9,7 @@ import { Hono } from 'hono';
 
 import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
-import { resolveConfirmation } from './confirmations.js';
+import { resolveConfirmation, buildResolvedConfirmationMessage } from './confirmations.js';
 import { handleTurn, type HandleTurnDeps } from './handle-turn.js';
 import { completeOAuth } from './mcp/oauth-registry.js';
 import { buildOwnerDeclineMessage, checkOwnerAccess } from './owner-gate.js';
@@ -306,6 +306,7 @@ export function createServer(deps: ServerDeps): Hono {
       team?: { id?: string };
       actions?: { action_id?: string }[];
       response_url?: string;
+      message?: { blocks?: unknown[]; text?: string };
     };
     try {
       payload = JSON.parse(payloadJson) as typeof payload;
@@ -354,11 +355,13 @@ export function createServer(deps: ServerDeps): Hono {
     // Best-effort: update the interactive message via response_url so the
     // buttons are replaced with a status line. Never block the ACK on this.
     if (responseUrl) {
-      const statusText = approved ? 'Approved ✅' : 'Cancelled ✋';
+      // Keep the original question + action detail in the thread history and
+      // swap the buttons for a decision line — never collapse to "Approved ✅".
+      const update = buildResolvedConfirmationMessage(payload.message ?? {}, approved);
       void fetch(responseUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ replace_original: true, text: statusText }),
+        body: JSON.stringify({ replace_original: true, ...update }),
       }).catch((err: unknown) => {
         console.warn('[agent] interactivity response_url update failed (non-blocking):', err);
       });
