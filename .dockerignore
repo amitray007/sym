@@ -1,0 +1,24 @@
+# Keep the build context small + correct (reinstall deps, rebuild dist in-image).
+**/node_modules
+**/dist
+**/.next
+**/*.tsbuildinfo
+**/coverage
+**/.turbo
+.turbo
+.git
+.gitignore
+.github
+
+# Never ship secrets or local state into the image.
+.env
+.env.*
+**/.env
+.sym
+**/*.db
+data
+
+# Editor / OS noise
+.vscode
+.idea
+.DS_Store
