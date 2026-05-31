@@ -190,6 +190,13 @@ async function connectServer(config: ConnectorConfig): Promise<PoolEntry> {
     console.info(
       `${label} connected — ${tools.length} tool(s): ${tools.map((t) => t.name).join(', ') || '(none)'}`,
     );
+    if (tools.length === 0 && config.auth?.kind === 'ambient') {
+      console.warn(
+        `${label} ambient connector returned 0 tools — is it authenticated? It self-authenticates ` +
+          `from disk; run its CLI login (e.g. \`gcloud auth login\`) for the config dir it uses ` +
+          `(set via transport.env), then try again.`,
+      );
+    }
 
     return { client, tools, ok: true };
   } catch (err) {
@@ -216,6 +223,12 @@ async function connectServer(config: ConnectorConfig): Promise<PoolEntry> {
     }
 
     console.warn(`${label} failed to connect or list tools — contributing zero tools:`, err);
+    if (config.auth?.kind === 'ambient') {
+      console.warn(
+        `${label} (ambient) — if this is an auth error, run the CLI's login (e.g. \`gcloud auth login\`) ` +
+          `for the config dir in transport.env; Sym injects no credential for ambient connectors.`,
+      );
+    }
     // If the client was created but connect/listTools failed, attempt a clean close.
     if (client !== undefined) {
       client.close().catch(() => undefined);

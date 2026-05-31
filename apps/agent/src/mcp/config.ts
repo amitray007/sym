@@ -69,7 +69,8 @@ export type AuthConfig =
       /** Where to inject the resolved credential. One or many injection targets. */
       inject: Injection | Injection[];
     }
-  | { kind: 'oauth' }; // C3 — SdkOAuthAdapter + encrypted token store
+  | { kind: 'oauth' } // C3 — SdkOAuthAdapter + encrypted token store
+  | { kind: 'ambient' }; // Model B — the wrapped CLI self-authenticates from disk; Sym injects nothing
 
 // ---------------------------------------------------------------------------
 // ConnectorConfig — the top-level shape
@@ -315,6 +316,12 @@ function parseAuth(raw: unknown, index: number, name: string): AuthConfig | null
   if (kind === 'oauth') {
     // OAuth is implemented (SdkOAuthAdapter + encrypted store).
     return { kind: 'oauth' };
+  }
+
+  if (kind === 'ambient') {
+    // Model B: the wrapped CLI self-authenticates from disk (e.g. `gcloud auth login`).
+    // Sym injects nothing; relocate the CLI's config dir via transport.env if needed.
+    return { kind: 'ambient' };
   }
 
   console.warn(`[mcp] ${label} kind='${String(kind)}' is not recognised — skipping entry`);

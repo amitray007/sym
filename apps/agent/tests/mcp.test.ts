@@ -237,6 +237,24 @@ describe('parseMcpServers', () => {
     expect(result[0]?.auth).toMatchObject({ kind: 'oauth' });
   });
 
+  it('accepts ambient auth (Model B — CLI self-authenticates from disk)', () => {
+    const raw = JSON.stringify([
+      {
+        name: 'gcloud',
+        transport: {
+          kind: 'stdio',
+          command: 'gcloud-mcp',
+          env: { CLOUDSDK_CONFIG: '/data/gcloud' },
+        },
+        auth: { kind: 'ambient' },
+      },
+    ]);
+    const result = parseMcpServers(raw);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.auth).toEqual({ kind: 'ambient' });
+    expect(result[0]?.transport).toMatchObject({ env: { CLOUDSDK_CONFIG: '/data/gcloud' } });
+  });
+
   it('skips entries missing required name', () => {
     const raw = JSON.stringify([{ transport: { kind: 'stdio', command: '/bin/server' } }]);
     expect(parseMcpServers(raw)).toEqual([]);
@@ -557,6 +575,10 @@ describe('buildTransport', () => {
 describe('makeProvider', () => {
   it('undefined auth → null (no provider)', () => {
     expect(makeProvider(undefined)).toBeNull();
+  });
+
+  it('ambient auth → null (Model B injects no credential)', () => {
+    expect(makeProvider({ kind: 'ambient' })).toBeNull();
   });
 
   it('static auth → StaticProvider instance', () => {
