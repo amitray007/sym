@@ -5,9 +5,10 @@ import { serve } from '@hono/node-server';
 import { config as loadDotenv } from 'dotenv';
 
 import { loadAgentConfig } from './config.js';
+import { initMcpPool, McpDispatcher } from './mcp/index.js';
 import { createServer } from './server.js';
 
-function main(): void {
+async function main(): Promise<void> {
   // Dev convenience: load the repo-root .env, letting it OVERRIDE vars already
   // in the shell — otherwise a stale/empty exported var (e.g. an empty
   // SLACK_BOT_TOKEN left in the shell) silently shadows the file. In production
@@ -24,15 +25,26 @@ function main(): void {
       ? `[mcp] ${mcpNames.length} connector(s) configured: ${mcpNames.join(', ')}`
       : '[mcp] no MCP servers configured (SYM_MCP_SERVERS unset or empty)',
   );
+
+  // Warm the MCP pool at boot (not lazily on the first turn) so every connector's
+  // tools are connected + ready before the first Slack message — no first-turn
+  // connect latency or race. Bounded by SYM_MCP_CONNECT_TIMEOUT_MS per connector;
+  // a server that fails contributes zero tools (fail-open) and never blocks boot.
+  if (config.mcpServers.length > 0) {
+    await initMcpPool(config.mcpServers);
+    const ready = new McpDispatcher(config.mcpServers).list().length;
+    console.info(
+      `[mcp] pool warm — ${ready} tool(s) ready across ${config.mcpServers.length} connector(s)`,
+    );
+  }
+
   const app = createServer({ config });
   serve({ fetch: app.fetch, port: config.port }, (info) => {
     console.info(`[agent] listening on :${info.port}`);
   });
 }
 
-try {
-  main();
-} catch (err: unknown) {
+main().catch((err: unknown) => {
   console.error('[agent] fatal startup error:', err);
   process.exit(1);
-}
+});
