@@ -11,6 +11,12 @@ import { Agent } from '@earendil-works/pi-agent-core';
 import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
+import {
+  buildConnectorCatalog,
+  makeCallTool,
+  makeFindTools,
+  partitionDescriptors,
+} from './meta-tools.js';
 import { bridgeTools } from './tools.js';
 
 import type { ThinkingLevel } from './think-router.js';
@@ -326,7 +332,9 @@ export async function runLoopPi(
   const historyMessages = toAgentMessages(opts.history);
 
   // The static base system prompt — byte-stable for provider prompt caching.
-  const systemPrompt = buildSystemPrompt();
+  // The connector catalog (static per deploy) is appended below, after we know
+  // which MCP tools exist; that keeps the prefix cache-stable too.
+  const baseSystemPrompt = buildSystemPrompt();
 
   // The user's message, with turn metadata framed as context-only so "summarize
   // it" refers to the conversation (in history), not the metadata. Same builder
@@ -339,12 +347,48 @@ export async function runLoopPi(
   // present_* tools). Collected here because Pi otherwise swallows the result.
   const renders: RenderIntent[] = [];
 
-  // Bridge the built-in tools as native Pi tools (full schemas visible up front).
-  const descriptors = registry.listTools();
-  const agentTools = bridgeTools(registry, ctx, descriptors, (r) => renders.push(r));
+  // Split tools: built-ins are bridged natively (small, always relevant); MCP
+  // tools are reached on demand via find_tools/call_tool so their schemas don't
+  // bloat every turn (~10k for "hi" otherwise). MCP names are `<server>__<tool>`.
+  const allDescriptors = registry.listTools();
+  const { builtin: builtinDescriptors, mcp: mcpDescriptors } = partitionDescriptors(allDescriptors);
+  const onRender = (r: RenderIntent): void => {
+    renders.push(r);
+  };
 
-  // Build a name → ToolDescriptor map so beforeToolCall can look up destructive hints.
-  const descriptorMap = new Map<string, ToolDescriptor>(descriptors.map((d) => [d.name, d]));
+  // Owner-confirmation for a destructive MCP tool. call_tool self-gates because the
+  // model invokes `call_tool`, not the underlying tool name. Fails CLOSED.
+  const confirmMcp = async (toolName: string, args: Record<string, unknown>): Promise<boolean> => {
+    const channelId = turn.channelId;
+    if (!channelId || !opts.slackClient) {
+      console.warn(`[pi] mcp tool '${toolName}' blocked: confirmation channel unavailable`);
+      return false;
+    }
+    return requestConfirmation({
+      slackClient: opts.slackClient,
+      channel: channelId as SlackChannelId,
+      ...(turn.threadTs !== undefined ? { threadTs: turn.threadTs as SlackThreadTs } : {}),
+      toolName,
+      args,
+    });
+  };
+
+  const agentTools = [
+    ...bridgeTools(registry, ctx, builtinDescriptors, onRender),
+    ...(mcpDescriptors.length > 0
+      ? [
+          makeFindTools(mcpDescriptors),
+          makeCallTool({ mcp: mcpDescriptors, registry, ctx, confirm: confirmMcp, onRender }),
+        ]
+      : []),
+  ];
+
+  // Append the connector catalog so the model knows what's reachable via find_tools.
+  const catalog = buildConnectorCatalog(mcpDescriptors);
+  const systemPrompt = catalog.length > 0 ? `${baseSystemPrompt}\n\n${catalog}` : baseSystemPrompt;
+
+  // beforeToolCall gates only natively-bridged built-ins; MCP confirm lives in call_tool.
+  const descriptorMap = new Map<string, ToolDescriptor>(builtinDescriptors.map((d) => [d.name, d]));
 
   // Accumulate streaming text deltas.
   const draftParts: string[] = [];
