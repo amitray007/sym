@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { parseAllowlist, runCli } from '../src/run-cli.js';
+import { isIntrospectionOnly, parseAllowlist, runCli } from '../src/run-cli.js';
 
 describe('parseAllowlist', () => {
   it('parses comma-separated bare names', () => {
@@ -70,5 +70,20 @@ describe('runCli', () => {
     });
     expect(r.timedOut).toBe(true);
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('isIntrospectionOnly', () => {
+  it('treats help/version invocations as free (run without confirmation)', () => {
+    expect(isIntrospectionOnly(['gog'])).toBe(true);
+    expect(isIntrospectionOnly(['gog', '--help'])).toBe(true);
+    expect(isIntrospectionOnly(['gog', 'gmail', '--help'])).toBe(true);
+    expect(isIntrospectionOnly(['gcloud', '--version'])).toBe(true);
+    expect(isIntrospectionOnly(['gog', 'help'])).toBe(true);
+  });
+  it('treats real commands as needing confirmation', () => {
+    expect(isIntrospectionOnly(['gog', 'gmail', 'messages', 'send', '--to', 'x'])).toBe(false);
+    expect(isIntrospectionOnly(['gcloud', 'run', 'services', 'list'])).toBe(false);
+    expect(isIntrospectionOnly(['rm', '-rf', '/'])).toBe(false);
   });
 });

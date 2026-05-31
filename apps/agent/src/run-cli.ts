@@ -56,6 +56,18 @@ function fail(binary: string, error: string): RunCliResult {
   return { ok: false, binary, stdout: '', stderr: '', code: null, timedOut: false, error };
 }
 
+const HELP_TOKENS = new Set(['-h', '--help', 'help', '-v', '--version', 'version']);
+
+/**
+ * True when an argv is pure introspection (help/version) — safe to run without
+ * confirmation even under SYM_CLI_CONFIRM, since `--help` short-circuits before
+ * any action runs. A bare binary (argv.length <= 1) also counts (prints usage).
+ */
+export function isIntrospectionOnly(argv: string[]): boolean {
+  if (argv.length <= 1) return true;
+  return argv.slice(1).some((a) => HELP_TOKENS.has(a));
+}
+
 export async function runCli(
   argv: string[],
   opts: { allowlist?: Allowlist; timeoutMs?: number; maxChars?: number; cwd?: string } = {},

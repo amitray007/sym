@@ -11,6 +11,7 @@ import { Agent } from '@earendil-works/pi-agent-core';
 import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
+import { isIntrospectionOnly } from '../run-cli.js';
 import {
   buildConnectorCatalog,
   makeCallTool,
@@ -407,10 +408,25 @@ export async function runLoopPi(
     signal?: AbortSignal,
   ): Promise<{ block: true; reason?: string } | undefined> => {
     const toolName = context.toolCall.name;
-    const descriptor = descriptorMap.get(toolName);
 
-    if (descriptor?.destructiveHint !== true) {
-      // Non-destructive or unknown — allow through immediately.
+    // Decide whether this call needs owner confirmation.
+    let needsConfirm: boolean;
+    if (toolName === 'run_cli') {
+      // run_cli is unconfirmed by default (full freedom within SYM_CLI_ALLOWLIST).
+      // SYM_CLI_CONFIRM gates real commands; help/version introspection stays free
+      // so the agent can learn a CLI without prompting.
+      const cliConfirm = /^(1|true|yes|on)$/i.test(process.env['SYM_CLI_CONFIRM'] ?? '');
+      const argvRaw = (context.args as { argv?: unknown } | undefined)?.argv;
+      const argv = Array.isArray(argvRaw)
+        ? argvRaw.filter((a): a is string => typeof a === 'string')
+        : [];
+      needsConfirm = cliConfirm && !isIntrospectionOnly(argv);
+    } else {
+      needsConfirm = descriptorMap.get(toolName)?.destructiveHint === true;
+    }
+
+    if (!needsConfirm) {
+      // Non-destructive / unconfirmed — allow through immediately.
       return undefined;
     }
 
@@ -422,7 +438,7 @@ export async function runLoopPi(
     const channelId = turn.channelId;
     if (!channelId || !opts.slackClient) {
       // Fail closed: no channel or no Slack client → cannot prompt → block.
-      console.warn(`[pi] destructive tool '${toolName}' blocked: confirmation channel unavailable`);
+      console.warn(`[pi] tool '${toolName}' blocked: confirmation channel unavailable`);
       return { block: true, reason: 'Confirmation channel unavailable.' };
     }
 
