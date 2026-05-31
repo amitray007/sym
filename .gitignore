@@ -70,3 +70,6 @@ slack/manifest.yml
 .parcel-cache
 .eslintcache
 tmp/
+
+# Personal server provisioning scripts (custom /data setup, not part of the build)
+dev/
