@@ -239,6 +239,8 @@ const TOOL_VERBS: Record<string, string> = {
   set_status: 'updating your status',
   add_reminder: 'setting a reminder',
   delete_message: 'deleting its message',
+  find_tools: 'finding the right tool',
+  call_tool: 'running a connector tool',
   // NOTE: no entry for set_plan / present_* — they're in SILENT_TOOLS, so a
   // verb here would be dead (their start never reaches the shimmer/card).
 };
@@ -391,6 +393,15 @@ export async function runLoopPi(
   // beforeToolCall gates only natively-bridged built-ins; MCP confirm lives in call_tool.
   const descriptorMap = new Map<string, ToolDescriptor>(builtinDescriptors.map((d) => [d.name, d]));
 
+  // Tool names the UI status/task-card layer recognizes: built-ins + the
+  // on-demand meta-tools. find_tools/call_tool are real tool calls but aren't
+  // registered descriptors, so they must be listed here or their status gets
+  // dropped by the phantom-tool guard.
+  const knownToolNames = new Set<string>([
+    ...descriptorMap.keys(),
+    ...(mcpDescriptors.length > 0 ? ['find_tools', 'call_tool'] : []),
+  ]);
+
   // Accumulate streaming text deltas.
   const draftParts: string[] = [];
   // Track tool invocations for the receipt.
@@ -512,7 +523,7 @@ export async function runLoopPi(
       // Phantom tool guard: if some future model leaks a Harmony tool-call frame
       // that names a tool we never registered, drop the status update instead of
       // echoing garbage into the shimmer. Belt-and-braces for the demux fix.
-      if (!descriptorMap.has(toolName)) {
+      if (!knownToolNames.has(toolName)) {
         console.warn(`[pi] dropping status for unknown tool '${toolName}' (not in registry)`);
         return;
       }
@@ -533,7 +544,7 @@ export async function runLoopPi(
       // Same phantom-tool guard as start — we only surface end events for tools
       // we actually started. Pi feeds the error/result back to the model
       // internally; this is purely UI-facing.
-      if (!descriptorMap.has(toolName)) return;
+      if (!knownToolNames.has(toolName)) return;
       // Silent tools never fired onToolStart, so onToolEnd would be unbalanced.
       if (SILENT_TOOLS.has(toolName)) return;
       await opts.onToolEnd?.(event.toolCallId, event.isError);
