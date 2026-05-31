@@ -239,8 +239,7 @@ const TOOL_VERBS: Record<string, string> = {
   set_status: 'updating your status',
   add_reminder: 'setting a reminder',
   delete_message: 'deleting its message',
-  find_tools: 'finding the right tool',
-  call_tool: 'running a connector tool',
+  // find_tools / call_tool are specialized from args in friendlyVerb (below).
   // NOTE: no entry for set_plan / present_* — they're in SILENT_TOOLS, so a
   // verb here would be dead (their start never reaches the shimmer/card).
 };
@@ -267,7 +266,31 @@ const SILENT_TOOLS: ReadonlySet<string> = new Set([
   'present_table',
 ]);
 
-function friendlyVerb(toolName: string): string {
+/** "sentry__search_issues" → "sentry: search issues" for readable status. */
+function humanizeMcpName(name: string): string {
+  const sep = name.indexOf('__');
+  if (sep <= 0) return name.replace(/_/g, ' ');
+  return `${name.slice(0, sep)}: ${name.slice(sep + 2).replace(/_/g, ' ')}`;
+}
+
+/**
+ * Friendly status verb. find_tools/call_tool are generic meta-tools, so we
+ * specialize from their args — the underlying connector tool / the query —
+ * instead of showing "running a connector tool" for every call.
+ */
+function friendlyVerb(toolName: string, args?: unknown): string {
+  if (toolName === 'call_tool') {
+    const name = (args as { name?: unknown } | undefined)?.name;
+    return typeof name === 'string' && name.length > 0
+      ? `running ${humanizeMcpName(name)}`
+      : 'running a connector tool';
+  }
+  if (toolName === 'find_tools') {
+    const query = (args as { query?: unknown } | undefined)?.query;
+    return typeof query === 'string' && query.trim().length > 0
+      ? `finding tools for “${query.trim()}”`
+      : 'finding the right tool';
+  }
   return TOOL_VERBS[toolName] ?? `using ${toolName}`;
 }
 
@@ -534,7 +557,7 @@ export async function runLoopPi(
       toolsInvoked.push(toolName);
       // Re-arm the "writing" status so the next text_delta after this tool flips it again.
       emittedWritingStatus = false;
-      const verb = friendlyVerb(toolName);
+      const verb = friendlyVerb(toolName, event.args);
       await opts.onStatus?.(`is ${verb}…`);
       await opts.onToolStart?.(event.toolCallId, verb);
     }
