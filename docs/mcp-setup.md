@@ -112,51 +112,90 @@ pnpm --filter @sym/agent qa:mcp
 
 ## Deploy setup (Docker / Dokploy)
 
-The container's filesystem is **ephemeral** and it runs as a **non-you UID**, so
-durable credential state needs a **persistent volume**, and Model B's
-config dir must be relocated onto it.
+The container's filesystem is **ephemeral** — rebuilt from the image on every
+redeploy/restart, so anything installed _into a running container_ is lost. Only
+**two** things survive: the **image** (what the Dockerfile baked) and the
+**`/data` volume**. The image is deliberately **CLI-agnostic** (generic runtimes
+only: node, python3, curl), so the actual tools live on `/data` and you never
+edit the Dockerfile to add one.
 
-### Persistent volume — the only durable state
+### Persistent tools on /data (no CLIs in the image)
 
-Mount one persistent volume at `/data` and route both the OAuth store and any
-ambient config dirs into it. Conversation stays stateless (the Slack thread is
-the memory); `/data` is the only thing that must survive restarts.
+Mount one persistent volume at `/data`. `/data/bin` is on `PATH`, so any binary
+or npm-global you put there is found by name. Provision it **once** (via
+`docker exec`); it then survives every redeploy — install + login are not lost.
 
 ```
-/data                       (persistent volume — writable, UID-matched, secured, backed up)
-  credentials.db            ← SYM_DB_PATH=/data/credentials.db   (OAuth store, AES-256-GCM)
-  gcloud/                    ← Model B: CLOUDSDK_CONFIG=/data/gcloud
-    credentials.db           (refresh token, 0600)
-    access_tokens.db         (mutable cache — gcloud writes this at RUNTIME → volume must be writable)
-    configurations/
+/data                         (persistent volume — the ONLY durable state)
+  bin/                        ← on PATH: tool binaries + npm-global bins land here
+    shopify-dev-mcp           (npm: @shopify/dev-mcp)
+    gcloud-mcp                (npm: @google-cloud/gcloud-mcp)
+    gcloud  → ../google-cloud-sdk/bin/gcloud   (symlink)
+  lib/                        ← npm-global modules (npm i -g --prefix /data)
+  google-cloud-sdk/           ← the gcloud SDK, extracted here
+  gcloud/                     ← CLOUDSDK_CONFIG=/data/gcloud  (the login — persists)
+  credentials.db              ← SYM_DB_PATH=/data/credentials.db  (OAuth store)
 ```
 
-### Model B on the deploy
+### One-time provisioning (run once via `docker exec`)
 
-```jsonc
-{
-  "name": "gcloud",
-  "transport": {
-    "kind": "stdio",
-    "command": "gcloud-mcp-server",
-    "env": { "CLOUDSDK_CONFIG": "/data/gcloud" },
-  }, // relocate gcloud's config onto the volume
-  "auth": { "kind": "ambient" },
-  "trust": false,
-}
-```
-
-One-time login on the box (headless):
+Runs as the `node` user (the image's `USER`), writing to the node-owned volume —
+no root, no rebuild. Re-run only if you ever recreate the volume.
 
 ```bash
-docker exec -it <container> sh
-CLOUDSDK_CONFIG=/data/gcloud gcloud auth application-default login --no-launch-browser
-# paste the URL into a browser, authorize, paste the code back
+docker exec -it sym-agent bash      # Dokploy: use its container terminal
+
+# 1) MCP server packages → /data  (bins land in /data/bin, already on PATH)
+npm i -g --prefix /data @shopify/dev-mcp@1.13.3 @google-cloud/gcloud-mcp@0.5.3
+
+# 2) gcloud SDK → /data, expose its `gcloud` on PATH  (uses python3 from the image)
+cd /tmp
+curl -sSLO https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
+tar -xf google-cloud-cli-linux-x86_64.tar.gz -C /data       # → /data/google-cloud-sdk
+ln -sf /data/google-cloud-sdk/bin/gcloud /data/bin/gcloud
+# (arm64 host? use google-cloud-cli-linux-arm.tar.gz)
+
+# 3) one-time gcloud login → writes creds to /data/gcloud (persists on the volume)
+export CLOUDSDK_CONFIG=/data/gcloud
+gcloud auth login --no-launch-browser
+gcloud auth application-default login --no-launch-browser   # if the server uses ADC
+gcloud config set project <PROJECT_ID>
 ```
 
-Requirements: the `gcloud` CLI must be in the image and on `PATH`; the container's
-UID must be able to read/write `/data/gcloud` (the `0600` files); back up `/data`
-(it holds plaintext refresh tokens).
+### Connector config (point commands at the /data tools)
+
+No `npx` at runtime → no package download, no connect timeout. Commands resolve
+from `/data/bin` via `PATH`:
+
+```jsonc
+[
+  {
+    "name": "shopify-dev-mcp",
+    "transport": { "kind": "stdio", "command": "shopify-dev-mcp" },
+    "trust": false,
+  },
+  {
+    "name": "gcloud",
+    "transport": {
+      "kind": "stdio",
+      "command": "gcloud-mcp",
+      "env": { "CLOUDSDK_CONFIG": "/data/gcloud" },
+    },
+    "auth": { "kind": "ambient" },
+    "trust": false,
+  },
+]
+```
+
+After provisioning, **redeploy** (or restart): the tools _and_ the gcloud login
+are all on `/data`, so the connectors come up immediately and stay up across
+future redeploys. Back up `/data` — it holds the plaintext gcloud refresh token
+plus the OAuth store.
+
+> uvx-based (Python) MCP servers work the same way: install `uv` onto `/data/bin`
+> (its installer is a single `curl`) and point the connector at it. Static-token
+> servers (e.g. `@sentry/mcp-server`) need no login at all — `npm i -g --prefix
+/data` the package and pass the token via `inject.env`.
 
 ---
 
@@ -173,7 +212,7 @@ UID must be able to read/write `/data/gcloud` (the `0600` files); back up `/data
 | Single identity per dir        | one config dir = one identity/project                                   | separate dirs per identity                                                 |
 | Expiry / revocation            | gcloud ADC refresh tokens can be revoked / expire                       | re-login runbook; Sym can't refresh (the CLI owns it)                      |
 | UID / permissions              | login writes `0600` as one user; container runs as another              | chown the volume / match UID                                               |
-| CLI must be in the image       | the MCP server shells `gcloud`                                          | bake the CLI into the deploy image                                         |
+| CLI must be reachable          | the MCP server shells `gcloud`                                          | install the CLI onto `/data/bin` (on `PATH`) — persists, no image change   |
 
 **Security:** keep ambient / infra-mutating connectors **confirm-gated** (do not
 `trust:true` something that can change infra under your full identity).

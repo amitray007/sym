@@ -4,13 +4,13 @@
 # pnpm + turbo monorepo: builds apps/agent and its workspace deps
 # (@sym/kernel, @sym/contracts, @sym/adapter-slack), then runs the agent.
 #
-# Connectors that shell out to a CLI need that CLI present in this image:
-#   - npx-based stdio MCP servers (shopify, sentry, notion, influxdb, gcloud-mcp):
-#     npx ships with node — already available.
-#   - uvx-based (Python) MCP servers (mcp-google-sheets, celery-flower-mcp):
-#     uncomment the `uv` install block in the runtime stage.
-#   - ambient gcloud (Model B): also install the gcloud CLI, and mount a
-#     persistent volume at /data (CLOUDSDK_CONFIG=/data/gcloud) for its login.
+# This image is deliberately CLI-AGNOSTIC. It bakes in only GENERIC runtimes
+# (node, python3, curl) — never a specific CLI. The actual tools you connect —
+# CLIs like gcloud and the MCP server packages (shopify-dev-mcp, gcloud-mcp, …) —
+# are installed ONCE onto the persistent /data volume, NOT into this image. They
+# live on /data/bin (which is on PATH), so they survive every redeploy/restart
+# and you never edit this file to add a tool.
+# See docs/mcp-setup.md → "Persistent tools on /data (no CLIs in the image)".
 
 FROM node:24-slim AS base
 ENV PNPM_HOME="/pnpm" PATH="/pnpm:$PATH"
@@ -23,20 +23,25 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
 
-# ---- runtime: node only; run the built agent ----
+# ---- runtime: generic runtimes only; real tools live on the /data volume ----
 FROM node:24-slim AS runtime
 ENV NODE_ENV=production
 
-# Uncomment if you use uvx-based (Python) MCP servers:
-# RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
-#   && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
-#   && rm -rf /var/lib/apt/lists/*
+# Generic runtimes ONLY (not specific CLIs):
+#   python3        — runtime many CLIs need (e.g. gcloud); node is already here
+#   curl, ca-certs — fetch tools + TLS during the one-time /data provisioning
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl python3 \
+  && rm -rf /var/lib/apt/lists/*
 
-# /data is the ONLY durable state: the OAuth token store (SYM_DB_PATH) and any
-# ambient CLI config dirs (Model B). Mount a persistent volume here in prod.
-RUN mkdir -p /data && chown node:node /data
+# /data is the ONLY durable state: persistent CLIs / MCP servers + their auth +
+# the OAuth store. Anything on /data/bin is on PATH, so volume-installed tools
+# (gcloud, shopify-dev-mcp, gcloud-mcp, …) "just work" after a one-time setup —
+# and survive redeploys because the volume persists. Provision once, never lose.
+RUN mkdir -p /data/bin && chown -R node:node /data
+ENV PATH="/data/bin:$PATH"
+
 COPY --from=build --chown=node:node /repo /repo
-
 USER node
 WORKDIR /repo/apps/agent
 ENV SYM_DB_PATH=/data/credentials.db
