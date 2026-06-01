@@ -109,18 +109,50 @@ export function binaryOnPath(bin: string): boolean {
   return false;
 }
 
+/** A CLI connector as shown on every surface: binary, description, PATH health. */
+export interface CliConnector {
+  bin: string;
+  description?: string;
+  /** Whether the binary resolves on $PATH (the CLI equivalent of "connected"). */
+  onPath: boolean;
+}
+
 /**
- * A one-line boot/status summary of the CLI connectors: each allowlisted binary
- * with whether it's actually on PATH (✓/✗), so a missing CLI is obvious in the
- * logs instead of silently failing only when the agent tries to run it.
+ * The CANONICAL CLI-connector list — the single source every surface renders
+ * (sym status / connector ls / tools / apply, the boot + reload logs, and the
+ * TUI). Effective allowlist bins (or the described/featured ones under `*`),
+ * each with its description and a PATH check.
+ */
+export function resolveCliConnectors(): CliConnector[] {
+  const allow = resolveAllowlist();
+  const describe = loadCliDescribe();
+  const bins = allow === '*' ? resolveCliCapabilities().map((c) => c.bin) : [...allow].sort();
+  return bins.map((bin) => ({
+    bin,
+    ...(describe[bin] !== undefined ? { description: describe[bin] } : {}),
+    onPath: binaryOnPath(bin),
+  }));
+}
+
+/** Whether the run_cli allowlist is the `*` wildcard (any installed CLI). */
+export function isCliWildcard(): boolean {
+  return resolveAllowlist() === '*';
+}
+
+/**
+ * A one-line boot/log summary of the CLI connectors: each binary with whether
+ * it's actually on PATH (✓/✗), so a missing CLI is obvious in the logs instead
+ * of silently failing only when the agent tries to run it.
  */
 export function cliConnectorsSummary(): string {
-  const allow = resolveAllowlist();
-  if (allow === '*') return 'run_cli allowlist: * (any installed CLI is runnable)';
-  const bins = [...allow].sort();
-  if (bins.length === 0) return 'no CLI connectors configured';
-  const parts = bins.map((b) => `${b} ${binaryOnPath(b) ? '✓' : '✗ (not on PATH)'}`);
-  return `${bins.length} CLI connector(s): ${parts.join(', ')}`;
+  const conns = resolveCliConnectors();
+  const parts = conns.map((c) => `${c.bin} ${c.onPath ? '✓' : '✗ (not on PATH)'}`);
+  if (isCliWildcard()) {
+    return `run_cli allowlist: * (any installed CLI)${parts.length > 0 ? ` — described: ${parts.join(', ')}` : ''}`;
+  }
+  return conns.length === 0
+    ? 'no CLI connectors configured'
+    : `${conns.length} CLI connector(s): ${parts.join(', ')}`;
 }
 
 /**

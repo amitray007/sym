@@ -21,7 +21,11 @@ vi.mock('../src/cli/config-store.js', () => ({
   writeConfigFile: vi.fn(),
   removeConnector: vi.fn((c) => ({ next: c, removed: false })),
 }));
-vi.mock('../src/mcp/source.js', () => ({ configPath: () => '/tmp/x.json' }));
+vi.mock('../src/mcp/source.js', () => ({
+  configPath: () => '/tmp/x.json',
+  loadCliAllow: () => undefined,
+  loadCliDescribe: () => ({}),
+}));
 
 const ESC = String.fromCharCode(27);
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 50));

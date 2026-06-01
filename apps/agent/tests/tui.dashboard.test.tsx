@@ -17,7 +17,11 @@ vi.mock('../src/cli/admin-client.js', () => ({
 vi.mock('../src/cli/config-store.js', () => ({
   loadConfigFile: vi.fn(() => ({ version: 1, mcpServers: [] })),
 }));
-vi.mock('../src/mcp/source.js', () => ({ configPath: () => '/tmp/x.json' }));
+vi.mock('../src/mcp/source.js', () => ({
+  configPath: () => '/tmp/x.json',
+  loadCliAllow: () => undefined,
+  loadCliDescribe: () => ({}),
+}));
 
 import { applyReload, fetchConnectors, testConnector } from '../src/cli/admin-client.js';
 

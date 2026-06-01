@@ -11,6 +11,7 @@ import React, { useEffect, useState } from 'react';
 import { applyReload, fetchConnectors, testConnector } from '../../cli/admin-client.js';
 import { loadConfigFile } from '../../cli/config-store.js';
 import { configPath } from '../../mcp/source.js';
+import { isCliWildcard, resolveCliConnectors } from '../../run-cli.js';
 import { Footer, Frame, Header, Table, type Cell } from '../ui/components.js';
 import { COLORS, healthGlyph } from '../ui/theme.js';
 import { useInterval } from '../ui/useInterval.js';
@@ -123,10 +124,26 @@ export function Dashboard({
     ];
   });
 
+  // CLI connectors (config + PATH check) — same canonical source as every surface.
+  const cliConnectors = resolveCliConnectors();
+  const cliWildcard = isCliWildcard();
+
   return (
     <Frame title="sym · connectors">
       <Header reachable={reachable} totalTools={totalTools} configPath={configPath()} />
       <Table columns={COLUMNS} rows={rows} selected={cursor} />
+      <Box flexDirection="column" marginTop={1}>
+        <Text dimColor>CLIs (run_cli):</Text>
+        {cliConnectors.length === 0 && !cliWildcard && <Text dimColor> (none)</Text>}
+        {cliConnectors.map((c) => (
+          <Text key={c.bin}>
+            {'  '}
+            <Text color={c.onPath ? COLORS.ok : COLORS.bad}>{c.onPath ? '●' : '○'}</Text> {c.bin}
+            {c.description !== undefined ? <Text dimColor> — {c.description}</Text> : null}
+          </Text>
+        ))}
+        {cliWildcard && <Text dimColor> …plus any installed CLI (*)</Text>}
+      </Box>
       {selected?.error !== undefined && (
         <Box marginTop={1}>
           <Text color={COLORS.warn}>

@@ -54,7 +54,12 @@ import {
   writeConfigFile,
 } from './config-store.js';
 import { configPath, loadCliDescribe } from '../mcp/source.js';
-import { resolveAllowlist, resolveCliCapabilities } from '../run-cli.js';
+import {
+  isCliWildcard,
+  resolveAllowlist,
+  resolveCliCapabilities,
+  resolveCliConnectors,
+} from '../run-cli.js';
 
 import type { ConnectorConfig, TransportConfig } from '../mcp/config.js';
 
@@ -120,6 +125,21 @@ function offlineDetails(): ConnectorDetail[] {
   }));
 }
 
+/**
+ * The CLI-connectors block, rendered IDENTICALLY on every surface (status,
+ * connector ls, tools, apply). Each line: `bin ✓/✗ — description`.
+ */
+function cliConnectorLines(): string[] {
+  const conns = resolveCliConnectors();
+  const lines = conns.map(
+    (c) =>
+      `  ${c.bin} ${c.onPath ? '✓' : '✗ (not on PATH)'}${c.description !== undefined ? ` — ${c.description}` : ''}`,
+  );
+  if (isCliWildcard()) lines.push('  …plus ANY other installed CLI (allowlist is *)');
+  else if (conns.length === 0) lines.push('  (no CLI connectors)');
+  return lines;
+}
+
 /** A fixed-width text table of connector rows (dense, aligned, agent-readable). */
 function renderConnectorTable(connectors: ConnectorDetail[]): string {
   if (connectors.length === 0) return '  (no connectors)';
@@ -148,8 +168,6 @@ async function statusCommand(json: boolean): Promise<number> {
     connectors = offlineDetails();
   }
   const totalTools = connectors.reduce((sum, c) => sum + c.tools, 0);
-  const allow = resolveAllowlist();
-  const cliList = allow === '*' ? ['*'] : [...allow].sort();
 
   if (json) {
     console.log(
@@ -160,7 +178,7 @@ async function statusCommand(json: boolean): Promise<number> {
           totalTools,
           connectorCount: connectors.length,
           connectors,
-          cli: { allow: cliList, wildcard: allow === '*' },
+          cli: { connectors: resolveCliConnectors(), wildcard: isCliWildcard() },
         },
         null,
         2,
@@ -175,7 +193,8 @@ async function statusCommand(json: boolean): Promise<number> {
       (reachable ? '' : '   (offline view — start Sym for live health/tools)'),
   );
   console.log(renderConnectorTable(connectors));
-  console.log(`\nCLIs (run_cli): ${allow === '*' ? '* (any installed CLI)' : cliList.join(', ')}`);
+  console.log('\nCLIs (run_cli):');
+  for (const line of cliConnectorLines()) console.log(line);
   return 0;
 }
 
@@ -199,10 +218,6 @@ async function connectorCommand(args: string[], json: boolean): Promise<number> 
     } catch {
       // agent down — wiring-only view.
     }
-    const allow = resolveAllowlist();
-    const describe = loadCliDescribe();
-    const cliBins = allow === '*' ? resolveCliCapabilities().map((c) => c.bin) : [...allow].sort();
-
     const mcp = cfg.mcpServers.map((s) => {
       const d = live.get(s.name);
       const health = d === undefined ? 'unknown' : healthWord(d);
@@ -215,20 +230,21 @@ async function connectorCommand(args: string[], json: boolean): Promise<number> 
         ...(d?.error !== undefined ? { error: d.error } : {}),
       };
     });
-    const cli = cliBins.map((bin) => ({
-      name: bin,
+    const cli = resolveCliConnectors().map((c) => ({
+      name: c.bin,
       kind: 'cli' as const,
-      description: describe[bin],
+      onPath: c.onPath,
+      ...(c.description !== undefined ? { description: c.description } : {}),
     }));
 
     if (json) {
       console.log(
-        JSON.stringify({ connectors: [...mcp, ...cli], cliWildcard: allow === '*' }, null, 2),
+        JSON.stringify({ connectors: [...mcp, ...cli], cliWildcard: isCliWildcard() }, null, 2),
       );
       return 0;
     }
     console.log(`connectors (${path}):`);
-    if (mcp.length === 0 && cli.length === 0 && allow !== '*') console.log('  (none)');
+    if (mcp.length === 0 && cli.length === 0 && !isCliWildcard()) console.log('  (none)');
     for (const m of mcp) {
       console.log(
         `  ${m.name.padEnd(20)} mcp   ${m.health.padEnd(10)} ${m.tools} tool(s)   via find_tools → call_tool`,
@@ -236,9 +252,11 @@ async function connectorCommand(args: string[], json: boolean): Promise<number> 
       if (m.error !== undefined) console.log(`      ⚠ ${m.error}`);
     }
     for (const c of cli) {
-      console.log(`  ${c.name.padEnd(20)} cli   ${c.description ?? 'run via run_cli'}`);
+      console.log(
+        `  ${c.name.padEnd(20)} cli   ${c.onPath ? '✓'.padEnd(10) : '✗'.padEnd(10)} ${c.description ?? 'run via run_cli'}`,
+      );
     }
-    if (allow === '*') {
+    if (isCliWildcard()) {
       console.log('  …plus ANY other installed CLI (allowlist is *) — run via run_cli');
     }
     return 0;
@@ -388,15 +406,17 @@ async function toolsCommand(name: string | undefined, json: boolean): Promise<nu
   );
 
   // CLIs are capabilities too — surface them in the catalog so a tool search
-  // covers both MCP tools and run_cli CLIs.
-  const allow = resolveAllowlist();
-  const describe = loadCliDescribe();
-  const cliList = allow === '*' ? ['*'] : [...allow].sort();
-  const cli = cliList.map((bin) => ({ bin, description: describe[bin] }));
-
+  // covers both MCP tools and run_cli CLIs (same renderer as every other surface).
   if (json) {
     console.log(
-      JSON.stringify({ catalog, cli: { allow: cliList, describe, via: 'run_cli' } }, null, 2),
+      JSON.stringify(
+        {
+          catalog,
+          cli: { connectors: resolveCliConnectors(), wildcard: isCliWildcard(), via: 'run_cli' },
+        },
+        null,
+        2,
+      ),
     );
     return 0;
   }
@@ -407,10 +427,7 @@ async function toolsCommand(name: string | undefined, json: boolean): Promise<nu
     for (const t of c.tools) console.log(`  ${t.name} — ${t.description}`);
   }
   console.log(`\nCLIs (via run_cli):`);
-  for (const c of cli) {
-    console.log(`  ${c.bin}${c.description !== undefined ? ` — ${c.description}` : ''}`);
-  }
-  if (allow === '*') console.log('  (* = any installed CLI; run ["<bin>","--help"] to learn one)');
+  for (const line of cliConnectorLines()) console.log(line);
   return 0;
 }
 
@@ -459,17 +476,23 @@ async function showCommand(name: string | undefined, json: boolean): Promise<num
   return 0;
 }
 
-/** Pretty one-line-per-connector reload report. */
+/** Reload report: MCP reconcile result + the CLI connectors (same on every surface). */
 function printReload(r: ReloadResponse, json: boolean): void {
   if (json) {
-    console.log(JSON.stringify(r, null, 2));
+    console.log(
+      JSON.stringify({ ...r, cli: resolveCliConnectors(), cliWildcard: isCliWildcard() }, null, 2),
+    );
     return;
   }
   console.log(`source: ${r.source} (${r.path}) — ${r.totalTools} tool(s) live`);
+  console.log('MCP connectors:');
+  if (r.connectors.length === 0) console.log('  (none)');
   for (const c of r.connectors) {
     const err = c.error !== undefined ? ` — ${c.error}` : '';
     console.log(`  ${c.status.padEnd(20)} ${c.name}  ${c.tools} tool(s)${err}`);
   }
+  console.log('CLIs (run_cli):');
+  for (const line of cliConnectorLines()) console.log(line);
 }
 
 // ---------------------------------------------------------------------------
