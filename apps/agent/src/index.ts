@@ -17,6 +17,10 @@ async function main(): Promise<void> {
   loadDotenv({ path: resolve(repoRoot, '.env'), override: true });
 
   const config = loadAgentConfig();
+  // Boot visibility: which model is actually loaded. FIREWORKS_MODEL is read here
+  // once at boot, so this is the authoritative answer to "what model am I running?"
+  // (a stale env or a `.env` override is otherwise invisible).
+  console.info(`[agent] model: ${config.fireworksModel} (fireworks @ ${config.fireworksBaseUrl})`);
   // Boot visibility: make it obvious where connector config came from (the config
   // file, the legacy env var, or nothing). An unset source otherwise produces no
   // log at all, which makes "why no MCP tools?" murky.

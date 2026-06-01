@@ -539,7 +539,16 @@ if (argv[1] !== undefined && fileURLToPath(import.meta.url) === argv[1]) {
   main(argv.slice(2))
     .then((code) => process.exit(code))
     .catch((err: unknown) => {
-      console.error(`sym: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`sym: ${msg}`);
+      // A cwd-relative config path fails when `sym` is run from a non-writable
+      // dir (e.g. `/`). Point at the fix rather than leaving a bare EACCES.
+      if (/EACCES|permission denied|mkdir/i.test(msg)) {
+        console.error(
+          `hint: set SYM_CONFIG_PATH to a writable path, e.g. ` +
+            `export SYM_CONFIG_PATH=/data/sym/config.json   (current: ${configPath()})`,
+        );
+      }
       process.exit(1);
     });
 }

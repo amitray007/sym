@@ -54,7 +54,12 @@ RUN printf '#!/bin/sh\nexec node /repo/apps/agent/dist/cli/index.js "$@"\n' > /u
 
 USER node
 WORKDIR /repo/apps/agent
+# Persistent, node-writable defaults on the /data volume. Both the agent and the
+# `sym` CLI (run via `docker exec`, which inherits these) resolve here — so the
+# connector config + secret store survive redeploys and `sym` never falls back to
+# a cwd-relative `.sym/` (which fails when run from `/`).
 ENV SYM_DB_PATH=/data/credentials.db
+ENV SYM_CONFIG_PATH=/data/sym/config.json
 # AGENT_PORT (default 3001) — the HTTP server Slack + the OAuth callback reach.
 EXPOSE 3001
 CMD ["node", "dist/index.js"]
