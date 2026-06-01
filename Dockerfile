@@ -42,6 +42,16 @@ RUN mkdir -p /data/bin && chown -R node:node /data
 ENV PATH="/data/bin:$PATH"
 
 COPY --from=build --chown=node:node /repo /repo
+
+# `sym` — the agent's OWN connector control-plane CLI (status/apply/mcp/secret +
+# the interactive TUI). Unlike the third-party tools on /data, sym is first-party
+# and belongs in the image. Expose it on PATH via a thin wrapper so, inside the
+# container, `sym status` / `sym menu` "just work":
+#     docker exec -it <container> sym status
+#     docker exec -it <container> sym menu     # interactive TUI (needs -it)
+RUN printf '#!/bin/sh\nexec node /repo/apps/agent/dist/cli/index.js "$@"\n' > /usr/local/bin/sym \
+  && chmod +x /usr/local/bin/sym
+
 USER node
 WORKDIR /repo/apps/agent
 ENV SYM_DB_PATH=/data/credentials.db
