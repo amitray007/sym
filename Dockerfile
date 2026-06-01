@@ -57,6 +57,13 @@ RUN printf '#!/bin/sh\nexec node /repo/apps/agent/dist/cli/index.js "$@"\n' > /u
 
 USER node
 WORKDIR /repo/apps/agent
+# HOME on the /data volume — the key to PERSISTENT CLI AUTH. CLIs write their
+# logins to $HOME/.config/… (gcloud, gh), ~/.netrc, ~/.sentryclirc, etc.; with
+# HOME on /data those credentials survive redeploys with ZERO per-tool config.
+# Tool-agnostic, and inherited by `docker exec` sessions too, so a login you do
+# in the terminal is the same one the running agent uses. Created at boot (CMD)
+# in case the volume is fresh.
+ENV HOME=/data/home
 # Persistent, node-writable defaults on the /data volume. Both the agent and the
 # `sym` CLI (run via `docker exec`, which inherits these) resolve here — so the
 # connector config + secret store survive redeploys and `sym` never falls back to
@@ -65,4 +72,6 @@ ENV SYM_DB_PATH=/data/credentials.db
 ENV SYM_CONFIG_PATH=/data/sym/config.json
 # AGENT_PORT (default 3001) — the HTTP server Slack + the OAuth callback reach.
 EXPOSE 3001
-CMD ["node", "dist/index.js"]
+# Ensure $HOME exists (fresh volume) before starting; `exec` keeps node as PID 1
+# so SIGTERM still reaches it for graceful shutdown.
+CMD ["sh", "-c", "mkdir -p \"$HOME\" && exec node dist/index.js"]

@@ -231,13 +231,24 @@ or npm-global you put there is found by name. Provision it **once** (via
 /data                         (persistent volume — the ONLY durable state)
   bin/                        ← on PATH: tool binaries + npm-global bins land here
     shopify-dev-mcp           (npm: @shopify/dev-mcp)
-    gcloud-mcp                (npm: @google-cloud/gcloud-mcp)
+    sentry-cli                (npm: @sentry/cli)
     gcloud  → ../google-cloud-sdk/bin/gcloud   (symlink)
   lib/                        ← npm-global modules (npm i -g --prefix /data)
   google-cloud-sdk/           ← the gcloud SDK, extracted here
-  gcloud/                     ← CLOUDSDK_CONFIG=/data/gcloud  (the login — persists)
-  credentials.db              ← SYM_DB_PATH=/data/credentials.db  (OAuth store)
+  home/                       ← HOME=/data/home — EVERY CLI's login persists here
+    .config/gcloud, .config/gh, .sentryclirc, …   (no per-tool config needed)
+  gcloud/                     ← CLOUDSDK_CONFIG=/data/gcloud  (explicit gcloud dir)
+  sym/config.json             ← SYM_CONFIG_PATH  (connectors)
+  credentials.db              ← SYM_DB_PATH  (encrypted secret/OAuth store)
 ```
+
+**Binaries persist but auth didn't?** That's the classic trap: a CLI installs to
+`/data/bin` (persists) but writes its _login_ to `$HOME/.config/…` on the
+ephemeral container layer (lost on redeploy). The image fixes this by setting
+**`HOME=/data/home`** — so every CLI's credentials (`gcloud`, `gh`, `~/.netrc`,
+`~/.sentryclirc`, …) land on the volume, tool-agnostically, with no per-tool env.
+Token CLIs are even simpler: put the token in a **Dokploy env var** (`GH_TOKEN`,
+`SENTRY_AUTH_TOKEN`) — Dokploy re-injects it every boot, so it always persists.
 
 ### One-time provisioning (run once via `docker exec`)
 
