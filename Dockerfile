@@ -30,8 +30,11 @@ ENV NODE_ENV=production
 # Generic runtimes ONLY (not specific CLIs):
 #   python3        — runtime many CLIs need (e.g. gcloud); node is already here
 #   curl, ca-certs — fetch tools + TLS during the one-time /data provisioning
+#   git            — generic VCS; gh shells out to it (clone/checkout) and the
+#                    agent uses it via run_cli. apt-based (not a static binary),
+#                    so it belongs in the image, not on /data.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl python3 \
+      ca-certificates curl python3 git \
   && rm -rf /var/lib/apt/lists/*
 
 # /data is the ONLY durable state: persistent CLIs / MCP servers + their auth +
