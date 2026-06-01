@@ -5,11 +5,27 @@ import {
   contextBlock,
   dividerBlock,
   headerBlock,
+  linkCell,
   markdownBlock,
   mrkdwnElement,
   plainTextElement,
   sectionBlock,
 } from '../src/blocks.js';
+
+describe('linkCell', () => {
+  it('uses the given text as the link label', () => {
+    const cell = linkCell('open issue', 'https://x.test/i/1');
+    expect(cell.elements[0].elements[0]).toEqual({
+      type: 'link',
+      url: 'https://x.test/i/1',
+      text: 'open issue',
+    });
+  });
+  it('falls back to the URL when text is empty (Slack rejects empty link text)', () => {
+    const cell = linkCell('   ', 'https://x.test/i/1');
+    expect(cell.elements[0].elements[0].text).toBe('https://x.test/i/1');
+  });
+});
 
 describe('markdownBlock', () => {
   it('produces correct shape', () => {

@@ -1273,7 +1273,10 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
                     // Plain names in cells — tokens would render literally here.
                     const raw = resolver.flattenToNames(rewrittenTexts[i] ?? d.match.text);
                     const preview = raw.length > 140 ? `${raw.slice(0, 140)}…` : raw;
-                    const text = `${preview}${rep}`;
+                    // A message with no text (bot/app alerts whose content is in
+                    // attachments) would leave the cell empty — Slack rejects an
+                    // empty link cell. Use a readable placeholder instead.
+                    const text = `${preview}${rep}`.trim() || '(no message text)';
                     return [
                       { text: whoCell },
                       { text: whereCell },

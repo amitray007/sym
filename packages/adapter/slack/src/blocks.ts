@@ -175,11 +175,19 @@ export function rawTextCell(text: string): RawTextCell {
   return { type: 'raw_text', text };
 }
 
-/** A `rich_text` table cell that renders `text` as a link to `url`. */
+/**
+ * A `rich_text` table cell that renders `text` as a link to `url`.
+ *
+ * Slack rejects a `link` element with EMPTY text (`invalid_arguments`), which
+ * happens for search results whose message has no top-level text (e.g. bot/app
+ * alerts whose content is in attachments). Fall back to the URL as the label so
+ * the cell is always valid.
+ */
 export function linkCell(text: string, url: string): RichTextLinkCell {
+  const label = text.trim().length > 0 ? text : url;
   return {
     type: 'rich_text',
-    elements: [{ type: 'rich_text_section', elements: [{ type: 'link', url, text }] }],
+    elements: [{ type: 'rich_text_section', elements: [{ type: 'link', url, text: label }] }],
   };
 }
 
