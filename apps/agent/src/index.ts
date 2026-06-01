@@ -5,7 +5,7 @@ import { serve } from '@hono/node-server';
 import { config as loadDotenv } from 'dotenv';
 
 import { loadAgentConfig } from './config.js';
-import { initMcpPool, McpDispatcher } from './mcp/index.js';
+import { configPath, initMcpPool, McpDispatcher } from './mcp/index.js';
 import { createServer } from './server.js';
 
 async function main(): Promise<void> {
@@ -17,13 +17,20 @@ async function main(): Promise<void> {
   loadDotenv({ path: resolve(repoRoot, '.env'), override: true });
 
   const config = loadAgentConfig();
-  // Boot visibility: make it obvious whether SYM_MCP_SERVERS was picked up. An unset
-  // var otherwise produces no log at all, which makes "why no MCP tools?" murky.
+  // Boot visibility: make it obvious where connector config came from (the config
+  // file, the legacy env var, or nothing). An unset source otherwise produces no
+  // log at all, which makes "why no MCP tools?" murky.
   const mcpNames = config.mcpServers.map((s) => s.name);
+  const sourceLabel =
+    config.mcpConfigSource === 'file'
+      ? `config file (${configPath()})`
+      : config.mcpConfigSource === 'env'
+        ? 'SYM_MCP_SERVERS env'
+        : 'no source';
   console.info(
     mcpNames.length > 0
-      ? `[mcp] ${mcpNames.length} connector(s) configured: ${mcpNames.join(', ')}`
-      : '[mcp] no MCP servers configured (SYM_MCP_SERVERS unset or empty)',
+      ? `[mcp] ${mcpNames.length} connector(s) from ${sourceLabel}: ${mcpNames.join(', ')}`
+      : `[mcp] no MCP servers configured (${sourceLabel})`,
   );
 
   // Warm the MCP pool at boot (not lazily on the first turn) so every connector's

@@ -4,9 +4,10 @@
  * one owner, one model provider. No secrets are logged.
  */
 
-import { parseMcpServers } from './mcp/config.js';
+import { loadConnectorConfigs } from './mcp/source.js';
 
 import type { ConnectorConfig } from './mcp/config.js';
+import type { ConfigSource } from './mcp/source.js';
 /** Runtime behavior knobs — all optional, all have safe defaults. */
 export interface BehaviorConfig {
   /**
@@ -58,10 +59,13 @@ export interface AgentConfig {
   /** Runtime behavior toggles. */
   behavior: BehaviorConfig;
   /**
-   * MCP connector configs parsed from `SYM_MCP_SERVERS` (JSON array env var).
-   * Empty array when not configured — no MCP tools, no crash.
+   * MCP connector configs — loaded from the config file (`SYM_CONFIG_PATH`,
+   * default `.sym/config.json`) when present, else the legacy `SYM_MCP_SERVERS`
+   * env var. Empty array when neither is configured — no MCP tools, no crash.
    */
   mcpServers: ConnectorConfig[];
+  /** Where `mcpServers` was loaded from — for boot-log diagnostics. */
+  mcpConfigSource: ConfigSource;
 }
 
 const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
@@ -81,6 +85,7 @@ function taskCardAfter(raw: string | undefined): 'delete' | 'collapse' {
 }
 
 export function loadAgentConfig(): AgentConfig {
+  const connectors = loadConnectorConfigs();
   return {
     port: Number(process.env['AGENT_PORT'] ?? '3001'),
     slackSigningSecret: required('SLACK_SIGNING_SECRET'),
@@ -99,6 +104,7 @@ export function loadAgentConfig(): AgentConfig {
       taskCardAfter: taskCardAfter(process.env['TASK_CARD_AFTER']),
       ownerPostMarker: process.env['OWNER_POST_MARKER'] !== 'false',
     },
-    mcpServers: parseMcpServers(process.env['SYM_MCP_SERVERS']),
+    mcpServers: connectors.mcpServers,
+    mcpConfigSource: connectors.source,
   };
 }

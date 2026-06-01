@@ -24,6 +24,7 @@ const config: AgentConfig = {
     ownerPostMarker: true,
   },
   mcpServers: [],
+  mcpConfigSource: 'none',
 };
 
 function sign(ts: string, body: string): string {

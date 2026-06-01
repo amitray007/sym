@@ -128,15 +128,28 @@ export function parseMcpServers(raw: string | undefined): ConnectorConfig[] {
     return [];
   }
 
+  return parseConnectorArray(parsed, 'SYM_MCP_SERVERS');
+}
+
+/**
+ * Parse an already-decoded value (e.g. the `mcpServers` field of the config
+ * file, or `JSON.parse(SYM_MCP_SERVERS)`) into typed connector configs.
+ *
+ * Fail-open: a non-array is logged and yields `[]`; each malformed entry is
+ * logged and skipped. Never throws into startup.
+ */
+export function parseConnectorArray(
+  parsed: unknown,
+  label = 'connector config',
+): ConnectorConfig[] {
   if (!Array.isArray(parsed)) {
-    console.warn('[mcp] SYM_MCP_SERVERS must be a JSON array — ignoring all MCP servers');
+    console.warn(`[mcp] ${label} must be a JSON array — ignoring all MCP servers`);
     return [];
   }
 
   const configs: ConnectorConfig[] = [];
   for (let i = 0; i < parsed.length; i++) {
-    const entry = parsed[i];
-    const result = parseEntry(entry, i);
+    const result = parseEntry(parsed[i], i);
     if (result !== null) {
       configs.push(result);
     }
