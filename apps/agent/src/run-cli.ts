@@ -28,7 +28,9 @@ export interface RunCliResult {
 
 export type Allowlist = Set<string> | '*';
 
-const DEFAULT_ALLOWLIST = 'gog,gcloud,gsutil,bq,sentry-cli,gh,jq';
+// `sym` is included so the agent can introspect its OWN connectors/tools/health
+// (`sym status`, `sym tools`, `sym show <name>` — all read-only, dense output).
+const DEFAULT_ALLOWLIST = 'sym,gog,gcloud,gsutil,bq,sentry-cli,gh,jq';
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_CHARS = 20_000;
 

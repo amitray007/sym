@@ -76,19 +76,29 @@ It is baked into the image (`bin: sym`); locally run it via
 `pnpm --filter @sym/agent sym …`.
 
 ```bash
-sym status                              # live connectors + tool count (GET /admin/status)
-sym apply                               # reconcile the running agent to the file (POST /admin/reload)
+# read (all support --json for exact machine/agent parsing):
+sym status                              # agent health + EVERY connector's health + tool counts (table)
+sym tools [name]                        # full live tool catalog (name + description)
+sym show <name>                         # one connector: config + live health + its tools
+sym mcp ls                              # config-file connectors, enriched with live health
+sym secret ls                           # stored secret NAMES only — never values
 
-sym mcp ls                              # list connectors in the config file
+# write:
+sym apply                               # reconcile the running agent to the file (POST /admin/reload)
 sym mcp add --name sentry --command sentry-mcp          # stdio shorthand
 sym mcp add --name remote --url https://host/mcp        # http shorthand
-sym mcp add --json '{"name":"x","transport":{…},"auth":{…}}'   # full generic shape (auth/injection)
+sym mcp add --spec '{"name":"x","transport":{…},"auth":{…}}'   # full generic shape (auth/injection)
 sym mcp rm --name sentry
-
 sym secret set sentry SENTRY_AUTH_TOKEN sntrys_…        # → encrypted store (or pipe the value via stdin)
-sym secret ls                           # stored secret NAMES only — never values
 sym secret rm sentry SENTRY_AUTH_TOKEN
 ```
+
+**The agent reads `sym` too.** `sym` is on the default `run_cli` allowlist, so the
+agent can introspect its own setup — `["sym","status"]`, `["sym","tools"]`,
+`["sym","show","<connector>"]` (append `"--json"` for structured output). The
+read commands emit dense, complete data precisely because that output becomes
+model context. (Mutating verbs are also runnable; gate them with
+`SYM_CLI_CONFIRM=on` if you don't want the agent changing config unprompted.)
 
 Mutating `mcp` verbs write the file and then best-effort `apply`; if the agent
 isn't running yet, the file is still written and the change lands on next start.

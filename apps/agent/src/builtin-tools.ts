@@ -161,7 +161,7 @@ const RUN_CLI_DESCRIPTOR: ToolDescriptor = {
   // Runs an allowlisted CLI by argv (no shell). NOT confirm-gated (no
   // destructiveHint) — the binary allowlist (SYM_CLI_ALLOWLIST) is the boundary.
   description:
-    'Run an allowlisted command-line tool (e.g. gog, gcloud, sentry-cli, gh, jq) by argv array — no shell, so no pipes/redirects. To learn a CLI you do not know, FIRST run it with --help (e.g. ["gog","gmail","--help"]) or "<subcommand> --help", then run the real command. Returns stdout, stderr, and exit code. argv[0] must be a bare allowlisted binary name.',
+    'Run an allowlisted command-line tool (e.g. sym, gog, gcloud, sentry-cli, gh, jq) by argv array — no shell, so no pipes/redirects. To inspect YOUR OWN connectors + tools, run ["sym","status"], ["sym","tools"], or ["sym","show","<connector>"] (add "--json" for structured output). To learn a CLI you do not know, FIRST run it with --help (e.g. ["gog","gmail","--help"]) or "<subcommand> --help", then run the real command. Returns stdout, stderr, and exit code. argv[0] must be a bare allowlisted binary name.',
   parameters: {
     type: 'object',
     properties: {
