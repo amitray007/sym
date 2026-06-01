@@ -154,13 +154,19 @@ describe('sym read commands (real wire)', () => {
     expect(data.tools.map((t) => t.name)).toContain('get_env');
   });
 
-  it('mcp ls --json merges config wiring with live health', async () => {
-    const [code, out] = await run('mcp', 'ls', '--json');
+  it('connector ls --json lists MCP + CLI connectors with live health', async () => {
+    const [code, out] = await run('connector', 'ls', '--json');
     expect(code).toBe(0);
     const data = JSON.parse(out) as {
-      connectors: { name: string; live: { ok: boolean } | null }[];
+      connectors: { name: string; kind: string; health?: string }[];
     };
     const echo = data.connectors.find((c) => c.name === 'echo');
-    expect(echo?.live?.ok).toBe(true);
+    expect(echo?.kind).toBe('mcp');
+    expect(echo?.health).toBe('connected');
+  });
+
+  it('the merged `sym mcp`/`sym cli` verbs are gone (redirect to connector)', async () => {
+    const [code] = await run('mcp', 'ls');
+    expect(code).toBe(1); // deprecation redirect → non-zero
   });
 });

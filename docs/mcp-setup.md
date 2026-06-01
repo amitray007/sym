@@ -75,30 +75,39 @@ through `sym` — a tool-agnostic control plane over the same file + admin seam.
 It is baked into the image (`bin: sym`); locally run it via
 `pnpm --filter @sym/agent sym …`.
 
+A **connector** is anything Sym reaches the outside world with — an **MCP**
+connector (structured tools, used via `find_tools` → `call_tool`) OR a **CLI**
+(used via `run_cli`). `sym connector` is the one surface for both.
+
 ```bash
-# read (all support --json for exact machine/agent parsing):
-sym status                              # agent health + EVERY connector's health + tool counts (table)
-sym tools [name]                        # full live tool catalog (name + description)
-sym show <name>                         # one connector: config + live health + its tools
-sym mcp ls                              # config-file connectors, enriched with live health
+# inspect (all support --json for exact machine/agent parsing):
+sym status                              # agent health + every connector + tool counts
+sym connector ls                        # ALL connectors (MCP + CLI): health, tools, descriptions
+sym connector show <name>               # one connector in full
+sym tools [name]                        # every tool — MCP tools (call_tool) + CLIs (run_cli)
 sym secret ls                           # stored secret NAMES only — never values
 
-# write:
-sym apply                               # reconcile the running agent to the file (POST /admin/reload)
-sym mcp add --name sentry --command sentry-mcp          # stdio shorthand
-sym mcp add --name remote --url https://host/mcp        # http shorthand
-sym mcp add --spec '{"name":"x","transport":{…},"auth":{…}}'   # full generic shape (auth/injection)
-sym mcp rm --name sentry
-sym secret set sentry SENTRY_AUTH_TOKEN sntrys_…        # → encrypted store (or pipe the value via stdin)
+# manage:
+sym connector add --name sentry --command sentry-mcp        # MCP, stdio
+sym connector add --name remote --url https://host/mcp      # MCP, http
+sym connector add --spec '{"name":"x","transport":{…},"auth":{…}}'   # MCP, full generic shape
+sym connector add --cli gcloud --desc "Google Cloud Platform CLI"    # CLI connector (allow + describe)
+sym connector rm <name>                 # remove a connector (MCP or CLI)
+sym apply                               # reconcile the running agent (POST /admin/reload)
+sym secret set sentry SENTRY_AUTH_TOKEN sntrys_…            # → encrypted store (or pipe via stdin)
 sym secret rm sentry SENTRY_AUTH_TOKEN
 ```
 
+CLI connectors ARE the `run_cli` allowlist — adding them with `--cli` builds an
+explicit allow set (replacing a `*` env default). `sym mcp …` / `sym cli …` were
+merged into `sym connector`.
+
 **The agent reads `sym` too.** `sym` is on the default `run_cli` allowlist, so the
-agent can introspect its own setup — `["sym","status"]`, `["sym","tools"]`,
-`["sym","show","<connector>"]` (append `"--json"` for structured output). The
-read commands emit dense, complete data precisely because that output becomes
-model context. (Mutating verbs are also runnable; gate them with
-`SYM_CLI_CONFIRM=on` if you don't want the agent changing config unprompted.)
+agent introspects its own setup — `["sym","status"]`, `["sym","connector","ls"]`,
+`["sym","tools"]` (append `"--json"`). It also `find_tools` (which searches BOTH
+MCP connectors and CLIs) and **prefers MCP tools** when one fits, falling back to
+`run_cli` only otherwise. (Mutating verbs are runnable; gate with
+`SYM_CLI_CONFIRM=1` if you don't want the agent changing config unprompted.)
 
 Mutating `mcp` verbs write the file and then best-effort `apply`; if the agent
 isn't running yet, the file is still written and the change lands on next start.

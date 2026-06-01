@@ -12,23 +12,24 @@
  * dense, complete data (and support `--json` for exact parsing). The output of
  * `sym status` / `sym tools` / `sym show` is meant to be readable as context.
  *
- * Verbs:
- *   sym status [--json]                     agent health + every connector's health + tools
- *   sym tools [name] [--json]               full tool catalog (name + description) — live
- *   sym show <name> [--json]                one connector: config + health + tools
- *   sym apply [--json]                      reconcile the running agent to the file
- *   sym mcp ls [--json]                     connectors in the config file + live health
- *   sym mcp add --spec '<ConnectorConfig>'  add/replace a connector (full generic shape)
- *   sym mcp add --name N --command C [--arg A]… [--trust]   stdio shorthand
- *   sym mcp add --name N --url U [--trust]                  http shorthand
- *   sym mcp rm  --name N                     remove a connector
- *   sym secret set <connector> <field> [value]   (value via stdin if omitted)
- *   sym secret ls [--json]                   list stored secret names (no values)
- *   sym secret rm  <connector> <field>       delete a stored secret
+ * One surface — `sym connector` — manages BOTH kinds of capability:
+ *   - MCP connectors (transport × auth × injection; used via call_tool)
+ *   - CLI connectors (a binary + description; used via run_cli)
  *
- * Mutating `mcp` verbs write the file, then best-effort `apply` so changes go
- * live immediately; if the agent isn't reachable the file is still written and
- * the change lands on next start (or a later `sym apply`).
+ * Verbs:
+ *   sym status [--json]                          agent health + every connector + tool counts
+ *   sym connector ls [--json]                    all connectors (MCP + CLI)
+ *   sym connector show <name> [--json]           one connector in full
+ *   sym connector add --name N --command/--url/--spec   add an MCP connector
+ *   sym connector add --cli <bin> [--desc "…"]   add a CLI connector
+ *   sym connector rm <name>                      remove a connector (MCP or CLI)
+ *   sym tools [name] [--json]                    every tool (MCP tools + CLIs)
+ *   sym apply [--json]                           reconcile the running agent to the file
+ *   sym secret set|ls|rm                         manage encrypted secrets
+ *
+ * Adding/removing an MCP connector best-effort `apply`s so it goes live without a
+ * restart; if the agent isn't reachable the file is still written. (`sym mcp` /
+ * `sym cli` were merged into `sym connector`.)
  */
 
 import { argv } from 'node:process';
@@ -53,38 +54,35 @@ import {
   writeConfigFile,
 } from './config-store.js';
 import { configPath, loadCliDescribe } from '../mcp/source.js';
-import { resolveAllowlist } from '../run-cli.js';
+import { resolveAllowlist, resolveCliCapabilities } from '../run-cli.js';
 
 import type { ConnectorConfig, TransportConfig } from '../mcp/config.js';
 
 const HELP = `sym — connector control plane
 
-  sym                                          launch the interactive menu (TUI) on a terminal
-  sym menu                                     launch the interactive menu explicitly
+A "connector" is anything Sym reaches the outside world with: an MCP connector
+(structured tools, used via find_tools → call_tool) OR a CLI (used via run_cli).
+One surface manages both.
 
-Read (add --json for machine/agent-parseable output):
-  sym status                                   agent health + each connector's health + tool count
-  sym tools [name]                             full live tool catalog (name + description)
-  sym show <name>                              one connector: config + health + its tools
-  sym mcp ls                                   connectors in the config file (+ live health)
-  sym cli ls                                   the run_cli allowlist (CLIs the agent may run)
-  sym secret ls                                stored secret names (never values)
+  sym  /  sym menu                              interactive menu (TUI)
 
-Write:
+Inspect (add --json for machine/agent-parseable output):
+  sym status                                   agent health + every connector + tool counts
+  sym connector ls                             all connectors (MCP + CLI): health, tools, descriptions
+  sym connector show <name>                    one connector in full
+  sym tools [name]                             every tool — MCP tools (call_tool) + CLIs (run_cli)
+
+Manage:
+  sym connector add --name N --command C       add an MCP connector (stdio; repeat --arg per token)
+  sym connector add --name N --url U [--trust]  add an MCP connector (http)
+  sym connector add --spec '<ConnectorConfig>' add an MCP connector (full generic shape)
+  sym connector add --cli <bin> --desc "…"     add a CLI connector (allow + describe it)
+  sym connector rm <name>                      remove a connector (MCP or CLI)
   sym apply                                    reconcile the running agent to the config file
-  sym mcp add --spec '<ConnectorConfig JSON>'  add/replace a connector (full generic shape)
-  sym mcp add --name N --command C [--arg A]…   stdio shorthand (repeat --arg per token)
-  sym mcp add --name N --url U [--trust]        http shorthand
-  sym mcp rm --name N                           remove a connector
-  sym cli add <bin> [--desc "what it's for"]    allow a CLI for run_cli (additive; describe it)
-  sym cli desc <bin> <text…>                     set/update a CLI's description
-  sym cli set <a,b,c>                           replace the whole allowlist (e.g. restrict from *)
-  sym cli rm <bin>…                             disallow a CLI
-  sym secret set <connector> <field> [value]   store a secret (value via stdin if omitted)
-  sym secret rm <connector> <field>            delete a stored secret
+  sym secret set|ls|rm                         manage encrypted secrets (never printed)
 
-Secrets live in the encrypted store (SYM_ENCRYPTION_KEY); the config file holds
-wiring only. The config file is SYM_CONFIG_PATH (default .sym/config.json).`;
+Connectors live in SYM_CONFIG_PATH (default .sym/config.json); secrets in the
+encrypted store (SYM_ENCRYPTION_KEY).`;
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -181,101 +179,174 @@ async function statusCommand(json: boolean): Promise<number> {
   return 0;
 }
 
-/** `sym cli` — view/manage the run_cli allowlist (stored in the config file). */
-function cliCommand(args: string[], json: boolean): number {
+/**
+ * `sym connector` — the ONE surface for capabilities, MCP and CLI alike.
+ *   ls            list every connector (MCP + CLI) with health/tools/description
+ *   show <name>   one connector in full
+ *   add …         add an MCP connector (--name/--command/--url/--spec) or a CLI
+ *                 connector (--cli <bin> [--desc "…"])
+ *   rm <name>     remove a connector (MCP or CLI, whichever owns the name)
+ */
+async function connectorCommand(args: string[], json: boolean): Promise<number> {
   const verb = args[0];
   const path = configPath();
 
   if (verb === undefined || verb === 'ls' || verb === 'list') {
+    const cfg = loadConfigFile(path);
+    const live = new Map<string, ConnectorDetail>();
+    try {
+      for (const d of await fetchConnectors()) live.set(d.name, d);
+    } catch {
+      // agent down — wiring-only view.
+    }
     const allow = resolveAllowlist();
     const describe = loadCliDescribe();
-    const list = allow === '*' ? ['*'] : [...allow].sort();
-    const source = loadConfigFile(path).cli !== undefined ? 'config file' : 'env/default';
+    const cliBins = allow === '*' ? resolveCliCapabilities().map((c) => c.bin) : [...allow].sort();
+
+    const mcp = cfg.mcpServers.map((s) => {
+      const d = live.get(s.name);
+      const health = d === undefined ? 'unknown' : healthWord(d);
+      return {
+        name: s.name,
+        kind: 'mcp' as const,
+        transport: s.transport.kind,
+        health,
+        tools: d?.tools ?? 0,
+        ...(d?.error !== undefined ? { error: d.error } : {}),
+      };
+    });
+    const cli = cliBins.map((bin) => ({
+      name: bin,
+      kind: 'cli' as const,
+      description: describe[bin],
+    }));
+
     if (json) {
       console.log(
-        JSON.stringify({ allow: list, describe, wildcard: allow === '*', source }, null, 2),
+        JSON.stringify({ connectors: [...mcp, ...cli], cliWildcard: allow === '*' }, null, 2),
       );
       return 0;
     }
-    console.log(`run_cli allowlist (${source}):`);
-    for (const bin of list) {
-      console.log(`  ${bin}${describe[bin] !== undefined ? ` — ${describe[bin]}` : ''}`);
+    console.log(`connectors (${path}):`);
+    if (mcp.length === 0 && cli.length === 0 && allow !== '*') console.log('  (none)');
+    for (const m of mcp) {
+      console.log(
+        `  ${m.name.padEnd(20)} mcp   ${m.health.padEnd(10)} ${m.tools} tool(s)   via find_tools → call_tool`,
+      );
+      if (m.error !== undefined) console.log(`      ⚠ ${m.error}`);
+    }
+    for (const c of cli) {
+      console.log(`  ${c.name.padEnd(20)} cli   ${c.description ?? 'run via run_cli'}`);
     }
     if (allow === '*') {
-      console.log('  (* = any installed CLI; restrict with `sym cli set <a,b,c>`)');
+      console.log('  …plus ANY other installed CLI (allowlist is *) — run via run_cli');
     }
     return 0;
+  }
+
+  if (verb === 'show') {
+    const name = args[1];
+    if (name === undefined)
+      throw new Error('connector show requires a name: sym connector show <name>');
+    const cfg = loadConfigFile(path);
+    if (cfg.mcpServers.some((s) => s.name === name)) {
+      return showCommand(name, json); // MCP detail: config + health + tools
+    }
+    const allow = resolveAllowlist();
+    const known =
+      allow === '*' ? resolveCliCapabilities().some((c) => c.bin === name) : allow.has(name);
+    if (known || allow === '*') {
+      const desc = loadCliDescribe()[name];
+      if (json) {
+        console.log(
+          JSON.stringify(
+            { name, kind: 'cli', description: desc ?? null, use: `run_cli ["${name}", …]` },
+            null,
+            2,
+          ),
+        );
+        return 0;
+      }
+      console.log(`connector: ${name} (cli)`);
+      console.log(`  ${desc ?? '(no description)'}`);
+      console.log(`  use: run_cli ["${name}", …]   (run ["${name}","--help"] to learn it)`);
+      return 0;
+    }
+    console.log(`no connector named '${name}'`);
+    return 1;
   }
 
   if (verb === 'add') {
     const { values, positionals } = parseArgs({
       args: args.slice(1),
-      options: { desc: { type: 'string' } },
+      options: {
+        cli: { type: 'boolean' },
+        desc: { type: 'string' },
+        spec: { type: 'string' },
+        name: { type: 'string' },
+        command: { type: 'string' },
+        arg: { type: 'string', multiple: true },
+        url: { type: 'string' },
+        trust: { type: 'boolean' },
+      },
       allowPositionals: true,
     });
-    const bins = positionals.filter((b) => b.length > 0);
-    if (bins.length === 0) throw new Error('cli add requires binary names: sym cli add gh jq');
-    if (values.desc !== undefined && bins.length !== 1) {
-      throw new Error('--desc applies to a single binary: sym cli add gcloud --desc "…"');
-    }
-    const cfg = loadConfigFile(path);
-    // Seed a fresh allowlist from the current effective set so add is ADDITIVE,
-    // never a surprise narrowing of an env/default allowlist.
-    let base = cfg.cli?.allow;
-    if (base === undefined) {
-      const eff = resolveAllowlist();
-      base = eff === '*' ? ['*'] : [...eff];
-    }
-    let next = setCliAllow(cfg, [...base, ...bins]);
-    if (values.desc !== undefined && bins[0] !== undefined) {
-      next = setCliDesc(next, bins[0], values.desc);
-    }
-    writeConfigFile(path, next);
-    console.log(`allowlist: ${(next.cli?.allow ?? []).join(', ')}`);
-    if ((next.cli?.allow ?? []).includes('*')) {
-      console.log('  note: still contains * (any CLI). Run `sym cli rm "*"` to enforce the list.');
-    }
-    return 0;
-  }
 
-  if (verb === 'desc' || verb === 'describe') {
-    const bin = args[1];
-    const text = args.slice(2).join(' ').trim();
-    if (bin === undefined || text.length === 0) {
-      throw new Error('cli desc requires: sym cli desc <bin> <description text>');
+    if (values.cli === true) {
+      const bin = positionals[0];
+      if (bin === undefined || bin.length === 0) {
+        throw new Error('cli connector needs a binary: sym connector add --cli <bin> [--desc "…"]');
+      }
+      const cfg = loadConfigFile(path);
+      // CLI connectors ARE the run_cli allowlist — build it explicitly (no `*`).
+      const base = (cfg.cli?.allow ?? []).filter((b) => b !== '*');
+      let next = setCliAllow(cfg, [...base, bin]);
+      if (values.desc !== undefined) next = setCliDesc(next, bin, values.desc);
+      writeConfigFile(path, next);
+      console.log(
+        `added cli connector: ${bin}${values.desc !== undefined ? ` — ${values.desc}` : ''}`,
+      );
+      console.log(`run_cli allowlist: ${(next.cli?.allow ?? []).join(', ')}`);
+      return 0;
     }
-    writeConfigFile(path, setCliDesc(loadConfigFile(path), bin, text));
-    console.log(`described ${bin}: ${text}`);
-    return 0;
-  }
 
-  if (verb === 'set') {
-    const bins = args
-      .slice(1)
-      .flatMap((s) => s.split(','))
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    if (bins.length === 0) throw new Error('cli set requires a list: sym cli set sym,gcloud,gh,jq');
-    const next = setCliAllow(loadConfigFile(path), bins);
-    writeConfigFile(path, next);
-    console.log(`allowlist: ${(next.cli?.allow ?? []).join(', ')}`);
+    const connector = connectorFromAddFlags({
+      ...(values.spec !== undefined ? { json: values.spec } : {}),
+      ...(values.name !== undefined ? { name: values.name } : {}),
+      ...(values.command !== undefined ? { command: values.command } : {}),
+      ...(values.arg !== undefined ? { arg: values.arg } : {}),
+      ...(values.url !== undefined ? { url: values.url } : {}),
+      ...(values.trust !== undefined ? { trust: values.trust } : {}),
+    });
+    writeConfigFile(path, upsertConnector(loadConfigFile(path), connector));
+    console.log(`added mcp connector: ${connector.name}`);
+    await tryApply(json);
     return 0;
   }
 
   if (verb === 'rm' || verb === 'remove') {
-    const bins = args.slice(1).filter((b) => b.length > 0);
-    if (bins.length === 0) throw new Error('cli rm requires binary names: sym cli rm gh');
-    const { next, removed } = removeCli(loadConfigFile(path), bins);
-    writeConfigFile(path, next);
-    console.log(
-      removed.length > 0
-        ? `removed ${removed.join(', ')} → allowlist: ${(next.cli?.allow ?? []).join(', ') || '(empty)'}`
-        : 'nothing removed (not in the allowlist)',
-    );
-    return 0;
+    const name = args[1];
+    if (name === undefined || name.length === 0) {
+      throw new Error('connector rm requires a name: sym connector rm <name>');
+    }
+    const cfg = loadConfigFile(path);
+    if (cfg.mcpServers.some((s) => s.name === name)) {
+      writeConfigFile(path, removeConnector(cfg, name).next);
+      console.log(`removed mcp connector: ${name}`);
+      await tryApply(json);
+      return 0;
+    }
+    const { next, removed } = removeCli(cfg, [name]);
+    if (removed.length > 0) {
+      writeConfigFile(path, next);
+      console.log(`removed cli connector: ${name}`);
+      return 0;
+    }
+    console.log(`no connector named '${name}'`);
+    return 1;
   }
 
-  throw new Error(`unknown 'cli' verb '${verb}' — see 'sym help'`);
+  throw new Error(`unknown 'connector' verb '${verb ?? ''}' — see 'sym help'`);
 }
 
 /** `sym tools [name]` — the live tool catalog (name + description). */
@@ -423,7 +494,7 @@ export function connectorFromAddFlags(values: {
   }
 
   if (values.name === undefined || values.name.length === 0) {
-    throw new Error('mcp add requires --name (or --spec)');
+    throw new Error('connector add requires --name (or --spec, or --cli for a CLI connector)');
   }
 
   let transport: TransportConfig;
@@ -436,7 +507,7 @@ export function connectorFromAddFlags(values: {
       ...(values.arg !== undefined && values.arg.length > 0 ? { args: values.arg } : {}),
     };
   } else {
-    throw new Error('mcp add requires --command (stdio) or --url (http), or use --spec');
+    throw new Error('connector add requires --command (stdio) or --url (http), or --spec');
   }
 
   return {
@@ -444,97 +515,6 @@ export function connectorFromAddFlags(values: {
     transport,
     ...(values.trust === true ? { trust: true } : {}),
   };
-}
-
-async function mcpCommand(args: string[], json: boolean): Promise<number> {
-  const verb = args[0];
-  const path = configPath();
-
-  if (verb === 'ls' || verb === 'list') {
-    const cfg = loadConfigFile(path);
-    // Best-effort live health to enrich the wiring view.
-    const live = new Map<string, ConnectorDetail>();
-    try {
-      for (const d of await fetchConnectors()) live.set(d.name, d);
-    } catch {
-      // agent down — wiring-only view.
-    }
-    if (json) {
-      const rows = cfg.mcpServers.map((s) => ({
-        name: s.name,
-        transport: s.transport.kind,
-        auth: s.auth?.kind ?? 'none',
-        trust: s.trust === true,
-        live: live.get(s.name) ?? null,
-      }));
-      console.log(JSON.stringify({ path, connectors: rows }, null, 2));
-      return 0;
-    }
-    if (cfg.mcpServers.length === 0) {
-      console.log(`(no connectors in ${path})`);
-      return 0;
-    }
-    console.log(`${cfg.mcpServers.length} connector(s) in ${path}:`);
-    for (const s of cfg.mcpServers) {
-      const d = live.get(s.name);
-      const health = d !== undefined ? `  ${healthWord(d)} · ${d.tools} tool(s)` : '';
-      const trust = s.trust === true ? ' [trust]' : '';
-      console.log(
-        `  ${s.name.padEnd(20)} ${s.transport.kind.padEnd(6)} auth:${(s.auth?.kind ?? 'none').padEnd(7)}${trust}${health}`,
-      );
-    }
-    return 0;
-  }
-
-  if (verb === 'add') {
-    const { values } = parseArgs({
-      args: args.slice(1),
-      options: {
-        spec: { type: 'string' },
-        name: { type: 'string' },
-        command: { type: 'string' },
-        arg: { type: 'string', multiple: true },
-        url: { type: 'string' },
-        trust: { type: 'boolean' },
-      },
-      allowPositionals: false,
-    });
-    const connector = connectorFromAddFlags({
-      ...(values.spec !== undefined ? { json: values.spec } : {}),
-      ...(values.name !== undefined ? { name: values.name } : {}),
-      ...(values.command !== undefined ? { command: values.command } : {}),
-      ...(values.arg !== undefined ? { arg: values.arg } : {}),
-      ...(values.url !== undefined ? { url: values.url } : {}),
-      ...(values.trust !== undefined ? { trust: values.trust } : {}),
-    });
-    writeConfigFile(path, upsertConnector(loadConfigFile(path), connector));
-    console.log(`wrote ${connector.name} to ${path}`);
-    await tryApply(json);
-    return 0;
-  }
-
-  if (verb === 'rm' || verb === 'remove') {
-    const { values } = parseArgs({
-      args: args.slice(1),
-      options: { name: { type: 'string' } },
-      allowPositionals: true,
-    });
-    const name = values.name;
-    if (name === undefined || name.length === 0) {
-      throw new Error('mcp rm requires --name N');
-    }
-    const { next, removed } = removeConnector(loadConfigFile(path), name);
-    if (!removed) {
-      console.log(`no connector named '${name}' in ${path}`);
-      return 0;
-    }
-    writeConfigFile(path, next);
-    console.log(`removed ${name} from ${path}`);
-    await tryApply(json);
-    return 0;
-  }
-
-  throw new Error(`unknown 'mcp' verb '${verb ?? ''}' — see 'sym help'`);
 }
 
 /** Best-effort reconcile after a file edit; a down agent is a soft note, not an error. */
@@ -635,21 +615,29 @@ export async function main(rawArgs: string[]): Promise<number> {
     case 'status':
       return statusCommand(json);
 
+    case 'connector':
+    case 'connectors':
+    case 'conn':
+      return connectorCommand(args, json);
+
     case 'tools':
       return toolsCommand(args[0], json);
 
     case 'show':
-      return showCommand(args[0], json);
+      // `sym show <name>` is shorthand for `sym connector show <name>`.
+      return connectorCommand(['show', ...args], json);
 
     case 'apply':
       printReload(await applyReload(), json);
       return 0;
 
     case 'mcp':
-      return mcpCommand(args, json);
-
     case 'cli':
-      return cliCommand(args, json);
+      console.error(
+        `'sym ${group}' was merged into 'sym connector'. Use: sym connector ls | show <name> | ` +
+          `add (--name/--command/--url/--spec for MCP, or --cli <bin> --desc "…" for a CLI) | rm <name>.`,
+      );
+      return 1;
 
     case 'secret':
       return secretCommand(args, json);
