@@ -273,27 +273,30 @@ export function createServer(deps: ServerDeps): Hono {
         await handleTurn(turn, {
           ...buildTurnDeps(),
           replySink: async ({ text, blocks }) => {
-            await fetch(responseUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              // in_channel: visible in the conversation, matching the seed-post
-              // intent (the owner ran /sym here to get an answer here).
-              body: JSON.stringify({ response_type: 'in_channel', text, blocks }),
-            });
+            // Delivery ladder, best → most-compatible. Each tier logs why it
+            // fell through (postToResponseUrl surfaces the HTTP status + Slack
+            // error, which a bare fetch would swallow). `text` is the FULL body,
+            // so text-only tiers are never truncated.
+            //   1. in_channel + blocks — rich, visible to everyone (the /giphy
+            //      experience: the answer shows in the conversation).
+            //   2. in_channel + text  — Slack refused the rich blocks over
+            //      response_url (the `markdown`/table block types aren't
+            //      universally accepted on this surface).
+            //   3. ephemeral + text   — Slack refused in_channel into this
+            //      conversation; fall back so the owner who ran /sym still sees
+            //      the answer (only they see it, not the other participant).
+            if (await postToResponseUrl(responseUrl, { response_type: 'in_channel', text, blocks }))
+              return;
+            if (await postToResponseUrl(responseUrl, { response_type: 'in_channel', text })) return;
+            await postToResponseUrl(responseUrl, { response_type: 'ephemeral', text });
           },
         });
       } catch (runErr) {
         console.warn('[agent] /sym response_url answer failed — sending hint instead:', runErr);
-        await fetch(responseUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            response_type: 'ephemeral',
-            text: "I hit an error answering that here. Try again, or run `/sym` from our DM or a channel I'm in.",
-          }),
-        }).catch((postErr: unknown) =>
-          console.warn('[agent] /sym hint post failed (continuing):', postErr),
-        );
+        await postToResponseUrl(responseUrl, {
+          response_type: 'ephemeral',
+          text: "I hit an error answering that here. Try again, or run `/sym` from our DM or a channel I'm in.",
+        });
       }
       return;
     }
@@ -692,6 +695,32 @@ export function createServer(deps: ServerDeps): Hono {
 /** Cap a logged request string so a pasted wall of text can't flood the logs. */
 function truncate(s: string, max = 500): string {
   return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+/**
+ * POST a JSON payload to a Slack `response_url` and SURFACE failures. Critical
+ * subtlety: `fetch` does NOT reject on a 4xx/5xx, so a payload Slack refuses
+ * (e.g. an unsupported block type, or `invalid_blocks`) otherwise fails
+ * completely silently — the user sees nothing and nothing is logged. Returns
+ * true only on a 2xx; logs the status + body (Slack's error string) otherwise.
+ */
+async function postToResponseUrl(responseUrl: string, payload: unknown): Promise<boolean> {
+  try {
+    const res = await fetch(responseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '<no body>');
+      console.warn(`[agent] response_url POST rejected: HTTP ${res.status} — ${detail}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[agent] response_url POST threw (network?):', err);
+    return false;
+  }
 }
 
 /** True for IPv4/IPv6 loopback addresses (and the IPv4-mapped form). */

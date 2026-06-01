@@ -1019,18 +1019,21 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
   const body = await finalReplyBody(reply, planController, deps);
   const blocks = [...markdownBlocks(body), ...renderBlocks, receiptToContextBlock(reply.receipt)];
-  const text = clipNotif(body + fallbackSuffix);
+  const fullText = body + fallbackSuffix;
 
   // Delivery override (slash response_url): hand off instead of posting to a
-  // channel Sym may not be a member of.
+  // channel Sym may not be a member of. Pass the FULL body — for chat.postMessage
+  // `text` is only the notification preview (blocks carry the body, so we clip
+  // it), but a response_url sink may need to fall back to text-only delivery,
+  // where the text IS the content and must not be truncated.
   if (deps.replySink !== undefined) {
-    await deps.replySink({ text, blocks });
+    await deps.replySink({ text: fullText, blocks });
     return;
   }
 
   await deps.slackClient.chatPostMessage({
     channel: turn.channelId,
-    text,
+    text: clipNotif(fullText),
     blocks,
     // Reply in-thread when the turn is already threaded; top-level otherwise.
     ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),
