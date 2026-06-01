@@ -488,7 +488,7 @@ const SEARCH_MESSAGES_DESCRIPTOR: ToolDescriptor = {
   type: 'function',
   name: 'search_messages',
   description: [
-    'Search ACROSS the entire Slack workspace via `search.messages`. This is your PRIMARY tool for any "what did I do" / "who did I talk to" / "what happened" / "find messages about X" question — it covers every channel and DM the owner is in, not just one. Reach for it BEFORE read_channel / list_channels when the location of the answer is unknown.',
+    'Search the owner\'s SLACK messages across the workspace (`search.messages`). USE ONLY for questions ABOUT SLACK CONVERSATIONS — recaps, "what did I say/do in Slack", "who did I talk to", finding a past message or thread. It does NOT reach GitHub, cloud, issue trackers, an app\'s data, or ANY external system — for anything outside Slack use `find_tools` (connectors/CLIs), NEVER this tool. (e.g. "raise a PR", "list cloud resources", "what are my sentry issues" are NOT search_messages tasks.) Within Slack-content questions it is the primary tool — it covers every channel + DM, not one — so reach for it before read_channel / list_channels when you don\'t know the channel.',
     '',
     'Query syntax — Slack search modifiers (combine freely):',
     '  - `from:<@U042MBPUZ9N>`        find messages from a user by ID (most reliable)',
