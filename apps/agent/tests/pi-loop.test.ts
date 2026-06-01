@@ -34,7 +34,7 @@ vi.mock('@earendil-works/pi-agent-core', () => {
 
 import { ToolRegistry } from '@sym/kernel';
 
-import { nextWhimsicalStatus, runLoopPi, WHIMSY_WORDS } from '../src/pi/loop.js';
+import { friendlyVerb, nextWhimsicalStatus, runLoopPi, WHIMSY_WORDS } from '../src/pi/loop.js';
 
 import type { Model } from '@earendil-works/pi-ai';
 import type {
@@ -127,6 +127,53 @@ describe('nextWhimsicalStatus', () => {
       // "ing" / "over" / "thoughts" suffixes — keep the list playful, not random.
       expect(word).toMatch(/(ing|over|thoughts)$/);
     }
+  });
+});
+
+describe('friendlyVerb — specific task-row labels from args', () => {
+  it('run_cli shows the actual command, not "using run_cli"', () => {
+    expect(friendlyVerb('run_cli', { argv: ['gcloud', 'projects', 'list'] })).toBe(
+      'running gcloud projects list',
+    );
+    expect(friendlyVerb('run_cli', { argv: ['gh', 'issue', 'list', '--assignee', '@me'] })).toBe(
+      'running gh issue list --assignee @me',
+    );
+    expect(friendlyVerb('run_cli', {})).toBe('running a command');
+  });
+
+  it('clips a very long command', () => {
+    const long = friendlyVerb('run_cli', { argv: ['bq', 'query', 'SELECT '.repeat(40)] });
+    expect(long.length).toBeLessThanOrEqual('running '.length + 56);
+    expect(long.endsWith('…')).toBe(true);
+  });
+
+  it('call_tool shows the connector tool name', () => {
+    expect(friendlyVerb('call_tool', { name: 'sentry__list_issues' })).toBe(
+      'running sentry: list issues',
+    );
+  });
+
+  it('searches include the query', () => {
+    expect(friendlyVerb('web_search', { query: 'kimi k2 pricing' })).toBe(
+      'searching the web for “kimi k2 pricing”',
+    );
+    expect(friendlyVerb('search_messages', { query: 'from:@amit image-optimizer' })).toBe(
+      'searching Slack for “from:@amit image-optimizer”',
+    );
+    expect(friendlyVerb('find_tools', { query: 'github issues' })).toBe(
+      'finding tools for “github issues”',
+    );
+  });
+
+  it('fetch_url shows the host', () => {
+    expect(friendlyVerb('fetch_url', { url: 'https://docs.example.com/a/b?x=1' })).toBe(
+      'reading docs.example.com',
+    );
+  });
+
+  it('falls back to a humanized generic verb for unmapped tools', () => {
+    expect(friendlyVerb('read_channel', {})).toBe('reading the channel');
+    expect(friendlyVerb('some_new_tool', {})).toBe('using some new tool');
   });
 });
 
