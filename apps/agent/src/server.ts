@@ -292,9 +292,22 @@ export function createServer(deps: ServerDeps): Hono {
             // (the newer `markdown`/table block types aren't always accepted
             // over response_url).
             const responseType = isDm ? 'ephemeral' : 'in_channel';
-            if (await postToResponseUrl(responseUrl, { response_type: responseType, text, blocks }))
+            // Echo the command the same way the seed message does
+            // (`<@owner> via /sym: <prompt>`) so the response_url reply has the
+            // same attribution header as the in-channel experience — we can't
+            // post a separate seed here, so we prepend it to the answer itself.
+            const attribution = `<@${requester}> via \`/sym\`: ${seedText}`;
+            const headedText = `${attribution}\n\n${text}`;
+            const headedBlocks = [{ type: 'markdown', text: attribution }, ...blocks];
+            if (
+              await postToResponseUrl(responseUrl, {
+                response_type: responseType,
+                text: headedText,
+                blocks: headedBlocks,
+              })
+            )
               return;
-            await postToResponseUrl(responseUrl, { response_type: responseType, text });
+            await postToResponseUrl(responseUrl, { response_type: responseType, text: headedText });
           },
         });
       } catch (runErr) {
