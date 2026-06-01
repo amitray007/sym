@@ -97,7 +97,9 @@ export async function healthCheckTokens(ctx: WorkspaceContext): Promise<void> {
   }
 
   if (ctx.userSlackClient === undefined) {
-    console.log(
+    // warn (stderr), not log (stdout): the `sym ... --json` CLI captures console.log
+    // as its output, so a stray boot warning here races into and corrupts the JSON.
+    console.warn(
       '[agent] no SLACK_OWNER_USER_TOKEN configured — actor:user tools will fall back to the bot token where possible',
     );
   } else {
