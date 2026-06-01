@@ -1,68 +1,53 @@
 /**
- * `sym` TUI root — a main menu that routes to the self-contained screens.
- *
- * Pure navigation: arrow keys (or j/k) move the cursor, Enter opens a screen,
- * q quits. Each screen does its own data loading and returns here via onBack.
+ * `sym` TUI root — a Dashboard-home router. The Dashboard is the landing
+ * screen; it navigates into per-connector detail, the add/edit builder, and the
+ * secrets manager. Each screen returns home via onBack.
  */
 
-import { Box, Text, useApp, useInput } from 'ink';
+import { useApp } from 'ink';
 import React, { useState } from 'react';
 
-import { AddScreen } from './screens/AddScreen.js';
-import { SecretsScreen } from './screens/SecretsScreen.js';
-import { StatusScreen } from './screens/StatusScreen.js';
+import { BuilderScreen } from './screens/BuilderScreen.js';
+import { Dashboard } from './screens/Dashboard.js';
+import { DetailScreen } from './screens/DetailScreen.js';
+import { SecretsManager } from './screens/SecretsManager.js';
 
-type Screen = 'menu' | 'status' | 'add' | 'secrets';
-
-const ITEMS: { key: Exclude<Screen, 'menu'> | 'quit'; label: string }[] = [
-  { key: 'status', label: 'Status — live connectors & tools' },
-  { key: 'add', label: 'Add / replace a connector' },
-  { key: 'secrets', label: 'Secrets' },
-  { key: 'quit', label: 'Quit' },
-];
+type Screen =
+  | { name: 'dashboard' }
+  | { name: 'detail'; connector: string }
+  | { name: 'add' }
+  | { name: 'edit'; connector: string }
+  | { name: 'secrets' };
 
 export function App(): React.ReactElement {
   const { exit } = useApp();
-  const [screen, setScreen] = useState<Screen>('menu');
-  const [cursor, setCursor] = useState(0);
+  const [screen, setScreen] = useState<Screen>({ name: 'dashboard' });
+  const home = (): void => setScreen({ name: 'dashboard' });
 
-  useInput((input, key) => {
-    if (screen !== 'menu') return;
-    if (key.upArrow || input === 'k') {
-      setCursor((c) => (c + ITEMS.length - 1) % ITEMS.length);
-    } else if (key.downArrow || input === 'j') {
-      setCursor((c) => (c + 1) % ITEMS.length);
-    } else if (key.return) {
-      const item = ITEMS[cursor];
-      if (item === undefined || item.key === 'quit') exit();
-      else setScreen(item.key);
-    } else if (input === 'q') {
-      exit();
-    }
-  });
-
-  const back = (): void => setScreen('menu');
-  if (screen === 'status') return <StatusScreen onBack={back} />;
-  if (screen === 'add') return <AddScreen onBack={back} />;
-  if (screen === 'secrets') return <SecretsScreen onBack={back} />;
-
-  return (
-    <Box flexDirection="column">
-      <Text bold>sym — connector control plane</Text>
-      <Box flexDirection="column" marginTop={1}>
-        {ITEMS.map((item, i) => {
-          const selected = i === cursor;
-          return (
-            <Text key={item.key} {...(selected ? { color: 'cyan' } : {})}>
-              {selected ? '❯ ' : '  '}
-              {item.label}
-            </Text>
-          );
-        })}
-      </Box>
-      <Box marginTop={1}>
-        <Text dimColor>↑/↓ move · enter select · q quit</Text>
-      </Box>
-    </Box>
-  );
+  switch (screen.name) {
+    case 'detail':
+      return (
+        <DetailScreen
+          connector={screen.connector}
+          onBack={home}
+          onEdit={(connector) => setScreen({ name: 'edit', connector })}
+        />
+      );
+    case 'add':
+      return <BuilderScreen onBack={home} />;
+    case 'edit':
+      return <BuilderScreen connector={screen.connector} onBack={home} />;
+    case 'secrets':
+      return <SecretsManager onBack={home} />;
+    case 'dashboard':
+    default:
+      return (
+        <Dashboard
+          onOpen={(connector) => setScreen({ name: 'detail', connector })}
+          onAdd={() => setScreen({ name: 'add' })}
+          onSecrets={() => setScreen({ name: 'secrets' })}
+          onQuit={() => exit()}
+        />
+      );
+  }
 }

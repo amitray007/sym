@@ -1,44 +1,53 @@
 /**
- * TUI root menu — render + cursor navigation.
- *
- * Stays in the menu (does not Enter into a screen) so no screen side effects
- * (network/store) fire. The screens have their own tests.
+ * TUI root router — Dashboard is home; navigating to the builder and back works.
+ * Data deps are mocked; the render + navigation path is real.
  */
 
 import { render } from 'ink-testing-library';
 import React from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { App } from '../src/tui/app.js';
 
-// ESC [ B — the terminal "cursor down" sequence ink's useInput parses.
-const DOWN_ARROW = `${String.fromCharCode(27)}[B`;
+vi.mock('../src/cli/admin-client.js', () => ({
+  fetchConnectors: vi.fn().mockResolvedValue([]),
+  fetchConnectorTools: vi.fn().mockResolvedValue([]),
+  testConnector: vi.fn(),
+  applyReload: vi.fn(),
+}));
+vi.mock('../src/cli/config-store.js', () => ({
+  loadConfigFile: vi.fn(() => ({ version: 1, mcpServers: [] })),
+  upsertConnector: vi.fn((c, x) => ({ ...c, mcpServers: [x] })),
+  writeConfigFile: vi.fn(),
+  removeConnector: vi.fn((c) => ({ next: c, removed: false })),
+}));
+vi.mock('../src/mcp/source.js', () => ({ configPath: () => '/tmp/x.json' }));
+
+const ESC = String.fromCharCode(27);
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 50));
 
-describe('App menu', () => {
-  it('renders the title and all menu items', () => {
+describe('App router', () => {
+  it('lands on the Dashboard', async () => {
     const { lastFrame } = render(<App />);
-    const frame = lastFrame() ?? '';
-    expect(frame).toContain('sym — connector control plane');
-    expect(frame).toContain('Status');
-    expect(frame).toContain('Add / replace a connector');
-    expect(frame).toContain('Secrets');
-    expect(frame).toContain('Quit');
+    await vi.waitFor(() => expect(lastFrame() ?? '').toContain('sym · connectors'));
   });
 
-  it('starts with the cursor on the first item', () => {
-    const { lastFrame } = render(<App />);
-    const line = (lastFrame() ?? '').split('\n').find((l) => l.includes('Status')) ?? '';
-    expect(line).toContain('❯');
-  });
-
-  it('moves the cursor down with the arrow key', async () => {
+  it('navigates Dashboard → new-connector builder on "n", and back on escape', async () => {
     const { lastFrame, stdin } = render(<App />);
+    await vi.waitFor(() => expect(lastFrame() ?? '').toContain('sym · connectors'));
     await tick();
-    stdin.write(DOWN_ARROW);
+    stdin.write('n');
+    await vi.waitFor(() => expect(lastFrame() ?? '').toContain('new connector'));
     await tick();
-    const frame = lastFrame() ?? '';
-    const addLine = frame.split('\n').find((l) => l.includes('Add / replace')) ?? '';
-    expect(addLine).toContain('❯');
+    stdin.write(ESC); // escape
+    await vi.waitFor(() => expect(lastFrame() ?? '').toContain('sym · connectors'));
+  });
+
+  it('navigates Dashboard → secrets on "s"', async () => {
+    const { lastFrame, stdin } = render(<App />);
+    await vi.waitFor(() => expect(lastFrame() ?? '').toContain('sym · connectors'));
+    await tick();
+    stdin.write('s');
+    await vi.waitFor(() => expect(lastFrame() ?? '').toContain('sym · secrets'));
   });
 });
