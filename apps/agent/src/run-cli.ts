@@ -50,6 +50,31 @@ function isAllowed(list: Allowlist, binary: string): boolean {
   return list === '*' || list.has(binary);
 }
 
+/**
+ * A system-prompt block telling the model which CLIs it can drive via `run_cli`.
+ * Appended per turn (so it reflects the current allowlist) and points the model
+ * at `sym status` / `sym tools` for its LIVE connector + tool set.
+ */
+export function buildCliCatalog(allowlist: Allowlist): string {
+  const lines = [
+    '## Command-line tools (run_cli)',
+    '',
+    'Run an allowlisted CLI by argv array (no shell — no pipes/redirects).',
+  ];
+  if (allowlist === '*') {
+    lines.push(
+      'Allowlist: * — any CLI installed on the host is runnable. Run `["<cli>","--help"]` to discover one, then the real command.',
+    );
+  } else {
+    const names = [...allowlist].sort().join(', ');
+    lines.push(names.length > 0 ? `Available CLIs: ${names}.` : '(no CLIs allowlisted)');
+  }
+  lines.push(
+    'Run `["sym","status"]` or `["sym","tools"]` to see your CURRENT connectors + tools and their health — these change at runtime, so check rather than assume.',
+  );
+  return lines.join('\n');
+}
+
 function truncate(s: string, max: number): string {
   return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
 }

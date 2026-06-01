@@ -11,7 +11,7 @@ import { Agent } from '@earendil-works/pi-agent-core';
 import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
-import { isIntrospectionOnly } from '../run-cli.js';
+import { buildCliCatalog, isIntrospectionOnly, parseAllowlist } from '../run-cli.js';
 import {
   buildConnectorCatalog,
   makeCallTool,
@@ -409,9 +409,15 @@ export async function runLoopPi(
       : []),
   ];
 
-  // Append the connector catalog so the model knows what's reachable via find_tools.
+  // Append live capability catalogs so the model knows what's reachable THIS turn:
+  // MCP connectors (via find_tools/call_tool) + CLIs (via run_cli). Both are
+  // per-turn snapshots; the static prompt already tells the model to introspect
+  // (`sym status`/`sym tools`/`find_tools`) rather than trust a cached list.
   const catalog = buildConnectorCatalog(mcpDescriptors);
-  const systemPrompt = catalog.length > 0 ? `${baseSystemPrompt}\n\n${catalog}` : baseSystemPrompt;
+  const cliCatalog = buildCliCatalog(parseAllowlist(process.env['SYM_CLI_ALLOWLIST']));
+  const systemPrompt = [baseSystemPrompt, catalog, cliCatalog]
+    .filter((s) => s.length > 0)
+    .join('\n\n');
 
   // beforeToolCall gates only natively-bridged built-ins; MCP confirm lives in call_tool.
   const descriptorMap = new Map<string, ToolDescriptor>(builtinDescriptors.map((d) => [d.name, d]));

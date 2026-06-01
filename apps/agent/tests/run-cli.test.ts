@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { isIntrospectionOnly, parseAllowlist, runCli } from '../src/run-cli.js';
+import { buildCliCatalog, isIntrospectionOnly, parseAllowlist, runCli } from '../src/run-cli.js';
 
 describe('parseAllowlist', () => {
   it('parses comma-separated bare names', () => {
@@ -21,6 +21,23 @@ describe('parseAllowlist', () => {
   it('falls back to the default allowlist when unset', () => {
     const a = parseAllowlist(undefined);
     if (a !== '*') expect(a.has('gcloud')).toBe(true);
+  });
+});
+
+describe('buildCliCatalog', () => {
+  it('lists the allowlisted CLIs and points at sym introspection', () => {
+    const out = buildCliCatalog(parseAllowlist('gcloud,sentry-cli,sym'));
+    expect(out).toContain('run_cli');
+    expect(out).toContain('gcloud');
+    expect(out).toContain('sentry-cli');
+    expect(out).toContain('sym');
+    expect(out).toContain('"status"');
+    expect(out).toContain('"tools"');
+  });
+  it('explains the wildcard allowlist', () => {
+    const out = buildCliCatalog('*');
+    expect(out).toContain('*');
+    expect(out).toMatch(/--help/);
   });
 });
 
