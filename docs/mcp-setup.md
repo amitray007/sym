@@ -96,6 +96,14 @@ isn't running yet, the file is still written and the change lands on next start.
 and stores generic secrets. Secrets go to the encrypted store (needs
 `SYM_ENCRYPTION_KEY`); the config file holds wiring only.
 
+**Interactive menu (TUI).** Run `sym` with no args on a terminal (or `sym menu`)
+to launch an Ink-based menu: a live **Status** dashboard (with `[a]` apply /
+`[r]` refresh), an **Add / replace a connector** form (stdio or http, then
+best-effort apply), and a **Secrets** screen (list names, add with a masked
+value, delete). It's the same operations as the flag CLI, navigable with arrow
+keys — for when you'd rather not remember flags. Piped/non-TTY invocations print
+this help instead of launching the UI.
+
 ## The two credential models
 
 **Model A — Sym holds the credential.** A static token (injected via `env`/`header`)

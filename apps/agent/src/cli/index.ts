@@ -41,6 +41,9 @@ import type { ConnectorConfig, TransportConfig } from '../mcp/config.js';
 
 const HELP = `sym — connector control plane
 
+  sym                                          launch the interactive menu (TUI) on a terminal
+  sym menu                                     launch the interactive menu explicitly
+
 Usage:
   sym status                                   show live connectors + tool count
   sym apply                                    reconcile the running agent to the config file
@@ -256,6 +259,20 @@ async function main(argv: string[]): Promise<number> {
 
   switch (group) {
     case undefined:
+      // Bare `sym` on a terminal launches the interactive TUI; piped/non-TTY
+      // (CI, `sym | cat`) prints help instead of trying to drive a UI.
+      if (process.stdout.isTTY) {
+        await (await import('../tui/index.js')).launchTui();
+        return 0;
+      }
+      console.log(HELP);
+      return 0;
+
+    case 'menu':
+    case 'tui':
+      await (await import('../tui/index.js')).launchTui();
+      return 0;
+
     case 'help':
     case '--help':
     case '-h':

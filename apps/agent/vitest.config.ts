@@ -56,7 +56,7 @@ export default mod;
 export default defineConfig({
   plugins: [nodeNewBuiltinsPlugin()],
   test: {
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     testTimeout: 20_000,
     hookTimeout: 20_000,
   },
