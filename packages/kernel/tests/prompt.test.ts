@@ -57,6 +57,16 @@ describe('buildTurnContextPrompt', () => {
     expect(ctx).toContain('12345.6789');
   });
 
+  it('marks a channel mention as SHARED visibility', () => {
+    const ctx = buildTurnContextPrompt(makeTurn({ entrySurface: 'app_mention' }));
+    expect(ctx).toContain('SHARED');
+  });
+
+  it('marks a DM as PRIVATE visibility', () => {
+    const ctx = buildTurnContextPrompt(makeTurn({ entrySurface: 'dm' }));
+    expect(ctx).toContain('PRIVATE');
+  });
+
   it('omits threadTs when absent', () => {
     const turn = makeTurn();
     delete (turn as Partial<Turn>).threadTs;
