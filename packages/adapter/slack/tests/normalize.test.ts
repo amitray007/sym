@@ -47,6 +47,23 @@ function dmEvent(): RawSlackEvent {
   };
 }
 
+/** Group-DM (mpim) message that @mentions the bot mid-sentence. */
+function mpimMentionEvent(): RawSlackEvent {
+  return {
+    type: 'event_callback',
+    event_id: 'Ev-mpim-1',
+    team_id: 'T001',
+    event: {
+      type: 'message',
+      channel_type: 'mpim',
+      ts: '1700000005.000001',
+      user: 'U001',
+      channel: 'G001',
+      text: 'hey <@UBOT001> can you recap this for us',
+    },
+  };
+}
+
 function shortcutEvent(): RawSlackEvent {
   return {
     type: 'shortcut',
@@ -158,6 +175,68 @@ describe('normalizeSlackEvent', () => {
   it('ignores a DM message authored by the bot user id', () => {
     const e = dmEvent();
     (e.event as unknown as Record<string, unknown>)['user'] = BOT_USER_ID;
+    expect(
+      normalizeSlackEvent({ event: e, workspaceId: WORKSPACE_ID, botUserId: BOT_USER_ID }),
+    ).toBeNull();
+  });
+
+  // --- Group DM (mpim) ------------------------------------------------------
+  it('normalizes an mpim message that @mentions the bot (→ app_mention surface)', () => {
+    const result = normalizeSlackEvent({
+      event: mpimMentionEvent(),
+      workspaceId: WORKSPACE_ID,
+      botUserId: BOT_USER_ID,
+    });
+    expect(result).not.toBeNull();
+    // Shared surface — group DM is visible to the other humans, so it must NOT
+    // be 'dm' (private / assistant mode); it behaves like a channel mention.
+    expect(result!.entrySurface).toBe('app_mention');
+    expect(result!.requester).toBe('U001');
+    expect(result!.channelId).toBe('G001');
+    // Bot mention stripped wherever it sat, whitespace collapsed.
+    expect(result!.text).toBe('hey can you recap this for us');
+  });
+
+  it('threads an mpim mention under its own ts (no thread_ts → roots a thread)', () => {
+    const turn = slackTurnInputToTurn(
+      normalizeSlackEvent({
+        event: mpimMentionEvent(),
+        workspaceId: WORKSPACE_ID,
+        botUserId: BOT_USER_ID,
+      })!,
+    );
+    expect(turn.threadTs).toBe('1700000005.000001');
+  });
+
+  it('IGNORES an mpim message that does NOT mention the bot (avoids replying to every line)', () => {
+    const e = mpimMentionEvent();
+    (e.event as unknown as Record<string, unknown>)['text'] =
+      'just two humans talking, no bot here';
+    expect(
+      normalizeSlackEvent({ event: e, workspaceId: WORKSPACE_ID, botUserId: BOT_USER_ID }),
+    ).toBeNull();
+  });
+
+  it("ignores the bot's own mpim messages (bot_id present) even if text has a mention", () => {
+    const e = mpimMentionEvent();
+    delete (e.event as unknown as Record<string, unknown>)['user'];
+    (e.event as unknown as Record<string, unknown>)['bot_id'] = 'B0SYM';
+    expect(
+      normalizeSlackEvent({ event: e, workspaceId: WORKSPACE_ID, botUserId: BOT_USER_ID }),
+    ).toBeNull();
+  });
+
+  it('ignores an mpim message authored by the bot user id', () => {
+    const e = mpimMentionEvent();
+    (e.event as unknown as Record<string, unknown>)['user'] = BOT_USER_ID;
+    expect(
+      normalizeSlackEvent({ event: e, workspaceId: WORKSPACE_ID, botUserId: BOT_USER_ID }),
+    ).toBeNull();
+  });
+
+  it('ignores an mpim message with a subtype (edit/streaming echo)', () => {
+    const e = mpimMentionEvent();
+    (e.event as unknown as Record<string, unknown>)['subtype'] = 'message_changed';
     expect(
       normalizeSlackEvent({ event: e, workspaceId: WORKSPACE_ID, botUserId: BOT_USER_ID }),
     ).toBeNull();

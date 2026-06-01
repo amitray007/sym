@@ -84,6 +84,21 @@ function stripMention(text: string): string {
   return text.replace(/^<@[A-Z0-9]+>\s*/u, '').trim();
 }
 
+/** True when `text` @mentions this specific bot anywhere (group-DM trigger test). */
+function mentionsBot(text: string, botUserId: SlackUserId): boolean {
+  return text.includes(`<@${botUserId}>`);
+}
+
+/**
+ * Remove the bot's mention token wherever it appears (not just leading — in a
+ * group DM the user may write "hey <@SYM> can you…") and collapse the resulting
+ * whitespace. Used for the mpim path; the channel app_mention path keeps the
+ * leading-only {@link stripMention} since Slack puts the mention first there.
+ */
+function stripBotMention(text: string, botUserId: SlackUserId): string {
+  return text.replaceAll(`<@${botUserId}>`, ' ').replace(/\s+/gu, ' ').trim();
+}
+
 /**
  * Build an optional `threadTs` field compatible with `exactOptionalPropertyTypes`.
  * When the raw value is undefined, we return an empty object so the property
@@ -135,6 +150,29 @@ export function normalizeSlackEvent(opts: NormalizeOpts): SlackTurnInput | null 
         channelId: e.channel as SlackChannelId,
         ts: e.ts as SlackThreadTs,
         text: e.text,
+        ...optionalThreadTs(e.thread_ts),
+      };
+    }
+
+    // Group DM (mpim). Sym is a member, so Slack delivers EVERY message here —
+    // unlike a 1:1 `im` where every message is for Sym, most of these aren't.
+    // Act ONLY when the bot is actually @mentioned; otherwise Sym would answer
+    // every line in the conversation. When it IS mentioned we treat it exactly
+    // like a channel app_mention: threaded reply, SHARED visibility (the other
+    // humans in the DM see it), never assistant-panel mode. Skip the bot's own
+    // posts / edit subtypes so Sym never re-triggers on its own reply.
+    if (e.type === 'message' && e.channel_type === 'mpim') {
+      if (e.bot_id !== undefined || e.subtype !== undefined) return null;
+      if (e.user === undefined || e.user === botUserId) return null;
+      if (!mentionsBot(e.text, botUserId)) return null;
+      return {
+        workspaceId,
+        eventId,
+        entrySurface: 'app_mention',
+        requester: e.user as SlackUserId,
+        channelId: e.channel as SlackChannelId,
+        ts: e.ts as SlackThreadTs,
+        text: stripBotMention(e.text, botUserId),
         ...optionalThreadTs(e.thread_ts),
       };
     }

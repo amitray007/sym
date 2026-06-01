@@ -94,6 +94,10 @@ oauth_config:
       - groups:history
       - im:history
       - im:read
+      # Group-DM (mpim) support: receive + read messages in multi-person DMs
+      # Sym is added to, so an @mention there delivers a `message.mpim` event.
+      - mpim:history
+      - mpim:read
       # List / profile / channel discovery (bot fallback path).
       - channels:read
       - groups:read
@@ -112,6 +116,9 @@ settings:
     bot_events:
       - app_mention
       - message.im
+      # Group DM: Slack delivers every message in an mpim Sym is a member of;
+      # the agent acts only on those that @mention Sym (see normalize.ts).
+      - message.mpim
       # Assistant container lifecycle — drives setTitle + setSuggestedPrompts
       # in apps/agent/src/assistant.ts.
       - assistant_thread_started
