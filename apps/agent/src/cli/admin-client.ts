@@ -9,10 +9,16 @@
  * be overridden via `SYM_ADMIN_URL` for non-standard deployments.
  */
 
-import type { ConnectorStatus, ReconcileResult } from '../mcp/index.js';
+import type {
+  ConnectorDetail,
+  ConnectorStatus,
+  ConnectorTestResult,
+  ReconcileResult,
+  ToolInfo,
+} from '../mcp/index.js';
 
-// Re-export so callers can import the connector-status type from here.
-export type { ConnectorStatus };
+// Re-export so callers can import these types from here.
+export type { ConnectorStatus, ConnectorDetail, ToolInfo, ConnectorTestResult };
 
 // ---------------------------------------------------------------------------
 // Base URL resolution
@@ -118,4 +124,51 @@ export async function fetchStatus(baseUrl?: string): Promise<StatusResponse> {
     throw new Error(`admin status failed: HTTP ${response.status.toString()} — ${body}`);
   }
   return response.json() as Promise<StatusResponse>;
+}
+
+/** Shared request helper for the richer admin routes (same error semantics). */
+async function adminRequest<T>(
+  path: string,
+  baseUrl: string | undefined,
+  init?: RequestInit,
+): Promise<T> {
+  const base = baseUrl ?? adminBaseUrl();
+  const url = `${base}${path}`;
+  let response: Response;
+  try {
+    response = await fetch(url, init);
+  } catch (err) {
+    throw new Error(`could not reach the Sym admin endpoint at ${url} — is the agent running?`, {
+      cause: err,
+    });
+  }
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`admin request failed: HTTP ${response.status.toString()} — ${body}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+/** GET `/admin/connectors` — per-connector wiring + live health (dashboard rows). */
+export async function fetchConnectors(baseUrl?: string): Promise<ConnectorDetail[]> {
+  const body = await adminRequest<{ connectors: ConnectorDetail[] }>('/admin/connectors', baseUrl);
+  return body.connectors;
+}
+
+/** GET `/admin/connectors/:name/tools` — the tools a connector serves. */
+export async function fetchConnectorTools(name: string, baseUrl?: string): Promise<ToolInfo[]> {
+  const body = await adminRequest<{ tools: ToolInfo[] }>(
+    `/admin/connectors/${encodeURIComponent(name)}/tools`,
+    baseUrl,
+  );
+  return body.tools;
+}
+
+/** POST `/admin/connectors/:name/test` — re-connect one connector in isolation. */
+export async function testConnector(name: string, baseUrl?: string): Promise<ConnectorTestResult> {
+  return adminRequest<ConnectorTestResult>(
+    `/admin/connectors/${encodeURIComponent(name)}/test`,
+    baseUrl,
+    { method: 'POST' },
+  );
 }

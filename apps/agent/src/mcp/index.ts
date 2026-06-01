@@ -7,9 +7,18 @@ export {
   initMcpPool,
   reconcileConnectors,
   getActiveConfigs,
+  listConnectorDetails,
+  getConnectorTools,
+  testConnector,
   MCP_TOOL_SEPARATOR,
 } from './dispatcher.js';
-export type { ReconcileResult, ConnectorStatus } from './dispatcher.js';
+export type {
+  ReconcileResult,
+  ConnectorStatus,
+  ConnectorDetail,
+  ToolInfo,
+  ConnectorTestResult,
+} from './dispatcher.js';
 export { CompositeDispatcher } from './composite.js';
 export { completeOAuth, getPendingAuth } from './oauth-registry.js';
 export { SqliteCredentialStore } from './store.js';

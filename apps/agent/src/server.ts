@@ -12,7 +12,14 @@ import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { resolveConfirmation, buildResolvedConfirmationMessage } from './confirmations.js';
 import { handleTurn, type HandleTurnDeps } from './handle-turn.js';
-import { getActiveConfigs, McpDispatcher, reconcileConnectors } from './mcp/index.js';
+import {
+  getActiveConfigs,
+  getConnectorTools,
+  listConnectorDetails,
+  McpDispatcher,
+  reconcileConnectors,
+  testConnector,
+} from './mcp/index.js';
 import { completeOAuth } from './mcp/oauth-registry.js';
 import { loadConnectorConfigs } from './mcp/source.js';
 import { buildOwnerDeclineMessage, checkOwnerAccess } from './owner-gate.js';
@@ -568,6 +575,35 @@ export function createServer(deps: ServerDeps): Hono {
         `across ${result.connectors.length} connector(s)`,
     );
     return c.json({ source: loaded.source, path: loaded.path, ...result });
+  });
+
+  /** GET /admin/connectors — per-connector wiring + live health (dashboard rows). */
+  app.get('/admin/connectors', (c) => {
+    if (!isLoopback(getConnInfo(c).remote.address)) {
+      return c.json({ error: 'forbidden', detail: 'admin endpoints are loopback-only' }, 403);
+    }
+    return c.json({ connectors: listConnectorDetails() });
+  });
+
+  /** GET /admin/connectors/:name/tools — the tools a connector serves. */
+  app.get('/admin/connectors/:name/tools', (c) => {
+    if (!isLoopback(getConnInfo(c).remote.address)) {
+      return c.json({ error: 'forbidden', detail: 'admin endpoints are loopback-only' }, 403);
+    }
+    const tools = getConnectorTools(c.req.param('name'));
+    if (tools === null) {
+      return c.json({ error: 'not_connected', detail: 'unknown or unconnected connector' }, 404);
+    }
+    return c.json({ tools });
+  });
+
+  /** POST /admin/connectors/:name/test — re-connect one connector in isolation. */
+  app.post('/admin/connectors/:name/test', async (c) => {
+    if (!isLoopback(getConnInfo(c).remote.address)) {
+      return c.json({ error: 'forbidden', detail: 'admin endpoints are loopback-only' }, 403);
+    }
+    const result = await testConnector(c.req.param('name'));
+    return c.json(result);
   });
 
   return app;
