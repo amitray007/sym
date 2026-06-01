@@ -756,7 +756,7 @@ describe('handleTurn', () => {
     expect(flushBatch.has('task-3')).toBe(true);
   });
 
-  it('sets task_display_mode=timeline on chatStartStream so chunks render as sequential cards', async () => {
+  it('always opens chatStartStream with task_display_mode=plan (one grouped block, even without set_plan)', async () => {
     mockRunLoopPi.mockImplementationOnce(
       async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
         const o = opts as { onDelta?: (d: string) => Promise<void> };
@@ -777,7 +777,7 @@ describe('handleTurn', () => {
     });
 
     expect(slack.startStreamCalls).toHaveLength(1);
-    expect(slack.startStreamCalls[0]?.taskDisplayMode).toBe('timeline');
+    expect(slack.startStreamCalls[0]?.taskDisplayMode).toBe('plan');
   });
 
   it('opens the stream with task_display_mode=plan once the model latches a plan', async () => {

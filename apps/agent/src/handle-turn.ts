@@ -627,12 +627,11 @@ async function streamReply(
     const startParams: StartStreamParams = {
       channel,
       threadTs,
-      // Task-card layout, resolved at open time (see ensureStreamOpen):
-      //  - `plan`     when the model has latched a plan — model-authored intent
-      //               renders as ONE grouped plan block.
-      //  - `timeline` otherwise — tool-call rows as individual cards in arrival
-      //               order (also Slack's default; set explicitly for stability).
-      taskDisplayMode: 'timeline',
+      // Task-card layout: ALWAYS `plan` — every task row (tool-derived shimmer
+      // rows AND model-authored set_plan items) renders grouped inside ONE
+      // collapsible block, never as separate per-tool cards. Consistent UX every
+      // turn, whether or not the model called set_plan.
+      taskDisplayMode: 'plan',
       ...(isAssistant
         ? {}
         : { recipientUserId: turn.requester, recipientTeamId: deps.slackTeamId }),
@@ -656,13 +655,8 @@ async function streamReply(
     const ensureStreamOpen = async (): Promise<boolean> => {
       if (streamTs !== undefined) return true;
       if (streamOpenFailed) return false;
-      // Resolve task-card layout from plan state AT OPEN TIME. `setPlan` flips
-      // the controller active synchronously, before its flush opens the stream
-      // (PlanController.setPlan sets active=true, then emits → the card's
-      // set_plan handler calls sendChunks → here). So a plan-mode turn opens as
-      // a grouped `plan` block; tool-only turns stay `timeline`. If a text delta
-      // opened the stream before any set_plan, it stays `timeline` — graceful.
-      startParams.taskDisplayMode = ctx.planController.isActive() ? 'plan' : 'timeline';
+      // taskDisplayMode is fixed at `plan` (set above) so the layout is the same
+      // grouped block on every turn — no open-time resolution from plan state.
       try {
         const handle = await deps.slackClient.chatStartStream(startParams);
         streamTs = handle.ts;
