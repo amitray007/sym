@@ -15,6 +15,8 @@
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 
+import { loadCliAllow } from './mcp/source.js';
+
 export interface RunCliResult {
   ok: boolean;
   binary: string;
@@ -44,6 +46,24 @@ export function parseAllowlist(raw: string | undefined): Allowlist {
       .map((s) => s.trim())
       .filter((s) => s.length > 0),
   );
+}
+
+/** Build an Allowlist from a string array (`['*']` ⇒ wildcard). */
+export function allowlistFromArray(arr: string[]): Allowlist {
+  if (arr.includes('*')) return '*';
+  return new Set(arr.map((s) => s.trim()).filter((s) => s.length > 0));
+}
+
+/**
+ * Resolve the EFFECTIVE allowlist the same way for run_cli and the prompt
+ * catalog: the config file's `cli.allow` when present (sym-managed), else the
+ * `SYM_CLI_ALLOWLIST` env var, else the built-in default. Read fresh so
+ * `sym cli add/rm` takes effect immediately (no agent restart).
+ */
+export function resolveAllowlist(): Allowlist {
+  const fromFile = loadCliAllow();
+  if (fromFile !== undefined) return allowlistFromArray(fromFile);
+  return parseAllowlist(process.env['SYM_CLI_ALLOWLIST']);
 }
 
 function isAllowed(list: Allowlist, binary: string): boolean {
@@ -99,7 +119,7 @@ export async function runCli(
   argv: string[],
   opts: { allowlist?: Allowlist; timeoutMs?: number; maxChars?: number; cwd?: string } = {},
 ): Promise<RunCliResult> {
-  const allowlist = opts.allowlist ?? parseAllowlist(process.env['SYM_CLI_ALLOWLIST']);
+  const allowlist = opts.allowlist ?? resolveAllowlist();
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
 

@@ -11,7 +11,7 @@ import { Agent } from '@earendil-works/pi-agent-core';
 import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
-import { buildCliCatalog, isIntrospectionOnly, parseAllowlist } from '../run-cli.js';
+import { buildCliCatalog, isIntrospectionOnly, resolveAllowlist } from '../run-cli.js';
 import {
   buildConnectorCatalog,
   makeCallTool,
@@ -414,7 +414,7 @@ export async function runLoopPi(
   // per-turn snapshots; the static prompt already tells the model to introspect
   // (`sym status`/`sym tools`/`find_tools`) rather than trust a cached list.
   const catalog = buildConnectorCatalog(mcpDescriptors);
-  const cliCatalog = buildCliCatalog(parseAllowlist(process.env['SYM_CLI_ALLOWLIST']));
+  const cliCatalog = buildCliCatalog(resolveAllowlist());
   const systemPrompt = [baseSystemPrompt, catalog, cliCatalog]
     .filter((s) => s.length > 0)
     .join('\n\n');

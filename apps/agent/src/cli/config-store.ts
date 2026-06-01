@@ -35,6 +35,8 @@ import type { ConnectorConfig } from '../mcp/config.js';
 export interface SymConfigFile {
   version: number;
   mcpServers: ConnectorConfig[];
+  /** run_cli allowlist (bare binary names; `"*"` = any). Managed by `sym cli`. */
+  cli?: { allow: string[] };
 }
 
 // ---------------------------------------------------------------------------
@@ -78,8 +80,17 @@ export function loadConfigFile(path: string): SymConfigFile {
   const obj = parsed as Record<string, unknown>;
   const version = typeof obj['version'] === 'number' ? obj['version'] : 1;
   const mcpServers = parseConnectorArray(obj['mcpServers'], path);
+  const cli = readCliSection(obj['cli']);
 
-  return { version, mcpServers };
+  return { version, mcpServers, ...(cli !== undefined ? { cli } : {}) };
+}
+
+/** Parse the optional `cli: { allow: string[] }` section (ignored if malformed). */
+function readCliSection(raw: unknown): { allow: string[] } | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const allow = (raw as Record<string, unknown>)['allow'];
+  if (!Array.isArray(allow) || !allow.every((s) => typeof s === 'string')) return undefined;
+  return { allow: allow as string[] };
 }
 
 // ---------------------------------------------------------------------------
@@ -149,4 +160,39 @@ export function removeConnector(
   }
   const mcpServers = cfg.mcpServers.filter((_, i) => i !== idx);
   return { next: { ...cfg, mcpServers }, removed: true };
+}
+
+// ---------------------------------------------------------------------------
+// CLI allowlist (run_cli) — managed by `sym cli`
+// ---------------------------------------------------------------------------
+
+/** Dedupe + trim + drop empties, preserving order. */
+function clean(list: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of list) {
+    const v = raw.trim();
+    if (v.length > 0 && !seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+/** Return a new config with the run_cli allowlist set to `allow` (pure). */
+export function setCliAllow(cfg: SymConfigFile, allow: string[]): SymConfigFile {
+  return { ...cfg, cli: { allow: clean(allow) } };
+}
+
+/** Remove binaries from the allowlist; reports which were actually present (pure). */
+export function removeCli(
+  cfg: SymConfigFile,
+  bins: string[],
+): { next: SymConfigFile; removed: string[] } {
+  const current = cfg.cli?.allow ?? [];
+  const drop = new Set(bins.map((b) => b.trim()));
+  const kept = current.filter((b) => !drop.has(b));
+  const removed = current.filter((b) => drop.has(b));
+  return { next: { ...cfg, cli: { allow: kept } }, removed };
 }

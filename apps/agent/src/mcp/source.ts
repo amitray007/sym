@@ -81,6 +81,35 @@ export function loadConnectorConfigs(): LoadedConnectorConfig {
   return { mcpServers, source: 'file', path };
 }
 
+/**
+ * Read the run_cli allowlist from the config file's `cli.allow` array, or
+ * `undefined` when the file/field is absent or malformed (caller falls back to
+ * the `SYM_CLI_ALLOWLIST` env var). Fail-open — never throws.
+ *
+ * File shape: `{ …, "cli": { "allow": ["sym","gcloud","sentry-cli"] } }`.
+ * An entry of `"*"` means "any CLI" (wildcard).
+ */
+export function loadCliAllow(): string[] | undefined {
+  let raw: string;
+  try {
+    raw = readFileSync(configPath(), 'utf8');
+  } catch {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const cli = (parsed as Record<string, unknown>)['cli'];
+  if (cli === null || typeof cli !== 'object' || Array.isArray(cli)) return undefined;
+  const allow = (cli as Record<string, unknown>)['allow'];
+  if (!Array.isArray(allow) || !allow.every((s) => typeof s === 'string')) return undefined;
+  return allow as string[];
+}
+
 /** Legacy env-var source. Returns 'none' when the var is unset/empty. */
 function fromEnv(): { mcpServers: ConnectorConfig[]; source: ConfigSource } {
   const rawEnv = process.env['SYM_MCP_SERVERS'];

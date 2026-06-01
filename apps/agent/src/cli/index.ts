@@ -46,10 +46,13 @@ import {
 import {
   loadConfigFile,
   removeConnector,
+  removeCli,
+  setCliAllow,
   upsertConnector,
   writeConfigFile,
 } from './config-store.js';
 import { configPath } from '../mcp/source.js';
+import { resolveAllowlist } from '../run-cli.js';
 
 import type { ConnectorConfig, TransportConfig } from '../mcp/config.js';
 
@@ -63,6 +66,7 @@ Read (add --json for machine/agent-parseable output):
   sym tools [name]                             full live tool catalog (name + description)
   sym show <name>                              one connector: config + health + its tools
   sym mcp ls                                   connectors in the config file (+ live health)
+  sym cli ls                                   the run_cli allowlist (CLIs the agent may run)
   sym secret ls                                stored secret names (never values)
 
 Write:
@@ -71,6 +75,9 @@ Write:
   sym mcp add --name N --command C [--arg A]…   stdio shorthand (repeat --arg per token)
   sym mcp add --name N --url U [--trust]        http shorthand
   sym mcp rm --name N                           remove a connector
+  sym cli add <bin>…                            allow a CLI for run_cli (additive)
+  sym cli set <a,b,c>                           replace the whole allowlist (e.g. restrict from *)
+  sym cli rm <bin>…                             disallow a CLI
   sym secret set <connector> <field> [value]   store a secret (value via stdin if omitted)
   sym secret rm <connector> <field>            delete a stored secret
 
@@ -141,6 +148,8 @@ async function statusCommand(json: boolean): Promise<number> {
     connectors = offlineDetails();
   }
   const totalTools = connectors.reduce((sum, c) => sum + c.tools, 0);
+  const allow = resolveAllowlist();
+  const cliList = allow === '*' ? ['*'] : [...allow].sort();
 
   if (json) {
     console.log(
@@ -151,6 +160,7 @@ async function statusCommand(json: boolean): Promise<number> {
           totalTools,
           connectorCount: connectors.length,
           connectors,
+          cli: { allow: cliList, wildcard: allow === '*' },
         },
         null,
         2,
@@ -165,7 +175,77 @@ async function statusCommand(json: boolean): Promise<number> {
       (reachable ? '' : '   (offline view — start Sym for live health/tools)'),
   );
   console.log(renderConnectorTable(connectors));
+  console.log(`\nCLIs (run_cli): ${allow === '*' ? '* (any installed CLI)' : cliList.join(', ')}`);
   return 0;
+}
+
+/** `sym cli` — view/manage the run_cli allowlist (stored in the config file). */
+function cliCommand(args: string[], json: boolean): number {
+  const verb = args[0];
+  const path = configPath();
+
+  if (verb === undefined || verb === 'ls' || verb === 'list') {
+    const allow = resolveAllowlist();
+    const list = allow === '*' ? ['*'] : [...allow].sort();
+    const source = loadConfigFile(path).cli !== undefined ? 'config file' : 'env/default';
+    if (json) {
+      console.log(JSON.stringify({ allow: list, wildcard: allow === '*', source }, null, 2));
+      return 0;
+    }
+    console.log(`run_cli allowlist (${source}): ${list.join(', ')}`);
+    if (allow === '*') {
+      console.log('  * = any installed CLI is runnable. Restrict with `sym cli set <a,b,c>`.');
+    }
+    return 0;
+  }
+
+  if (verb === 'add') {
+    const bins = args.slice(1).filter((b) => b.length > 0);
+    if (bins.length === 0) throw new Error('cli add requires binary names: sym cli add gh jq');
+    const cfg = loadConfigFile(path);
+    // Seed a fresh allowlist from the current effective set so add is ADDITIVE,
+    // never a surprise narrowing of an env/default allowlist.
+    let base = cfg.cli?.allow;
+    if (base === undefined) {
+      const eff = resolveAllowlist();
+      base = eff === '*' ? ['*'] : [...eff];
+    }
+    const next = setCliAllow(cfg, [...base, ...bins]);
+    writeConfigFile(path, next);
+    console.log(`allowlist: ${(next.cli?.allow ?? []).join(', ')}`);
+    if ((next.cli?.allow ?? []).includes('*')) {
+      console.log('  note: still contains * (any CLI). Run `sym cli rm "*"` to enforce the list.');
+    }
+    return 0;
+  }
+
+  if (verb === 'set') {
+    const bins = args
+      .slice(1)
+      .flatMap((s) => s.split(','))
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (bins.length === 0) throw new Error('cli set requires a list: sym cli set sym,gcloud,gh,jq');
+    const next = setCliAllow(loadConfigFile(path), bins);
+    writeConfigFile(path, next);
+    console.log(`allowlist: ${(next.cli?.allow ?? []).join(', ')}`);
+    return 0;
+  }
+
+  if (verb === 'rm' || verb === 'remove') {
+    const bins = args.slice(1).filter((b) => b.length > 0);
+    if (bins.length === 0) throw new Error('cli rm requires binary names: sym cli rm gh');
+    const { next, removed } = removeCli(loadConfigFile(path), bins);
+    writeConfigFile(path, next);
+    console.log(
+      removed.length > 0
+        ? `removed ${removed.join(', ')} → allowlist: ${(next.cli?.allow ?? []).join(', ') || '(empty)'}`
+        : 'nothing removed (not in the allowlist)',
+    );
+    return 0;
+  }
+
+  throw new Error(`unknown 'cli' verb '${verb}' — see 'sym help'`);
 }
 
 /** `sym tools [name]` — the live tool catalog (name + description). */
@@ -523,6 +603,9 @@ export async function main(rawArgs: string[]): Promise<number> {
 
     case 'mcp':
       return mcpCommand(args, json);
+
+    case 'cli':
+      return cliCommand(args, json);
 
     case 'secret':
       return secretCommand(args, json);
