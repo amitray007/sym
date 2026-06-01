@@ -17,6 +17,7 @@ import {
   resolveAllowlist,
   resolveCliCapabilities,
 } from '../run-cli.js';
+import { judgeSlackToolUse, SLACK_GUARD_TOOLS } from '../slack-guard.js';
 import {
   buildConnectorCatalog,
   makeCallTool,
@@ -25,6 +26,7 @@ import {
 } from './meta-tools.js';
 import { bridgeTools } from './tools.js';
 
+import type { SlackGuardVerdict } from '../slack-guard.js';
 import type { ThinkingLevel } from './think-router.js';
 import type {
   BeforeToolCallContext,
@@ -486,6 +488,13 @@ export async function runLoopPi(
   // Track tool invocations for the receipt.
   const toolsInvoked: string[] = [];
 
+  // Per-turn cache for the Slack-read relevance guard. Computed at most once
+  // (the first time a broad Slack read is attempted) and reused for the rest of
+  // the turn so the guard costs one fast LLM call regardless of how many Slack
+  // reads the model makes. A `confirm` that the owner approves is upgraded to
+  // `allow` so we don't re-prompt for every subsequent Slack read.
+  let slackGuardVerdict: SlackGuardVerdict | undefined;
+
   // ---------------------------------------------------------------------------
   // Confirm-before-destructive hook
   //
@@ -498,6 +507,51 @@ export async function runLoopPi(
     signal?: AbortSignal,
   ): Promise<{ block: true; reason?: string } | undefined> => {
     const toolName = context.toolCall.name;
+
+    // -------------------------------------------------------------------------
+    // Slack-read relevance guard
+    //
+    // Before a broad Slack read runs, make sure the request is actually about
+    // Slack conversations — not an external-system task the model is trying to
+    // answer with a Slack search, and not something that would leak the owner's
+    // private content into a shared channel. One fast LLM call, cached per turn,
+    // fails OPEN (allow) on any error.
+    // -------------------------------------------------------------------------
+    if (SLACK_GUARD_TOOLS.has(toolName)) {
+      if (slackGuardVerdict === undefined) {
+        slackGuardVerdict = await judgeSlackToolUse(turn.text ?? '', {
+          fireworks: { baseUrl: modelCfg.baseUrl, apiKey: modelCfg.apiKey },
+          model: modelCfg.model.id,
+          visibility: turn.entrySurface === 'dm' ? 'private' : 'shared',
+        });
+      }
+
+      if (slackGuardVerdict === 'redirect') {
+        return {
+          block: true,
+          reason: `${toolName} only searches Slack conversations — it can't reach external systems. This request looks like a task in another system (a repo, cloud, issue tracker, etc.). Use find_tools to discover the right connector or CLI instead of a Slack search.`,
+        };
+      }
+
+      if (slackGuardVerdict === 'confirm') {
+        const channelId = turn.channelId;
+        if (channelId && opts.slackClient) {
+          const approved = await requestConfirmation({
+            slackClient: opts.slackClient,
+            channel: channelId as SlackChannelId,
+            ...(turn.threadTs !== undefined ? { threadTs: turn.threadTs as SlackThreadTs } : {}),
+            toolName,
+            args: (context.args ?? {}) as Record<string, unknown>,
+          });
+          if (!approved) {
+            return { block: true, reason: 'The owner did not approve this Slack operation.' };
+          }
+        }
+        // Approved (or no channel to prompt on → fail open). Don't re-ask for
+        // the rest of the turn.
+        slackGuardVerdict = 'allow';
+      }
+    }
 
     // Decide whether this call needs owner confirmation.
     let needsConfirm: boolean;
