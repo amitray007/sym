@@ -1,3 +1,4 @@
+import { getConnInfo } from '@hono/node-server/conninfo';
 import {
   assistantThreadContextChanged,
   assistantThreadStarted,
@@ -11,7 +12,9 @@ import { createAssistantContextStore } from './assistant-context.js';
 import { handleAssistantThreadStarted } from './assistant.js';
 import { resolveConfirmation, buildResolvedConfirmationMessage } from './confirmations.js';
 import { handleTurn, type HandleTurnDeps } from './handle-turn.js';
+import { getActiveConfigs, McpDispatcher, reconcileConnectors } from './mcp/index.js';
 import { completeOAuth } from './mcp/oauth-registry.js';
+import { loadConnectorConfigs } from './mcp/source.js';
 import { buildOwnerDeclineMessage, checkOwnerAccess } from './owner-gate.js';
 import { healthCheckTokens, loadWorkspaceContext } from './workspace-context.js';
 
@@ -149,7 +152,9 @@ export function createServer(deps: ServerDeps): Hono {
       // completes, every subsequent turn picks it up).
       ...(ctx.ownerProfile !== undefined ? { ownerProfile: ctx.ownerProfile } : {}),
       nameResolver: ctx.nameResolver,
-      mcpConfigs: ctx.mcpServers,
+      // No mcpConfigs here: handleTurn reads the LIVE active set (getActiveConfigs),
+      // which POST /admin/reload reconciles out-of-band. Passing the boot-frozen
+      // ctx.mcpServers would pin every turn to the startup config and defeat reload.
     };
   }
 
@@ -527,7 +532,55 @@ export function createServer(deps: ServerDeps): Hono {
 
   app.get('/health', (c) => c.json({ ok: true }));
 
+  // --- Admin control plane (loopback-only) ----------------------------------
+  // The `sym` CLI (run via `docker exec` inside the container) drives the live
+  // connector pool through these routes. They are bound to loopback only: a
+  // request whose remote address is not 127.0.0.1 / ::1 is refused. The CLI hits
+  // http://127.0.0.1:<port> directly; proxied traffic arrives with the proxy's
+  // address (or X-Forwarded-For) and is rejected. No secrets cross these routes.
+
+  /** GET /admin/status — current live connector set + tool count (read-only). */
+  app.get('/admin/status', (c) => {
+    if (!isLoopback(getConnInfo(c).remote.address)) {
+      return c.json({ error: 'forbidden', detail: 'admin endpoints are loopback-only' }, 403);
+    }
+    const active = getActiveConfigs();
+    return c.json({
+      connectors: active.map((s) => s.name),
+      totalTools: new McpDispatcher(active).list().length,
+    });
+  });
+
+  /**
+   * POST /admin/reload — re-read the config file and reconcile the live pool.
+   * This is the seam `sym apply` calls. Validate-then-swap happens inside
+   * reconcileConnectors: a connector that fails to connect leaves the previous
+   * healthy one serving. Returns a per-connector status report.
+   */
+  app.post('/admin/reload', async (c) => {
+    if (!isLoopback(getConnInfo(c).remote.address)) {
+      return c.json({ error: 'forbidden', detail: 'admin endpoints are loopback-only' }, 403);
+    }
+    const loaded = loadConnectorConfigs();
+    const result = await reconcileConnectors(loaded.mcpServers);
+    console.info(
+      `[admin] reload from ${loaded.source} (${loaded.path}) — ${result.totalTools} tool(s) live ` +
+        `across ${result.connectors.length} connector(s)`,
+    );
+    return c.json({ source: loaded.source, path: loaded.path, ...result });
+  });
+
   return app;
+}
+
+/** True for IPv4/IPv6 loopback addresses (and the IPv4-mapped form). */
+function isLoopback(address: string | undefined): boolean {
+  return (
+    address === '127.0.0.1' ||
+    address === '::1' ||
+    address === '::ffff:127.0.0.1' ||
+    address === 'localhost'
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ import {
 import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
-import { CompositeDispatcher, McpDispatcher, initMcpPool } from './mcp/index.js';
+import { CompositeDispatcher, McpDispatcher, initMcpPool, getActiveConfigs } from './mcp/index.js';
 import { NameResolver } from './name-resolver.js';
 import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
@@ -982,7 +982,10 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   // servers are configured (mcpConfigs is empty or absent), this contributes
   // zero tools and the composite is functionally identical to builtin alone.
   // Pool init runs once (pool is module-level); subsequent calls are cheap.
-  const mcpConfigs = deps.mcpConfigs ?? [];
+  // Live set: the connector pool is reconciled out-of-band by POST /admin/reload,
+  // so each turn reads the CURRENT active configs rather than a boot-frozen array.
+  // `deps.mcpConfigs` remains an explicit override for tests.
+  const mcpConfigs = deps.mcpConfigs ?? getActiveConfigs();
   if (mcpConfigs.length > 0) {
     // Fire-and-forget the pool warm; list() returns whatever is cached so far.
     // For the first turn the pool warms before the loop starts because we

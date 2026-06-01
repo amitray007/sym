@@ -13,13 +13,60 @@ Connector = Transport × Acquisition × Injection
 
 ## Env vars
 
-| Var                          | Purpose                                                                                                          |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `SYM_MCP_SERVERS`            | JSON array of connectors (see below)                                                                             |
-| `SYM_MCP_CONNECT_TIMEOUT_MS` | per-connector connect timeout (default `10000`)                                                                  |
-| `SYM_ENCRYPTION_KEY`         | 32-byte base64/hex — encrypts the OAuth token store (required only for OAuth connectors; fail-closed without it) |
-| `SYM_DB_PATH`                | OAuth token store path (default `.sym/credentials.db`)                                                           |
-| `SYM_PUBLIC_URL`             | public HTTPS base for the OAuth callback (`/oauth/callback/:slug`)                                               |
+| Var                          | Purpose                                                                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `SYM_CONFIG_PATH`            | connector config file (default `.sym/config.json`; set to `/data/sym/config.json` on the deploy). Source of truth when present |
+| `SYM_MCP_SERVERS`            | JSON array of connectors — **legacy fallback**, used only when the config file is absent                                       |
+| `SYM_MCP_CONNECT_TIMEOUT_MS` | per-connector connect timeout (default `10000`)                                                                                |
+| `SYM_ENCRYPTION_KEY`         | 32-byte base64/hex — encrypts the OAuth token store (required only for OAuth connectors; fail-closed without it)               |
+| `SYM_DB_PATH`                | OAuth token store path (default `.sym/credentials.db`)                                                                         |
+| `SYM_PUBLIC_URL`             | public HTTPS base for the OAuth callback (`/oauth/callback/:slug`)                                                             |
+
+## Config file + live reload (the control-plane seam)
+
+Connector wiring now lives in a JSON **config file** (`SYM_CONFIG_PATH`, default
+`.sym/config.json`), not just the env var. The file is the source of truth when
+present; `SYM_MCP_SERVERS` is a legacy fallback used only when the file is absent.
+A malformed file falls back to env (fail-open) so a bad edit never strands the
+agent at zero connectors. **Secrets do not belong in this file** — wiring +
+`secretRef`s only.
+
+```jsonc
+// .sym/config.json
+{
+  "version": 1,
+  "mcpServers": [
+    {
+      "name": "sentry",
+      "transport": { "kind": "stdio", "command": "sentry-mcp" },
+      "auth": {
+        "kind": "static",
+        "secret": "…",
+        "inject": { "at": "env", "name": "SENTRY_AUTH_TOKEN" },
+      },
+    },
+  ],
+}
+```
+
+The running agent reconciles the live connector pool **without a restart** via a
+loopback-only admin route — this is the seam the `sym` CLI's `apply`/`status`
+will call. Edit the file, then:
+
+```bash
+# inside the container (or locally): apply the file to the live pool
+curl -s -X POST http://127.0.0.1:3001/admin/reload | jq
+#   → { "source": "file", "connectors": [ { "name": "sentry", "status": "connected", "tools": 12 } ], "totalTools": 12 }
+
+# read-only: what's live right now
+curl -s http://127.0.0.1:3001/admin/status | jq
+```
+
+Reconcile is **validate-then-swap**: a connector that fails to connect leaves the
+previously-healthy one serving (`status: "failed-kept-previous"`); unchanged
+connectors are left untouched (no reconnect churn); dropped ones are closed
+(`status: "removed"`). The routes refuse any non-loopback caller — the CLI hits
+`127.0.0.1` from inside the container; proxied traffic is rejected.
 
 ## The two credential models
 
