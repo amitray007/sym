@@ -86,7 +86,7 @@ export function loadWorkspaceContext(config: AgentConfig): WorkspaceContext {
 export async function healthCheckTokens(ctx: WorkspaceContext): Promise<void> {
   try {
     const auth = await ctx.slackClient.authTest();
-    console.log(`[agent] bot token OK — acting as ${auth.user ?? auth.userId} (${auth.teamId})`);
+    console.info(`[agent] bot token OK — acting as ${auth.user ?? auth.userId} (${auth.teamId})`);
     if (auth.teamId !== ctx.slackTeamId) {
       console.warn(
         `[agent] bot token team_id ${auth.teamId} does not match SLACK_TEAM_ID ${ctx.slackTeamId}`,
@@ -105,7 +105,9 @@ export async function healthCheckTokens(ctx: WorkspaceContext): Promise<void> {
   } else {
     try {
       const auth = await ctx.userSlackClient.authTest();
-      console.log(`[agent] user token OK — acting as ${auth.user ?? auth.userId} (${auth.teamId})`);
+      console.info(
+        `[agent] user token OK — acting as ${auth.user ?? auth.userId} (${auth.teamId})`,
+      );
       if (auth.userId !== ctx.ownerSlackUserId) {
         console.warn(
           `[agent] user token belongs to ${auth.userId}, not the configured SYM_OWNER_SLACK_USER_ID (${ctx.ownerSlackUserId}) — confirm this is intended`,
@@ -149,7 +151,7 @@ export async function healthCheckTokens(ctx: WorkspaceContext): Promise<void> {
     const label = ctx.ownerProfile.displayName ?? ctx.ownerProfile.realName ?? ctx.ownerSlackUserId;
     const handle = ctx.ownerProfile.userName ? `@${ctx.ownerProfile.userName}` : '(no @handle)';
     const tz = ctx.ownerProfile.tz ?? 'unknown tz';
-    console.log(`[agent] owner profile resolved — ${label} ${handle} (${tz})`);
+    console.info(`[agent] owner profile resolved — ${label} ${handle} (${tz})`);
   } catch (err) {
     console.warn(
       '[agent] could not resolve owner profile — turn metadata will fall back to raw user id. Error:',
@@ -165,10 +167,10 @@ export async function healthCheckTokens(ctx: WorkspaceContext): Promise<void> {
   const directoryClient = ctx.userSlackClient ?? ctx.slackClient;
   void ctx.nameResolver
     .populateChannels(directoryClient)
-    .then(() => console.log('[agent] channel name cache warmed'))
+    .then(() => console.info('[agent] channel name cache warmed'))
     .catch((err) => console.warn('[agent] channel cache warm failed (continuing lazy):', err));
   void ctx.nameResolver
     .populateUsers(directoryClient)
-    .then(() => console.log('[agent] user name cache warmed'))
+    .then(() => console.info('[agent] user name cache warmed'))
     .catch((err) => console.warn('[agent] user cache warm failed (continuing lazy):', err));
 }
