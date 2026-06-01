@@ -83,12 +83,10 @@ export function resolveCliCapabilities(): CliCapability[] {
   const allow = loadCliAllow() ?? [];
   const describe = loadCliDescribe();
   const bins = new Set<string>([...allow.filter((b) => b !== '*'), ...Object.keys(describe)]);
-  return [...bins]
-    .sort()
-    .map((bin) => ({
-      bin,
-      ...(describe[bin] !== undefined ? { description: describe[bin] } : {}),
-    }));
+  return [...bins].sort().map((bin) => ({
+    bin,
+    ...(describe[bin] !== undefined ? { description: describe[bin] } : {}),
+  }));
 }
 
 function isAllowed(list: Allowlist, binary: string): boolean {
