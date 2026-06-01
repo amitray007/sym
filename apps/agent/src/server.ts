@@ -238,6 +238,7 @@ export function createServer(deps: ServerDeps): Hono {
     rawEvent: RawSlackEvent,
     requester: SlackUserId,
     responseUrl: string,
+    isDm: boolean,
   ): Promise<void> {
     const input = normalizeSlackEvent({
       event: rawEvent,
@@ -273,22 +274,27 @@ export function createServer(deps: ServerDeps): Hono {
         await handleTurn(turn, {
           ...buildTurnDeps(),
           replySink: async ({ text, blocks }) => {
-            // Delivery ladder, best → most-compatible. Each tier logs why it
-            // fell through (postToResponseUrl surfaces the HTTP status + Slack
-            // error, which a bare fetch would swallow). `text` is the FULL body,
-            // so text-only tiers are never truncated.
-            //   1. in_channel + blocks — rich, visible to everyone (the /giphy
-            //      experience: the answer shows in the conversation).
-            //   2. in_channel + text  — Slack refused the rich blocks over
-            //      response_url (the `markdown`/table block types aren't
-            //      universally accepted on this surface).
-            //   3. ephemeral + text   — Slack refused in_channel into this
-            //      conversation; fall back so the owner who ran /sym still sees
-            //      the answer (only they see it, not the other participant).
-            if (await postToResponseUrl(responseUrl, { response_type: 'in_channel', text, blocks }))
+            // `text` is the FULL body, so text-only tiers are never truncated.
+            // Each postToResponseUrl call logs the HTTP status + Slack error on
+            // failure (a bare fetch would swallow a 4xx).
+            //
+            // DM context (1:1 or group): Slack SILENTLY DROPS a delayed
+            // `in_channel` response_url reply (returns 200, renders nothing), so
+            // we must use `ephemeral` — the owner who ran /sym sees the answer.
+            // This is a Slack platform limit, not ours: a non-member app cannot
+            // post a visible delayed reply into a DM (that's why /giphy answers
+            // synchronously, which we can't — the model takes >3s).
+            //
+            // Non-DM (a channel Sym just isn't a member of): a delayed
+            // `in_channel` reply DOES render, visible to the channel.
+            //
+            // Both branches try rich blocks first, then fall back to text-only
+            // (the newer `markdown`/table block types aren't always accepted
+            // over response_url).
+            const responseType = isDm ? 'ephemeral' : 'in_channel';
+            if (await postToResponseUrl(responseUrl, { response_type: responseType, text, blocks }))
               return;
-            if (await postToResponseUrl(responseUrl, { response_type: 'in_channel', text })) return;
-            await postToResponseUrl(responseUrl, { response_type: 'ephemeral', text });
+            await postToResponseUrl(responseUrl, { response_type: responseType, text });
           },
         });
       } catch (runErr) {
@@ -501,10 +507,21 @@ export function createServer(deps: ServerDeps): Hono {
     const teamId = params.get('team_id') ?? '';
     const userId = params.get('user_id') ?? '';
     const channelId = params.get('channel_id') ?? '';
+    const channelName = params.get('channel_name') ?? '';
     const command = params.get('command') ?? '';
     const text = params.get('text') ?? '';
     const triggerId = params.get('trigger_id') ?? '';
     const responseUrl = params.get('response_url') ?? '';
+
+    // Is this a DM-style conversation (1:1 `im` or group `mpim`)? Slack tags a
+    // 1:1 DM with channel_name "directmessage" and an `im` id (`D…`); a group
+    // DM with "mpdm-…". This matters for the response_url fallback: a DELAYED
+    // `in_channel` reply is silently dropped by Slack in DM contexts (returns
+    // 200 but never renders), so there we must answer `ephemeral` instead.
+    const isDm =
+      channelName === 'directmessage' ||
+      channelName.startsWith('mpdm') ||
+      channelId.startsWith('D');
 
     // Foreign-workspace guard — silent-ACK so a misconfigured second install
     // doesn't get a Slack-visible error pointing back at us.
@@ -558,9 +575,11 @@ export function createServer(deps: ServerDeps): Hono {
       channel_id: channelId,
       text,
     };
-    void processSlashCommand(rawEvent, userId as SlackUserId, responseUrl).catch((err: unknown) => {
-      console.error('[agent] processSlashCommand failed', err);
-    });
+    void processSlashCommand(rawEvent, userId as SlackUserId, responseUrl, isDm).catch(
+      (err: unknown) => {
+        console.error('[agent] processSlashCommand failed', err);
+      },
+    );
     return c.body(null, 200);
   });
 

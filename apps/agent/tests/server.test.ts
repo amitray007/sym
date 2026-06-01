@@ -232,4 +232,27 @@ describe('agent server /slack/commands', () => {
     );
     expect(res.status).toBe(200);
   });
+
+  it('ACKs the owner happy path 200 when invoked from a DM (channel_name=directmessage)', async () => {
+    // A 1:1 DM with someone else: the seed post will fail (channel_not_found)
+    // and delivery falls back to an ephemeral response_url reply. All of that
+    // is background + fire-and-forget; the route contract is still a fast 200.
+    const body = formBody({
+      team_id: config.slackTeamId,
+      user_id: config.ownerSlackUserId,
+      channel_id: 'D9999',
+      channel_name: 'directmessage',
+      command: '/sym',
+      text: 'summarize what we just discussed',
+      trigger_id: 'tr-dm-1',
+      response_url: 'http://example.invalid/r/dm',
+    });
+    const res = await postTo(
+      '/slack/commands',
+      body,
+      'application/x-www-form-urlencoded',
+      signedHeaders(body),
+    );
+    expect(res.status).toBe(200);
+  });
 });
