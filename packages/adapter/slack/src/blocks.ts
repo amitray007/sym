@@ -118,6 +118,50 @@ export function markdownBlock(text: string): MarkdownBlock {
   return { type: 'markdown', text };
 }
 
+/** Slack `markdown` block text limit (~12k); leave headroom. */
+export const MAX_MARKDOWN_BLOCK_CHARS = 11_800;
+/** Whole-message budget — keep the reply comfortably under Slack's message size + text limits. */
+export const MAX_BODY_CHARS = 38_000;
+
+/**
+ * Split text into ≤`max`-char pieces, preferring a paragraph break, then a line
+ * break, then a space within the window so chunks don't slice mid-word.
+ */
+export function splitForBlocks(text: string, max: number): string[] {
+  const out: string[] = [];
+  let rest = text;
+  while (rest.length > max) {
+    const window = rest.slice(0, max);
+    let cut = window.lastIndexOf('\n\n');
+    if (cut < max * 0.5) cut = window.lastIndexOf('\n');
+    if (cut < max * 0.5) cut = window.lastIndexOf(' ');
+    if (cut <= 0) cut = max;
+    out.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).replace(/^\s+/, '');
+  }
+  if (rest.length > 0) out.push(rest);
+  return out;
+}
+
+/**
+ * Render a reply body as one OR MORE `markdown` blocks, chunked under Slack's
+ * per-block limit so a long answer (e.g. dumping `sym tools`) never trips
+ * `msg_too_long`. Caps total length to `MAX_BODY_CHARS` (so the whole message
+ * stays valid) and marks any truncation rather than dropping it silently.
+ */
+export function markdownBlocks(text: string): MarkdownBlock[] {
+  if (text.length <= MAX_MARKDOWN_BLOCK_CHARS) return [{ type: 'markdown', text }];
+  let body = text;
+  let dropped = 0;
+  if (body.length > MAX_BODY_CHARS) {
+    dropped = body.length - MAX_BODY_CHARS;
+    body = body.slice(0, MAX_BODY_CHARS);
+  }
+  const chunks = splitForBlocks(body, MAX_MARKDOWN_BLOCK_CHARS);
+  if (dropped > 0) chunks.push(`…\n\n_(truncated ${dropped.toLocaleString()} more characters)_`);
+  return chunks.map((t) => ({ type: 'markdown', text: t }));
+}
+
 /** A `section` block with a mrkdwn body text and optional field elements. */
 export function sectionBlock(text: string, fields?: MrkdwnElement[]): SectionBlock {
   const block: SectionBlock = { type: 'section', text: mrkdwnElement(text) };

@@ -1,5 +1,5 @@
 import {
-  markdownBlock,
+  markdownBlocks,
   receiptToContextBlock,
   renderIntentToBlocks,
   renderIntentToFallbackText,
@@ -316,6 +316,12 @@ export class TaskCardManager {
 
 function capitalize(s: string): string {
   return s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1);
+}
+
+/** Cap the notification/fallback `text` param under Slack's ~40k limit. */
+function clipNotif(text: string): string {
+  const MAX = 39_000;
+  return text.length > MAX ? `${text.slice(0, MAX - 1)}…` : text;
 }
 
 /**
@@ -752,8 +758,8 @@ async function streamReply(
     const postFinal = async (body: string): Promise<void> => {
       await deps.slackClient.chatPostMessage({
         channel,
-        text: body + fallbackSuffix,
-        blocks: [markdownBlock(body), ...renderBlocks, receipt],
+        text: clipNotif(body + fallbackSuffix),
+        blocks: [...markdownBlocks(body), ...renderBlocks, receipt],
         thread_ts: threadTs,
       });
     };
@@ -822,8 +828,8 @@ async function streamReply(
           await deps.slackClient.chatUpdate({
             channel,
             ts: streamTs,
-            text: cleaned + fallbackSuffix,
-            blocks: [markdownBlock(cleaned), ...renderBlocks, receipt],
+            text: clipNotif(cleaned + fallbackSuffix),
+            blocks: [...markdownBlocks(cleaned), ...renderBlocks, receipt],
           });
         } catch (err) {
           console.warn('[agent] cleanup update failed (continuing):', err);
@@ -1001,10 +1007,10 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
 
   const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
   const body = await finalReplyBody(reply, planController, deps);
-  const blocks = [markdownBlock(body), ...renderBlocks, receiptToContextBlock(reply.receipt)];
+  const blocks = [...markdownBlocks(body), ...renderBlocks, receiptToContextBlock(reply.receipt)];
   await deps.slackClient.chatPostMessage({
     channel: turn.channelId,
-    text: body + fallbackSuffix,
+    text: clipNotif(body + fallbackSuffix),
     blocks,
     // Reply in-thread when the turn is already threaded; top-level otherwise.
     ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),

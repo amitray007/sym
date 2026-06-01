@@ -7,6 +7,9 @@ import {
   headerBlock,
   linkCell,
   markdownBlock,
+  markdownBlocks,
+  MAX_MARKDOWN_BLOCK_CHARS,
+  MAX_BODY_CHARS,
   mrkdwnElement,
   plainTextElement,
   sectionBlock,
@@ -98,5 +101,30 @@ describe('plainTextElement', () => {
       text: 'No emoji',
       emoji: false,
     });
+  });
+});
+
+describe('markdownBlocks (chunking)', () => {
+  it('returns a single block for short text', () => {
+    const b = markdownBlocks('hello');
+    expect(b).toEqual([{ type: 'markdown', text: 'hello' }]);
+  });
+
+  it('splits a long body into multiple blocks, each under the limit', () => {
+    const body = Array.from({ length: 5000 }, (_, i) => `line ${i}`).join('\n');
+    const b = markdownBlocks(body);
+    expect(b.length).toBeGreaterThan(1);
+    for (const blk of b) {
+      expect(blk.type).toBe('markdown');
+      expect(blk.text.length).toBeLessThanOrEqual(MAX_MARKDOWN_BLOCK_CHARS);
+    }
+  });
+
+  it('caps total length and marks the truncation', () => {
+    const body = 'x'.repeat(MAX_BODY_CHARS + 50_000);
+    const b = markdownBlocks(body);
+    const total = b.reduce((n, blk) => n + blk.text.length, 0);
+    expect(total).toBeLessThanOrEqual(MAX_BODY_CHARS + 200);
+    expect(b[b.length - 1]!.text).toMatch(/truncated/);
   });
 });
