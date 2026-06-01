@@ -238,6 +238,57 @@ describe('handleTurn', () => {
     expect(blocks[1]?.type).toBe('context'); // receipt footer
   });
 
+  // --- replySink: slash response_url delivery for conversations Sym can't post in ---
+  it('delivers via replySink instead of chatPostMessage when a sink is provided', async () => {
+    mockRunLoopPi.mockResolvedValueOnce(makeReply({ markdown: 'Answer for a private chat' }));
+    const slack = new MockSlackClient();
+    const sinkCalls: { text: string; blocks: unknown[] }[] = [];
+    await handleTurn(makeTurn({ entrySurface: 'slash_command' }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
+      replySink: async (msg) => {
+        sinkCalls.push(msg);
+      },
+    });
+
+    // No Slack post — Sym isn't a member of this conversation; the sink owns delivery.
+    expect(slack.posts).toHaveLength(0);
+    expect(sinkCalls).toHaveLength(1);
+    expect(sinkCalls[0]!.text).toBe('Answer for a private chat');
+    const sinkBlocks = sinkCalls[0]!.blocks as { type: string; text?: string }[];
+    expect(sinkBlocks[0]?.type).toBe('markdown');
+    expect(sinkBlocks[0]?.text).toBe('Answer for a private chat');
+    expect(sinkBlocks.at(-1)?.type).toBe('context'); // receipt footer still present
+  });
+
+  it('replySink path never opens a stream, even for a threaded turn', async () => {
+    mockRunLoopPi.mockResolvedValueOnce(makeReply({ markdown: 'no streaming here' }));
+    const slack = new MockSlackClient();
+    const sinkCalls: { text: string; blocks: unknown[] }[] = [];
+    await handleTurn(makeTurn({ threadTs: '900.1' as SlackThreadTs }), {
+      fireworks: FAKE_FIREWORKS,
+      model: 'accounts/fireworks/models/gpt-oss-120b',
+      slackClient: slack,
+      botUserId: BOT,
+      slackTeamId: 'T-TEST',
+      behavior: FAKE_BEHAVIOR,
+      nameResolver: FAKE_RESOLVER,
+      replySink: async (msg) => {
+        sinkCalls.push(msg);
+      },
+    });
+
+    expect(slack.startStreamCalls).toHaveLength(0); // streaming skipped
+    expect(slack.posts).toHaveLength(0);
+    expect(sinkCalls).toHaveLength(1);
+    expect(sinkCalls[0]!.text).toBe('no streaming here');
+  });
+
   it('streams (not chatPostMessage) when the turn is threaded (app_mention)', async () => {
     // The mock streams deltas via onDelta so appendedText is populated.
     mockRunLoopPi.mockImplementationOnce(

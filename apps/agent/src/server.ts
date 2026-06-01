@@ -259,22 +259,41 @@ export function createServer(deps: ServerDeps): Hono {
       });
       seedTs = result.ts;
     } catch (err) {
-      console.warn('[agent] /sym seed post failed — falling back to response_url:', err);
-      // Most common cause is `not_in_channel`. Surface a private, actionable
-      // hint to the owner via Slack's response_url (ephemeral by default).
+      // Sym isn't a member of this conversation (typically `not_in_channel` —
+      // a private chat / DM with someone else / a channel it wasn't invited
+      // to), so it can't seed a thread here. But it can STILL answer: Slack's
+      // slash `response_url` posts back into the originating conversation
+      // regardless of membership. Run the turn and deliver the reply that way.
+      // Trade-off vs the seeded path: no live streaming / task cards / buttons
+      // (response_url is a one-shot post), but the owner gets a real answer
+      // instead of an impossible "invite me" instruction (you can't /invite a
+      // bot into a 1:1 DM).
+      console.warn('[agent] /sym seed post failed — answering via response_url instead:', err);
       try {
+        await handleTurn(turn, {
+          ...buildTurnDeps(),
+          replySink: async ({ text, blocks }) => {
+            await fetch(responseUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              // in_channel: visible in the conversation, matching the seed-post
+              // intent (the owner ran /sym here to get an answer here).
+              body: JSON.stringify({ response_type: 'in_channel', text, blocks }),
+            });
+          },
+        });
+      } catch (runErr) {
+        console.warn('[agent] /sym response_url answer failed — sending hint instead:', runErr);
         await fetch(responseUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             response_type: 'ephemeral',
-            text:
-              "I couldn't post in this channel — invite me first with `/invite @Sym`, then try `/sym` again. " +
-              '(Or run it from a channel I’m already in, or from our DM.)',
+            text: "I hit an error answering that here. Try again, or run `/sym` from our DM or a channel I'm in.",
           }),
-        });
-      } catch (postErr) {
-        console.warn('[agent] /sym response_url fallback failed (continuing):', postErr);
+        }).catch((postErr: unknown) =>
+          console.warn('[agent] /sym hint post failed (continuing):', postErr),
+        );
       }
       return;
     }

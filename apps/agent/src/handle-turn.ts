@@ -75,6 +75,15 @@ export interface HandleTurnDeps {
    * When present, MCP tools are available alongside builtin tools.
    */
   mcpConfigs?: ConnectorConfig[];
+  /**
+   * Optional override for FINAL reply delivery. When set, handleTurn does NOT
+   * post to Slack and skips streaming (which needs a postable thread) — it hands
+   * the rendered reply here instead. Used by the slash-command `response_url`
+   * path: when Sym isn't a member of the conversation it can't `chat.postMessage`
+   * a seed, but Slack's response_url delivers the answer there regardless. The
+   * turn still runs identically (same tools, same loop); only delivery differs.
+   */
+  replySink?: (msg: { text: string; blocks: unknown[] }) => Promise<void>;
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
@@ -997,20 +1006,31 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   const registry = new ToolRegistry(dispatcher);
 
   // Threaded turns: try streaming; fall through to postMessage only if it fails.
-  if (turn.threadTs !== undefined) {
+  // A replySink turn never streams — streaming requires posting into a thread
+  // Sym owns, which is exactly what the sink path lacks (it can't post here).
+  if (turn.threadTs !== undefined && deps.replySink === undefined) {
     const streamed = await streamReply(rewrittenTurn, deps, { history, registry, planController });
     if (streamed) return;
   }
 
-  // Non-threaded or stream fallback: run the loop and post normally.
+  // Non-threaded or stream fallback: run the loop and build the final reply.
   const reply = await runTurnLoop(rewrittenTurn, deps, registry, history);
 
   const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
   const body = await finalReplyBody(reply, planController, deps);
   const blocks = [...markdownBlocks(body), ...renderBlocks, receiptToContextBlock(reply.receipt)];
+  const text = clipNotif(body + fallbackSuffix);
+
+  // Delivery override (slash response_url): hand off instead of posting to a
+  // channel Sym may not be a member of.
+  if (deps.replySink !== undefined) {
+    await deps.replySink({ text, blocks });
+    return;
+  }
+
   await deps.slackClient.chatPostMessage({
     channel: turn.channelId,
-    text: clipNotif(body + fallbackSuffix),
+    text,
     blocks,
     // Reply in-thread when the turn is already threaded; top-level otherwise.
     ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),
