@@ -273,7 +273,7 @@ export function createServer(deps: ServerDeps): Hono {
       try {
         await handleTurn(turn, {
           ...buildTurnDeps(),
-          replySink: async ({ text, blocks }) => {
+          replySink: async ({ text, blocks, receiptText }) => {
             // `text` is the FULL body, so text-only tiers are never truncated.
             // Each postToResponseUrl call logs the HTTP status + Slack error on
             // failure (a bare fetch would swallow a 4xx).
@@ -297,8 +297,12 @@ export function createServer(deps: ServerDeps): Hono {
             // same attribution header as the in-channel experience — we can't
             // post a separate seed here, so we prepend it to the answer itself.
             const attribution = `<@${requester}> via \`/sym\`: ${seedText}`;
-            const headedText = `${attribution}\n\n${text}`;
+            // Rich tier: attribution header block + the answer/receipt blocks.
             const headedBlocks = [{ type: 'markdown', text: attribution }, ...blocks];
+            // Text-only tier: the blocks' receipt context footer is unavailable,
+            // so append the plain-text receipt under the answer to match.
+            const footer = receiptText.length > 0 ? `\n\n${receiptText}` : '';
+            const headedText = `${attribution}\n\n${text}${footer}`;
             if (
               await postToResponseUrl(responseUrl, {
                 response_type: responseType,

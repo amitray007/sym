@@ -1,6 +1,7 @@
 import {
   markdownBlocks,
   receiptToContextBlock,
+  receiptToFooterFields,
   renderIntentToBlocks,
   renderIntentToFallbackText,
   threadToHistory,
@@ -83,7 +84,17 @@ export interface HandleTurnDeps {
    * a seed, but Slack's response_url delivers the answer there regardless. The
    * turn still runs identically (same tools, same loop); only delivery differs.
    */
-  replySink?: (msg: { text: string; blocks: unknown[] }) => Promise<void>;
+  replySink?: (msg: {
+    text: string;
+    blocks: unknown[];
+    /**
+     * Plain-text rendering of the receipt footer (model / tools / duration),
+     * for the text-only delivery tier where the `blocks` context footer can't
+     * be used. The rich tier shows the footer via the receipt context block in
+     * `blocks`, so this is only needed when falling back to text.
+     */
+    receiptText: string;
+  }) => Promise<void>;
 }
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
@@ -1025,9 +1036,14 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   // channel Sym may not be a member of. Pass the FULL body — for chat.postMessage
   // `text` is only the notification preview (blocks carry the body, so we clip
   // it), but a response_url sink may need to fall back to text-only delivery,
-  // where the text IS the content and must not be truncated.
+  // where the text IS the content and must not be truncated. Also hand over a
+  // plain-text receipt footer for that text-only tier (the rich tier gets it
+  // from the receipt context block already in `blocks`).
   if (deps.replySink !== undefined) {
-    await deps.replySink({ text: fullText, blocks });
+    const receiptText = receiptToFooterFields(reply.receipt)
+      .map((f) => `_${f.label}:_ ${f.value}`)
+      .join('  ·  ');
+    await deps.replySink({ text: fullText, blocks, receiptText });
     return;
   }
 

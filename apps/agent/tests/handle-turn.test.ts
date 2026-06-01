@@ -240,9 +240,19 @@ describe('handleTurn', () => {
 
   // --- replySink: slash response_url delivery for conversations Sym can't post in ---
   it('delivers via replySink instead of chatPostMessage when a sink is provided', async () => {
-    mockRunLoopPi.mockResolvedValueOnce(makeReply({ markdown: 'Answer for a private chat' }));
+    mockRunLoopPi.mockResolvedValueOnce(
+      makeReply({
+        markdown: 'Answer for a private chat',
+        receipt: {
+          turnId: 'turn-1' as TurnId,
+          model: 'accounts/fireworks/models/gpt-oss-120b',
+          toolsInvoked: ['flip_coin'],
+          durationMs: 1200,
+        },
+      }),
+    );
     const slack = new MockSlackClient();
-    const sinkCalls: { text: string; blocks: unknown[] }[] = [];
+    const sinkCalls: { text: string; blocks: unknown[]; receiptText: string }[] = [];
     await handleTurn(makeTurn({ entrySurface: 'slash_command' }), {
       fireworks: FAKE_FIREWORKS,
       model: 'accounts/fireworks/models/gpt-oss-120b',
@@ -264,6 +274,9 @@ describe('handleTurn', () => {
     expect(sinkBlocks[0]?.type).toBe('markdown');
     expect(sinkBlocks[0]?.text).toBe('Answer for a private chat');
     expect(sinkBlocks.at(-1)?.type).toBe('context'); // receipt footer still present
+    // Plain-text receipt for the text-only fallback tier (model shortened + tools).
+    expect(sinkCalls[0]!.receiptText).toContain('gpt-oss-120b');
+    expect(sinkCalls[0]!.receiptText).toContain('flip_coin');
   });
 
   it('replySink path never opens a stream, even for a threaded turn', async () => {
