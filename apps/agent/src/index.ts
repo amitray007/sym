@@ -6,6 +6,7 @@ import { config as loadDotenv } from 'dotenv';
 
 import { loadAgentConfig } from './config.js';
 import { configPath, initMcpPool, McpDispatcher } from './mcp/index.js';
+import { cliConnectorsSummary } from './run-cli.js';
 import { createServer } from './server.js';
 
 async function main(): Promise<void> {
@@ -36,6 +37,9 @@ async function main(): Promise<void> {
       ? `[mcp] ${mcpNames.length} connector(s) from ${sourceLabel}: ${mcpNames.join(', ')}`
       : `[mcp] no MCP servers configured (${sourceLabel})`,
   );
+  // CLI connectors are invisible otherwise (they're not "connected", just
+  // allowlisted) — log them with a PATH check so a missing binary is obvious.
+  console.info(`[cli] ${cliConnectorsSummary()}`);
 
   // Warm the MCP pool at boot (not lazily on the first turn) so every connector's
   // tools are connected + ready before the first Slack message — no first-turn

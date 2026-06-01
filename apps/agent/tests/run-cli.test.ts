@@ -7,7 +7,22 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { buildCliCatalog, isIntrospectionOnly, parseAllowlist, runCli } from '../src/run-cli.js';
+import {
+  binaryOnPath,
+  buildCliCatalog,
+  isIntrospectionOnly,
+  parseAllowlist,
+  runCli,
+} from '../src/run-cli.js';
+
+describe('binaryOnPath', () => {
+  it('finds a binary that exists on PATH', () => {
+    expect(binaryOnPath('node')).toBe(true);
+  });
+  it('returns false for a binary not on PATH', () => {
+    expect(binaryOnPath('definitely-not-a-real-cli-xyz')).toBe(false);
+  });
+});
 
 describe('parseAllowlist', () => {
   it('parses comma-separated bare names', () => {

@@ -23,6 +23,7 @@ import {
 import { completeOAuth } from './mcp/oauth-registry.js';
 import { loadConnectorConfigs } from './mcp/source.js';
 import { buildOwnerDeclineMessage, checkOwnerAccess } from './owner-gate.js';
+import { cliConnectorsSummary } from './run-cli.js';
 import { healthCheckTokens, loadWorkspaceContext } from './workspace-context.js';
 
 import type { AgentConfig } from './config.js';
@@ -574,6 +575,7 @@ export function createServer(deps: ServerDeps): Hono {
       `[admin] reload from ${loaded.source} (${loaded.path}) — ${result.totalTools} tool(s) live ` +
         `across ${result.connectors.length} connector(s)`,
     );
+    console.info(`[cli] ${cliConnectorsSummary()}`);
     return c.json({ source: loaded.source, path: loaded.path, ...result });
   });
 

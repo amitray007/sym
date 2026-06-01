@@ -13,7 +13,9 @@
  */
 
 import { spawn } from 'node:child_process';
+import { accessSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 
 import { loadCliAllow, loadCliDescribe } from './mcp/source.js';
 
@@ -91,6 +93,34 @@ export function resolveCliCapabilities(): CliCapability[] {
 
 function isAllowed(list: Allowlist, binary: string): boolean {
   return list === '*' || list.has(binary);
+}
+
+/** True if `bin` resolves to an executable on `$PATH` (a "connected" CLI). */
+export function binaryOnPath(bin: string): boolean {
+  for (const dir of (process.env['PATH'] ?? '').split(delimiter)) {
+    if (dir.length === 0) continue;
+    try {
+      accessSync(join(dir, bin), constants.X_OK);
+      return true;
+    } catch {
+      // not here — keep scanning
+    }
+  }
+  return false;
+}
+
+/**
+ * A one-line boot/status summary of the CLI connectors: each allowlisted binary
+ * with whether it's actually on PATH (✓/✗), so a missing CLI is obvious in the
+ * logs instead of silently failing only when the agent tries to run it.
+ */
+export function cliConnectorsSummary(): string {
+  const allow = resolveAllowlist();
+  if (allow === '*') return 'run_cli allowlist: * (any installed CLI is runnable)';
+  const bins = [...allow].sort();
+  if (bins.length === 0) return 'no CLI connectors configured';
+  const parts = bins.map((b) => `${b} ${binaryOnPath(b) ? '✓' : '✗ (not on PATH)'}`);
+  return `${bins.length} CLI connector(s): ${parts.join(', ')}`;
 }
 
 /**

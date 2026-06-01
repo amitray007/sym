@@ -16,7 +16,7 @@ import {
   setCliDesc,
   writeConfigFile,
 } from '../src/cli/config-store.js';
-import { resolveAllowlist, resolveCliCapabilities } from '../src/run-cli.js';
+import { cliConnectorsSummary, resolveAllowlist, resolveCliCapabilities } from '../src/run-cli.js';
 
 let dir: string;
 let cfgPath: string;
@@ -138,5 +138,21 @@ describe('CLI descriptions + capabilities', () => {
     );
     const caps = resolveCliCapabilities();
     expect(caps.map((c) => c.bin)).toEqual(['gcloud']);
+  });
+
+  it('cliConnectorsSummary marks present vs missing binaries on PATH', () => {
+    writeFileSync(
+      cfgPath,
+      JSON.stringify({ version: 1, mcpServers: [], cli: { allow: ['node', 'nope-xyz'] } }),
+    );
+    const summary = cliConnectorsSummary();
+    expect(summary).toContain('node ✓');
+    expect(summary).toContain('nope-xyz ✗');
+  });
+
+  it('cliConnectorsSummary reports the wildcard allowlist', () => {
+    process.env['SYM_CLI_ALLOWLIST'] = '*'; // no file cli section → env
+    writeFileSync(cfgPath, JSON.stringify({ version: 1, mcpServers: [] }));
+    expect(cliConnectorsSummary()).toContain('*');
   });
 });
