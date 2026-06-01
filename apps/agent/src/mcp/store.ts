@@ -31,6 +31,12 @@ import type {
 // Types
 // ---------------------------------------------------------------------------
 
+/** A stored static secret's identity — connector + field name, NEVER the value. */
+export interface SecretRef {
+  connector: string;
+  field: string;
+}
+
 export interface CredentialStore {
   getClientInformation(connectorName: string): OAuthClientInformationMixed | undefined;
   saveClientInformation(connectorName: string, info: OAuthClientInformationMixed): void;
@@ -41,6 +47,15 @@ export interface CredentialStore {
   clearCodeVerifier(connectorName: string): void;
   getDiscoveryState(connectorName: string): OAuthDiscoveryState | undefined;
   saveDiscoveryState(connectorName: string, state: OAuthDiscoveryState): void;
+
+  // Generic static secrets — written by `sym secret set`, read by the
+  // (future) `secretRef` static-credential injection path. Stored under a
+  // reserved field namespace so they never collide with OAuth fields above.
+  saveSecret(connectorName: string, field: string, value: string): void;
+  getSecret(connectorName: string, field: string): string | undefined;
+  deleteSecret(connectorName: string, field: string): void;
+  /** All stored static-secret identities (connector + field) — never values. */
+  listSecretRefs(): SecretRef[];
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +133,9 @@ export function parseEncryptionKey(raw: string | undefined): Buffer {
 
 const DEFAULT_DB_DIR = '.sym';
 const DEFAULT_DB_FILE = 'credentials.db';
+
+/** Reserved field-name prefix for generic static secrets (vs OAuth fields). */
+const SECRET_FIELD_PREFIX = 'secret:';
 
 /**
  * SQLite-backed credential store with AES-256-GCM encryption.
@@ -241,6 +259,34 @@ export class SqliteCredentialStore implements CredentialStore {
 
   saveDiscoveryState(connectorName: string, state: OAuthDiscoveryState): void {
     this._set(connectorName, 'discovery_state', JSON.stringify(state));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Generic static secrets — namespaced under `secret:` so they never collide
+  // with the OAuth fields above and `listSecretRefs` can enumerate just them.
+  // ---------------------------------------------------------------------------
+
+  saveSecret(connectorName: string, field: string, value: string): void {
+    this._set(connectorName, `${SECRET_FIELD_PREFIX}${field}`, value);
+  }
+
+  getSecret(connectorName: string, field: string): string | undefined {
+    return this._get(connectorName, `${SECRET_FIELD_PREFIX}${field}`);
+  }
+
+  deleteSecret(connectorName: string, field: string): void {
+    this._delete(connectorName, `${SECRET_FIELD_PREFIX}${field}`);
+  }
+
+  listSecretRefs(): SecretRef[] {
+    const stmt = this.db.prepare(
+      'SELECT connector_name, field FROM mcp_credentials WHERE field LIKE ? ORDER BY connector_name, field',
+    );
+    const rows = stmt.all(`${SECRET_FIELD_PREFIX}%`) as { connector_name: string; field: string }[];
+    return rows.map((r) => ({
+      connector: r.connector_name,
+      field: r.field.slice(SECRET_FIELD_PREFIX.length),
+    }));
   }
 
   /**

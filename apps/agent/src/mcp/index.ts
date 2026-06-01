@@ -13,3 +13,4 @@ export type { ReconcileResult, ConnectorStatus } from './dispatcher.js';
 export { CompositeDispatcher } from './composite.js';
 export { completeOAuth, getPendingAuth } from './oauth-registry.js';
 export { SqliteCredentialStore } from './store.js';
+export type { SecretRef } from './store.js';

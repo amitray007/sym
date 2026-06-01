@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "sym": "./dist/cli/index.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",
@@ -10,6 +13,7 @@
     "test": "vitest run",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
+    "sym": "tsx src/cli/index.ts",
     "qa:mcp": "tsc -p tsconfig.json && node scripts/qa-connector.mjs",
     "qa:delete": "tsc -p tsconfig.json && node scripts/qa-delete.mjs"
   },

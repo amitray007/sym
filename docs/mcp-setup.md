@@ -68,6 +68,34 @@ connectors are left untouched (no reconnect churn); dropped ones are closed
 (`status: "removed"`). The routes refuse any non-loopback caller — the CLI hits
 `127.0.0.1` from inside the container; proxied traffic is rejected.
 
+## The `sym` CLI (control plane)
+
+Rather than hand-editing the JSON + curling the admin routes, drive everything
+through `sym` — a tool-agnostic control plane over the same file + admin seam.
+It is baked into the image (`bin: sym`); locally run it via
+`pnpm --filter @sym/agent sym …`.
+
+```bash
+sym status                              # live connectors + tool count (GET /admin/status)
+sym apply                               # reconcile the running agent to the file (POST /admin/reload)
+
+sym mcp ls                              # list connectors in the config file
+sym mcp add --name sentry --command sentry-mcp          # stdio shorthand
+sym mcp add --name remote --url https://host/mcp        # http shorthand
+sym mcp add --json '{"name":"x","transport":{…},"auth":{…}}'   # full generic shape (auth/injection)
+sym mcp rm --name sentry
+
+sym secret set sentry SENTRY_AUTH_TOKEN sntrys_…        # → encrypted store (or pipe the value via stdin)
+sym secret ls                           # stored secret NAMES only — never values
+sym secret rm sentry SENTRY_AUTH_TOKEN
+```
+
+Mutating `mcp` verbs write the file and then best-effort `apply`; if the agent
+isn't running yet, the file is still written and the change lands on next start.
+`sym` knows nothing about any specific service — it edits generic connector rows
+and stores generic secrets. Secrets go to the encrypted store (needs
+`SYM_ENCRYPTION_KEY`); the config file holds wiring only.
+
 ## The two credential models
 
 **Model A — Sym holds the credential.** A static token (injected via `env`/`header`)

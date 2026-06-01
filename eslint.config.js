@@ -91,6 +91,13 @@ export default [
       'no-console': 'off',
     },
   },
+  {
+    // The `sym` CLI: stdout IS the product, so plain console.log is correct.
+    files: ['**/src/cli/**/*.{ts,tsx,mts,cts}'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
   // Must be last — disables stylistic rules that conflict with Prettier
   prettierConfig,
 ];
