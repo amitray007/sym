@@ -81,15 +81,8 @@ export function loadConnectorConfigs(): LoadedConnectorConfig {
   return { mcpServers, source: 'file', path };
 }
 
-/**
- * Read the run_cli allowlist from the config file's `cli.allow` array, or
- * `undefined` when the file/field is absent or malformed (caller falls back to
- * the `SYM_CLI_ALLOWLIST` env var). Fail-open — never throws.
- *
- * File shape: `{ …, "cli": { "allow": ["sym","gcloud","sentry-cli"] } }`.
- * An entry of `"*"` means "any CLI" (wildcard).
- */
-export function loadCliAllow(): string[] | undefined {
+/** Read the `cli` object from the config file (or undefined). Fail-open. */
+function readCliSection(): Record<string, unknown> | undefined {
   let raw: string;
   try {
     raw = readFileSync(configPath(), 'utf8');
@@ -105,9 +98,38 @@ export function loadCliAllow(): string[] | undefined {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
   const cli = (parsed as Record<string, unknown>)['cli'];
   if (cli === null || typeof cli !== 'object' || Array.isArray(cli)) return undefined;
-  const allow = (cli as Record<string, unknown>)['allow'];
+  return cli as Record<string, unknown>;
+}
+
+/**
+ * Read the run_cli allowlist from the config file's `cli.allow` array, or
+ * `undefined` when the file/field is absent or malformed (caller falls back to
+ * the `SYM_CLI_ALLOWLIST` env var). Fail-open — never throws.
+ *
+ * File shape: `{ …, "cli": { "allow": ["sym","gcloud"], "describe": { "gcloud": "…" } } }`.
+ * An `allow` entry of `"*"` means "any CLI" (wildcard).
+ */
+export function loadCliAllow(): string[] | undefined {
+  const cli = readCliSection();
+  if (cli === undefined) return undefined;
+  const allow = cli['allow'];
   if (!Array.isArray(allow) || !allow.every((s) => typeof s === 'string')) return undefined;
   return allow as string[];
+}
+
+/**
+ * Read per-CLI descriptions (`cli.describe`) — what each binary is for, so the
+ * agent knows a CLI's purpose without it being hardcoded anywhere. Fail-open.
+ */
+export function loadCliDescribe(): Record<string, string> {
+  const cli = readCliSection();
+  const describe = cli?.['describe'];
+  if (describe === null || typeof describe !== 'object' || Array.isArray(describe)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(describe as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.length > 0) out[k] = v;
+  }
+  return out;
 }
 
 /** Legacy env-var source. Returns 'none' when the var is unset/empty. */

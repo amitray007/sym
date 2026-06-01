@@ -48,10 +48,11 @@ import {
   removeConnector,
   removeCli,
   setCliAllow,
+  setCliDesc,
   upsertConnector,
   writeConfigFile,
 } from './config-store.js';
-import { configPath } from '../mcp/source.js';
+import { configPath, loadCliDescribe } from '../mcp/source.js';
 import { resolveAllowlist } from '../run-cli.js';
 
 import type { ConnectorConfig, TransportConfig } from '../mcp/config.js';
@@ -75,7 +76,8 @@ Write:
   sym mcp add --name N --command C [--arg A]…   stdio shorthand (repeat --arg per token)
   sym mcp add --name N --url U [--trust]        http shorthand
   sym mcp rm --name N                           remove a connector
-  sym cli add <bin>…                            allow a CLI for run_cli (additive)
+  sym cli add <bin> [--desc "what it's for"]    allow a CLI for run_cli (additive; describe it)
+  sym cli desc <bin> <text…>                     set/update a CLI's description
   sym cli set <a,b,c>                           replace the whole allowlist (e.g. restrict from *)
   sym cli rm <bin>…                             disallow a CLI
   sym secret set <connector> <field> [value]   store a secret (value via stdin if omitted)
@@ -186,22 +188,36 @@ function cliCommand(args: string[], json: boolean): number {
 
   if (verb === undefined || verb === 'ls' || verb === 'list') {
     const allow = resolveAllowlist();
+    const describe = loadCliDescribe();
     const list = allow === '*' ? ['*'] : [...allow].sort();
     const source = loadConfigFile(path).cli !== undefined ? 'config file' : 'env/default';
     if (json) {
-      console.log(JSON.stringify({ allow: list, wildcard: allow === '*', source }, null, 2));
+      console.log(
+        JSON.stringify({ allow: list, describe, wildcard: allow === '*', source }, null, 2),
+      );
       return 0;
     }
-    console.log(`run_cli allowlist (${source}): ${list.join(', ')}`);
+    console.log(`run_cli allowlist (${source}):`);
+    for (const bin of list) {
+      console.log(`  ${bin}${describe[bin] !== undefined ? ` — ${describe[bin]}` : ''}`);
+    }
     if (allow === '*') {
-      console.log('  * = any installed CLI is runnable. Restrict with `sym cli set <a,b,c>`.');
+      console.log('  (* = any installed CLI; restrict with `sym cli set <a,b,c>`)');
     }
     return 0;
   }
 
   if (verb === 'add') {
-    const bins = args.slice(1).filter((b) => b.length > 0);
+    const { values, positionals } = parseArgs({
+      args: args.slice(1),
+      options: { desc: { type: 'string' } },
+      allowPositionals: true,
+    });
+    const bins = positionals.filter((b) => b.length > 0);
     if (bins.length === 0) throw new Error('cli add requires binary names: sym cli add gh jq');
+    if (values.desc !== undefined && bins.length !== 1) {
+      throw new Error('--desc applies to a single binary: sym cli add gcloud --desc "…"');
+    }
     const cfg = loadConfigFile(path);
     // Seed a fresh allowlist from the current effective set so add is ADDITIVE,
     // never a surprise narrowing of an env/default allowlist.
@@ -210,12 +226,26 @@ function cliCommand(args: string[], json: boolean): number {
       const eff = resolveAllowlist();
       base = eff === '*' ? ['*'] : [...eff];
     }
-    const next = setCliAllow(cfg, [...base, ...bins]);
+    let next = setCliAllow(cfg, [...base, ...bins]);
+    if (values.desc !== undefined && bins[0] !== undefined) {
+      next = setCliDesc(next, bins[0], values.desc);
+    }
     writeConfigFile(path, next);
     console.log(`allowlist: ${(next.cli?.allow ?? []).join(', ')}`);
     if ((next.cli?.allow ?? []).includes('*')) {
       console.log('  note: still contains * (any CLI). Run `sym cli rm "*"` to enforce the list.');
     }
+    return 0;
+  }
+
+  if (verb === 'desc' || verb === 'describe') {
+    const bin = args[1];
+    const text = args.slice(2).join(' ').trim();
+    if (bin === undefined || text.length === 0) {
+      throw new Error('cli desc requires: sym cli desc <bin> <description text>');
+    }
+    writeConfigFile(path, setCliDesc(loadConfigFile(path), bin, text));
+    console.log(`described ${bin}: ${text}`);
     return 0;
   }
 
@@ -286,8 +316,17 @@ async function toolsCommand(name: string | undefined, json: boolean): Promise<nu
     })),
   );
 
+  // CLIs are capabilities too — surface them in the catalog so a tool search
+  // covers both MCP tools and run_cli CLIs.
+  const allow = resolveAllowlist();
+  const describe = loadCliDescribe();
+  const cliList = allow === '*' ? ['*'] : [...allow].sort();
+  const cli = cliList.map((bin) => ({ bin, description: describe[bin] }));
+
   if (json) {
-    console.log(JSON.stringify({ catalog }, null, 2));
+    console.log(
+      JSON.stringify({ catalog, cli: { allow: cliList, describe, via: 'run_cli' } }, null, 2),
+    );
     return 0;
   }
   const total = catalog.reduce((sum, c) => sum + c.tools.length, 0);
@@ -296,6 +335,11 @@ async function toolsCommand(name: string | undefined, json: boolean): Promise<nu
     console.log(`\n${c.connector} (${c.tools.length})${c.ok ? '' : ' — not connected'}`);
     for (const t of c.tools) console.log(`  ${t.name} — ${t.description}`);
   }
+  console.log(`\nCLIs (via run_cli):`);
+  for (const c of cli) {
+    console.log(`  ${c.bin}${c.description !== undefined ? ` — ${c.description}` : ''}`);
+  }
+  if (allow === '*') console.log('  (* = any installed CLI; run ["<bin>","--help"] to learn one)');
   return 0;
 }
 

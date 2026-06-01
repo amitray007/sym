@@ -20,6 +20,7 @@
 
 import { MCP_TOOL_SEPARATOR } from '../mcp/dispatcher.js';
 
+import type { CliCapability } from '../run-cli.js';
 import type { RenderSink } from './tools.js';
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { TSchema } from '@earendil-works/pi-ai';
@@ -106,61 +107,98 @@ export function searchDescriptors(
   return scored.slice(0, limit).map((x) => x.d);
 }
 
+/** Rank CLI capabilities against a query by term overlap (bin + description). */
+export function searchCli(cli: CliCapability[], query: string, limit: number): CliCapability[] {
+  const terms = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 1);
+  if (terms.length === 0) return cli.slice(0, limit);
+  const scored = cli
+    .map((c) => {
+      const hay = `${c.bin} ${c.description ?? ''}`.toLowerCase();
+      let score = 0;
+      for (const t of terms) if (hay.includes(t)) score += 1;
+      return { c, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((x) => x.c);
+}
+
 const FIND_TOOLS_PARAMS = {
   type: 'object',
   properties: {
     query: {
       type: 'string',
-      description: 'What you want to do, e.g. "list sentry issues" or "create calendar event".',
+      description:
+        'What you want to do, e.g. "list sentry issues" or "deploy a cloud run service".',
     },
   },
   required: ['query'],
 } as const;
 
-/** The `find_tools` meta-tool: search MCP tools, return name+description+schema. */
-export function makeFindTools(mcp: ToolDescriptor[], limit = 12): AgentTool {
+/**
+ * The `find_tools` meta-tool: search BOTH on-demand MCP connector tools AND the
+ * allowlisted CLIs, so one query surfaces every way to accomplish a task. MCP
+ * matches are used via `call_tool`; CLI matches via `run_cli`.
+ */
+export function makeFindTools(
+  caps: { mcp: ToolDescriptor[]; cli: CliCapability[] },
+  limit = 12,
+): AgentTool {
+  const { mcp, cli } = caps;
   const connectors = [...groupByConnector(mcp).keys()];
   return {
     name: 'find_tools',
     label: 'find_tools',
     description:
-      'Search the on-demand connector tools. Returns matching tool names, descriptions, and ' +
-      'input schemas. Call this before call_tool whenever you need a connector capability.',
+      'Search ALL your on-demand capabilities — MCP connector tools AND command-line tools — ' +
+      'by what you want to do. Returns MCP tool names+schemas (use with call_tool) and matching ' +
+      'CLIs (use with run_cli). Call this before deciding you cannot do something.',
     parameters: FIND_TOOLS_PARAMS as unknown as TSchema,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     prepareArguments: (args: unknown) => args as any,
     execute: async (_toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
       const query = String((params as { query?: unknown })?.query ?? '').trim();
-      const matches = searchDescriptors(mcp, query, limit);
-      if (matches.length === 0) {
+      const mcpMatches = searchDescriptors(mcp, query, limit);
+      const cliMatches = searchCli(cli, query, limit);
+
+      if (mcpMatches.length === 0 && cliMatches.length === 0) {
         return {
           content: [
             {
               type: 'text',
               text:
-                `No tools matched "${query}". Available connectors: ${connectors.join(', ')}. ` +
-                'Try a broader query or a connector name.',
+                `No capability matched "${query}". Connectors: ${connectors.join(', ') || '(none)'}; ` +
+                `CLIs: ${cli.map((c) => c.bin).join(', ') || '(none)'}. Try a broader query, or run ` +
+                '`["sym","tools"]` for the full catalog and `["<cli>","--help"]` to probe a CLI.',
             },
           ],
           details: null,
         };
       }
-      const payload = matches.map((d) => ({
-        name: d.name,
-        description: d.description,
-        parameters: d.parameters,
-      }));
-      return {
-        content: [
-          {
-            type: 'text',
-            text:
-              `Found ${matches.length} tool(s). Call \`call_tool\` with one of these "name" values ` +
-              `and "arguments" matching its schema:\n${JSON.stringify(payload)}`,
-          },
-        ],
-        details: null,
-      };
+
+      const parts: string[] = [`Found ${mcpMatches.length + cliMatches.length} capability(ies):`];
+      if (mcpMatches.length > 0) {
+        const payload = mcpMatches.map((d) => ({
+          name: d.name,
+          description: d.description,
+          parameters: d.parameters,
+        }));
+        parts.push(
+          `MCP connector tools — use \`call_tool\` with the exact "name" + arguments matching its ` +
+            `schema:\n${JSON.stringify(payload)}`,
+        );
+      }
+      if (cliMatches.length > 0) {
+        const payload = cliMatches.map((c) => ({ bin: c.bin, description: c.description ?? '' }));
+        parts.push(
+          `CLIs — use \`run_cli\` with argv ["<bin>", …] (run ["<bin>","--help"] first if unsure):` +
+            `\n${JSON.stringify(payload)}`,
+        );
+      }
+      return { content: [{ type: 'text', text: parts.join('\n\n') }], details: null };
     },
   };
 }

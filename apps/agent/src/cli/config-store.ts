@@ -35,8 +35,11 @@ import type { ConnectorConfig } from '../mcp/config.js';
 export interface SymConfigFile {
   version: number;
   mcpServers: ConnectorConfig[];
-  /** run_cli allowlist (bare binary names; `"*"` = any). Managed by `sym cli`. */
-  cli?: { allow: string[] };
+  /**
+   * run_cli allowlist (bare binary names; `"*"` = any) + optional per-binary
+   * descriptions (what each CLI is for). Managed by `sym cli`.
+   */
+  cli?: { allow: string[]; describe?: Record<string, string> };
 }
 
 // ---------------------------------------------------------------------------
@@ -85,12 +88,24 @@ export function loadConfigFile(path: string): SymConfigFile {
   return { version, mcpServers, ...(cli !== undefined ? { cli } : {}) };
 }
 
-/** Parse the optional `cli: { allow: string[] }` section (ignored if malformed). */
-function readCliSection(raw: unknown): { allow: string[] } | undefined {
+/** Parse the optional `cli: { allow, describe? }` section (ignored if malformed). */
+function readCliSection(raw: unknown): SymConfigFile['cli'] {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
-  const allow = (raw as Record<string, unknown>)['allow'];
+  const obj = raw as Record<string, unknown>;
+  const allow = obj['allow'];
   if (!Array.isArray(allow) || !allow.every((s) => typeof s === 'string')) return undefined;
-  return { allow: allow as string[] };
+  const describe = parseDescribe(obj['describe']);
+  return { allow: allow as string[], ...(describe !== undefined ? { describe } : {}) };
+}
+
+/** Parse `cli.describe` (a string→string map), dropping non-string/empty values. */
+function parseDescribe(raw: unknown): Record<string, string> | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.length > 0) out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -180,12 +195,34 @@ function clean(list: string[]): string[] {
   return out;
 }
 
-/** Return a new config with the run_cli allowlist set to `allow` (pure). */
-export function setCliAllow(cfg: SymConfigFile, allow: string[]): SymConfigFile {
-  return { ...cfg, cli: { allow: clean(allow) } };
+/** Keep only the describe entries whose key satisfies `keep` (or undefined if empty). */
+function pruneDescribe(
+  describe: Record<string, string> | undefined,
+  keep: (bin: string) => boolean,
+): Record<string, string> | undefined {
+  if (describe === undefined) return undefined;
+  const out = Object.fromEntries(Object.entries(describe).filter(([k]) => keep(k)));
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
-/** Remove binaries from the allowlist; reports which were actually present (pure). */
+/** Return a new config with the run_cli allowlist set to `allow` (pure). Prunes
+ *  descriptions to the surviving binaries. */
+export function setCliAllow(cfg: SymConfigFile, allow: string[]): SymConfigFile {
+  const cleaned = clean(allow);
+  const keep = new Set(cleaned);
+  const describe = pruneDescribe(cfg.cli?.describe, (b) => keep.has(b));
+  return { ...cfg, cli: { allow: cleaned, ...(describe !== undefined ? { describe } : {}) } };
+}
+
+/** Set a binary's description, e.g. "Google Cloud Platform CLI" (pure). */
+export function setCliDesc(cfg: SymConfigFile, bin: string, desc: string): SymConfigFile {
+  const allow = cfg.cli?.allow ?? [];
+  const describe = { ...(cfg.cli?.describe ?? {}), [bin.trim()]: desc.trim() };
+  return { ...cfg, cli: { allow, describe } };
+}
+
+/** Remove binaries from the allowlist (and their descriptions); reports which
+ *  were present (pure). */
 export function removeCli(
   cfg: SymConfigFile,
   bins: string[],
@@ -194,5 +231,9 @@ export function removeCli(
   const drop = new Set(bins.map((b) => b.trim()));
   const kept = current.filter((b) => !drop.has(b));
   const removed = current.filter((b) => drop.has(b));
-  return { next: { ...cfg, cli: { allow: kept } }, removed };
+  const describe = pruneDescribe(cfg.cli?.describe, (b) => !drop.has(b));
+  return {
+    next: { ...cfg, cli: { allow: kept, ...(describe !== undefined ? { describe } : {}) } },
+    removed,
+  };
 }

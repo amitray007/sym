@@ -11,7 +11,12 @@ import { Agent } from '@earendil-works/pi-agent-core';
 import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
-import { buildCliCatalog, isIntrospectionOnly, resolveAllowlist } from '../run-cli.js';
+import {
+  buildCliCatalog,
+  isIntrospectionOnly,
+  resolveAllowlist,
+  resolveCliCapabilities,
+} from '../run-cli.js';
 import {
   buildConnectorCatalog,
   makeCallTool,
@@ -399,22 +404,26 @@ export async function runLoopPi(
     });
   };
 
+  // CLIs the agent can run, as named/described capabilities (config-driven).
+  const cliCaps = resolveCliCapabilities();
   const agentTools = [
     ...bridgeTools(registry, ctx, builtinDescriptors, onRender),
+    // find_tools searches BOTH MCP tools and CLIs, so it's worth offering whenever
+    // either exists. call_tool is MCP-only.
+    ...(mcpDescriptors.length > 0 || cliCaps.length > 0
+      ? [makeFindTools({ mcp: mcpDescriptors, cli: cliCaps })]
+      : []),
     ...(mcpDescriptors.length > 0
-      ? [
-          makeFindTools(mcpDescriptors),
-          makeCallTool({ mcp: mcpDescriptors, registry, ctx, confirm: confirmMcp, onRender }),
-        ]
+      ? [makeCallTool({ mcp: mcpDescriptors, registry, ctx, confirm: confirmMcp, onRender })]
       : []),
   ];
 
   // Append live capability catalogs so the model knows what's reachable THIS turn:
-  // MCP connectors (via find_tools/call_tool) + CLIs (via run_cli). Both are
-  // per-turn snapshots; the static prompt already tells the model to introspect
-  // (`sym status`/`sym tools`/`find_tools`) rather than trust a cached list.
+  // MCP connectors (via find_tools/call_tool) + CLIs (via run_cli, with what each
+  // is for). Both are per-turn snapshots; the static prompt tells the model to
+  // introspect (`sym status`/`sym tools`/`find_tools`) rather than trust a cached list.
   const catalog = buildConnectorCatalog(mcpDescriptors);
-  const cliCatalog = buildCliCatalog(resolveAllowlist());
+  const cliCatalog = buildCliCatalog(resolveAllowlist(), cliCaps);
   const systemPrompt = [baseSystemPrompt, catalog, cliCatalog]
     .filter((s) => s.length > 0)
     .join('\n\n');

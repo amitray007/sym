@@ -25,17 +25,20 @@ describe('parseAllowlist', () => {
 });
 
 describe('buildCliCatalog', () => {
-  it('lists the allowlisted CLIs and points at sym introspection', () => {
-    const out = buildCliCatalog(parseAllowlist('gcloud,sentry-cli,sym'));
+  it('lists the CLI capabilities with descriptions and points at sym introspection', () => {
+    const out = buildCliCatalog(parseAllowlist('gcloud,sentry-cli,sym'), [
+      { bin: 'gcloud', description: 'Google Cloud Platform CLI' },
+      { bin: 'sentry-cli', description: 'Sentry releases + source maps' },
+      { bin: 'sym' },
+    ]);
     expect(out).toContain('run_cli');
-    expect(out).toContain('gcloud');
+    expect(out).toContain('gcloud — Google Cloud Platform CLI');
     expect(out).toContain('sentry-cli');
-    expect(out).toContain('sym');
     expect(out).toContain('"status"');
     expect(out).toContain('"tools"');
   });
   it('explains the wildcard allowlist', () => {
-    const out = buildCliCatalog('*');
+    const out = buildCliCatalog('*', []);
     expect(out).toContain('*');
     expect(out).toMatch(/--help/);
   });

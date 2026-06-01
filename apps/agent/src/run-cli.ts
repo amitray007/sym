@@ -15,7 +15,7 @@
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 
-import { loadCliAllow } from './mcp/source.js';
+import { loadCliAllow, loadCliDescribe } from './mcp/source.js';
 
 export interface RunCliResult {
   ok: boolean;
@@ -66,6 +66,31 @@ export function resolveAllowlist(): Allowlist {
   return parseAllowlist(process.env['SYM_CLI_ALLOWLIST']);
 }
 
+/** A CLI the agent can run via run_cli, with what it's for (operator-supplied). */
+export interface CliCapability {
+  bin: string;
+  description?: string;
+}
+
+/**
+ * The CLIs to surface to the agent as named, searchable capabilities: the
+ * explicitly-allowed binaries (excluding the `*` wildcard) plus any binary the
+ * operator described, each with its `cli.describe` text. Under a pure `*`
+ * allowlist with no described bins this is empty — the catalog still tells the
+ * agent it can run "any installed CLI". Nothing is hardcoded; it's all config.
+ */
+export function resolveCliCapabilities(): CliCapability[] {
+  const allow = loadCliAllow() ?? [];
+  const describe = loadCliDescribe();
+  const bins = new Set<string>([...allow.filter((b) => b !== '*'), ...Object.keys(describe)]);
+  return [...bins]
+    .sort()
+    .map((bin) => ({
+      bin,
+      ...(describe[bin] !== undefined ? { description: describe[bin] } : {}),
+    }));
+}
+
 function isAllowed(list: Allowlist, binary: string): boolean {
   return list === '*' || list.has(binary);
 }
@@ -75,22 +100,30 @@ function isAllowed(list: Allowlist, binary: string): boolean {
  * Appended per turn (so it reflects the current allowlist) and points the model
  * at `sym status` / `sym tools` for its LIVE connector + tool set.
  */
-export function buildCliCatalog(allowlist: Allowlist): string {
+export function buildCliCatalog(allowlist: Allowlist, capabilities: CliCapability[]): string {
   const lines = [
     '## Command-line tools (run_cli)',
     '',
-    'Run an allowlisted CLI by argv array (no shell — no pipes/redirects).',
+    'Run a CLI by argv array (no shell — no pipes/redirects). If unsure of its',
+    'subcommands, run `["<bin>","--help"]` first, then the real command.',
   ];
+  if (capabilities.length > 0) {
+    lines.push('Available CLIs:');
+    for (const c of capabilities) {
+      lines.push(`- ${c.bin}${c.description !== undefined ? ` — ${c.description}` : ''}`);
+    }
+  }
   if (allowlist === '*') {
     lines.push(
-      'Allowlist: * — any CLI installed on the host is runnable. Run `["<cli>","--help"]` to discover one, then the real command.',
+      capabilities.length > 0
+        ? '…plus ANY other CLI installed on the host (allowlist is `*`).'
+        : 'Allowlist: `*` — any CLI installed on the host is runnable.',
     );
-  } else {
-    const names = [...allowlist].sort().join(', ');
-    lines.push(names.length > 0 ? `Available CLIs: ${names}.` : '(no CLIs allowlisted)');
+  } else if (capabilities.length === 0) {
+    lines.push('(no CLIs allowlisted)');
   }
   lines.push(
-    'Run `["sym","status"]` or `["sym","tools"]` to see your CURRENT connectors + tools and their health — these change at runtime, so check rather than assume.',
+    'Run `["sym","status"]` / `["sym","tools"]` for your CURRENT connectors + tools (they change at runtime, so check rather than assume).',
   );
   return lines.join('\n');
 }

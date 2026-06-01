@@ -92,17 +92,34 @@ describe('buildConnectorCatalog', () => {
 
 describe('find_tools', () => {
   it('returns matching tools (name + schema) and excludes non-matches', async () => {
-    const tool = makeFindTools([sentryList, gcalCreate]);
+    const tool = makeFindTools({ mcp: [sentryList, gcalCreate], cli: [] });
     const res = await tool.execute('id', { query: 'sentry' });
     const text = textOf(res);
     expect(text).toContain('sentry__list_issues');
     expect(text).not.toContain('gcloud__create_event');
   });
-  it('lists connectors when nothing matches', async () => {
-    const tool = makeFindTools([sentryList, gcalCreate]);
+  it('also searches CLIs and returns them as run_cli capabilities', async () => {
+    const tool = makeFindTools({
+      mcp: [sentryList, gcalCreate],
+      cli: [
+        { bin: 'gcloud', description: 'Google Cloud Platform CLI' },
+        { bin: 'jq', description: 'JSON processor' },
+      ],
+    });
+    const res = await tool.execute('id', { query: 'cloud' });
+    const text = textOf(res);
+    expect(text).toContain('gcloud');
+    expect(text).toContain('run_cli');
+    expect(text).not.toContain('jq');
+  });
+  it('reports both connectors and CLIs when nothing matches', async () => {
+    const tool = makeFindTools({
+      mcp: [sentryList, gcalCreate],
+      cli: [{ bin: 'gcloud' }],
+    });
     const res = await tool.execute('id', { query: 'zzzznope' });
-    expect(textOf(res)).toContain('No tools matched');
-    expect(textOf(res)).toContain('sentry');
+    expect(textOf(res)).toContain('No capability matched');
+    expect(textOf(res)).toContain('gcloud');
   });
 });
 
