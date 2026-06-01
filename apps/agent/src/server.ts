@@ -22,7 +22,7 @@ import {
 } from './mcp/index.js';
 import { completeOAuth } from './mcp/oauth-registry.js';
 import { loadConnectorConfigs } from './mcp/source.js';
-import { buildOwnerDeclineMessage, checkOwnerAccess } from './owner-gate.js';
+import { buildOwnerDeclineMessage, checkOwnerAccess, formatDeniedAttempt } from './owner-gate.js';
 import { cliConnectorsSummary } from './run-cli.js';
 import { healthCheckTokens, loadWorkspaceContext } from './workspace-context.js';
 
@@ -68,6 +68,57 @@ export function createServer(deps: ServerDeps): Hono {
   // in the logs at boot without blocking server start.
   void healthCheckTokens(ctx);
 
+  /**
+   * THE single owner gate. Every Slack ingress (DM, mention, slash command,
+   * button click, assistant-panel lifecycle) routes its access decision through
+   * here — there is no second copy of the `requester === owner` comparison. Add
+   * a new ingress and you physically cannot let a non-owner through without
+   * calling this, which keeps the "Sym works for exactly one human" invariant
+   * structural rather than a thing each handler remembers to re-check.
+   *
+   * Returns `true` for the owner. On deny it fires {@link logDeniedAttempt}
+   * (fire-and-forget — name resolution hits Slack and must never delay the 3s
+   * ACK) and returns `false`. The CALLER owns the surface-specific response: a
+   * polite line in a DM, total silence everywhere else. Fails closed via
+   * `checkOwnerAccess` (unset owner ⇒ nobody passes).
+   */
+  function ownerGate(requester: SlackUserId, surface: string, text?: string): boolean {
+    if (checkOwnerAccess(requester, ctx.ownerSlackUserId) === 'allow') return true;
+    void logDeniedAttempt(requester, surface, text);
+    return false;
+  }
+
+  /**
+   * Audit a non-owner attempt to reach Sym: WHO (resolved display name + id),
+   * WHAT (their request text / clicked action, truncated), WHERE (surface), and
+   * WHEN (ISO timestamp), plus the deny reason. One structured `console.warn`
+   * line so it greps cleanly out of the deploy logs. Name resolution is
+   * best-effort — a miss falls back to the raw id, never blocks, never throws.
+   */
+  async function logDeniedAttempt(
+    requester: SlackUserId,
+    surface: string,
+    text?: string,
+  ): Promise<void> {
+    const at = new Date().toISOString();
+    let name = requester as string;
+    try {
+      name = await ctx.nameResolver.resolveUser(requester, ctx.slackClient);
+    } catch {
+      // Best-effort: keep the raw id if the lookup fails for any reason.
+    }
+    console.warn(
+      formatDeniedAttempt({
+        requester,
+        name,
+        surface,
+        at,
+        ownerSlackUserId: ctx.ownerSlackUserId,
+        ...(text !== undefined && text.length > 0 ? { text: truncate(text) } : {}),
+      }),
+    );
+  }
+
   async function processEvent(raw: RawSlackEvent, teamId: string): Promise<void> {
     // Single workspace: ignore events from any other Slack team.
     if (teamId !== config.slackTeamId) {
@@ -80,7 +131,7 @@ export function createServer(deps: ServerDeps): Hono {
     // Sym to update any panel state on their behalf. Silent drop, no API calls.
     const ctxChanged = assistantThreadContextChanged(raw);
     if (ctxChanged) {
-      if (ctxChanged.userId !== ctx.ownerSlackUserId) return;
+      if (!ownerGate(ctxChanged.userId, 'assistant_panel')) return;
       assistantContext.remember(
         ctxChanged.channelId,
         ctxChanged.threadTs,
@@ -96,7 +147,7 @@ export function createServer(deps: ServerDeps): Hono {
     // first impression must not contradict the lock.
     const assistantStart = assistantThreadStarted(raw);
     if (assistantStart) {
-      if (assistantStart.userId !== ctx.ownerSlackUserId) return;
+      if (!ownerGate(assistantStart.userId, 'assistant_panel')) return;
       assistantContext.remember(
         assistantStart.channelId,
         assistantStart.threadTs,
@@ -117,7 +168,8 @@ export function createServer(deps: ServerDeps): Hono {
     // Single-owner gate: Sym acts only on its owner's requests. Non-owner turns
     // are dropped — silently in channels (Sym stays invisible to the rest of the
     // team), with one polite line in a DM (silence in a 1:1 just looks broken).
-    if (checkOwnerAccess(turn.requester, ctx.ownerSlackUserId) === 'deny') {
+    // The attempt is logged inside ownerGate (name + request + time).
+    if (!ownerGate(turn.requester, turn.entrySurface, turn.text)) {
       if (turn.entrySurface === 'dm' && turn.channelId !== undefined) {
         try {
           await ctx.slackClient.chatPostMessage({
@@ -344,8 +396,14 @@ export function createServer(deps: ServerDeps): Hono {
     // ---------------------------------------------------------------------------
     // Owner gate — only the owner's click, from our workspace, resolves a
     // confirmation. Anything else is silently ACK'd (no Slack error shown).
+    // Foreign-workspace clicks are dropped before the owner gate (a click from
+    // another install isn't a non-owner "attempt" worth logging). The owner gate
+    // logs the clicked action_id as the request for any non-owner in OUR team.
     // ---------------------------------------------------------------------------
-    if (teamId !== config.slackTeamId || clickerId !== config.ownerSlackUserId) {
+    if (teamId !== config.slackTeamId) {
+      return c.json({ ok: true });
+    }
+    if (!ownerGate(clickerId as SlackUserId, 'interactivity', actionId)) {
       return c.json({ ok: true });
     }
 
@@ -434,8 +492,9 @@ export function createServer(deps: ServerDeps): Hono {
 
     // Owner gate. The slash command surface looks identical for owner and
     // non-owner — silent ACK either way, no telltale Slack error. Non-owner
-    // commands simply do nothing visible.
-    if (checkOwnerAccess(userId as SlackUserId, ctx.ownerSlackUserId) === 'deny') {
+    // commands simply do nothing visible (but the attempt is logged: name,
+    // the command text, and time).
+    if (!ownerGate(userId as SlackUserId, 'slash_command', text)) {
       return c.body(null, 200);
     }
 
@@ -609,6 +668,11 @@ export function createServer(deps: ServerDeps): Hono {
   });
 
   return app;
+}
+
+/** Cap a logged request string so a pasted wall of text can't flood the logs. */
+function truncate(s: string, max = 500): string {
+  return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
 /** True for IPv4/IPv6 loopback addresses (and the IPv4-mapped form). */

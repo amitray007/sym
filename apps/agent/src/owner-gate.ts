@@ -22,6 +22,37 @@ export function denyReason(ownerSlackUserId: SlackUserId | null): DenyReason {
   return ownerSlackUserId === null ? 'owner_unset' : 'not_owner';
 }
 
+/** A non-owner's attempt to reach Sym — everything we audit about it. */
+export interface DeniedAttempt {
+  /** The requester's Slack user id (Slack-signed, not spoofable externally). */
+  requester: SlackUserId;
+  /** Resolved display name, or the raw id when the name lookup missed/failed. */
+  name: string;
+  /** Where they came in: `dm` | `app_mention` | `slash_command` | `interactivity` | `assistant_panel`. */
+  surface: string;
+  /** ISO-8601 timestamp of the attempt. */
+  at: string;
+  /** The current owner (for the deny reason); may be null if unset. */
+  ownerSlackUserId: SlackUserId | null;
+  /** Their request text / clicked action, already truncated. Absent for content-less events. */
+  text?: string;
+}
+
+/**
+ * Build the single structured audit line for a denied attempt — WHO (name +
+ * id), WHAT (request, JSON-quoted so newlines/quotes can't break the line),
+ * WHERE (surface), WHEN (timestamp), and the deny reason. Pure so the exact
+ * shape is unit-tested here; the server just resolves the name and emits this
+ * via `console.warn`.
+ */
+export function formatDeniedAttempt(a: DeniedAttempt): string {
+  const request = a.text !== undefined && a.text.length > 0 ? JSON.stringify(a.text) : '(none)';
+  return (
+    `[owner-gate] DENIED non-owner ${a.name} (${a.requester}) on ${a.surface} ` +
+    `at ${a.at} [reason=${denyReason(a.ownerSlackUserId)}] request=${request}`
+  );
+}
+
 /**
  * Build the one-line decline a non-owner sees when they DM Sym. Channels stay
  * silent (Sym is invisible to the rest of the team there); a DM is a 1:1, so
