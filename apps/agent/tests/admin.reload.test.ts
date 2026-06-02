@@ -146,4 +146,70 @@ describe('admin control plane (real loopback socket)', () => {
     },
     { timeout: 30_000 },
   );
+
+  it(
+    'POST /admin/reload responds 200 (not 500) when the config file is missing',
+    async () => {
+      // SYM_CONFIG_PATH points to cfgPath which was NEVER written — simulates
+      // a fresh deploy where the operator hasn't applied yet. The loader
+      // falls back to source:'none', mcpServers:[].
+      const reload = await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
+      expect(reload.status).toBe(200);
+      const body = (await reload.json()) as ReloadBody;
+      // source reports 'none' (file missing → env fallback → env unset → none)
+      expect(body.source).toBe('none');
+      expect(body.totalTools).toBe(0);
+      expect(body.connectors).toEqual([]);
+    },
+    { timeout: 10_000 },
+  );
+
+  it(
+    'POST /admin/reload responds 200 when the config file is malformed JSON',
+    async () => {
+      // Write garbage JSON — loader logs a warning and falls back to env (unset
+      // in this test env) → source:'none'. Must not 500.
+      writeFileSync(cfgPath, '{ invalid json !!!', 'utf8');
+
+      const reload = await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
+      expect(reload.status).toBe(200);
+      const body = (await reload.json()) as ReloadBody;
+      expect(body.source).toBe('none');
+      expect(body.totalTools).toBe(0);
+    },
+    { timeout: 10_000 },
+  );
+
+  it(
+    'POST /admin/reload reports a failed connector in the connectors array, not a 500',
+    async () => {
+      // Write a connector with a command that does not exist (guaranteed spawn fail).
+      const broken: ConnectorConfig = {
+        name: 'broken',
+        transport: {
+          kind: 'stdio',
+          command: '/this/binary/does/not/exist/sym-fake-mcp',
+        },
+        trust: true,
+      };
+      writeConfig([broken]);
+
+      const reload = await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
+      // Must respond with 200 — reconcileConnectors absorbs per-connector errors.
+      expect(reload.status).toBe(200);
+      const body = (await reload.json()) as ReloadBody;
+      // The broken connector appears in the connectors array with an error status.
+      const entry = body.connectors.find((c) => c.name === 'broken');
+      expect(entry).toBeDefined();
+      // reconcileConnectors uses 'failed' (not 'error') for a connect-failure.
+      expect(entry?.status).toBe('failed');
+      // error field carries a human-readable message (not an empty string).
+      expect(typeof entry?.error).toBe('string');
+      expect((entry?.error ?? '').length).toBeGreaterThan(0);
+      // Zero tools since the connector failed.
+      expect(entry?.tools).toBe(0);
+      expect(body.totalTools).toBe(0);
+    },
+    { timeout: 15_000 },
+  );
 });

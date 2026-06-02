@@ -5,7 +5,7 @@
  *  1.  Config parsing (valid/invalid/empty SYM_MCP_SERVERS values)
  *  2.  StaticProvider.resolve — string secret, record secret, argv, array
  *  3.  buildTransport — env merge order, argv append, stub arms
- *  4.  makeProvider — static→provider, oauth→throw, undefined→null
+ *  4.  makeProvider — static→StaticProvider, oauth→OAuthProvider (C3), undefined→null
  *  5.  CompositeDispatcher prefix routing
  *  6.  McpDispatcher — MCP result → ToolResult mapping + security annotations
  *  7.  FAIL OPEN — down server → zero tools, no throw
@@ -14,7 +14,8 @@
  * MCP Client/Transport are fully mocked — no real subprocess is spawned.
  */
 
-// Module mocks must be declared before imports (hoisted by vitest).
+// vi.mock() calls are hoisted to the top of the file by the vitest transform,
+// so they execute before any imports regardless of where they appear in source.
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
   return { Client: vi.fn() };
 });

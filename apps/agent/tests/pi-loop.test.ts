@@ -495,6 +495,59 @@ describe('per-turn deadline (Z16-04)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Reply shape — focused assertion that runLoopPi returns a well-formed Reply
+// ---------------------------------------------------------------------------
+
+describe('runLoopPi — Reply shape', () => {
+  beforeEach(() => {
+    capturedSubscribers.length = 0;
+  });
+
+  it('returns a Reply with turnId, markdown, and receipt; renders absent when no render intent fired', async () => {
+    const registry = makeRegistryWithOneTool();
+    const turn = makeTurn();
+
+    const result = await runLoopPi(turn, makeModelCfg(), registry, {
+      history: [] as ChatMessage[],
+    });
+
+    // turnId must match the turn that was run.
+    expect(result.turnId).toBe(turn.id);
+
+    // markdown is always a string (possibly empty when agent had nothing to say).
+    expect(typeof result.markdown).toBe('string');
+
+    // receipt must carry the required fields.
+    expect(result.receipt).toBeDefined();
+    expect(result.receipt.turnId).toBe(turn.id);
+    expect(typeof result.receipt.model).toBe('string');
+    expect(result.receipt.model.length).toBeGreaterThan(0);
+    expect(Array.isArray(result.receipt.toolsInvoked)).toBe(true);
+
+    // No render intents fired (the fake Agent emits no tool events with renders),
+    // so the renders field must be absent (not an empty array — not present at all).
+    expect(result.renders).toBeUndefined();
+  });
+
+  it('populates receipt.toolsInvoked when tool events flow through the subscriber', async () => {
+    const registry = makeRegistryWithOneTool();
+
+    const runPromise = runLoopPi(makeTurn(), makeModelCfg(), registry, {
+      history: [] as ChatMessage[],
+    });
+
+    // Drive a tool_execution_start for a known tool — subscriber records the name.
+    const subscriber = capturedSubscribers[0]!;
+    await subscriber({ type: 'tool_execution_start', toolName: 'read_thread' });
+
+    const result = await runPromise;
+
+    // The tool name should appear in toolsInvoked.
+    expect(result.receipt.toolsInvoked).toContain('read_thread');
+  });
+});
+
 /**
  * Count the number of active listeners for a given event type on an
  * EventTarget by round-tripping through add/remove with a sentinel.
