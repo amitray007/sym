@@ -135,6 +135,135 @@ describe('agent server /slack/events', () => {
 // ---------------------------------------------------------------------------
 // Slash commands — owner-gated universal entry point.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// assistant_thread_context_changed event path
+// ---------------------------------------------------------------------------
+describe('agent server — assistant_thread_context_changed', () => {
+  it('ACKs an assistant_thread_context_changed event from the owner with 200', async () => {
+    const body = JSON.stringify({
+      type: 'event_callback',
+      event_id: 'Ev-ctx-changed-1',
+      team_id: config.slackTeamId,
+      event: {
+        type: 'assistant_thread_context_changed',
+        ts: '1700000030.000001',
+        channel: '',
+        text: '',
+        assistant_thread: {
+          user_id: config.ownerSlackUserId,
+          channel_id: 'D-OWNER-SYM-IM',
+          thread_ts: '1700000030.000001',
+        },
+        context: {
+          channel_id: 'C-CONTEXT-CHANNEL',
+        },
+      },
+    });
+    const res = await postTo('/slack/events', body, 'application/json', signedHeaders(body));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it('silently drops an assistant_thread_context_changed from a non-owner (no error, no API call)', async () => {
+    const body = JSON.stringify({
+      type: 'event_callback',
+      event_id: 'Ev-ctx-changed-nonowner',
+      team_id: config.slackTeamId,
+      event: {
+        type: 'assistant_thread_context_changed',
+        ts: '1700000031.000001',
+        channel: '',
+        text: '',
+        assistant_thread: {
+          user_id: 'U-NOT-OWNER',
+          channel_id: 'D-INTRUDER-SYM-IM',
+          thread_ts: '1700000031.000001',
+        },
+        context: {
+          channel_id: 'C-SOME-CHANNEL',
+        },
+      },
+    });
+    const res = await postTo('/slack/events', body, 'application/json', signedHeaders(body));
+    // The server still ACKs 200 (Slack requires a fast 200 even for dropped events)
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OAuth callback route — GET /oauth/callback/:slug
+// ---------------------------------------------------------------------------
+describe('agent server — GET /oauth/callback/:slug', () => {
+  it('returns 400 with HTML when required parameters are missing', async () => {
+    const app = createServer({ config });
+    // Missing code and state
+    const res = await app.request('/oauth/callback/test-connector', { method: 'GET' });
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain('Missing required parameters');
+  });
+
+  it('returns 400 with HTML when slug is present but code is missing', async () => {
+    const app = createServer({ config });
+    const res = await app.request('/oauth/callback/test-connector?state=abc123', { method: 'GET' });
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain('Missing required parameters');
+  });
+
+  it('returns 400 with HTML when slug is present but state is missing', async () => {
+    const app = createServer({ config });
+    const res = await app.request('/oauth/callback/test-connector?code=auth-code-123', {
+      method: 'GET',
+    });
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain('Missing required parameters');
+  });
+
+  it('returns 400 with HTML when completeOAuth fails (unknown slug)', async () => {
+    const app = createServer({ config });
+    // A slug that is not in the oauth registry will cause completeOAuth to throw.
+    const res = await app.request('/oauth/callback/nonexistent-slug?code=code123&state=state456', {
+      method: 'GET',
+    });
+    // completeOAuth throws for unknown slugs → 400 response
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain('Authorization Failed');
+    expect(html).toContain('nonexistent-slug');
+    // Must not leak code or state into the HTML response
+    expect(html).not.toContain('code123');
+    expect(html).not.toContain('state456');
+  });
+
+  it('OAuth failure response contains an HTML page (not JSON)', async () => {
+    const app = createServer({ config });
+    const res = await app.request('/oauth/callback/test-slug?code=authcode&state=authstate', {
+      method: 'GET',
+    });
+    const contentType = res.headers.get('content-type') ?? '';
+    expect(contentType).toMatch(/text\/html/);
+  });
+
+  it('does not echo code or state in any error response', async () => {
+    const app = createServer({ config });
+    const sensitiveCode = 'super-secret-auth-code';
+    const sensitiveState = 'secret-csrf-state';
+    const res = await app.request(
+      `/oauth/callback/test-slug?code=${sensitiveCode}&state=${sensitiveState}`,
+      { method: 'GET' },
+    );
+    const html = await res.text();
+    expect(html).not.toContain(sensitiveCode);
+    expect(html).not.toContain(sensitiveState);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slack Slash Commands
+// ---------------------------------------------------------------------------
 describe('agent server /slack/commands', () => {
   function formBody(fields: Record<string, string>): string {
     return new URLSearchParams(fields).toString();
