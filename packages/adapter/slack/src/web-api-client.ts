@@ -1,4 +1,5 @@
 import { SlackWebApiError, withSlackRetries } from './retry.js';
+import { mapChannelSummary, mapMessageRow, mapUserProfile } from './web-api-mappers.js';
 
 import type { SlackClient } from './client.js';
 import type {
@@ -36,6 +37,7 @@ import type {
   UsersListResult,
   UsersProfileSetParams,
 } from './types.js';
+import type { SlackPagedResponse, SlackRawChannel, SlackRawUser } from './web-api-mappers.js';
 import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
 
 const SLACK_API = 'https://slack.com/api';
@@ -52,30 +54,6 @@ interface SlackOkResponse {
   error?: string;
   ts?: string;
   channel?: string;
-}
-
-/** Raw `conversations.replies` payload — only the fields the mapper reads. */
-interface RepliesResponse extends SlackOkResponse {
-  messages?: {
-    user?: string;
-    bot_id?: string;
-    text?: string;
-    ts?: string;
-    subtype?: string;
-  }[];
-  response_metadata?: { next_cursor?: string };
-}
-
-/** Raw `conversations.history` payload — distinct from replies (different endpoint semantics). */
-interface HistoryResponse extends SlackOkResponse {
-  messages?: {
-    user?: string;
-    bot_id?: string;
-    text?: string;
-    ts?: string;
-    subtype?: string;
-  }[];
-  response_metadata?: { next_cursor?: string };
 }
 
 /**
@@ -212,23 +190,14 @@ export class WebApiSlackClient implements SlackClient {
     // Page through the thread (Slack caps a page at SLACK_PAGE_LIMIT) until we
     // run out of replies or hit the ceiling — whichever comes first.
     do {
-      const json = await this.callForm<RepliesResponse>('conversations.replies', {
+      const json = await this.callForm<SlackPagedResponse>('conversations.replies', {
         channel: params.channel,
         ts: params.ts,
         limit: Math.min(SLACK_PAGE_LIMIT, ceiling - messages.length),
         ...(cursor !== undefined ? { cursor } : {}),
       });
 
-      for (const m of json.messages ?? []) {
-        messages.push({
-          ...(m.user !== undefined ? { user: m.user as SlackUserId } : {}),
-          ...(m.bot_id !== undefined ? { botId: m.bot_id } : {}),
-          text: m.text ?? '',
-          ts: (m.ts ?? '') as SlackThreadTs,
-          ...(m.subtype !== undefined ? { subtype: m.subtype } : {}),
-        });
-      }
-
+      for (const m of json.messages ?? []) messages.push(mapMessageRow(m));
       cursor = json.response_metadata?.next_cursor || undefined;
     } while (cursor !== undefined && messages.length < ceiling);
 
@@ -245,22 +214,13 @@ export class WebApiSlackClient implements SlackClient {
     // Page through the channel (Slack returns newest-first) until we hit the
     // ceiling or run out of messages — whichever comes first.
     do {
-      const json = await this.callForm<HistoryResponse>('conversations.history', {
+      const json = await this.callForm<SlackPagedResponse>('conversations.history', {
         channel: params.channel,
         limit: Math.min(SLACK_PAGE_LIMIT, ceiling - collected.length),
         ...(cursor !== undefined ? { cursor } : {}),
       });
 
-      for (const m of json.messages ?? []) {
-        collected.push({
-          ...(m.user !== undefined ? { user: m.user as SlackUserId } : {}),
-          ...(m.bot_id !== undefined ? { botId: m.bot_id } : {}),
-          text: m.text ?? '',
-          ts: (m.ts ?? '') as SlackThreadTs,
-          ...(m.subtype !== undefined ? { subtype: m.subtype } : {}),
-        });
-      }
-
+      for (const m of json.messages ?? []) collected.push(mapMessageRow(m));
       cursor = json.response_metadata?.next_cursor || undefined;
     } while (cursor !== undefined && collected.length < ceiling);
 
@@ -333,76 +293,25 @@ export class WebApiSlackClient implements SlackClient {
 
   async usersInfo(params: UsersInfoParams): Promise<SlackUserProfile> {
     interface UserResponse extends SlackOkResponse {
-      user?: {
-        id?: string;
-        /** Slack's stable @-handle — what `search.messages` `from:@…` expects. */
-        name?: string;
-        real_name?: string;
-        deleted?: boolean;
-        is_bot?: boolean;
-        tz?: string;
-        profile?: {
-          display_name?: string;
-          real_name?: string;
-          title?: string;
-          email?: string;
-          status_text?: string;
-          status_emoji?: string;
-        };
-      };
+      user?: SlackRawUser;
     }
     const json = await this.callForm<UserResponse>('users.info', { user: params.user });
     const u = json.user ?? {};
-    const p = u.profile ?? {};
     const id = u.id;
     if (!id) throw new SlackWebApiError('missing_user_id', { error: 'missing_user_id' });
-    return {
-      id: id as SlackUserId,
-      ...(u.name !== undefined && u.name !== '' ? { userName: u.name } : {}),
-      ...(p.display_name !== undefined && p.display_name !== ''
-        ? { displayName: p.display_name }
-        : {}),
-      ...(p.real_name !== undefined || u.real_name !== undefined
-        ? { realName: (p.real_name ?? u.real_name) as string }
-        : {}),
-      ...(p.title !== undefined && p.title !== '' ? { title: p.title } : {}),
-      // Email only present when the bot has the `users:read.email` scope.
-      ...(p.email !== undefined && p.email !== '' ? { email: p.email } : {}),
-      ...(p.status_text !== undefined && p.status_text !== ''
-        ? { statusText: p.status_text, status: p.status_text }
-        : {}),
-      ...(p.status_emoji !== undefined && p.status_emoji !== ''
-        ? { statusEmoji: p.status_emoji }
-        : {}),
-      ...(u.tz !== undefined ? { tz: u.tz } : {}),
-      ...(u.is_bot !== undefined ? { isBot: u.is_bot } : {}),
-      ...(u.deleted !== undefined ? { deleted: u.deleted } : {}),
-    };
+    return mapUserProfile({ ...u, id });
   }
 
   async usersList(params: UsersListParams): Promise<UsersListResult> {
     interface UsersListResponse extends SlackOkResponse {
-      members?: {
-        id?: string;
-        name?: string;
-        real_name?: string;
-        deleted?: boolean;
-        is_bot?: boolean;
-        tz?: string;
-        profile?: {
-          display_name?: string;
-          real_name?: string;
-          title?: string;
-          status_text?: string;
-        };
-      }[];
+      members?: SlackRawUser[];
       response_metadata?: { next_cursor?: string };
     }
     // Page through users.list (Slack caps a single page at 200) until the
     // caller's ceiling or the workspace runs out. Large workspaces have
     // thousands of members; the ceiling keeps boot bounded.
     const ceiling = params.limit ?? 2000;
-    const members: NonNullable<UsersListResponse['members']> = [];
+    const members: SlackRawUser[] = [];
     let cursor: string | undefined;
     do {
       const json = await this.callForm<UsersListResponse>('users.list', {
@@ -417,30 +326,9 @@ export class WebApiSlackClient implements SlackClient {
     // guard against emitting empty branded ids.
     const users: SlackUserProfile[] = members
       .filter(
-        (u): u is NonNullable<UsersListResponse['members']>[number] & { id: string } =>
-          typeof u.id === 'string' && u.id.length > 0,
+        (u): u is SlackRawUser & { id: string } => typeof u.id === 'string' && u.id.length > 0,
       )
-      .map((u) => {
-        const p = u.profile ?? {};
-        return {
-          id: u.id as SlackUserId,
-          ...(u.name !== undefined && u.name !== '' ? { userName: u.name } : {}),
-          ...(p.display_name !== undefined && p.display_name !== ''
-            ? { displayName: p.display_name }
-            : {}),
-          ...(p.real_name !== undefined || u.real_name !== undefined
-            ? { realName: (p.real_name ?? u.real_name) as string }
-            : {}),
-          ...(p.title !== undefined && p.title !== '' ? { title: p.title } : {}),
-          // Z12-07: include status field to match usersInfo/SlackUserProfile
-          ...(p.status_text !== undefined && p.status_text !== ''
-            ? { statusText: p.status_text, status: p.status_text }
-            : {}),
-          ...(u.tz !== undefined ? { tz: u.tz } : {}),
-          ...(u.is_bot !== undefined ? { isBot: u.is_bot } : {}),
-          ...(u.deleted !== undefined ? { deleted: u.deleted } : {}),
-        };
-      });
+      .map(mapUserProfile);
     return { users };
   }
 
@@ -563,20 +451,14 @@ export class WebApiSlackClient implements SlackClient {
 
   async conversationsList(params: ConversationsListParams): Promise<ConversationsListResult> {
     interface ListResponse extends SlackOkResponse {
-      channels?: {
-        id?: string;
-        name?: string;
-        is_private?: boolean;
-        topic?: { value?: string };
-        num_members?: number;
-      }[];
+      channels?: SlackRawChannel[];
       response_metadata?: { next_cursor?: string };
     }
     // Page through conversations.list (Slack caps a single page at 200) until
     // we hit the caller's ceiling or run out of channels. Without pagination,
     // owners in 50+ channels silently miss the rest of their workspace.
     const ceiling = params.limit ?? 200;
-    const collected: ListResponse['channels'] = [];
+    const collected: SlackRawChannel[] = [];
     let cursor: string | undefined;
     do {
       const json = await this.callForm<ListResponse>('conversations.list', {
@@ -590,18 +472,11 @@ export class WebApiSlackClient implements SlackClient {
     } while (cursor !== undefined && collected.length < ceiling);
 
     // Filter out channels with no id — guard against empty branded ids.
-    const channels: SlackChannelSummary[] = (collected ?? [])
+    const channels: SlackChannelSummary[] = collected
       .filter(
-        (c): c is NonNullable<ListResponse['channels']>[number] & { id: string } =>
-          typeof c.id === 'string' && c.id.length > 0,
+        (c): c is SlackRawChannel & { id: string } => typeof c.id === 'string' && c.id.length > 0,
       )
-      .map((c) => ({
-        id: c.id as SlackChannelId,
-        ...(c.name !== undefined ? { name: c.name } : {}),
-        isPrivate: c.is_private === true,
-        ...(c.topic?.value !== undefined && c.topic.value !== '' ? { topic: c.topic.value } : {}),
-        ...(c.num_members !== undefined ? { memberCount: c.num_members } : {}),
-      }));
+      .map(mapChannelSummary);
     return { channels };
   }
 }
