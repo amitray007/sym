@@ -18,6 +18,7 @@
  * `__` name to the MCP dispatcher — so no extra wiring.
  */
 
+import { passthroughArgs } from './tools.js';
 import { MCP_TOOL_SEPARATOR } from '../mcp/dispatcher.js';
 
 import type { CliCapability } from '../run-cli.js';
@@ -157,8 +158,7 @@ export function makeFindTools(
       'by what you want to do. Returns MCP tool names+schemas (use with call_tool) and matching ' +
       'CLIs (use with run_cli). Call this before deciding you cannot do something.',
     parameters: FIND_TOOLS_PARAMS as unknown as TSchema,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prepareArguments: (args: unknown) => args as any,
+    prepareArguments: passthroughArgs,
     execute: async (_toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
       const query = String((params as { query?: unknown })?.query ?? '').trim();
       const mcpMatches = searchDescriptors(mcp, query, limit);
@@ -235,8 +235,7 @@ export function makeCallTool(opts: {
       'Execute a connector tool by its exact name (from find_tools) with arguments matching its ' +
       'input schema.',
     parameters: CALL_TOOL_PARAMS as unknown as TSchema,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prepareArguments: (args: unknown) => args as any,
+    prepareArguments: passthroughArgs,
     execute: async (toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
       const name = String((params as { name?: unknown })?.name ?? '');
       const args = ((params as { arguments?: unknown })?.arguments ?? {}) as JsonObject;
