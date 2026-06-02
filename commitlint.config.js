@@ -3,10 +3,10 @@
  * Husky `commit-msg` hook invokes this via @commitlint/cli.
  *
  * Examples:
- *   feat(db): add memory_entries table
  *   fix(slack): dedupe events by event_id
  *   chore(repo): bump turbo to 2.4
- *   docs(plan): clarify Sp2 review gate
+ *   feat(agent): stream reply via response_url
+ *   feat(mcp): add stdio connector pool
  */
 export default {
   extends: ['@commitlint/config-conventional'],
@@ -22,31 +22,22 @@ export default {
       1,
       'always',
       [
-        // Spine
+        // Infrastructure / repo
         'repo',
-        'db',
         'contracts',
-        'secrets',
-        // Streams + apps
+        // Adapters + apps
         'slack',
         'kernel',
-        'fireworks',
         'agent',
-        'dashboard',
-        'onboarding',
         'mcp',
-        'skills',
-        'sandbox',
-        'memory',
-        'audit',
-        'tasks',
-        'soul',
-        'devex',
+        // Operator control tier (kept — see docs/FUTURE.md)
+        'cli',
+        'tui',
         // Meta
         'ci',
         'deps',
         'docs',
-        'specs',
+        'devex',
       ],
     ],
   },

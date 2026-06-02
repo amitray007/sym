@@ -21,6 +21,10 @@ SLACK_TEAM_ID=<T...>
 
 SYM_OWNER_SLACK_USER_ID=<U...>
 
+# Optional — owner's User OAuth token (xoxp-). Unlocks real workspace search
+# and act-as-owner writes. See .env.example for details.
+# SLACK_OWNER_USER_TOKEN=<xoxp-...>
+
 # ── Fireworks ─────────────────────────────────────────────────────────────────
 
 FIREWORKS_API_KEY=<fw-...>
@@ -30,4 +34,26 @@ FIREWORKS_MODEL=<accounts/fireworks/models/...>
 # ── Agent ─────────────────────────────────────────────────────────────────────
 
 # AGENT_PORT=3001   # optional, defaults to 3001
-AGENT_URL=<https://agent.yourdomain.com>
+
+# ── MCP / connectors ──────────────────────────────────────────────────────────
+# Required for OAuth connectors. See .env.example for full details.
+
+# Public HTTPS base URL of this agent — used as OAuth redirect_uri base.
+SYM_PUBLIC_URL=<https://agent.yourdomain.com>
+
+# 32-byte AES-256-GCM key for the encrypted credential store (base64 or hex).
+# Required when using OAuth connectors. Generate with:
+#   node -e "import('node:crypto').then(m=>process.stdout.write(m.randomBytes(32).toString('base64')))" --input-type=module
+SYM_ENCRYPTION_KEY=<base64-32-bytes>
+
+# Path to the encrypted SQLite credential DB on the persistent volume.
+SYM_DB_PATH=/data/credentials.db
+
+# ── Operator / CLI ────────────────────────────────────────────────────────────
+# Optional. See .env.example for full details.
+
+# SYM_CONFIG_PATH=.sym/config.json      # connector config file path (default)
+# SYM_MCP_CONNECT_TIMEOUT_MS=10000      # startup connect timeout per connector
+# SYM_CLI_ALLOWLIST=sym,gh,gcloud,...   # comma-separated allowed CLIs
+# SYM_CLI_CONFIRM=false                 # require confirmation for run_cli
+# SYM_ADMIN_URL=                        # override admin HTTP base URL (loopback default)

@@ -104,24 +104,3 @@ jobs:
         # do not fail CI yet (knip exits 1 when it has any findings).
         continue-on-error: true
         run: pnpm knip --reporter compact
-
-  # ─────────────────────────────────────────────
-  # promptfoo eval stub
-  # TODO(S7a/S7d): wire real eval sets once they exist.
-  # This job is intentionally a no-op so it doesn't fail CI.
-  # Remove the "if: false" guard and fill in the eval command
-  # when packages/memory and packages/soul ship their promptfoo configs.
-  # ─────────────────────────────────────────────
-  evals:
-    name: promptfoo evals (stub — no-op until eval sets exist)
-    runs-on: ubuntu-latest
-    # Runs only on PRs touching memory, soul, or kernel packages.
-    # The "if: false" ensures it's always skipped until eval sets exist.
-    if: false
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      # TODO(S7a): pnpm --filter @sym/memory exec promptfoo eval --ci
-      # TODO(S7d): pnpm --filter @sym/soul exec promptfoo eval --ci
-      - name: Placeholder
-        run: echo "No eval sets yet — see TODO above."

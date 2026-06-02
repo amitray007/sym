@@ -8,13 +8,6 @@
 
 <!-- 1–3 sentences. What is this PR and why does it exist? -->
 
-## Stream
-
-<!-- Which build-plan stream owns this change? e.g. Sp1, Sp2, S1, S7a, S8 -->
-
-Stream:
-End goal touched:
-
 ## What changed
 
 <!-- Bullet list of the substantive changes. Group by package/app. -->
@@ -32,20 +25,9 @@ End goal touched:
 - **Units consuming:**
 - **Backward compatible:** <!-- yes / expand-contract / breaking -->
 - **Expand-contract plan:** <!-- N/A (why) OR three phases listed -->
-- **Deploy order:** <!-- doesn't matter (why) OR e.g. DB migration → Dashboard → Agent -->
+- **Deploy order:** <!-- doesn't matter (why) OR N/A (why) -->
 - **Rollback plan:** <!-- revert PR / two-step / N/A (why) -->
-- **Audit + OTel added:** <!-- list event names + semantic keys, or N/A (why) -->
 - **Eval impact:** <!-- N/A (why) / set updated / thresholds changed -->
-
-## Schema / migration notes
-
-<!-- Only required if this PR touches packages/db/. Otherwise delete this section. -->
-
-- Additive only?
-- `NOT NULL` after backfill?
-- Drops two-phase? Renames three-phase?
-- Indexes `CONCURRENTLY`?
-- Drizzle types regenerated and committed?
 
 ## Contracts notes
 
@@ -64,6 +46,6 @@ End goal touched:
 
 ## Related
 
-<!-- Spec sections, build-plan chunks, prior PRs, issues. -->
+<!-- Build-plan chunks, prior PRs, issues. -->
 
 -

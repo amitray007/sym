@@ -2,8 +2,6 @@
   "recommendations": [
     "dbaeumer.vscode-eslint",
     "esbenp.prettier-vscode",
-    "editorconfig.editorconfig",
-    "bradlc.vscode-tailwindcss",
-    "drizzle-team.drizzle-vscode"
+    "editorconfig.editorconfig"
   ]
 }
