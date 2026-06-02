@@ -5,20 +5,18 @@
  * was streamed), live-stream (text arrived before any tool), and no-stream
  * fallback (empty response or stream open failure). Also owns the shimmer
  * status keepalive and cleanup-LLM backstop.
+ *
+ * The reply-finalization helpers (clip/cleanup/hero render) live in
+ * `./reply-finalize`; running the Pi loop with its deadline lives in
+ * `./run-turn-loop`. Both are shared with the plain-postMessage path.
  */
 
-import {
-  markdownBlocks,
-  receiptToContextBlock,
-  renderIntentToBlocks,
-  renderIntentToFallbackText,
-} from '@sym/adapter-slack';
+import { markdownBlocks, receiptToContextBlock } from '@sym/adapter-slack';
 
 import { logCtx } from './log.js';
-import { runLoopPi } from './pi/loop.js';
-import { buildFireworksModel } from './pi/model.js';
-import { pickThinkingLevel } from './pi/think-router.js';
 import { cleanupReply } from './reply-cleanup.js';
+import { clipNotif, finalReplyBody, heroRenderParts, needsLlmCleanup } from './reply-finalize.js';
+import { runTurnLoop } from './run-turn-loop.js';
 import {
   nextWhimsicalStatus,
   pickShimmerPhrase,
@@ -29,157 +27,18 @@ import { TaskCardManager } from './task-card-manager.js';
 
 import type { HandleTurnDeps } from './handle-turn.js';
 import type { PlanController } from './plan-controller.js';
-import type {
-  AppendStreamParams,
-  SlackBlock,
-  StartStreamParams,
-  TaskUpdateChunk,
-} from '@sym/adapter-slack';
-import type { ChatMessage, Reply, SlackChannelId, SlackThreadTs, Turn } from '@sym/contracts';
+import type { AppendStreamParams, StartStreamParams, TaskUpdateChunk } from '@sym/adapter-slack';
+import type { ChatMessage, SlackChannelId, SlackThreadTs, Turn } from '@sym/contracts';
 import type { ToolRegistry } from '@sym/kernel';
 
 /** Flush a chunk to the stream when the buffer reaches this many characters. */
 const FLUSH_CHARS = 60;
 
 /**
- * Default per-turn deadline used when `SYM_TURN_DEADLINE_MS` is not set via
- * `BehaviorConfig`. Matches the default in `config.ts`.
- */
-const DEFAULT_TURN_DEADLINE_MS = 60_000;
-
-/**
  * Slack's `assistant.threads.setStatus` shimmer auto-clears after 2 min. Re-send
  * the most recent status every 90s so long tool runs keep showing feedback.
  */
 const STATUS_KEEPALIVE_MS = 90_000;
-
-/** Cap the notification/fallback `text` param under Slack's ~40k limit. */
-export function clipNotif(text: string): string {
-  const MAX = 39_000;
-  return text.length > MAX ? `${text.slice(0, MAX - 1)}…` : text;
-}
-
-/**
- * Whether to run the LLM cleanup backstop. The model narrates its STEPS
- * whenever it's doing things, so narration tracks *any* tool use — not the tool
- * COUNT. (Observed 2026-05-30: a turn that narrated a whole fake p1/p2/p3 plan
- * while actually invoking just `get_current_time` slipped past a `> 1` gate.)
- * Run whenever a plan was set OR at least one tool ran. Pure no-tool text
- * replies ("hello") have nothing to narrate, so they skip the extra call. This
- * gate is STRUCTURAL — it never inspects the reply text — so it still fires on
- * narration phrasings we've never seen.
- */
-export function needsLlmCleanup(reply: Reply, planController: PlanController): boolean {
-  return planController.isActive() || reply.receipt.toolsInvoked.length > 0;
-}
-
-/**
- * Body for the non-streamed paths: span-removal cleanup on multi-step turns,
- * the raw draft otherwise. `cleanupReply` fails open to the draft, so this
- * never loses the answer.
- */
-export async function finalReplyBody(
-  reply: Reply,
-  planController: PlanController,
-  deps: HandleTurnDeps,
-): Promise<string> {
-  if (needsLlmCleanup(reply, planController)) {
-    return cleanupReply(reply.markdown, { fireworks: deps.fireworks, model: deps.model });
-  }
-  return reply.markdown;
-}
-
-/**
- * The turn's single "hero" render. A turn may collect multiple render intents
- * (e.g. two searches); we surface only the LAST one — one structured surface
- * per message — and log the others as an over-render signal. Returns the blocks
- * to splice beneath the markdown body and a fallback-text suffix carrying the
- * same content for notifications + screen readers.
- */
-export function heroRenderParts(reply: Reply): {
-  renderBlocks: SlackBlock[];
-  fallbackSuffix: string;
-} {
-  const renders = reply.renders;
-  if (renders === undefined || renders.length === 0) {
-    return { renderBlocks: [], fallbackSuffix: '' };
-  }
-  if (renders.length > 1) {
-    console.info(
-      `${logCtx(reply.turnId)} [render] ${renders.length} intents this turn; using last (over-render signal)`,
-    );
-  }
-  const hero = renders[renders.length - 1]!;
-  return {
-    renderBlocks: renderIntentToBlocks(hero),
-    fallbackSuffix: `\n\n${renderIntentToFallbackText(hero)}`,
-  };
-}
-
-/**
- * Run the turn through the Pi loop.
- *
- * Single path — no fallback. `onDelta` and `history` are forwarded so the
- * streaming / postMessage pipeline is unchanged.
- *
- * A per-turn deadline is applied via `AbortSignal.timeout` (sourced from
- * `deps.behavior.turnDeadlineMs`; default 60 s). If a caller also supplies a
- * `signal`, the two are combined with `AbortSignal.any` so EITHER the user-cancel
- * OR the deadline can abort the run. A timeout abort flows into Pi's graceful
- * abort path (partial reply), not an unhandled rejection.
- */
-export async function runTurnLoop(
-  turn: Turn,
-  deps: HandleTurnDeps,
-  registry: ToolRegistry,
-  history: ChatMessage[],
-  onDelta?: (delta: string) => void | Promise<void>,
-  onStatus?: (status: string) => void | Promise<void>,
-  onToolStart?: (toolCallId: string, friendlyLabel: string) => void | Promise<void>,
-  onToolEnd?: (toolCallId: string, errored: boolean) => void | Promise<void>,
-  signal?: AbortSignal,
-): Promise<Reply> {
-  const model = buildFireworksModel({
-    baseUrl: deps.fireworks.baseUrl,
-    modelId: deps.model,
-  });
-  // Route reasoning effort per-turn from the user message + thread depth. Pure
-  // heuristic at ingress; the router never emits `'off'` (gpt-oss-120b on
-  // Fireworks rejects it — see loop.ts Agent construction).
-  const thinkingLevel = pickThinkingLevel({
-    text: turn.text,
-    threadDepth: history.length,
-  });
-
-  // Build the per-turn deadline signal. A deadline of 0 means "no cap".
-  // Combine with any caller-supplied signal so both the user-cancel and the
-  // deadline can abort the run — whichever fires first wins.
-  const deadlineMs = deps.behavior.turnDeadlineMs ?? DEFAULT_TURN_DEADLINE_MS;
-  const turnSignal =
-    deadlineMs > 0
-      ? signal !== undefined
-        ? AbortSignal.any([signal, AbortSignal.timeout(deadlineMs)])
-        : AbortSignal.timeout(deadlineMs)
-      : signal;
-
-  return runLoopPi(
-    turn,
-    { baseUrl: deps.fireworks.baseUrl, apiKey: deps.fireworks.apiKey, model },
-    registry,
-    {
-      history,
-      slackClient: deps.slackClient,
-      thinkingLevel,
-      ...(deps.behavior.cliConfirm === true ? { cliConfirm: true } : {}),
-      ...(onDelta !== undefined ? { onDelta } : {}),
-      ...(onStatus !== undefined ? { onStatus } : {}),
-      ...(onToolStart !== undefined ? { onToolStart } : {}),
-      ...(onToolEnd !== undefined ? { onToolEnd } : {}),
-      ...(deps.ownerProfile !== undefined ? { ownerProfile: deps.ownerProfile } : {}),
-      ...(turnSignal !== undefined ? { signal: turnSignal } : {}),
-    },
-  );
-}
 
 /**
  * Attempt a streamed reply via chat.startStream / appendStream / stopStream.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { PlanController } from '../src/plan-controller.js';
-import { clipNotif, heroRenderParts, needsLlmCleanup } from '../src/stream-reply.js';
+import { clipNotif, heroRenderParts, needsLlmCleanup } from '../src/reply-finalize.js';
 
 import type { Reply, TurnId } from '@sym/contracts';
 

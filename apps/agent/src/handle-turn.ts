@@ -16,13 +16,9 @@ import { createBuiltinDispatcher } from './builtin-tools.js';
 import { logCtx } from './log.js';
 import { CompositeDispatcher, McpDispatcher, initMcpPool, getActiveConfigs } from './mcp/index.js';
 import { PlanController } from './plan-controller.js';
-import {
-  clipNotif,
-  finalReplyBody,
-  heroRenderParts,
-  runTurnLoop,
-  streamReply,
-} from './stream-reply.js';
+import { clipNotif, finalReplyBody, heroRenderParts } from './reply-finalize.js';
+import { runTurnLoop } from './run-turn-loop.js';
+import { streamReply } from './stream-reply.js';
 import { loadTurnHistory, loadViewedChannelContext } from './turn-context.js';
 
 import type { BehaviorConfig } from './config.js';
