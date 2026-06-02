@@ -27,6 +27,7 @@ import {
   escapeHtml,
   htmlPage,
   isLoopback,
+  isSlackResponseUrl,
   postToResponseUrl,
   truncate,
 } from './server-utils.js';
@@ -208,14 +209,21 @@ export function createServer(deps: ServerDeps): Hono {
       // Confirmation resolved — best-effort update the interactive message via
       // response_url so the buttons are replaced with a status line.
       if (result.responseUrl) {
-        const update = buildResolvedConfirmationMessage(result.message, result.approved);
-        void fetch(result.responseUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ replace_original: true, ...update }),
-        }).catch((err: unknown) => {
-          console.warn('[agent] interactivity response_url update failed (non-blocking):', err);
-        });
+        // SSRF guard: only fetch URLs on the hooks.slack.com allow-list.
+        if (!isSlackResponseUrl(result.responseUrl)) {
+          console.warn(
+            `[agent] interactivity response_url blocked — not hooks.slack.com: ${result.responseUrl}`,
+          );
+        } else {
+          const update = buildResolvedConfirmationMessage(result.message, result.approved);
+          void fetch(result.responseUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ replace_original: true, ...update }),
+          }).catch((err: unknown) => {
+            console.warn('[agent] interactivity response_url update failed (non-blocking):', err);
+          });
+        }
       }
       return c.json({ ok: true });
     }
@@ -305,16 +313,23 @@ export function createServer(deps: ServerDeps): Hono {
     // Empty `/sym` with no text — nudge the owner ephemerally rather than
     // posting a blank seed in the channel.
     if (text.trim().length === 0) {
-      void fetch(responseUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          response_type: 'ephemeral',
-          text: 'Usage: `/sym <question or instruction>` — e.g. `/sym recap #eng-platform from this morning`',
-        }),
-      }).catch((err: unknown) => {
-        console.warn('[agent] /sym usage hint post failed:', err);
-      });
+      // SSRF guard: response_url must be on the hooks.slack.com allow-list.
+      if (isSlackResponseUrl(responseUrl)) {
+        void fetch(responseUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            response_type: 'ephemeral',
+            text: 'Usage: `/sym <question or instruction>` — e.g. `/sym recap #eng-platform from this morning`',
+          }),
+        }).catch((err: unknown) => {
+          console.warn('[agent] /sym usage hint post failed:', err);
+        });
+      } else {
+        console.warn(
+          `[agent] /sym usage hint: response_url blocked — not hooks.slack.com: ${responseUrl}`,
+        );
+      }
       return c.body(null, 200);
     }
 

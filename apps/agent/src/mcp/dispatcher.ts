@@ -193,17 +193,34 @@ async function connectServer(config: ConnectorConfig): Promise<PoolEntry> {
     // Map each MCP tool to a Sym ToolDescriptor.
     // Security: destructiveHint is set based on owner-config `trust`, not on
     // the server's annotation. We deliberately ignore rawTool.annotations.
-    const tools: ToolDescriptor[] = rawTools.map((rawTool) => ({
-      type: 'function' as const,
-      name: namespacedName(config.name, rawTool.name),
-      description: rawTool.description ?? `MCP tool ${rawTool.name} from server ${config.name}`,
-      // Pass the MCP tool's inputSchema straight through as-is.
-      parameters: rawTool.inputSchema as ToolDescriptor['parameters'],
-      // Security invariant: trust is owner-set. MCP server annotations are ignored.
-      // Without trust: destructiveHint=true → confirm gate fires for every call.
-      // With trust: no destructiveHint → gate skipped (owner opted in).
-      ...(config.trust !== true ? { destructiveHint: true as const } : {}),
-    }));
+    const tools: ToolDescriptor[] = rawTools.flatMap((rawTool) => {
+      // Security: validate inputSchema is a plain object before casting.
+      // A malformed / non-object schema from a remote server must be handled
+      // gracefully — skip the tool and log rather than crash or pass through
+      // an unvalidated value as the function parameters type.
+      const schema = rawTool.inputSchema;
+      if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) {
+        console.warn(
+          `${label} tool '${rawTool.name}' has a non-object inputSchema — skipping tool. ` +
+            `(got ${JSON.stringify(schema)})`,
+        );
+        return [];
+      }
+
+      return [
+        {
+          type: 'function' as const,
+          name: namespacedName(config.name, rawTool.name),
+          description: rawTool.description ?? `MCP tool ${rawTool.name} from server ${config.name}`,
+          // inputSchema is validated above as a plain object; safe to cast.
+          parameters: schema as ToolDescriptor['parameters'],
+          // Security invariant: trust is owner-set. MCP server annotations are ignored.
+          // Without trust: destructiveHint=true → confirm gate fires for every call.
+          // With trust: no destructiveHint → gate skipped (owner opted in).
+          ...(config.trust !== true ? { destructiveHint: true as const } : {}),
+        },
+      ];
+    });
 
     console.info(
       `${label} connected — ${tools.length} tool(s): ${tools.map((t) => t.name).join(', ') || '(none)'}`,

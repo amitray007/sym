@@ -4,13 +4,36 @@
  */
 
 /**
+ * Allow-list check for Slack `response_url` values (SSRF guard).
+ *
+ * Slack-generated response_url values always begin with
+ * `https://hooks.slack.com/`. Any other URL indicates either a misconfigured
+ * request or a prompt-injection / SSRF attempt — reject before fetching.
+ *
+ * Returns true when the URL is safe to fetch; false otherwise.
+ */
+export function isSlackResponseUrl(url: string): boolean {
+  return url.startsWith('https://hooks.slack.com/');
+}
+
+/**
  * POST a JSON payload to a Slack `response_url` and SURFACE failures. Critical
  * subtlety: `fetch` does NOT reject on a 4xx/5xx, so a payload Slack refuses
  * (e.g. an unsupported block type, or `invalid_blocks`) otherwise fails
  * completely silently — the user sees nothing and nothing is logged. Returns
  * true only on a 2xx; logs the status + body (Slack's error string) otherwise.
+ *
+ * SSRF guard: the URL is validated against the Slack hooks.slack.com allow-list
+ * before any network request is made. A non-Slack URL is rejected and returns
+ * false without fetching.
  */
 export async function postToResponseUrl(responseUrl: string, payload: unknown): Promise<boolean> {
+  if (!isSlackResponseUrl(responseUrl)) {
+    console.warn(
+      `[agent] response_url blocked — URL is not in the hooks.slack.com allow-list: ${responseUrl}`,
+    );
+    return false;
+  }
   try {
     const res = await fetch(responseUrl, {
       method: 'POST',

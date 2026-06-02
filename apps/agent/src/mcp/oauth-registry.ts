@@ -20,7 +20,7 @@
  * it MUST reject any call where `state` does not match the stored value.
  */
 
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual as cryptoTimingSafeEqual } from 'node:crypto';
 
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
@@ -119,18 +119,27 @@ export function generateState(): string {
 
 /**
  * Constant-time string comparison to prevent timing attacks on CSRF state.
+ *
+ * Uses `node:crypto.timingSafeEqual` (a C-level constant-time memcmp).
+ *
+ * Length-mismatch handling: `crypto.timingSafeEqual` throws when the two
+ * Buffers differ in byte length. We guard on the *byte* length (UTF-8
+ * encoding) BEFORE calling it rather than the character length, so a string
+ * with multi-byte chars is handled correctly. When lengths differ, we still
+ * spend a constant time comparing two equal-length dummy buffers to avoid
+ * leaking the presence of a length discrepancy as a timing signal.
  */
 function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
   const bufA = Buffer.from(a, 'utf8');
   const bufB = Buffer.from(b, 'utf8');
-  // Pad to same length — already equal above, but keep it safe.
-  if (bufA.length !== bufB.length) return false;
-  let diff = 0;
-  for (let i = 0; i < bufA.length; i++) {
-    diff |= (bufA[i] ?? 0) ^ (bufB[i] ?? 0);
+  if (bufA.byteLength !== bufB.byteLength) {
+    // Perform a dummy constant-time comparison so the code path timing is
+    // not distinguishable from the equal-length case.
+    const dummy = Buffer.alloc(bufA.byteLength);
+    cryptoTimingSafeEqual(dummy, dummy);
+    return false;
   }
-  return diff === 0;
+  return cryptoTimingSafeEqual(bufA, bufB);
 }
 
 // ---------------------------------------------------------------------------

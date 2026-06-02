@@ -24,6 +24,8 @@
  *     transport instance. Idempotent to call multiple times.
  */
 
+import net from 'node:net';
+
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
@@ -141,6 +143,85 @@ function buildStdioTransport(
 }
 
 // ---------------------------------------------------------------------------
+// MCP HTTP transport URL security helpers
+// ---------------------------------------------------------------------------
+
+/** Known RFC-1918 and link-local IPv4 prefixes. */
+const PRIVATE_IPV4_PREFIXES = [
+  /^10\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  /^169\.254\./,
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
+];
+
+/**
+ * Return true if `host` is an IPv4 private / link-local address, an IPv6
+ * private / link-local address, or resolves to one of those (we only check
+ * literals here — no DNS lookup at build time, keeping this pure/sync).
+ */
+function isPrivateHost(host: string): boolean {
+  // Strip IPv6 brackets
+  const bare = host.replace(/^\[/, '').replace(/\]$/, '');
+  if (net.isIPv4(bare)) {
+    return PRIVATE_IPV4_PREFIXES.some((re) => re.test(bare));
+  }
+  if (net.isIPv6(bare)) {
+    const low = bare.toLowerCase();
+    if (low === '::1') return false; // loopback — handled separately (allowed)
+    if (/^f[cd]/.test(low.split(':')[0] ?? '')) return true; // unique-local fc00::/7
+    if (/^fe[89ab]/.test(low.split(':')[0] ?? '')) return true; // link-local fe80::/10
+    if (/^ff/.test(low.split(':')[0] ?? '')) return true; // multicast
+    if (low.startsWith('2001:db8:')) return true; // documentation
+    if (low.startsWith('64:ff9b::')) return true; // NAT64
+  }
+  return false;
+}
+
+/** True when the host is localhost / loopback (IPv4 or IPv6). */
+function isLoopbackHost(host: string): boolean {
+  const bare = host.replace(/^\[/, '').replace(/\]$/, '');
+  return bare === 'localhost' || bare === '127.0.0.1' || bare === '::1';
+}
+
+/**
+ * Validate an MCP HTTP transport URL for security:
+ *
+ *  - plain `http://` is rejected unless the host is localhost / 127.0.0.1 / ::1
+ *    (local dev is fine; `http://` to a remote host is not).
+ *  - RFC-1918 / link-local hosts are allowed but produce a `console.warn`
+ *    (they are suspicious — the operator should know).
+ *
+ * Throws a descriptive Error on rejection so the caller can skip or surface it.
+ */
+export function validateMcpHttpUrl(rawUrl: string): void {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`[mcp] HTTP transport URL is not a valid URL: '${rawUrl}'`);
+  }
+
+  const { hostname, protocol } = url;
+
+  // Require https:// unless localhost/loopback.
+  if (protocol === 'http:' && !isLoopbackHost(hostname)) {
+    throw new Error(
+      `[mcp] HTTP transport URL must use https:// for non-localhost hosts (got '${rawUrl}'). ` +
+        `Plain http:// to a remote host is not permitted.`,
+    );
+  }
+
+  // Warn (but allow) RFC-1918 / link-local private addresses.
+  if (isPrivateHost(hostname)) {
+    console.warn(
+      `[mcp] HTTP transport URL '${rawUrl}' resolves to a private/link-local address — ` +
+        `allowed for internal deployments, but verify this is intentional.`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // http transport builder
 // ---------------------------------------------------------------------------
 
@@ -163,6 +244,9 @@ function buildHttpTransport(
   transport: Extract<TransportConfig, { kind: 'http' }>,
   resolved: ResolvedCredential,
 ): BuildTransportResult {
+  // Security: validate the URL before building the transport.
+  validateMcpHttpUrl(transport.url);
+
   // Reject stdio-only apply types.
   if (resolved.apply === 'env' || resolved.apply === 'argv' || resolved.apply === 'files') {
     throw new Error(
