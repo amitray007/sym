@@ -82,6 +82,7 @@ sym/
   dokploy/          Dokploy deployment config + env template
   scripts/          render-manifest.js + setup.sh
   assets/           Bot avatar images
+  examples/         Sample connector config.json + setup walkthrough (examples/README.md)
   docs/             Internal docs (refactor audit, mcp-setup, dependency graph)
   Dockerfile        Production image (node:24-slim, /data volume for CLIs + auth)
 ```

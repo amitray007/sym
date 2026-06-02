@@ -49,6 +49,10 @@ agent at zero connectors. **Secrets do not belong in this file** — wiring +
 }
 ```
 
+A ready-to-copy version of this file lives in
+[`examples/config.json`](../examples/config.json), with field-by-field notes in
+[`examples/README.md`](../examples/README.md).
+
 The running agent reconciles the live connector pool **without a restart** via a
 loopback-only admin route — this is the seam the `sym` CLI's `apply`/`status`
 will call. Edit the file, then:
