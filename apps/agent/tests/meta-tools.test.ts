@@ -7,8 +7,9 @@
  * ToolRegistry dispatcher), with owner-confirmation for destructive tools.
  */
 
-import { ToolRegistry } from '@sym/kernel';
 import { describe, expect, it, vi } from 'vitest';
+
+import { ToolRegistry } from '@sym/kernel';
 
 import {
   buildConnectorCatalog,

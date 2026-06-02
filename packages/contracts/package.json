@@ -2,6 +2,15 @@
   "name": "@sym/contracts",
   "version": "0.0.0",
   "private": true,
+  "description": "Sym shared types and contracts — domain models, tool interfaces, render primitives.",
+  "license": "MIT",
+  "author": "Amit Ray",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amitray007/sym",
+    "directory": "packages/contracts"
+  },
+  "sideEffects": false,
   "type": "module",
   "exports": {
     ".": {
@@ -22,6 +31,6 @@
     "test": "vitest run --typecheck"
   },
   "devDependencies": {
-    "vitest": "^2.1.8"
+    "vitest": "catalog:"
   }
 }

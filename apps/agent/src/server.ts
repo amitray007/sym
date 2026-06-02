@@ -1,6 +1,7 @@
 import { getConnInfo } from '@hono/node-server/conninfo';
-import { verifySlackSignature } from '@sym/adapter-slack';
 import { Hono } from 'hono';
+
+import { verifySlackSignature } from '@sym/adapter-slack';
 
 import { createAssistantContextStore } from './assistant-context.js';
 import {

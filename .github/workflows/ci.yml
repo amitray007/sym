@@ -67,6 +67,23 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # ─────────────────────────────────────────────────────────────────────
+      # Informational analysis steps — run after build, never block CI
+      # ─────────────────────────────────────────────────────────────────────
+
+      - name: Dependency graph analysis (depcruise)
+        # Enforces the not-to-apps (packages→apps) rule at ERROR; all other
+        # findings (orphans, cycles) are warnings. Runs informational-only —
+        # continue-on-error keeps CI green while knip/cycles are pending C10.
+        continue-on-error: true
+        run: pnpm depcruise --output-type err
+
+      - name: Dead code analysis (knip)
+        # Reports unused files/exports/deps. Findings are for C10's reference;
+        # do not fail CI yet (knip exits 1 when it has any findings).
+        continue-on-error: true
+        run: pnpm knip --reporter compact
+
   # ─────────────────────────────────────────────
   # promptfoo eval stub
   # TODO(S7a/S7d): wire real eval sets once they exist.

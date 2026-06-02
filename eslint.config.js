@@ -25,6 +25,21 @@ export default [
   ...tseslint.configs.recommended,
   ...tseslint.configs.stylistic,
   {
+    // CommonJS tool-config files (e.g. .dependency-cruiser.cjs) use `module.exports`
+    // + `require`, which are not defined in the default (module) global scope.
+    files: ['**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: {
+        module: 'readonly',
+        require: 'readonly',
+        __dirname: 'readonly',
+        process: 'readonly',
+        console: 'readonly',
+      },
+    },
+  },
+  {
     files: ['**/*.{ts,tsx,mts,cts}'],
     plugins: {
       import: importPlugin,
@@ -59,11 +74,40 @@ export default [
         'warn',
         {
           groups: ['builtin', 'external', 'internal', ['parent', 'sibling', 'index'], 'type'],
+          pathGroups: [
+            {
+              // Treat all @sym/* workspace packages as internal imports.
+              pattern: '@sym/**',
+              group: 'internal',
+              position: 'before',
+            },
+          ],
+          pathGroupsExcludedImportTypes: ['type'],
           'newlines-between': 'always',
           alphabetize: { order: 'asc', caseInsensitive: true },
         },
       ],
       'import/no-duplicates': 'error',
+
+      // Architecture guard: packages/* must not import apps/* source.
+      // (dependency-cruiser enforces this at the file level too, but this
+      // gives in-editor feedback without running depcruise.)
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              // Any relative or absolute reference that escapes into apps/**
+              // from within a packages/** file. Written as a regex on the
+              // import source — we match the literal "apps/" prefix which
+              // is what you'd see in a workspace-relative path.
+              regex: '^(\\.\\.[\\/])*apps[\\/]',
+              message:
+                'packages/* must not import from apps/*. Move shared code to a package instead.',
+            },
+          ],
+        },
+      ],
 
       // General
       'no-console': ['warn', { allow: ['warn', 'error', 'info'] }],
@@ -84,11 +128,29 @@ export default [
     },
   },
   {
+    // Size / complexity guard for production source files (not tests).
+    // At warn level so that existing large files are surfaced without
+    // breaking CI. Promote to error in C24 after the files are split.
+    files: ['**/src/**/*.{ts,tsx,mts,cts}'],
+    ignores: ['**/*.{test,spec}.{ts,tsx}', '**/test/**', '**/tests/**'],
+    rules: {
+      'max-lines': ['warn', { max: 500, skipBlankLines: true, skipComments: true }],
+      complexity: ['warn', 15],
+      'max-depth': ['warn', 4],
+      'max-params': ['warn', 4],
+    },
+  },
+  {
     // Test files relax certain rules
     files: ['**/*.{test,spec}.{ts,tsx}', '**/test/**', '**/tests/**'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
       'no-console': 'off',
+      // Tests can be long — exempt from size/complexity limits
+      'max-lines': 'off',
+      complexity: 'off',
+      'max-depth': 'off',
+      'max-params': 'off',
     },
   },
   {

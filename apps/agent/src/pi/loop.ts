@@ -8,6 +8,7 @@
  */
 
 import { Agent } from '@earendil-works/pi-agent-core';
+
 import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
