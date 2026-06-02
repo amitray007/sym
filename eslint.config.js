@@ -129,12 +129,22 @@ export default [
   },
   {
     // Size / complexity guard for production source files (not tests).
-    // At warn level so that existing large files are surfaced without
-    // breaking CI. Promote to error in C24 after the files are split.
+    //
+    // max-lines is ERROR: every source file is under 500 lines (C24 split the
+    // oversized ones — builtin-tools, handle-turn, server, loop, cli, mcp/config,
+    // stream-reply, web-api-client, BuilderScreen). A regression to a giant file
+    // now fails CI — the enforceable ceiling this refactor was about.
+    //
+    // complexity / max-depth / max-params stay WARN deliberately. The codebase
+    // has inherently-branchy functions (config parsers, the CLI dispatch switch,
+    // the streaming state machine, the tool-call gate) where driving the metric
+    // under the threshold would fragment cohesive logic rather than improve it.
+    // They are surfaced for judgement, not gated: tighten a function when a split
+    // genuinely improves cohesion, never just to satisfy a number.
     files: ['**/src/**/*.{ts,tsx,mts,cts}'],
     ignores: ['**/*.{test,spec}.{ts,tsx}', '**/test/**', '**/tests/**'],
     rules: {
-      'max-lines': ['warn', { max: 500, skipBlankLines: true, skipComments: true }],
+      'max-lines': ['error', { max: 500, skipBlankLines: true, skipComments: true }],
       complexity: ['warn', 15],
       'max-depth': ['warn', 4],
       'max-params': ['warn', 4],
