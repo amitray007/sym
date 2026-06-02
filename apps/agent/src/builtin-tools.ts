@@ -1,4 +1,4 @@
-import { threadToHistory } from '@sym/adapter-slack';
+import { isSlackChannelId, isSlackDmId, threadToHistory } from '@sym/adapter-slack';
 
 import { NameResolver } from './name-resolver.js';
 import { runCli } from './run-cli.js';
@@ -1211,7 +1211,7 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
                 await Promise.all([
                   ...authorIds.map((id) => resolver.resolveUser(id, slack)),
                   ...channelIds.map((id) =>
-                    NameResolver.isDmId(id)
+                    isSlackDmId(id)
                       ? resolver.resolveDmParticipant(id, slack)
                       : resolver.resolveChannel(id, slack),
                   ),
@@ -1233,14 +1233,14 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
                   const cid = m.channelId;
                   let whereTag: string;
                   let whereCell: string;
-                  if (cid !== undefined && NameResolver.isDmId(cid)) {
+                  if (cid !== undefined && isSlackDmId(cid)) {
                     const dm = resolver.getDmParticipant(cid);
                     whereTag = dm.userId !== undefined ? `a DM with <@${dm.userId}>` : 'a DM';
                     whereCell = dm.name !== undefined ? `DM with ${dm.name}` : 'Direct message';
                   } else {
                     const channelName =
                       m.channelName ?? (cid !== undefined ? resolver.getChannel(cid) : undefined);
-                    if (cid !== undefined && NameResolver.isChannelId(cid)) {
+                    if (cid !== undefined && isSlackChannelId(cid)) {
                       whereTag = `<#${cid}>`;
                       whereCell = channelName ? `#${channelName}` : '#channel';
                     } else if (channelName) {

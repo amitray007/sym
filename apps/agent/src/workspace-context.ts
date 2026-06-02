@@ -1,5 +1,6 @@
+import { WebApiSlackClient } from '@sym/adapter-slack';
+
 import { NameResolver } from './name-resolver.js';
-import { WebApiSlackClient } from './slack-client.js';
 
 import type { AgentConfig } from './config.js';
 import type { ConnectorConfig } from './mcp/config.js';

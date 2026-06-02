@@ -1,5 +1,6 @@
-import { withSlackRetries } from '@sym/adapter-slack';
+import { SlackWebApiError, withSlackRetries } from './retry.js';
 
+import type { SlackClient } from './client.js';
 import type {
   AppendStreamParams,
   AuthTestResult,
@@ -23,9 +24,7 @@ import type {
   SetStatusParams,
   SetSuggestedPromptsParams,
   SetTitleParams,
-  SlackApiError,
   SlackChannelSummary,
-  SlackClient,
   SlackThreadMessage,
   SlackUserProfile,
   StartStreamParams,
@@ -36,7 +35,7 @@ import type {
   UsersListParams,
   UsersListResult,
   UsersProfileSetParams,
-} from '@sym/adapter-slack';
+} from './types.js';
 import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
 
 const SLACK_API = 'https://slack.com/api';
@@ -47,18 +46,6 @@ const SLACK_PAGE_LIMIT = 200;
 const THREAD_FETCH_CEILING = 200;
 /** Default ceiling on channel history messages for viewed-channel context. */
 const CHANNEL_HISTORY_CEILING = 30;
-
-/** Error matching the adapter's `SlackApiError` shape so `withSlackRetries` can read it. */
-class SlackWebApiError extends Error implements SlackApiError {
-  readonly code: string;
-  readonly data: { error?: string; retry_after?: number };
-  constructor(code: string, data: { error?: string; retry_after?: number } = {}) {
-    super(code);
-    this.name = 'SlackWebApiError';
-    this.code = code;
-    this.data = data;
-  }
-}
 
 interface SlackOkResponse {
   ok: boolean;
@@ -79,10 +66,22 @@ interface RepliesResponse extends SlackOkResponse {
   response_metadata?: { next_cursor?: string };
 }
 
+/** Raw `conversations.history` payload — distinct from replies (different endpoint semantics). */
+interface HistoryResponse extends SlackOkResponse {
+  messages?: {
+    user?: string;
+    bot_id?: string;
+    text?: string;
+    ts?: string;
+    subtype?: string;
+  }[];
+  response_metadata?: { next_cursor?: string };
+}
+
 /**
  * Concrete `SlackClient` over the Slack Web API, authed with a workspace bot
- * token. The adapter package owns the typed interface; this is the real impl
- * the agent wires in (tests inject a mock instead).
+ * token. Lives in the adapter package alongside the interface it implements.
+ * Tests inject a mock instead.
  */
 export class WebApiSlackClient implements SlackClient {
   constructor(private readonly botToken: string) {}
@@ -160,8 +159,10 @@ export class WebApiSlackClient implements SlackClient {
       ...(params.blocks !== undefined ? { blocks: params.blocks } : {}),
       ...(params.thread_ts !== undefined ? { thread_ts: params.thread_ts } : {}),
     });
+    const ts = json.ts;
+    if (!ts) throw new SlackWebApiError('missing_ts', { error: 'missing_ts' });
     return {
-      ts: (json.ts ?? '') as SlackThreadTs,
+      ts: ts as SlackThreadTs,
       channel: (json.channel ?? params.channel) as SlackChannelId,
     };
   }
@@ -244,7 +245,7 @@ export class WebApiSlackClient implements SlackClient {
     // Page through the channel (Slack returns newest-first) until we hit the
     // ceiling or run out of messages — whichever comes first.
     do {
-      const json = await this.callForm<RepliesResponse>('conversations.history', {
+      const json = await this.callForm<HistoryResponse>('conversations.history', {
         channel: params.channel,
         limit: Math.min(SLACK_PAGE_LIMIT, ceiling - collected.length),
         ...(cursor !== undefined ? { cursor } : {}),
@@ -353,8 +354,10 @@ export class WebApiSlackClient implements SlackClient {
     const json = await this.callForm<UserResponse>('users.info', { user: params.user });
     const u = json.user ?? {};
     const p = u.profile ?? {};
+    const id = u.id;
+    if (!id) throw new SlackWebApiError('missing_user_id', { error: 'missing_user_id' });
     return {
-      id: (u.id ?? params.user) as SlackUserId,
+      id: id as SlackUserId,
       ...(u.name !== undefined && u.name !== '' ? { userName: u.name } : {}),
       ...(p.display_name !== undefined && p.display_name !== ''
         ? { displayName: p.display_name }
@@ -365,7 +368,9 @@ export class WebApiSlackClient implements SlackClient {
       ...(p.title !== undefined && p.title !== '' ? { title: p.title } : {}),
       // Email only present when the bot has the `users:read.email` scope.
       ...(p.email !== undefined && p.email !== '' ? { email: p.email } : {}),
-      ...(p.status_text !== undefined && p.status_text !== '' ? { statusText: p.status_text } : {}),
+      ...(p.status_text !== undefined && p.status_text !== ''
+        ? { statusText: p.status_text, status: p.status_text }
+        : {}),
       ...(p.status_emoji !== undefined && p.status_emoji !== ''
         ? { statusEmoji: p.status_emoji }
         : {}),
@@ -384,7 +389,12 @@ export class WebApiSlackClient implements SlackClient {
         deleted?: boolean;
         is_bot?: boolean;
         tz?: string;
-        profile?: { display_name?: string; real_name?: string; title?: string };
+        profile?: {
+          display_name?: string;
+          real_name?: string;
+          title?: string;
+          status_text?: string;
+        };
       }[];
       response_metadata?: { next_cursor?: string };
     }
@@ -403,23 +413,34 @@ export class WebApiSlackClient implements SlackClient {
       cursor = json.response_metadata?.next_cursor || undefined;
     } while (cursor !== undefined && members.length < ceiling);
 
-    const users: SlackUserProfile[] = members.map((u) => {
-      const p = u.profile ?? {};
-      return {
-        id: (u.id ?? '') as SlackUserId,
-        ...(u.name !== undefined && u.name !== '' ? { userName: u.name } : {}),
-        ...(p.display_name !== undefined && p.display_name !== ''
-          ? { displayName: p.display_name }
-          : {}),
-        ...(p.real_name !== undefined || u.real_name !== undefined
-          ? { realName: (p.real_name ?? u.real_name) as string }
-          : {}),
-        ...(p.title !== undefined && p.title !== '' ? { title: p.title } : {}),
-        ...(u.tz !== undefined ? { tz: u.tz } : {}),
-        ...(u.is_bot !== undefined ? { isBot: u.is_bot } : {}),
-        ...(u.deleted !== undefined ? { deleted: u.deleted } : {}),
-      };
-    });
+    // Filter out members with no id — Slack should always return one, but
+    // guard against emitting empty branded ids.
+    const users: SlackUserProfile[] = members
+      .filter(
+        (u): u is NonNullable<UsersListResponse['members']>[number] & { id: string } =>
+          typeof u.id === 'string' && u.id.length > 0,
+      )
+      .map((u) => {
+        const p = u.profile ?? {};
+        return {
+          id: u.id as SlackUserId,
+          ...(u.name !== undefined && u.name !== '' ? { userName: u.name } : {}),
+          ...(p.display_name !== undefined && p.display_name !== ''
+            ? { displayName: p.display_name }
+            : {}),
+          ...(p.real_name !== undefined || u.real_name !== undefined
+            ? { realName: (p.real_name ?? u.real_name) as string }
+            : {}),
+          ...(p.title !== undefined && p.title !== '' ? { title: p.title } : {}),
+          // Z12-07: include status field to match usersInfo/SlackUserProfile
+          ...(p.status_text !== undefined && p.status_text !== ''
+            ? { statusText: p.status_text, status: p.status_text }
+            : {}),
+          ...(u.tz !== undefined ? { tz: u.tz } : {}),
+          ...(u.is_bot !== undefined ? { isBot: u.is_bot } : {}),
+          ...(u.deleted !== undefined ? { deleted: u.deleted } : {}),
+        };
+      });
     return { users };
   }
 
@@ -439,8 +460,10 @@ export class WebApiSlackClient implements SlackClient {
       channel: params.channel,
     })) as { channel?: InfoChannel };
     const c = json.channel ?? {};
+    const id = c.id;
+    if (!id) throw new SlackWebApiError('missing_channel_id', { error: 'missing_channel_id' });
     return {
-      id: (c.id ?? params.channel) as SlackChannelId,
+      id: id as SlackChannelId,
       isIm: c.is_im === true,
       isMpim: c.is_mpim === true,
       ...(c.user !== undefined && c.user !== '' ? { userId: c.user as SlackUserId } : {}),
@@ -456,8 +479,10 @@ export class WebApiSlackClient implements SlackClient {
       bot_id?: string;
     }
     const json = await this.call<AuthTestResponse>('auth.test', {});
+    const userId = json.user_id;
+    if (!userId) throw new SlackWebApiError('missing_user_id', { error: 'missing_user_id' });
     return {
-      userId: (json.user_id ?? '') as SlackUserId,
+      userId: userId as SlackUserId,
       teamId: json.team_id ?? '',
       ...(json.user !== undefined ? { user: json.user } : {}),
       ...(json.bot_id !== undefined ? { isBot: true } : {}),
@@ -487,15 +512,21 @@ export class WebApiSlackClient implements SlackClient {
       ...(params.page !== undefined ? { page: params.page } : {}),
     });
     const raw = json.messages?.matches ?? [];
-    const matches: SearchMessageMatch[] = raw.map((m) => ({
-      channelId: (m.channel?.id ?? '') as SlackChannelId,
-      ...(m.channel?.name !== undefined ? { channelName: m.channel.name } : {}),
-      ...(m.username !== undefined ? { username: m.username } : {}),
-      ...(m.user !== undefined ? { userId: m.user as SlackUserId } : {}),
-      ts: (m.ts ?? '') as SlackThreadTs,
-      text: m.text ?? '',
-      ...(m.permalink !== undefined ? { permalink: m.permalink } : {}),
-    }));
+    // Filter out matches with no channel id — guard against empty branded ids.
+    const matches: SearchMessageMatch[] = raw
+      .filter(
+        (m): m is (typeof raw)[number] & { channel: { id: string } } =>
+          typeof m.channel?.id === 'string' && m.channel.id.length > 0,
+      )
+      .map((m) => ({
+        channelId: m.channel.id as SlackChannelId,
+        ...(m.channel.name !== undefined ? { channelName: m.channel.name } : {}),
+        ...(m.username !== undefined ? { username: m.username } : {}),
+        ...(m.user !== undefined ? { userId: m.user as SlackUserId } : {}),
+        ts: (m.ts ?? '') as SlackThreadTs,
+        text: m.text ?? '',
+        ...(m.permalink !== undefined ? { permalink: m.permalink } : {}),
+      }));
     return { matches, total: json.messages?.total ?? matches.length };
   }
 
@@ -558,13 +589,19 @@ export class WebApiSlackClient implements SlackClient {
       cursor = json.response_metadata?.next_cursor || undefined;
     } while (cursor !== undefined && collected.length < ceiling);
 
-    const channels: SlackChannelSummary[] = collected.map((c) => ({
-      id: (c.id ?? '') as SlackChannelId,
-      ...(c.name !== undefined ? { name: c.name } : {}),
-      isPrivate: c.is_private === true,
-      ...(c.topic?.value !== undefined && c.topic.value !== '' ? { topic: c.topic.value } : {}),
-      ...(c.num_members !== undefined ? { memberCount: c.num_members } : {}),
-    }));
+    // Filter out channels with no id — guard against empty branded ids.
+    const channels: SlackChannelSummary[] = (collected ?? [])
+      .filter(
+        (c): c is NonNullable<ListResponse['channels']>[number] & { id: string } =>
+          typeof c.id === 'string' && c.id.length > 0,
+      )
+      .map((c) => ({
+        id: c.id as SlackChannelId,
+        ...(c.name !== undefined ? { name: c.name } : {}),
+        isPrivate: c.is_private === true,
+        ...(c.topic?.value !== undefined && c.topic.value !== '' ? { topic: c.topic.value } : {}),
+        ...(c.num_members !== undefined ? { memberCount: c.num_members } : {}),
+      }));
     return { channels };
   }
 }

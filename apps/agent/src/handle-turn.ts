@@ -1,4 +1,6 @@
 import {
+  isSlackDmId,
+  isSlackUserId,
   markdownBlocks,
   receiptToContextBlock,
   receiptToFooterFields,
@@ -10,7 +12,6 @@ import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
 import { CompositeDispatcher, McpDispatcher, initMcpPool, getActiveConfigs } from './mcp/index.js';
-import { NameResolver } from './name-resolver.js';
 import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
@@ -20,6 +21,7 @@ import { pickShimmerPhrase, pickShimmerStatus } from './thinking-copy.js';
 
 import type { BehaviorConfig } from './config.js';
 import type { ConnectorConfig } from './mcp/index.js';
+import type { NameResolver } from './name-resolver.js';
 import type {
   AppendStreamParams,
   SlackBlock,
@@ -907,10 +909,10 @@ async function loadViewedChannelContext(
     let viewedLabel: string;
     try {
       rewrittenTranscript = await deps.nameResolver.rewriteMentions(transcript, deps.slackClient);
-      if (NameResolver.isUserId(viewed)) {
+      if (isSlackUserId(viewed)) {
         const name = await deps.nameResolver.resolveUser(viewed, deps.slackClient);
         viewedLabel = name !== viewed ? `a direct message with ${name}` : 'a direct message';
-      } else if (NameResolver.isDmId(viewed)) {
+      } else if (isSlackDmId(viewed)) {
         const name = await deps.nameResolver.resolveDmParticipant(viewed, deps.slackClient);
         viewedLabel = name !== undefined ? `a direct message with ${name}` : 'a direct message';
       } else {
@@ -920,9 +922,7 @@ async function loadViewedChannelContext(
     } catch {
       // Never leak the raw id — fall back to a generic, id-free phrase.
       viewedLabel =
-        NameResolver.isUserId(viewed) || NameResolver.isDmId(viewed)
-          ? 'a direct message'
-          : 'another channel';
+        isSlackUserId(viewed) || isSlackDmId(viewed) ? 'a direct message' : 'another channel';
     }
     return {
       role: 'user',

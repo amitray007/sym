@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { WebApiSlackClient } from '../src/slack-client.js';
+import { WebApiSlackClient } from '../src/web-api-client.js';
 
 import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
 
@@ -211,6 +211,24 @@ describe('WebApiSlackClient.conversationsHistory', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
     expect(messages).toHaveLength(2);
   });
+
+  // Z05-16: conversationsHistory uses its own HistoryResponse type, not RepliesResponse.
+  // Behavioral assertion: the response type is distinct from replies and functions correctly.
+  it('uses a separate HistoryResponse type (not RepliesResponse) — both fields present', async () => {
+    mockFetch([
+      {
+        ok: true,
+        messages: [{ user: 'U1', text: 'history msg', ts: '500.1' }],
+        response_metadata: { next_cursor: undefined },
+      },
+    ]);
+
+    const client = new WebApiSlackClient('xoxb-test');
+    // Calling history (not replies) — would break if the shared type couldn't handle next_cursor.
+    const { messages } = await client.conversationsHistory({ channel: CHANNEL });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.text).toBe('history msg');
+  });
 });
 
 describe('WebApiSlackClient assistant + streaming methods', () => {
@@ -278,6 +296,12 @@ describe('WebApiSlackClient assistant + streaming methods', () => {
     expect(fetchFn).toHaveBeenCalled();
   });
 
+  it('authTest throws when user_id is absent (Z03 branded-id fix)', async () => {
+    mockFetch([{ ok: true, user_id: '', team_id: 'T1' }]);
+    const client = new WebApiSlackClient('xoxb-test');
+    await expect(client.authTest()).rejects.toThrow('missing_user_id');
+  });
+
   it('searchMessages POSTs form-urlencoded query and maps Slack matches', async () => {
     const fetchFn = mockFetch([
       {
@@ -312,6 +336,26 @@ describe('WebApiSlackClient assistant + streaming methods', () => {
         'content-type': 'application/x-www-form-urlencoded; charset=utf-8',
       }),
     });
+  });
+
+  it('searchMessages filters out matches with empty channel id (Z03 branded-id fix)', async () => {
+    mockFetch([
+      {
+        ok: true,
+        messages: {
+          total: 2,
+          matches: [
+            { channel: { id: '' }, ts: '1.1', text: 'no channel' },
+            { channel: { id: 'C2' }, ts: '1.2', text: 'valid channel' },
+          ],
+        },
+      },
+    ]);
+    const client = new WebApiSlackClient('xoxp-user');
+    const result = await client.searchMessages({ query: 'test' });
+    // The empty-id match is filtered out; only the valid one comes through.
+    expect(result.matches).toHaveLength(1);
+    expect(result.matches[0]?.channelId).toBe('C2');
   });
 
   it('appendStream forwards task_update chunks unchanged', async () => {
@@ -407,5 +451,116 @@ describe('WebApiSlackClient retry layer', () => {
       'channel_not_found',
     );
     expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Z12-07: usersList includes status field
+// ---------------------------------------------------------------------------
+
+describe('WebApiSlackClient.usersList (Z12-07 — status field)', () => {
+  it('maps status_text into both statusText and status on each member', async () => {
+    mockFetch([
+      {
+        ok: true,
+        members: [
+          {
+            id: 'U1',
+            name: 'alice',
+            profile: { display_name: 'Alice', status_text: 'In a meeting' },
+          },
+          {
+            id: 'U2',
+            name: 'bob',
+            profile: { display_name: 'Bob' }, // no status
+          },
+        ],
+      },
+    ]);
+
+    const client = new WebApiSlackClient('xoxb-test');
+    const { users } = await client.usersList({});
+
+    expect(users).toHaveLength(2);
+    // User with status: both statusText and status must be present.
+    expect(users[0]?.statusText).toBe('In a meeting');
+    expect(users[0]?.status).toBe('In a meeting');
+    // User without status: neither field present.
+    expect(users[1]?.statusText).toBeUndefined();
+    expect(users[1]?.status).toBeUndefined();
+  });
+
+  it('filters out members with no id rather than emitting empty branded ids (Z03)', async () => {
+    mockFetch([
+      {
+        ok: true,
+        members: [
+          { id: '', name: 'noId', profile: {} },
+          { id: 'U3', name: 'valid', profile: {} },
+        ],
+      },
+    ]);
+
+    const client = new WebApiSlackClient('xoxb-test');
+    const { users } = await client.usersList({});
+    // Empty-id member is filtered; only valid one remains.
+    expect(users).toHaveLength(1);
+    expect(users[0]?.id).toBe('U3');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Z05-16: conversationsHistory uses HistoryResponse, not RepliesResponse
+// ---------------------------------------------------------------------------
+
+describe('WebApiSlackClient.conversationsHistory (Z05-16 — HistoryResponse type)', () => {
+  it('passes the channel param (not ts) to conversations.history', async () => {
+    const fetchFn = mockFetch([{ ok: true, messages: [] }]);
+    const client = new WebApiSlackClient('xoxb-test');
+
+    await client.conversationsHistory({ channel: CHANNEL });
+
+    const body = callFormBody(fetchFn, 0);
+    // history endpoint must NOT send `ts` — that's a replies-only param.
+    expect(body['ts']).toBeUndefined();
+    expect(body['channel']).toBe('C1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Z03: branded-id safety — throw on missing required fields
+// ---------------------------------------------------------------------------
+
+describe('WebApiSlackClient branded-id safety (Z03)', () => {
+  it('chatPostMessage throws on missing ts in response', async () => {
+    mockFetch([{ ok: true, channel: 'C1' }]); // ts absent
+    const client = new WebApiSlackClient('xoxb-test');
+    await expect(client.chatPostMessage({ channel: CHANNEL, text: 'hi' })).rejects.toThrow(
+      'missing_ts',
+    );
+  });
+
+  it('usersInfo throws when user.id is absent from Slack response', async () => {
+    mockFetch([{ ok: true, user: { profile: {} } }]); // no id field
+    const client = new WebApiSlackClient('xoxb-test');
+    await expect(client.usersInfo({ user: 'U1' as SlackUserId })).rejects.toThrow(
+      'missing_user_id',
+    );
+  });
+
+  it('conversationsList filters channels with empty id', async () => {
+    mockFetch([
+      {
+        ok: true,
+        channels: [
+          { id: '', name: 'no-id' },
+          { id: 'C99', name: 'valid' },
+        ],
+      },
+    ]);
+    const client = new WebApiSlackClient('xoxb-test');
+    const { channels } = await client.conversationsList({});
+    expect(channels).toHaveLength(1);
+    expect(channels[0]?.id).toBe('C99');
   });
 });
