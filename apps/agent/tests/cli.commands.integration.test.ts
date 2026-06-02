@@ -1,24 +1,41 @@
 /**
- * `sym` read commands — real-wire end to end. Drives the CLI's main() against a
- * live agent (loopback socket + real stdio echo server) and asserts the dense /
- * --json output that the operator AND the agent (via run_cli) consume.
+ * `sym` read commands — real-wire end to end, as a REAL SUBPROCESS.
+ *
+ * Drives the actual `sym` CLI (spawned via tsx) against a live in-process agent
+ * (loopback socket + real stdio echo MCP server) and asserts the dense / --json
+ * output that the operator AND the agent (via run_cli) consume.
+ *
+ * Why a subprocess (not in-process `main()` + a console.log spy): the agent runs
+ * in THIS process and logs to console during reconcile/admin handling. An
+ * in-process `vi.spyOn(console,'log')` captures those server logs too, so they
+ * race into the captured CLI output and corrupt `JSON.parse` (this flake bit CI
+ * twice — Z13-04). Running the CLI in its own process isolates its stdout: the
+ * child inherits SYM_CONFIG_PATH + SYM_ADMIN_URL and talks to the server over
+ * HTTP, exactly like the operator's shell does.
  */
 
+import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as nodePath from 'node:path';
 import * as nodeUrl from 'node:url';
+import { promisify } from 'node:util';
 
 import { serve } from '@hono/node-server';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { main } from '../src/cli/index.js';
 import { _resetPoolForTesting } from '../src/mcp/dispatcher.js';
 import { createServer } from '../src/server.js';
 
 import type { AgentConfig } from '../src/config.js';
 import type { ConnectorConfig } from '../src/mcp/config.js';
 import type { Server } from 'node:http';
+
+const execFileAsync = promisify(execFile);
+
+const AGENT_ROOT = nodePath.join(nodePath.dirname(nodeUrl.fileURLToPath(import.meta.url)), '..');
+const CLI_PATH = nodePath.join(AGENT_ROOT, 'src/cli/index.ts');
+const TSX_BIN = nodePath.join(AGENT_ROOT, 'node_modules/.bin/tsx');
 
 const FIXTURE_PATH = nodePath.resolve(
   nodePath.dirname(nodeUrl.fileURLToPath(import.meta.url)),
@@ -49,20 +66,29 @@ const config: AgentConfig = {
 
 let dir: string;
 let server: Server;
-let logs: string[];
+let adminUrl: string;
 const saved = { cfg: process.env['SYM_CONFIG_PATH'], admin: process.env['SYM_ADMIN_URL'] };
 
-/** Run a sym command, returning [exitCode, combinedStdout]. */
+/**
+ * Run a `sym` command as a real subprocess against the live test server.
+ * The child inherits SYM_CONFIG_PATH + SYM_ADMIN_URL (set in beforeEach) and so
+ * reaches the same config file + loopback admin server the operator would.
+ * Returns [exitCode, stdout]. Never throws on non-zero exit.
+ */
 async function run(...args: string[]): Promise<[number, string]> {
-  logs = [];
-  const spy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
-    logs.push(a.map(String).join(' '));
-  });
   try {
-    const code = await main(args);
-    return [code, logs.join('\n')];
-  } finally {
-    spy.mockRestore();
+    const { stdout } = await execFileAsync(TSX_BIN, [CLI_PATH, ...args], {
+      timeout: 20_000,
+      env: {
+        ...process.env,
+        SYM_CONFIG_PATH: nodePath.join(dir, 'config.json'),
+        SYM_ADMIN_URL: adminUrl,
+      },
+    });
+    return [0, stdout];
+  } catch (err) {
+    const e = err as { stdout?: string; code?: number };
+    return [e.code ?? 1, e.stdout ?? ''];
   }
 }
 
@@ -81,8 +107,13 @@ beforeEach(async () => {
   });
   const addr = server.address();
   if (addr === null || typeof addr === 'string') throw new Error('no server address');
-  process.env['SYM_ADMIN_URL'] = `http://127.0.0.1:${addr.port}`;
-  await run('apply'); // bring echo live
+  adminUrl = `http://127.0.0.1:${addr.port}`;
+  process.env['SYM_ADMIN_URL'] = adminUrl;
+
+  // Bring echo live in the server's pool (setup — done directly, not via a CLI
+  // subprocess: the commands under test are the read commands below).
+  const res = await fetch(`${adminUrl}/admin/reload`, { method: 'POST' });
+  if (!res.ok) throw new Error(`admin reload failed: ${res.status}`);
 });
 
 afterEach(async () => {
@@ -98,7 +129,7 @@ afterEach(async () => {
   }
 });
 
-describe('sym read commands (real wire)', () => {
+describe('sym read commands (real subprocess wire)', () => {
   it('status --json reports agent health + per-connector detail', async () => {
     const [code, out] = await run('status', '--json');
     expect(code).toBe(0);
