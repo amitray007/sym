@@ -44,18 +44,53 @@ export function partitionDescriptors(all: ToolDescriptor[]): {
   return { builtin, mcp };
 }
 
+/**
+ * Parse a `<server>__<tool>` name into `{ connector, local }`.
+ * Falls back to the full name for both when there is no `__`.
+ * Centralises the three places that previously duplicated this split.
+ */
+export function parseMcpName(name: string): { connector: string; local: string } {
+  const sep = name.indexOf(MCP_TOOL_SEPARATOR);
+  if (sep <= 0) return { connector: name, local: name };
+  return {
+    connector: name.slice(0, sep),
+    local: name.slice(sep + MCP_TOOL_SEPARATOR.length),
+  };
+}
+
 /** Group MCP tools by connector (the segment before `__`). */
 function groupByConnector(mcp: ToolDescriptor[]): Map<string, string[]> {
   const byConnector = new Map<string, string[]>();
   for (const d of mcp) {
-    const sep = d.name.indexOf(MCP_TOOL_SEPARATOR);
-    const connector = sep > 0 ? d.name.slice(0, sep) : d.name;
-    const local = sep > 0 ? d.name.slice(sep + MCP_TOOL_SEPARATOR.length) : d.name;
+    const { connector, local } = parseMcpName(d.name);
     const arr = byConnector.get(connector) ?? [];
     arr.push(local);
     byConnector.set(connector, arr);
   }
   return byConnector;
+}
+
+/**
+ * Rank items against a free-text query by term overlap in `hayFn(item)`.
+ * Returns up to `limit` matches, scored highest-first. Returns the first
+ * `limit` items unchanged when the query is empty.
+ */
+function rankByTerms<T>(items: T[], query: string, hayFn: (item: T) => string, limit: number): T[] {
+  const terms = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 1);
+  if (terms.length === 0) return items.slice(0, limit);
+  const scored = items
+    .map((item) => {
+      const hay = hayFn(item).toLowerCase();
+      let score = 0;
+      for (const t of terms) if (hay.includes(t)) score += 1;
+      return { item, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((x) => x.item);
 }
 
 /**
@@ -91,40 +126,12 @@ export function searchDescriptors(
   query: string,
   limit: number,
 ): ToolDescriptor[] {
-  const terms = query
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length > 1);
-  if (terms.length === 0) return mcp.slice(0, limit);
-  const scored = mcp
-    .map((d) => {
-      const hay = `${d.name} ${d.description ?? ''}`.toLowerCase();
-      let score = 0;
-      for (const t of terms) if (hay.includes(t)) score += 1;
-      return { d, score };
-    })
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit).map((x) => x.d);
+  return rankByTerms(mcp, query, (d) => `${d.name} ${d.description ?? ''}`, limit);
 }
 
 /** Rank CLI capabilities against a query by term overlap (bin + description). */
 export function searchCli(cli: CliCapability[], query: string, limit: number): CliCapability[] {
-  const terms = query
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length > 1);
-  if (terms.length === 0) return cli.slice(0, limit);
-  const scored = cli
-    .map((c) => {
-      const hay = `${c.bin} ${c.description ?? ''}`.toLowerCase();
-      let score = 0;
-      for (const t of terms) if (hay.includes(t)) score += 1;
-      return { c, score };
-    })
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit).map((x) => x.c);
+  return rankByTerms(cli, query, (c) => `${c.bin} ${c.description ?? ''}`, limit);
 }
 
 const FIND_TOOLS_PARAMS = {

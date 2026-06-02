@@ -29,6 +29,14 @@ export interface BehaviorConfig {
    * relay it. Defaults to true for transparency; set to false to suppress.
    */
   ownerPostMarker: boolean;
+  /**
+   * When true, the agent asks the owner to confirm `run_cli` calls before
+   * executing — except help/version introspection (`--help`, `--version`,
+   * bare binary), which remain unconfirmed so the agent can learn a CLI
+   * without prompting. Defaults to false (full freedom within the allowlist).
+   * Optional so existing callers that don't set it yet default to false.
+   */
+  cliConfirm?: boolean;
 }
 
 export interface AgentConfig {
@@ -103,6 +111,7 @@ export function loadAgentConfig(): AgentConfig {
       taskCardThreshold: Number(process.env['TASK_CARD_THRESHOLD'] ?? DEFAULT_TASK_CARD_THRESHOLD),
       taskCardAfter: taskCardAfter(process.env['TASK_CARD_AFTER']),
       ownerPostMarker: process.env['OWNER_POST_MARKER'] !== 'false',
+      cliConfirm: /^(1|true|yes|on)$/i.test(process.env['SYM_CLI_CONFIRM'] ?? ''),
     },
     mcpServers: connectors.mcpServers,
     mcpConfigSource: connectors.source,

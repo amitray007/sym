@@ -96,3 +96,32 @@ export function pickShimmerPhrase(turnId: TurnId | string | undefined): string {
 export function pickShimmerStatus(turnId: TurnId | string | undefined): string {
   return `is ${pickShimmerPhrase(turnId)}…`;
 }
+
+// ---------------------------------------------------------------------------
+// Whimsy — playful keepalive rotation
+// ---------------------------------------------------------------------------
+
+/**
+ * Curated playful present-progressive words for long "still thinking" stretches.
+ * Tool-specific verbs (TOOL_VERBS in pi/loop.ts) stay concrete; this only kicks
+ * in on the keepalive cycle when no real phase update has fired.
+ */
+export const WHIMSY_WORDS: readonly string[] = [
+  'pondering',
+  'cogitating',
+  'ruminating',
+  'musing',
+  'marinating',
+  'noodling',
+  'wadoodling',
+  'percolating',
+  'mulling it over',
+  'gathering thoughts',
+];
+
+/** Format a whimsical status string for the given keepalive tick. */
+export function nextWhimsicalStatus(tick: number): string {
+  const word =
+    WHIMSY_WORDS[((tick % WHIMSY_WORDS.length) + WHIMSY_WORDS.length) % WHIMSY_WORDS.length]!;
+  return `is ${word}…`;
+}

@@ -5,12 +5,17 @@ import {
   renderIntentToFallbackText,
 } from '@sym/adapter-slack';
 
-import { runLoopPi, nextWhimsicalStatus, WHIMSY_WORDS } from './pi/loop.js';
+import { runLoopPi } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
 import { cleanupReply } from './reply-cleanup.js';
 import { TaskCardManager } from './task-card-manager.js';
-import { pickShimmerPhrase, pickShimmerStatus } from './thinking-copy.js';
+import {
+  nextWhimsicalStatus,
+  pickShimmerPhrase,
+  pickShimmerStatus,
+  WHIMSY_WORDS,
+} from './thinking-copy.js';
 
 import type { HandleTurnDeps } from './handle-turn.js';
 import type { PlanController } from './plan-controller.js';
@@ -128,6 +133,7 @@ export async function runTurnLoop(
       history,
       slackClient: deps.slackClient,
       thinkingLevel,
+      ...(deps.behavior.cliConfirm === true ? { cliConfirm: true } : {}),
       ...(onDelta !== undefined ? { onDelta } : {}),
       ...(onStatus !== undefined ? { onStatus } : {}),
       ...(onToolStart !== undefined ? { onToolStart } : {}),

@@ -22,6 +22,7 @@ import {
   buildConnectorCatalog,
   makeCallTool,
   makeFindTools,
+  parseMcpName,
   partitionDescriptors,
 } from './meta-tools.js';
 import { bridgeTools } from './tools.js';
@@ -108,6 +109,12 @@ export interface PiLoopOptions {
    * REQUIRES an explicit non-`off` value (see Agent construction below).
    */
   thinkingLevel?: ThinkingLevel;
+  /**
+   * When true, the agent asks the owner to confirm `run_cli` calls before
+   * executing (except help/version introspection). Sourced from
+   * `BehaviorConfig.cliConfirm` (env `SYM_CLI_CONFIRM`). Defaults to false.
+   */
+  cliConfirm?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,7 +139,7 @@ export interface PiLoopOptions {
  * the ToolCall content blocks so Pi's context window sees the full tool round-trip.
  * Currently we surface assistant text only; tool-call content is omitted.
  */
-function toAgentMessages(history: ChatMessage[]): AgentMessage[] {
+export function toAgentMessages(history: ChatMessage[]): AgentMessage[] {
   const out: AgentMessage[] = [];
   let ts = 0;
 
@@ -205,7 +212,7 @@ function toAgentMessages(history: ChatMessage[]): AgentMessage[] {
  * Translate Pi's usage shape (from the final AssistantMessage) → Sym's `Usage`.
  * Returns `undefined` when no messages are present.
  */
-function extractUsage(messages: AgentMessage[]): Usage | undefined {
+export function extractUsage(messages: AgentMessage[]): Usage | undefined {
   // Collect usage from all assistant messages produced during this turn.
   let promptTokens = 0;
   let completionTokens = 0;
@@ -274,9 +281,9 @@ const SILENT_TOOLS: ReadonlySet<string> = new Set([
 
 /** "sentry__search_issues" → "sentry: search issues" for readable status. */
 function humanizeMcpName(name: string): string {
-  const sep = name.indexOf('__');
-  if (sep <= 0) return name.replace(/_/g, ' ');
-  return `${name.slice(0, sep)}: ${name.slice(sep + 2).replace(/_/g, ' ')}`;
+  const { connector, local } = parseMcpName(name);
+  if (connector === local) return name.replace(/_/g, ' ');
+  return `${connector}: ${local.replace(/_/g, ' ')}`;
 }
 
 /** Clip a value for a task-row title — short, single-line, scannable. */
@@ -343,95 +350,43 @@ export function friendlyVerb(toolName: string, args?: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// Whimsy — playful keepalive rotation
+// Per-turn helper builders
 // ---------------------------------------------------------------------------
 
-/**
- * Curated playful present-progressive words for long "still thinking" stretches.
- * Tool-specific verbs (TOOL_VERBS) stay concrete; this only kicks in on the
- * keepalive cycle when no real phase update has fired.
- */
-export const WHIMSY_WORDS: readonly string[] = [
-  'pondering',
-  'cogitating',
-  'ruminating',
-  'musing',
-  'marinating',
-  'noodling',
-  'wadoodling',
-  'percolating',
-  'mulling it over',
-  'gathering thoughts',
-];
-
-/** Format a whimsical status string for the given keepalive tick. */
-export function nextWhimsicalStatus(tick: number): string {
-  const word =
-    WHIMSY_WORDS[((tick % WHIMSY_WORDS.length) + WHIMSY_WORDS.length) % WHIMSY_WORDS.length]!;
-  return `is ${word}…`;
+/** Context objects threaded into the per-turn helper builders. */
+interface TurnHelperCtx {
+  turn: Turn;
+  modelCfg: PiModelCfg;
+  opts: PiLoopOptions;
+  registry: ToolRegistry;
+  ctx: ToolRuntimeContext;
 }
 
-// ---------------------------------------------------------------------------
-// Main loop
-// ---------------------------------------------------------------------------
-
 /**
- * Run a single Sym turn through Pi's `Agent`.
- *
- * Builds the Agent, subscribes for streaming text deltas, runs `prompt()`, then
- * collects the markdown reply and builds a `Receipt`.
- *
- * The `onDelta` callback is forwarded unchanged so `streamReply`'s buffer /
- * `chatAppendStream` pipeline works without modification.
+ * Assemble the Pi `AgentTool[]` for one turn: bridged built-ins + the two
+ * on-demand meta-tools (`find_tools` / `call_tool`) when MCP or CLI caps exist.
+ * Returns the tool list, a parallel `knownToolNames` guard set (for the
+ * phantom-tool filter), and the mutable `renders` sink for render intents.
  */
-export async function runLoopPi(
-  turn: Turn,
-  modelCfg: PiModelCfg,
-  registry: ToolRegistry,
-  opts: PiLoopOptions,
-): Promise<Reply> {
-  const startMs = Date.now();
-
-  // Build the ToolRuntimeContext passed to each tool dispatch.
-  const ctx: ToolRuntimeContext = {
-    workspaceId: turn.workspaceId,
-    conversationId: turn.conversationId,
-    ...(turn.channelId !== undefined ? { channelId: turn.channelId } : {}),
-    requester: turn.requester,
-    turnId: turn.id,
-  };
-
-  // Convert Sym history → Pi AgentMessage[] (system messages are dropped;
-  // Pi receives the system prompt via AgentState.systemPrompt).
-  const historyMessages = toAgentMessages(opts.history);
-
-  // The static base system prompt — byte-stable for provider prompt caching.
-  // The connector catalog (static per deploy) is appended below, after we know
-  // which MCP tools exist; that keeps the prefix cache-stable too.
-  const baseSystemPrompt = buildSystemPrompt();
-
-  // The user's message, with turn metadata framed as context-only so "summarize
-  // it" refers to the conversation (in history), not the metadata. Same builder
-  // as the kernel's assembleTurnMessages. When ownerProfile is supplied, an
-  // `owner: Amit Ray (Asia/Kolkata, …) — id U…` line lands inside the
-  // metadata block so the model knows who it's talking to.
-  const userText = buildUserTurnContent(turn, opts.ownerProfile);
-
-  // Render intents attached to tool results during the turn (search → table,
-  // present_* tools). Collected here because Pi otherwise swallows the result.
+function buildAgentTools(
+  hctx: TurnHelperCtx,
+  builtinDescriptors: ToolDescriptor[],
+  mcpDescriptors: ToolDescriptor[],
+  cliCaps: ReturnType<typeof resolveCliCapabilities>,
+): {
+  agentTools: ReturnType<typeof bridgeTools>;
+  descriptorMap: Map<string, ToolDescriptor>;
+  knownToolNames: Set<string>;
+  renders: RenderIntent[];
+} {
+  const { registry, ctx, turn, opts } = hctx;
   const renders: RenderIntent[] = [];
-
-  // Split tools: built-ins are bridged natively (small, always relevant); MCP
-  // tools are reached on demand via find_tools/call_tool so their schemas don't
-  // bloat every turn (~10k for "hi" otherwise). MCP names are `<server>__<tool>`.
-  const allDescriptors = registry.listTools();
-  const { builtin: builtinDescriptors, mcp: mcpDescriptors } = partitionDescriptors(allDescriptors);
   const onRender = (r: RenderIntent): void => {
     renders.push(r);
   };
 
-  // Owner-confirmation for a destructive MCP tool. call_tool self-gates because the
-  // model invokes `call_tool`, not the underlying tool name. Fails CLOSED.
+  // MCP confirm — call_tool self-gates because the model invokes `call_tool`,
+  // not the underlying MCP tool name. Fails CLOSED when channel is unavailable.
   const confirmMcp = async (toolName: string, args: Record<string, unknown>): Promise<boolean> => {
     const channelId = turn.channelId;
     if (!channelId || !opts.slackClient) {
@@ -447,8 +402,6 @@ export async function runLoopPi(
     });
   };
 
-  // CLIs the agent can run, as named/described capabilities (config-driven).
-  const cliCaps = resolveCliCapabilities();
   const agentTools = [
     ...bridgeTools(registry, ctx, builtinDescriptors, onRender),
     // find_tools searches BOTH MCP tools and CLIs, so it's worth offering whenever
@@ -461,20 +414,10 @@ export async function runLoopPi(
       : []),
   ];
 
-  // Append live capability catalogs so the model knows what's reachable THIS turn:
-  // MCP connectors (via find_tools/call_tool) + CLIs (via run_cli, with what each
-  // is for). Both are per-turn snapshots; the static prompt tells the model to
-  // introspect (`sym status`/`sym tools`/`find_tools`) rather than trust a cached list.
-  const catalog = buildConnectorCatalog(mcpDescriptors);
-  const cliCatalog = buildCliCatalog(resolveAllowlist(), cliCaps);
-  const systemPrompt = [baseSystemPrompt, catalog, cliCatalog]
-    .filter((s) => s.length > 0)
-    .join('\n\n');
-
   // beforeToolCall gates only natively-bridged built-ins; MCP confirm lives in call_tool.
   const descriptorMap = new Map<string, ToolDescriptor>(builtinDescriptors.map((d) => [d.name, d]));
 
-  // Tool names the UI status/task-card layer recognizes: built-ins + the
+  // Tool names the UI status/task-card layer recognises: built-ins + the
   // on-demand meta-tools. find_tools/call_tool are real tool calls but aren't
   // registered descriptors, so they must be listed here or their status gets
   // dropped by the phantom-tool guard.
@@ -483,10 +426,43 @@ export async function runLoopPi(
     ...(mcpDescriptors.length > 0 ? ['find_tools', 'call_tool'] : []),
   ]);
 
-  // Accumulate streaming text deltas.
-  const draftParts: string[] = [];
-  // Track tool invocations for the receipt.
-  const toolsInvoked: string[] = [];
+  return { agentTools, descriptorMap, knownToolNames, renders };
+}
+
+/**
+ * Compose the full system prompt for one turn: static base + connector catalog
+ * + CLI catalog. Static sections are cache-stable across turns when the
+ * connector set and allowlist don't change.
+ */
+function buildAgentSystemPrompt(
+  mcpDescriptors: ToolDescriptor[],
+  cliAllowlist: ReturnType<typeof resolveAllowlist>,
+  cliCaps: ReturnType<typeof resolveCliCapabilities>,
+): string {
+  const baseSystemPrompt = buildSystemPrompt();
+  // Append live capability catalogs so the model knows what's reachable THIS turn:
+  // MCP connectors (via find_tools/call_tool) + CLIs (via run_cli, with what each
+  // is for). Both are per-turn snapshots; the static prompt tells the model to
+  // introspect (`sym status`/`sym tools`/`find_tools`) rather than trust a cached list.
+  const catalog = buildConnectorCatalog(mcpDescriptors);
+  const cliCatalog = buildCliCatalog(cliAllowlist, cliCaps);
+  return [baseSystemPrompt, catalog, cliCatalog].filter((s) => s.length > 0).join('\n\n');
+}
+
+/**
+ * Factory for the `beforeToolCall` hook passed to Pi's Agent. Returns a closure
+ * over the turn/model context and the per-turn `slackGuardVerdict` cache.
+ *
+ * Gates built-in tools only; MCP tools are confirmed inside `call_tool`.
+ */
+function makeBeforeToolCall(
+  hctx: TurnHelperCtx,
+  descriptorMap: Map<string, ToolDescriptor>,
+): (
+  context: BeforeToolCallContext,
+  signal?: AbortSignal,
+) => Promise<{ block: true; reason?: string } | undefined> {
+  const { turn, modelCfg, opts } = hctx;
 
   // Per-turn cache for the Slack-read relevance guard. Computed at most once
   // (the first time a broad Slack read is attempted) and reused for the rest of
@@ -495,14 +471,7 @@ export async function runLoopPi(
   // `allow` so we don't re-prompt for every subsequent Slack read.
   let slackGuardVerdict: SlackGuardVerdict | undefined;
 
-  // ---------------------------------------------------------------------------
-  // Confirm-before-destructive hook
-  //
-  // For any tool whose descriptor carries `destructiveHint: true`, pause and ask
-  // the owner to approve via Slack before executing. Fail CLOSED when the
-  // confirmation channel is unavailable.
-  // ---------------------------------------------------------------------------
-  const beforeToolCall = async (
+  return async (
     context: BeforeToolCallContext,
     signal?: AbortSignal,
   ): Promise<{ block: true; reason?: string } | undefined> => {
@@ -557,14 +526,14 @@ export async function runLoopPi(
     let needsConfirm: boolean;
     if (toolName === 'run_cli') {
       // run_cli is unconfirmed by default (full freedom within SYM_CLI_ALLOWLIST).
-      // SYM_CLI_CONFIRM gates real commands; help/version introspection stays free
-      // so the agent can learn a CLI without prompting.
-      const cliConfirm = /^(1|true|yes|on)$/i.test(process.env['SYM_CLI_CONFIRM'] ?? '');
+      // cliConfirm (sourced from BehaviorConfig / SYM_CLI_CONFIRM) gates real
+      // commands; help/version introspection stays free so the agent can learn a
+      // CLI without prompting.
       const argvRaw = (context.args as { argv?: unknown } | undefined)?.argv;
       const argv = Array.isArray(argvRaw)
         ? argvRaw.filter((a): a is string => typeof a === 'string')
         : [];
-      needsConfirm = cliConfirm && !isIntrospectionOnly(argv);
+      needsConfirm = opts.cliConfirm === true && !isIntrospectionOnly(argv);
     } else {
       needsConfirm = descriptorMap.get(toolName)?.destructiveHint === true;
     }
@@ -600,40 +569,29 @@ export async function runLoopPi(
 
     return undefined;
   };
+}
 
-  // Construct the Agent.
-  //
-  // thinkingLevel: routed per-turn by `think-router.ts` (default `'low'`).
-  // gpt-oss-120b on Fireworks REQUIRES an explicit non-`off` effort: `'off'`
-  // makes pi-ai send `thinking: { type: 'disabled' }`, which Fireworks
-  // translates to `reasoning_effort: 'none'` and rejects with 400. The router
-  // never emits `'off'` (its floor is `'low'`); fall back to `'low'` if no
-  // value was supplied. We don't surface reasoning to users (thinking_delta
-  // is filtered in the subscriber below), so the cost is purely model-side.
-  const agent = new Agent({
-    initialState: {
-      systemPrompt,
-      model: modelCfg.model,
-      tools: agentTools,
-      messages: historyMessages,
-      thinkingLevel: opts.thinkingLevel ?? 'low',
-    },
-    getApiKey: (_provider: string) => modelCfg.apiKey,
-    beforeToolCall,
-  });
-
+/**
+ * Factory for the Pi Agent event subscriber. Returns a closure over the shared
+ * `draftParts` / `toolsInvoked` accumulators and the mutable `emittedWritingStatus`
+ * flag so consecutive tool–reply cycles re-arm the "writing" shimmer correctly.
+ *
+ * NOTE: `thinking_delta` events (Harmony reasoning on the anthropic-messages
+ * surface) are deliberately NOT routed anywhere — neither onDelta nor onStatus.
+ * They're internal reasoning and must never appear in the Slack message body or
+ * shimmer.
+ */
+function makeSubscriber(
+  opts: PiLoopOptions,
+  knownToolNames: Set<string>,
+  draftParts: string[],
+  toolsInvoked: string[],
+): (event: AgentEvent) => Promise<void> {
   // The first text_delta (initial reply, or first delta after each tool round)
   // flips status to "is writing the reply…". Re-armed on every tool start.
   let emittedWritingStatus = false;
 
-  // Subscribe to events for streaming + tool tracking.
-  // The subscriber is synchronous where possible; async onDelta is awaited in-band.
-  //
-  // NOTE: `thinking_delta` events (Harmony analysis/commentary on the
-  // anthropic-messages surface) are deliberately NOT routed anywhere — neither
-  // onDelta nor onStatus. They're internal reasoning and must never appear in
-  // the Slack message body or shimmer.
-  agent.subscribe(async (event: AgentEvent) => {
+  return async (event: AgentEvent): Promise<void> => {
     if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
       const delta = event.assistantMessageEvent.delta;
       // Only flip "writing" status when the partial actually carries a non-empty
@@ -682,19 +640,113 @@ export async function runLoopPi(
       if (SILENT_TOOLS.has(toolName)) return;
       await opts.onToolEnd?.(event.toolCallId, event.isError);
     }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Main loop
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a single Sym turn through Pi's `Agent`.
+ *
+ * Builds the Agent, subscribes for streaming text deltas, runs `prompt()`, then
+ * collects the markdown reply and builds a `Receipt`.
+ *
+ * The `onDelta` callback is forwarded unchanged so `streamReply`'s buffer /
+ * `chatAppendStream` pipeline works without modification.
+ */
+export async function runLoopPi(
+  turn: Turn,
+  modelCfg: PiModelCfg,
+  registry: ToolRegistry,
+  opts: PiLoopOptions,
+): Promise<Reply> {
+  const startMs = Date.now();
+
+  // Build the ToolRuntimeContext passed to each tool dispatch.
+  const ctx: ToolRuntimeContext = {
+    workspaceId: turn.workspaceId,
+    conversationId: turn.conversationId,
+    ...(turn.channelId !== undefined ? { channelId: turn.channelId } : {}),
+    requester: turn.requester,
+    turnId: turn.id,
+  };
+
+  // Convert Sym history → Pi AgentMessage[] (system messages are dropped;
+  // Pi receives the system prompt via AgentState.systemPrompt).
+  const historyMessages = toAgentMessages(opts.history);
+
+  // The user's message, with turn metadata framed as context-only so "summarize
+  // it" refers to the conversation (in history), not the metadata. Same builder
+  // as the kernel's assembleTurnMessages. When ownerProfile is supplied, an
+  // `owner: Amit Ray (Asia/Kolkata, …) — id U…` line lands inside the
+  // metadata block so the model knows who it's talking to.
+  const userText = buildUserTurnContent(turn, opts.ownerProfile);
+
+  // Partition the registry into built-ins (always bridged) and MCP tools
+  // (deferred behind find_tools/call_tool to keep per-turn token cost low).
+  const allDescriptors = registry.listTools();
+  const { builtin: builtinDescriptors, mcp: mcpDescriptors } = partitionDescriptors(allDescriptors);
+
+  // Resolve the CLI allowlist once per turn so both the tool list and the system
+  // prompt catalog read from the same snapshot (no double config-file read).
+  const cliAllowlist = resolveAllowlist();
+  const cliCaps = resolveCliCapabilities();
+
+  const hctx: TurnHelperCtx = { turn, modelCfg, opts, registry, ctx };
+
+  const { agentTools, descriptorMap, knownToolNames, renders } = buildAgentTools(
+    hctx,
+    builtinDescriptors,
+    mcpDescriptors,
+    cliCaps,
+  );
+
+  const systemPrompt = buildAgentSystemPrompt(mcpDescriptors, cliAllowlist, cliCaps);
+
+  // Accumulators shared between the subscriber and the post-run collection.
+  const draftParts: string[] = [];
+  const toolsInvoked: string[] = [];
+
+  // Construct the Agent.
+  //
+  // thinkingLevel: routed per-turn by `think-router.ts` (default `'low'`).
+  // gpt-oss-120b on Fireworks REQUIRES an explicit non-`off` effort: `'off'`
+  // makes pi-ai send `thinking: { type: 'disabled' }`, which Fireworks
+  // translates to `reasoning_effort: 'none'` and rejects with 400. The router
+  // never emits `'off'` (its floor is `'low'`); fall back to `'low'` if no
+  // value was supplied. We don't surface reasoning to users (thinking_delta
+  // is filtered in the subscriber below), so the cost is purely model-side.
+  const agent = new Agent({
+    initialState: {
+      systemPrompt,
+      model: modelCfg.model,
+      tools: agentTools,
+      messages: historyMessages,
+      thinkingLevel: opts.thinkingLevel ?? 'low',
+    },
+    getApiKey: (_provider: string) => modelCfg.apiKey,
+    beforeToolCall: makeBeforeToolCall(hctx, descriptorMap),
   });
 
-  // Run the full multi-step loop (tools + follow-ups) via a single prompt call.
-  if (opts.signal) {
-    // Pi's Agent doesn't accept an AbortSignal on prompt(); abort via agent.abort().
-    // Wire the signal so callers can cancel the run.
-    // TODO(pi): chunk 4 — Pi may expose signal on prompt() in a future version.
-    opts.signal.addEventListener('abort', () => {
-      agent.abort();
-    });
-  }
+  agent.subscribe(makeSubscriber(opts, knownToolNames, draftParts, toolsInvoked));
 
-  await agent.prompt(userText);
+  // Run the full multi-step loop (tools + follow-ups) via a single prompt call.
+  //
+  // Pi's Agent doesn't accept an AbortSignal on prompt(); abort via agent.abort().
+  // Wire the signal so callers can cancel the run, and clean up the listener in a
+  // finally block to avoid an event-listener leak when the signal outlives the run.
+  // TODO(pi): chunk 4 — Pi may expose signal on prompt() in a future version.
+  const abortHandler = (): void => {
+    agent.abort();
+  };
+  opts.signal?.addEventListener('abort', abortHandler);
+  try {
+    await agent.prompt(userText);
+  } finally {
+    opts.signal?.removeEventListener('abort', abortHandler);
+  }
 
   // Surface any error from Pi after the run settles.
   const errorMessage = agent.state.errorMessage;
