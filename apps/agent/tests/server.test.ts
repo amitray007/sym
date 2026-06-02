@@ -384,4 +384,31 @@ describe('agent server /slack/commands', () => {
     );
     expect(res.status).toBe(200);
   });
+
+  it('ACKs 200 for response_url fallback path: non-DM channel Sym is not a member of', async () => {
+    // When Sym is not a member of the invocation channel (not a DM), the seed
+    // chatPostMessage will fail and the turn falls back to response_url delivery.
+    // The route contract is still a fast 200 — background work is fire-and-forget.
+    const body = formBody({
+      team_id: config.slackTeamId,
+      user_id: config.ownerSlackUserId,
+      channel_id: 'C-NOT-MEMBER',
+      channel_name: 'some-channel',
+      command: '/sym',
+      text: 'what is the p1 status',
+      trigger_id: 'tr-resp-url-1',
+      response_url: 'http://example.invalid/r/fallback',
+    });
+    const res = await postTo(
+      '/slack/commands',
+      body,
+      'application/x-www-form-urlencoded',
+      signedHeaders(body),
+    );
+    // The HTTP contract is unchanged: route ACKs 200 immediately regardless of
+    // whether the background work uses the seed path or the response_url path.
+    expect(res.status).toBe(200);
+    // The body must be empty (Slack's preferred "no immediate message" shape).
+    expect(await res.text()).toBe('');
+  });
 });

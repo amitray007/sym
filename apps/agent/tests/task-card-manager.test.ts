@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { TaskCardManager } from '../src/handle-turn.js';
 import { PlanController } from '../src/plan-controller.js';
+import { TaskCardManager } from '../src/task-card-manager.js';
 
 import type { TaskUpdateChunk } from '@sym/adapter-slack';
 
