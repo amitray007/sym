@@ -110,4 +110,21 @@ describe('sym CLI smoke tests (real subprocess)', () => {
     // Should print an error message, not a stack trace / uncaught exception
     expect(output).toMatch(/unknown command/i);
   });
+
+  it('secret set REJECTS a positional value (argv leaks via the process table — Z09-14)', async () => {
+    const { stdout, stderr, code } = await spawnSym([
+      'secret',
+      'set',
+      'testconn',
+      'testfield',
+      'PLAINTEXT_LEAK_VALUE',
+    ]);
+    expect(code).not.toBe(0);
+    const output = stdout + stderr;
+    // It must refuse the positional value and point at stdin — never store it,
+    // and never echo the secret back.
+    expect(output).toMatch(/process table|stdin/i);
+    expect(output).not.toMatch(/stored secret/i);
+    expect(output).not.toContain('PLAINTEXT_LEAK_VALUE');
+  });
 });

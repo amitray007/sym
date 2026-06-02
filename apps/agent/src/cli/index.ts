@@ -566,11 +566,23 @@ async function secretCommand(args: string[], json: boolean): Promise<number> {
     const connector = args[1];
     const field = args[2];
     if (connector === undefined || field === undefined) {
-      throw new Error('secret set requires <connector> <field> [value]');
+      throw new Error('secret set requires <connector> <field> (value is read from stdin)');
     }
-    const value = args[3] ?? (await readStdin());
+    // SECURITY (Z09-14): never accept the secret as a positional arg — it would be
+    // visible in the process table (`ps`, /proc/<pid>/cmdline) to any local user.
+    // The value is read from stdin only.
+    if (args[3] !== undefined) {
+      throw new Error(
+        'secret set does not accept the value as an argument (it leaks via the process ' +
+          `table). Pipe it via stdin: \`printf %s "$TOKEN" | sym secret set ${connector} ${field}\``,
+      );
+    }
+    const value = await readStdin();
     if (value.length === 0) {
-      throw new Error('no secret value provided (pass as the last arg or pipe via stdin)');
+      throw new Error(
+        'no secret value provided — pipe it via stdin: ' +
+          `\`printf %s "$TOKEN" | sym secret set ${connector} ${field}\``,
+      );
     }
     setSecret(connector, field, value);
     console.log(`stored secret ${connector}/${field}`);

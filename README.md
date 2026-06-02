@@ -1,8 +1,10 @@
 # Sym
 
 A personal AI teammate that lives in your Slack workspace. Send it a DM or
-@mention it in a channel and it replies. No database, no dashboard — configured
-entirely by environment variables.
+@mention it in a channel and it replies. No message database and no _web_
+dashboard — the Slack thread is its memory. (Sym does ship a small operator
+TUI/CLI and an encrypted local credential store as a deliberate control tier for
+MCP connectors — see [docs/FUTURE.md](docs/FUTURE.md).)
 
 **Stack:** Hono (HTTP server) · Pi agent SDK · Fireworks (OpenAI-compatible LLM) · Slack Events API
 
