@@ -437,6 +437,64 @@ describe('AbortSignal wiring', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Z16-04: Per-turn deadline — AbortSignal.timeout flows into graceful abort
+// ---------------------------------------------------------------------------
+
+describe('per-turn deadline (Z16-04)', () => {
+  beforeEach(() => {
+    capturedSubscribers.length = 0;
+  });
+
+  it('a timeout signal (fires immediately) resolves without throwing — graceful abort path', async () => {
+    // AbortSignal.timeout(0) fires on the next microtask tick — effectively
+    // immediate. The abort handler calls agent.abort(), which triggers Pi's
+    // graceful-abort path. The run MUST resolve (return a Reply), not reject.
+    const registry = makeRegistryWithOneTool();
+    const result = await runLoopPi(makeTurn(), makeModelCfg(), registry, {
+      history: [] as ChatMessage[],
+      signal: AbortSignal.timeout(0),
+    });
+    // A valid Reply is returned — not an unhandled rejection.
+    expect(result).toBeDefined();
+    expect(result.markdown).toBeDefined();
+    expect(result.receipt).toBeDefined();
+  });
+
+  it('a combined signal (user-cancel + deadline) resolves without throwing', async () => {
+    // Simulate the AbortSignal.any([userSignal, AbortSignal.timeout(...)]) combination
+    // that runTurnLoop builds. Fire the user-cancel immediately and confirm that
+    // the combined signal also resolves gracefully.
+    const registry = makeRegistryWithOneTool();
+    const userController = new AbortController();
+    userController.abort();
+    const combined = AbortSignal.any([userController.signal, AbortSignal.timeout(60_000)]);
+
+    const result = await runLoopPi(makeTurn(), makeModelCfg(), registry, {
+      history: [] as ChatMessage[],
+      signal: combined,
+    });
+
+    expect(result).toBeDefined();
+    expect(result.markdown).toBeDefined();
+  });
+
+  it('removes the abort listener after a timeout abort (no listener leak on deadline path)', async () => {
+    const registry = makeRegistryWithOneTool();
+    const immediateSignal = AbortSignal.timeout(0);
+
+    // Run to completion — should not leave dangling listeners on the signal.
+    await runLoopPi(makeTurn(), makeModelCfg(), registry, {
+      history: [] as ChatMessage[],
+      signal: immediateSignal,
+    });
+
+    // After the run, the signal's listener count should be back to 0 (the abort
+    // handler was cleaned up in the finally block).
+    expect(listenerCount(immediateSignal, 'abort')).toBe(0);
+  });
+});
+
 /**
  * Count the number of active listeners for a given event type on an
  * EventTarget by round-tripping through add/remove with a sentinel.

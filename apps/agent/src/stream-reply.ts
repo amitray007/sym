@@ -33,6 +33,12 @@ import type { ToolRegistry } from '@sym/kernel';
 const FLUSH_CHARS = 60;
 
 /**
+ * Default per-turn deadline used when `SYM_TURN_DEADLINE_MS` is not set via
+ * `BehaviorConfig`. Matches the default in `config.ts`.
+ */
+const DEFAULT_TURN_DEADLINE_MS = 60_000;
+
+/**
  * Slack's `assistant.threads.setStatus` shimmer auto-clears after 2 min. Re-send
  * the most recent status every 90s so long tool runs keep showing feedback.
  */
@@ -106,6 +112,12 @@ export function heroRenderParts(reply: Reply): {
  *
  * Single path — no fallback. `onDelta` and `history` are forwarded so the
  * streaming / postMessage pipeline is unchanged.
+ *
+ * A per-turn deadline is applied via `AbortSignal.timeout` (sourced from
+ * `deps.behavior.turnDeadlineMs`; default 60 s). If a caller also supplies a
+ * `signal`, the two are combined with `AbortSignal.any` so EITHER the user-cancel
+ * OR the deadline can abort the run. A timeout abort flows into Pi's graceful
+ * abort path (partial reply), not an unhandled rejection.
  */
 export async function runTurnLoop(
   turn: Turn,
@@ -116,6 +128,7 @@ export async function runTurnLoop(
   onStatus?: (status: string) => void | Promise<void>,
   onToolStart?: (toolCallId: string, friendlyLabel: string) => void | Promise<void>,
   onToolEnd?: (toolCallId: string, errored: boolean) => void | Promise<void>,
+  signal?: AbortSignal,
 ): Promise<Reply> {
   const model = buildFireworksModel({
     baseUrl: deps.fireworks.baseUrl,
@@ -128,6 +141,18 @@ export async function runTurnLoop(
     text: turn.text,
     threadDepth: history.length,
   });
+
+  // Build the per-turn deadline signal. A deadline of 0 means "no cap".
+  // Combine with any caller-supplied signal so both the user-cancel and the
+  // deadline can abort the run — whichever fires first wins.
+  const deadlineMs = deps.behavior.turnDeadlineMs ?? DEFAULT_TURN_DEADLINE_MS;
+  const turnSignal =
+    deadlineMs > 0
+      ? signal !== undefined
+        ? AbortSignal.any([signal, AbortSignal.timeout(deadlineMs)])
+        : AbortSignal.timeout(deadlineMs)
+      : signal;
+
   return runLoopPi(
     turn,
     { baseUrl: deps.fireworks.baseUrl, apiKey: deps.fireworks.apiKey, model },
@@ -142,6 +167,7 @@ export async function runTurnLoop(
       ...(onToolStart !== undefined ? { onToolStart } : {}),
       ...(onToolEnd !== undefined ? { onToolEnd } : {}),
       ...(deps.ownerProfile !== undefined ? { ownerProfile: deps.ownerProfile } : {}),
+      ...(turnSignal !== undefined ? { signal: turnSignal } : {}),
     },
   );
 }

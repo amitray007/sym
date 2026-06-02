@@ -7,6 +7,12 @@ import type { ChatMessage, SlackChannelId, Turn } from '@sym/contracts';
 const HISTORY_LIMIT = 20;
 
 /**
+ * Default cap for the threaded history path. Matches the default in `config.ts`.
+ * Used when `behavior.threadHistoryLimit` is not set.
+ */
+const THREAD_HISTORY_DEFAULT = 80;
+
+/**
  * Load the prior conversation as `ChatMessage[]` — read LIVE from Slack, which
  * is the only source of truth (there is no transcript store).
  *
@@ -15,13 +21,20 @@ const HISTORY_LIMIT = 20;
  * oldest-first from the adapter. The triggering message is excluded by `ts` (the
  * loop appends it as the current turn). Best-effort: any failure degrades to no
  * history, never blocks the reply.
+ *
+ * The threaded path fetches the entire thread from Slack (no server-side limit),
+ * then tail-slices to `behavior.threadHistoryLimit` so a long thread doesn't send
+ * hundreds of messages to the model on every turn. The un-threaded path already
+ * caps via the `limit` parameter on `conversations.history`.
  */
 export async function loadTurnHistory(turn: Turn, deps: HandleTurnDeps): Promise<ChatMessage[]> {
   const channel = turn.channelId;
   if (channel === undefined) return [];
   try {
     let messages;
+    let isThreaded = false;
     if (turn.threadTs !== undefined) {
+      isThreaded = true;
       ({ messages } = await deps.slackClient.conversationsReplies({
         channel,
         ts: turn.threadTs,
@@ -32,10 +45,21 @@ export async function loadTurnHistory(turn: Turn, deps: HandleTurnDeps): Promise
         limit: HISTORY_LIMIT,
       }));
     }
-    const history = threadToHistory(messages, {
+    let history = threadToHistory(messages, {
       botUserId: deps.botUserId,
       ...(turn.ts !== undefined ? { excludeTs: turn.ts } : {}),
     });
+
+    // Cap the threaded history to the most-recent N messages. The un-threaded
+    // path is already server-side capped via `limit` above. A limit of 0 means
+    // "no cap" (send everything). The tail is kept so the model always sees the
+    // most recent context, not the distant past of a long thread.
+    if (isThreaded) {
+      const limit = deps.behavior.threadHistoryLimit ?? THREAD_HISTORY_DEFAULT;
+      if (limit > 0 && history.length > limit) {
+        history = history.slice(history.length - limit);
+      }
+    }
     // Resolver pass: every history message may still carry raw `<@U…>` /
     // `<#C…>` markup in its body (the prior message text the bot saw in
     // Slack). Strip those before the model sees them — same rationale as

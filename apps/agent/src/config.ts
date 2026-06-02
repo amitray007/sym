@@ -37,6 +37,23 @@ export interface BehaviorConfig {
    * Optional so existing callers that don't set it yet default to false.
    */
   cliConfirm?: boolean;
+  /**
+   * Per-turn deadline in milliseconds. A stuck model or a Fireworks error-loop
+   * is aborted after this many ms, producing a partial/timed-out reply instead
+   * of consuming credits without bound.
+   * Default: 60 000 (60 s). Set to 0 to disable.
+   * Optional so existing callers that don't set it yet use the default.
+   */
+  turnDeadlineMs?: number;
+  /**
+   * Maximum number of threaded history messages fed to the model per turn.
+   * The most-recent N messages are kept (tail-slice). A 200-reply thread would
+   * otherwise send all 200 messages to the model on every turn, growing cost
+   * linearly with thread length.
+   * Default: 80. Set to 0 to disable the cap (send all messages).
+   * Optional so existing callers that don't set it yet use the default.
+   */
+  threadHistoryLimit?: number;
 }
 
 export interface AgentConfig {
@@ -78,6 +95,8 @@ export interface AgentConfig {
 
 const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
 const DEFAULT_TASK_CARD_THRESHOLD = 1;
+const DEFAULT_TURN_DEADLINE_MS = 60_000;
+const DEFAULT_THREAD_HISTORY_LIMIT = 80;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -90,6 +109,20 @@ function required(name: string): string {
 function taskCardAfter(raw: string | undefined): 'delete' | 'collapse' {
   if (raw === 'collapse') return 'collapse';
   return 'delete';
+}
+
+/**
+ * Parse a non-negative integer env var, falling back to `def` when the variable
+ * is unset OR not a finite number >= 0. This prevents a typo'd value from
+ * silently disabling a bound via the `NaN`-falsy / `NaN`-to-0 footgun (the same
+ * class of bug fixed for the MCP connect timeout in `mcp/pool.ts`). `0` is a
+ * valid value — callers treat it as "no limit / no deadline".
+ */
+function posIntEnv(name: string, def: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return def;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : def;
 }
 
 export function loadAgentConfig(): AgentConfig {
@@ -108,10 +141,12 @@ export function loadAgentConfig(): AgentConfig {
     fireworksModel: required('FIREWORKS_MODEL'),
     fireworksBaseUrl: process.env['FIREWORKS_BASE_URL'] ?? DEFAULT_FIREWORKS_BASE_URL,
     behavior: {
-      taskCardThreshold: Number(process.env['TASK_CARD_THRESHOLD'] ?? DEFAULT_TASK_CARD_THRESHOLD),
+      taskCardThreshold: posIntEnv('TASK_CARD_THRESHOLD', DEFAULT_TASK_CARD_THRESHOLD),
       taskCardAfter: taskCardAfter(process.env['TASK_CARD_AFTER']),
       ownerPostMarker: process.env['OWNER_POST_MARKER'] !== 'false',
       cliConfirm: /^(1|true|yes|on)$/i.test(process.env['SYM_CLI_CONFIRM'] ?? ''),
+      turnDeadlineMs: posIntEnv('SYM_TURN_DEADLINE_MS', DEFAULT_TURN_DEADLINE_MS),
+      threadHistoryLimit: posIntEnv('SYM_THREAD_HISTORY_LIMIT', DEFAULT_THREAD_HISTORY_LIMIT),
     },
     mcpServers: connectors.mcpServers,
     mcpConfigSource: connectors.source,
