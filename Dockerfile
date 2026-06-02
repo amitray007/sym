@@ -12,7 +12,9 @@
 # and you never edit this file to add a tool.
 # See docs/mcp-setup.md → "Persistent tools on /data (no CLIs in the image)".
 
-FROM node:24-slim AS base
+# Pin to a specific digest so the base image is immutable and auditable.
+# To update: docker pull node:24-slim && docker inspect node:24-slim --format '{{index .RepoDigests 0}}'
+FROM node:24-slim@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf AS base
 ENV PNPM_HOME="/pnpm" PATH="/pnpm:$PATH"
 RUN corepack enable
 WORKDIR /repo
@@ -22,9 +24,16 @@ FROM base AS build
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
+# Prune devDependencies before copying to the runtime stage so vitest, tsx,
+# typescript, and TS source do not land in the production image.
+# ink, react, ink-text-input are in `dependencies` (runtime TUI) — they survive.
+# CI=true suppresses the interactive "confirm removal" prompt in non-TTY builds.
+# --ignore-scripts prevents the root `prepare` lifecycle hook (husky) from
+# running after prune — husky is itself a devDependency just removed.
+RUN CI=true pnpm prune --prod --ignore-scripts
 
 # ---- runtime: generic runtimes only; real tools live on the /data volume ----
-FROM node:24-slim AS runtime
+FROM node:24-slim@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf AS runtime
 ENV NODE_ENV=production
 
 # Generic runtimes ONLY (not specific CLIs):
@@ -72,6 +81,10 @@ ENV SYM_DB_PATH=/data/credentials.db
 ENV SYM_CONFIG_PATH=/data/sym/config.json
 # AGENT_PORT (default 3001) — the HTTP server Slack + the OAuth callback reach.
 EXPOSE 3001
+# Health check: GET /health returns {"ok":true}. curl is installed in the apt
+# step above. Uses AGENT_PORT default 3001; start period allows cold-start time.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -sf "http://localhost:${AGENT_PORT:-3001}/health" || exit 1
 # Ensure $HOME exists (fresh volume) before starting; `exec` keeps node as PID 1
 # so SIGTERM still reaches it for graceful shutdown.
 CMD ["sh", "-c", "mkdir -p \"$HOME\" && exec node dist/index.js"]

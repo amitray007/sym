@@ -26,6 +26,7 @@
     "@sym/adapter-slack": "workspace:*",
     "@sym/contracts": "workspace:*",
     "@sym/kernel": "workspace:*",
+    "dotenv": "^16.4.7",
     "hono": "^4.6.14",
     "ink": "^5.1.0",
     "ink-text-input": "^6.0.0",
@@ -34,7 +35,6 @@
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
-    "dotenv": "^16.4.7",
     "ink-testing-library": "^4.0.0",
     "tsx": "^4.19.2",
     "vitest": "catalog:"
