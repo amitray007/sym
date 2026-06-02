@@ -340,6 +340,6 @@ plus the OAuth store.
 
 The OAuth machinery (encrypted token store, `/oauth/callback/:slug`, refresh) is
 implemented. The in-Slack "Connect" button that surfaces the authorize URL and
-handles consent (**C3b**) is not yet built — so OAuth connectors (Gmail/Calendar)
+handles consent is not yet built — so OAuth connectors (Gmail/Calendar)
 are not yet usable end-to-end from Slack. Static (env/file) and ambient connectors
 are fully usable.
