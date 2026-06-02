@@ -29,6 +29,10 @@
       ],
       "outputs": ["coverage/**"]
     },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
     "lint": {
       "inputs": [
         "src/**",
