@@ -264,9 +264,24 @@ export function makeOAuthProvider(
   store?: CredentialStore,
   publicUrl?: string,
 ): OAuthProvider {
-  const resolvedPublicUrl = publicUrl ?? process.env['SYM_PUBLIC_URL'] ?? 'http://localhost:3000';
+  const resolvedPublicUrl = publicUrl ?? process.env['SYM_PUBLIC_URL'];
 
-  const redirectUri = `${resolvedPublicUrl.replace(/\/$/, '')}/oauth/callback/${connectorName}`;
+  if (resolvedPublicUrl === undefined || resolvedPublicUrl === '') {
+    // Z08-29: Warn loudly when SYM_PUBLIC_URL is unset so operators know the
+    // OAuth callback will use localhost — which works only in local dev.
+    // In production, the authorization server redirects to
+    // http://localhost:3000/oauth/callback/... which is unreachable, so the
+    // connector will stay in pending-auth indefinitely with no log evidence.
+    console.warn(
+      `[oauth:${connectorName}] SYM_PUBLIC_URL is not set — falling back to ` +
+        `http://localhost:3000 as the OAuth redirect URI. ` +
+        `This only works in local dev. In production, set SYM_PUBLIC_URL to the ` +
+        `agent's public HTTPS base URL so the OAuth callback is reachable.`,
+    );
+  }
+
+  const baseUrl = resolvedPublicUrl ?? 'http://localhost:3000';
+  const redirectUri = `${baseUrl.replace(/\/$/, '')}/oauth/callback/${connectorName}`;
 
   return new OAuthProvider(connectorName, store ?? getStore(), { redirectUri });
 }

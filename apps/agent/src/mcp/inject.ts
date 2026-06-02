@@ -31,7 +31,6 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 import type { TransportConfig } from './config.js';
 import type { ResolvedCredential } from './providers/provider.js';
-import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
 /**
@@ -257,9 +256,9 @@ function buildHttpTransport(
 
   if (resolved.apply === 'native') {
     // C3: wire the OAuthClientProvider into the SDK transport.
-    // `resolved.oauth` is a SdkOAuthAdapter (implements OAuthClientProvider).
-    // We cast via OAuthClientProvider — the adapter is structurally compatible.
-    const authProvider = resolved.oauth as OAuthClientProvider;
+    // `resolved.oauth` is typed as OAuthClientProvider in the ResolvedCredential
+    // discriminated union (C33 fix) — no cast needed.
+    const authProvider = resolved.oauth;
 
     // Static headers (non-secret) may still be present alongside OAuth.
     const hasHeaders = transport.headers !== undefined && Object.keys(transport.headers).length > 0;

@@ -159,15 +159,17 @@ function _ensureExitHandlers(): void {
     }
   });
 
-  // Async-capable signal handlers — use best-effort async removal then exit.
-  const makeSignalHandler = () => () => {
+  // Async-capable signal handler — cleans up all active dirs then exits.
+  // A single named function is registered for both SIGINT and SIGTERM.
+  // process.once ensures it fires at most once per signal (no double-exit).
+  const handleSignal = (): void => {
     Promise.all([..._activeDirs].map(_removeDir))
       .catch(() => undefined)
       .finally(() => process.exit(130));
   };
 
-  process.once('SIGINT', makeSignalHandler());
-  process.once('SIGTERM', makeSignalHandler());
+  process.once('SIGINT', handleSignal);
+  process.once('SIGTERM', handleSignal);
 }
 
 // ---------------------------------------------------------------------------

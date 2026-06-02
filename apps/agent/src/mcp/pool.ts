@@ -50,10 +50,31 @@ import type {
 /** Default maximum time to wait for connect + listTools, in milliseconds. */
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 
-const CONNECT_TIMEOUT_MS =
-  process.env['SYM_MCP_CONNECT_TIMEOUT_MS'] !== undefined
-    ? Math.max(1000, Number(process.env['SYM_MCP_CONNECT_TIMEOUT_MS']))
-    : DEFAULT_CONNECT_TIMEOUT_MS;
+/**
+ * Parse and validate the SYM_MCP_CONNECT_TIMEOUT_MS env var.
+ *
+ * Returns the parsed value when it is a finite positive number; falls back to
+ * `defaultMs` otherwise.  A non-numeric string (e.g. "abc") parses to `NaN`,
+ * and `setTimeout(fn, NaN)` silently treats NaN as 0 — that would DISABLE the
+ * connect-timeout entirely.  We guard against that here.
+ */
+export function parseConnectTimeoutMs(raw: string | undefined, defaultMs: number): number {
+  if (raw === undefined) return defaultMs;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    console.warn(
+      `[mcp] SYM_MCP_CONNECT_TIMEOUT_MS='${raw}' is not a finite positive number — ` +
+        `using default ${defaultMs}ms.`,
+    );
+    return defaultMs;
+  }
+  return Math.max(1000, parsed);
+}
+
+const CONNECT_TIMEOUT_MS = parseConnectTimeoutMs(
+  process.env['SYM_MCP_CONNECT_TIMEOUT_MS'],
+  DEFAULT_CONNECT_TIMEOUT_MS,
+);
 
 /**
  * Race `work` against a hard timeout. Rejects with a `TimeoutError` when the
@@ -310,6 +331,12 @@ export async function ensureEntry(config: ConnectorConfig): Promise<PoolEntry> {
     return existing;
   }
 
+  // Close the stale failed-OAuth dummy client before replacing it in the pool.
+  // This matches the pattern used in reconcileConnectors/testConnector, which
+  // explicitly close the old client before pool.set(). Without this, the dummy
+  // Client created for the ok:false entry leaks its transport connection.
+  await existing?.client?.close?.();
+
   const entry = await connectServer(config);
   pool.set(config.name, entry);
   return entry;
@@ -331,11 +358,6 @@ export async function ensureEntry(config: ConnectorConfig): Promise<PoolEntry> {
  */
 export class McpDispatcher implements ToolDispatcher {
   constructor(private readonly configs: ConnectorConfig[]) {}
-
-  async listAsync(): Promise<ToolDescriptor[]> {
-    const results = await Promise.all(this.configs.map((c) => ensureEntry(c)));
-    return results.flatMap((entry) => entry.tools);
-  }
 
   // ToolDispatcher.list() is synchronous — return whatever the pool has cached.
   // On the first turn the pool may be empty; callers that need up-to-date tools

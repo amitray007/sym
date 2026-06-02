@@ -34,13 +34,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CompositeDispatcher } from '../src/mcp/composite.js';
 import { parseMcpServers } from '../src/mcp/config.js';
-import { McpDispatcher, MCP_TOOL_SEPARATOR, _resetPoolForTesting } from '../src/mcp/dispatcher.js';
+import {
+  McpDispatcher,
+  MCP_TOOL_SEPARATOR,
+  _resetPoolForTesting,
+  initMcpPool,
+  parseConnectTimeoutMs,
+} from '../src/mcp/dispatcher.js';
 import { buildTransport } from '../src/mcp/inject.js';
 import { Materializer, _getActiveDirsForTesting } from '../src/mcp/materialize.js';
 import { makeProvider, NotImplementedError } from '../src/mcp/providers/provider.js';
 import { StaticProvider } from '../src/mcp/providers/static.js';
 
 import type { ConnectorConfig, Injection, SecretMaterial } from '../src/mcp/config.js';
+import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type {
   ConversationId,
   JsonObject,
@@ -563,7 +570,12 @@ describe('buildTransport', () => {
 
   it('native credential on stdio → throws (OAuth not supported over stdio)', () => {
     expect(() =>
-      buildTransport({ kind: 'stdio', command: '/bin/srv' }, { apply: 'native', oauth: {} }),
+      buildTransport(
+        { kind: 'stdio', command: '/bin/srv' },
+        // Cast a stub as OAuthClientProvider — the value is never read because
+        // the function throws before it reaches the native branch for stdio.
+        { apply: 'native', oauth: {} as unknown as OAuthClientProvider },
+      ),
     ).toThrow(/OAuth.*stdio/i);
   });
 });
@@ -704,7 +716,7 @@ describe('McpDispatcher', () => {
     const config = makeConnector({ name: 'srv' });
     const dispatcher = new McpDispatcher([config]);
 
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const tools = dispatcher.list();
     expect(tools).toHaveLength(1);
@@ -720,7 +732,7 @@ describe('McpDispatcher', () => {
 
     const config = makeConnector({ name: 'srv2' });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const tools = dispatcher.list();
     expect(tools[0]?.destructiveHint).toBe(true);
@@ -734,7 +746,7 @@ describe('McpDispatcher', () => {
 
     const config = makeConnector({ name: 'trusted', trust: true });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const tools = dispatcher.list();
     expect(tools[0]?.destructiveHint).toBeUndefined();
@@ -749,7 +761,7 @@ describe('McpDispatcher', () => {
 
     const config = makeConnector({ name: 'greeter', trust: true });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const result = await dispatcher.dispatch(
       makeCall(`greeter${MCP_TOOL_SEPARATOR}greet`, {}, 'call_xyz'),
@@ -771,7 +783,7 @@ describe('McpDispatcher', () => {
 
     const config = makeConnector({ name: 'failer', trust: true });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const result = await dispatcher.dispatch(
       makeCall(`failer${MCP_TOOL_SEPARATOR}fail_tool`, {}, 'call_fail'),
@@ -793,7 +805,7 @@ describe('McpDispatcher', () => {
 
     const config = makeConnector({ name: 'boomer', trust: true });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const result = await dispatcher.dispatch(
       makeCall(`boomer${MCP_TOOL_SEPARATOR}boom`, {}, 'call_boom'),
@@ -816,8 +828,7 @@ describe('McpDispatcher', () => {
       transport: { kind: 'stdio', command: '/bin/srv', env: { BASE: 'base' } },
       auth: { kind: 'static', secret: 'tok-123', inject: { at: 'env', name: 'API_KEY' } },
     });
-    const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     // StdioClientTransport should have been called with merged env
     expect(vi.mocked(MockStdioTransport)).toHaveBeenCalledWith(
@@ -851,7 +862,7 @@ describe('McpDispatcher — FAIL OPEN', () => {
     const config = makeConnector({ name: 'down_srv' });
     const dispatcher = new McpDispatcher([config]);
 
-    await expect(dispatcher.listAsync()).resolves.toEqual([]);
+    await initMcpPool([config]);
     expect(dispatcher.list()).toEqual([]);
   });
 
@@ -867,7 +878,7 @@ describe('McpDispatcher — FAIL OPEN', () => {
     const config = makeConnector({ name: 'list_fail_srv' });
     const dispatcher = new McpDispatcher([config]);
 
-    await expect(dispatcher.listAsync()).resolves.toEqual([]);
+    await initMcpPool([config]);
     expect(dispatcher.list()).toEqual([]);
   });
 
@@ -882,7 +893,7 @@ describe('McpDispatcher — FAIL OPEN', () => {
 
     const config = makeConnector({ name: 'conn_fail' });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync(); // fails internally — pool entry ok=false
+    await initMcpPool([config]); // fails internally — pool entry ok=false
 
     const result = await dispatcher.dispatch(
       makeCall(`conn_fail${MCP_TOOL_SEPARATOR}anything`, {}, 'call_x'),
@@ -925,19 +936,61 @@ describe('McpDispatcher — connect TIMEOUT', () => {
     vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
 
     const config = makeConnector({ name: 'hanging_srv' });
+    // McpDispatcher reads from the shared pool — initMcpPool populates it.
     const dispatcher = new McpDispatcher([config]);
 
     // Start the connect attempt and advance time past the timeout.
-    const connectPromise = dispatcher.listAsync();
-    // Advance past the default 10s timeout
-    vi.advanceTimersByTime(11_000);
+    const connectPromise = initMcpPool([config]);
+    // Advance past the default 10s timeout (async variant flushes microtasks too)
+    await vi.advanceTimersByTimeAsync(11_000);
 
-    const result = await connectPromise;
-    expect(result).toEqual([]);
+    await connectPromise;
     expect(dispatcher.list()).toEqual([]);
 
     // Clean up the hanging promise so node doesn't complain
     resolveHang();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8b. parseConnectTimeoutMs validation (Z08-26)
+// ---------------------------------------------------------------------------
+
+describe('parseConnectTimeoutMs', () => {
+  it('returns defaultMs when raw is undefined', () => {
+    expect(parseConnectTimeoutMs(undefined, 10_000)).toBe(10_000);
+  });
+
+  it('parses a valid numeric string', () => {
+    expect(parseConnectTimeoutMs('5000', 10_000)).toBe(5_000);
+  });
+
+  it('clamps to 1000ms minimum when value is below 1000', () => {
+    expect(parseConnectTimeoutMs('500', 10_000)).toBe(1_000);
+  });
+
+  it('falls back to defaultMs for a non-numeric string (NaN guard)', () => {
+    expect(parseConnectTimeoutMs('abc', 10_000)).toBe(10_000);
+  });
+
+  it('falls back to defaultMs for "NaN"', () => {
+    expect(parseConnectTimeoutMs('NaN', 10_000)).toBe(10_000);
+  });
+
+  it('falls back to defaultMs for an empty string', () => {
+    expect(parseConnectTimeoutMs('', 10_000)).toBe(10_000);
+  });
+
+  it('falls back to defaultMs for Infinity', () => {
+    expect(parseConnectTimeoutMs('Infinity', 10_000)).toBe(10_000);
+  });
+
+  it('falls back to defaultMs for a negative number', () => {
+    expect(parseConnectTimeoutMs('-5000', 10_000)).toBe(10_000);
+  });
+
+  it('falls back to defaultMs for zero', () => {
+    expect(parseConnectTimeoutMs('0', 10_000)).toBe(10_000);
   });
 });
 
@@ -1190,7 +1243,7 @@ describe('McpDispatcher — tools.allow enforcement', () => {
 
     const config = makeConnector({ name: 'srv_allow', trust: true });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const tools = dispatcher.list();
     expect(tools).toHaveLength(3);
@@ -1217,7 +1270,7 @@ describe('McpDispatcher — tools.allow enforcement', () => {
       tools: { allow: ['tool_b'] },
     });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const tools = dispatcher.list();
     // Only tool_b must be exposed; tool_a and tool_c are filtered out.
@@ -1240,7 +1293,7 @@ describe('McpDispatcher — tools.allow enforcement', () => {
       tools: { allow: ['alpha', 'gamma'] },
     });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const tools = dispatcher.list();
     expect(tools).toHaveLength(2);
@@ -1262,7 +1315,7 @@ describe('McpDispatcher — tools.allow enforcement', () => {
       tools: { allow: [] },
     });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const tools = dispatcher.list();
     // Empty allow-list means no filter — all tools exposed.

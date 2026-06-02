@@ -48,12 +48,15 @@ type StaticAuth = Extract<AuthConfig, { kind: 'static' }>;
 
 export class StaticProvider implements CredentialProvider {
   private readonly materializer: Materializer;
+  private readonly connectorName: string;
 
   constructor(
     private readonly auth: StaticAuth,
     materializer?: Materializer,
+    connectorName?: string,
   ) {
     this.materializer = materializer ?? defaultMaterializer;
+    this.connectorName = connectorName ?? 'connector';
   }
 
   async resolve(): Promise<ResolvedCredential> {
@@ -80,6 +83,7 @@ export class StaticProvider implements CredentialProvider {
         secret!,
         fileInj as Extract<Injection, { at: 'file' }>,
         injections,
+        this.connectorName,
       );
     }
 
@@ -98,6 +102,7 @@ export class StaticProvider implements CredentialProvider {
     secret: SecretMaterial,
     inj: Extract<Injection, { at: 'file' }>,
     allInjections: Injection[],
+    connectorName: string,
   ): Promise<ResolvedCredential> {
     // A file injection must be the only injection (one channel per credential).
     if (allInjections.length > 1) {
@@ -115,11 +120,16 @@ export class StaticProvider implements CredentialProvider {
       );
     }
 
-    const { dir, cleanup: _cleanup } = await this.materializer.materialize(
-      // Use the inject path's basename as a hint in connector naming
-      'connector',
+    const { dir } = await this.materializer.materialize(
+      // Use the real connector name as the temp dir prefix for debuggability.
+      connectorName,
       [{ path: inj.path, content: secret }],
     );
+    // Note: the cleanup() fn returned by materialize is intentionally not called here.
+    // The Materializer registers every created dir in the module-level `_activeDirs`
+    // Set and the process-exit handler (SIGINT/SIGTERM/exit) removes them all. The
+    // lifecycle of a file-injected credential is tied to the agent process — the file
+    // must persist for as long as the child process may read it.
 
     const absPath = path.join(dir, inj.path);
     const vars: Record<string, string> =

@@ -15,6 +15,7 @@ import { StaticProvider } from './static.js';
 
 import type { AuthConfig } from '../config.js';
 import type { Materializer } from '../materialize.js';
+import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 
 // ---------------------------------------------------------------------------
 // ResolvedCredential
@@ -36,7 +37,7 @@ export type ResolvedCredential =
   | { apply: 'argv'; args: string[] }
   | { apply: 'headers'; headers: Record<string, string> } // C2
   | { apply: 'files'; dir: string; vars: Record<string, string> } // C2.5
-  | { apply: 'native'; oauth: unknown } // C3 (SDK OAuthClientProvider)
+  | { apply: 'native'; oauth: OAuthClientProvider } // C3 (SDK OAuthClientProvider)
   | { apply: 'none' };
 
 // ---------------------------------------------------------------------------
@@ -96,7 +97,7 @@ export function makeProvider(
   if (auth === undefined) return null;
 
   if (auth.kind === 'static') {
-    return new StaticProvider(auth, deps?.materializer);
+    return new StaticProvider(auth, deps?.materializer, deps?.connectorName);
   }
 
   if (auth.kind === 'oauth') {

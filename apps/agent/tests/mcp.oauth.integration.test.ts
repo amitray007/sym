@@ -29,7 +29,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { McpDispatcher, _resetPoolForTesting } from '../src/mcp/dispatcher.js';
+import { McpDispatcher, _resetPoolForTesting, initMcpPool } from '../src/mcp/dispatcher.js';
 import {
   completeOAuth,
   getPendingAuth,
@@ -440,7 +440,8 @@ describe('C2: Full OAuth handshake with mock MCP server + mock AS', () => {
 
       // --- First connect: should fail open with 0 tools (UnauthorizedError path) ---
       const dispatcher = new McpDispatcher([config]);
-      const toolsBefore = await dispatcher.listAsync();
+      await initMcpPool([config]);
+      const toolsBefore = dispatcher.list();
 
       expect(toolsBefore).toHaveLength(0);
 
@@ -474,11 +475,12 @@ describe('C2: Full OAuth handshake with mock MCP server + mock AS', () => {
 
       // --- Second connect: tokens available → should succeed ---
       // No manual pool reset: ensureEntry() retries failed OAuth connectors, so
-      // the next listAsync reconnects with the now-stored tokens and comes online.
+      // the next initMcpPool reconnects with the now-stored tokens and comes online.
       // The dispatcher uses the module-level store (getStore()) which was
       // initialized with SYM_ENCRYPTION_KEY. The tokens are stored there.
       const dispatcher2 = new McpDispatcher([config]);
-      const toolsAfter = await dispatcher2.listAsync();
+      await initMcpPool([config]);
+      const toolsAfter = dispatcher2.list();
 
       // Should now have the tool (OAuth tokens persisted → Bearer sent → 200)
       expect(toolsAfter.some((t) => t.name === `${CONNECTOR_NAME}__secret_tool`)).toBe(true);
@@ -513,8 +515,7 @@ describe('C2: Full OAuth handshake with mock MCP server + mock AS', () => {
         trust: true,
       };
 
-      const dispatcher = new McpDispatcher([config]);
-      await dispatcher.listAsync(); // triggers UnauthorizedError → registry
+      await initMcpPool([config]); // triggers UnauthorizedError → registry
 
       const pending = getPendingAuth(CONNECTOR_NAME);
       expect(pending).toBeDefined();

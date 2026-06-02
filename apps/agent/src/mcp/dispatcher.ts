@@ -17,6 +17,7 @@ export {
   getActiveConfigs,
   MCP_TOOL_SEPARATOR,
   _resetPoolForTesting,
+  parseConnectTimeoutMs,
 } from './pool.js';
 
 export { reconcileConnectors } from './reconcile.js';

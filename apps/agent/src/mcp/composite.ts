@@ -8,6 +8,12 @@
  * `dispatch()`: routes by prefix — any tool name containing `__` is routed
  *               to the MCP dispatcher; all others go to builtin. This is safe
  *               because builtin tool names never contain `__`.
+ *
+ * Seam rationale: this class is the routing-vs-execution boundary. It owns the
+ * decision of WHICH dispatcher handles a call, but not HOW either dispatcher
+ * executes it. Keeping it as a named class (rather than inlining a
+ * `buildDispatcher` helper) makes the seam visible and testable, and lets
+ * handle-turn import a single concrete type via mcp/index.ts.
  */
 
 import { MCP_TOOL_SEPARATOR } from './dispatcher.js';

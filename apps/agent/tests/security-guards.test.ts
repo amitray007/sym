@@ -6,7 +6,7 @@
  *  2. safe-fetch IPv6 blocklist additions (multicast, documentation, NAT64)
  *  3. MCP HTTP transport URL validation (validateMcpHttpUrl)
  *  4. CSRF state timing-safe compare (completeOAuth with timingSafeEqual)
- *  5. Malformed MCP inputSchema structural check (McpDispatcher.listAsync)
+ *  5. Malformed MCP inputSchema structural check (McpDispatcher warm-up via initMcpPool)
  */
 
 // Module mocks must be declared before imports (hoisted by vitest).
@@ -22,7 +22,12 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
 import { Client as MockClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { McpDispatcher, MCP_TOOL_SEPARATOR, _resetPoolForTesting } from '../src/mcp/dispatcher.js';
+import {
+  McpDispatcher,
+  MCP_TOOL_SEPARATOR,
+  _resetPoolForTesting,
+  initMcpPool,
+} from '../src/mcp/dispatcher.js';
 import { validateMcpHttpUrl } from '../src/mcp/inject.js';
 import {
   completeOAuth,
@@ -270,8 +275,9 @@ describe('McpDispatcher — inputSchema structural validation', () => {
     };
     vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
 
-    const dispatcher = new McpDispatcher([makeConnector('schema-null')]);
-    await dispatcher.listAsync();
+    const cfg = makeConnector('schema-null');
+    const dispatcher = new McpDispatcher([cfg]);
+    await initMcpPool([cfg]);
     // The tool with null schema is skipped — no tools contributed
     expect(dispatcher.list()).toHaveLength(0);
   });
@@ -287,8 +293,9 @@ describe('McpDispatcher — inputSchema structural validation', () => {
     };
     vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
 
-    const dispatcher = new McpDispatcher([makeConnector('schema-string')]);
-    await dispatcher.listAsync();
+    const cfg = makeConnector('schema-string');
+    const dispatcher = new McpDispatcher([cfg]);
+    await initMcpPool([cfg]);
     expect(dispatcher.list()).toHaveLength(0);
   });
 
@@ -303,8 +310,9 @@ describe('McpDispatcher — inputSchema structural validation', () => {
     };
     vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
 
-    const dispatcher = new McpDispatcher([makeConnector('schema-array')]);
-    await dispatcher.listAsync();
+    const cfg = makeConnector('schema-array');
+    const dispatcher = new McpDispatcher([cfg]);
+    await initMcpPool([cfg]);
     expect(dispatcher.list()).toHaveLength(0);
   });
 
@@ -325,8 +333,9 @@ describe('McpDispatcher — inputSchema structural validation', () => {
     };
     vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
 
-    const dispatcher = new McpDispatcher([makeConnector('schema-valid')]);
-    await dispatcher.listAsync();
+    const cfg = makeConnector('schema-valid');
+    const dispatcher = new McpDispatcher([cfg]);
+    await initMcpPool([cfg]);
     const tools = dispatcher.list();
     expect(tools).toHaveLength(1);
     expect(tools[0]?.name).toBe(`schema-valid${MCP_TOOL_SEPARATOR}valid_tool`);
@@ -347,8 +356,9 @@ describe('McpDispatcher — inputSchema structural validation', () => {
     };
     vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
 
-    const dispatcher = new McpDispatcher([makeConnector('mixed')]);
-    await dispatcher.listAsync();
+    const cfg = makeConnector('mixed');
+    const dispatcher = new McpDispatcher([cfg]);
+    await initMcpPool([cfg]);
     const tools = dispatcher.list();
     expect(tools).toHaveLength(1);
     expect(tools[0]?.name).toBe(`mixed${MCP_TOOL_SEPARATOR}good`);
