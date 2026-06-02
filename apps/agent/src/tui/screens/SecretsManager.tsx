@@ -15,7 +15,7 @@
 
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { loadConfigFile } from '../../cli/config-store.js';
 import { listSecrets, removeSecret, setSecret } from '../../cli/secrets.js';
@@ -197,7 +197,7 @@ export function SecretsManager({ onBack }: ScreenProps): React.ReactElement {
   // Data loading
   // -------------------------------------------------------------------------
 
-  const loadData = useCallback((): void => {
+  const loadData = (): void => {
     try {
       const refs = listSecrets();
       setSecrets(refs);
@@ -213,9 +213,9 @@ export function SecretsManager({ onBack }: ScreenProps): React.ReactElement {
     } catch {
       setConfiguredNames(new Set());
     }
-  }, []);
+  };
 
-  useEffect(loadData, [loadData]);
+  useEffect(loadData, []);
 
   // -------------------------------------------------------------------------
   // Key handling — LIST mode

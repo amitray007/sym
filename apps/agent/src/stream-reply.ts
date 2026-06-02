@@ -1,3 +1,12 @@
+/**
+ * Streaming reply pipeline — runs the Pi loop and delivers the result to Slack.
+ *
+ * Contains the three delivery paths: buffer-mode (tools fired before any text
+ * was streamed), live-stream (text arrived before any tool), and no-stream
+ * fallback (empty response or stream open failure). Also owns the shimmer
+ * status keepalive and cleanup-LLM backstop.
+ */
+
 import {
   markdownBlocks,
   receiptToContextBlock,
@@ -10,13 +19,13 @@ import { runLoopPi } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
 import { cleanupReply } from './reply-cleanup.js';
-import { TaskCardManager } from './task-card-manager.js';
 import {
   nextWhimsicalStatus,
   pickShimmerPhrase,
   pickShimmerStatus,
   WHIMSY_WORDS,
-} from './thinking-copy.js';
+} from './shimmer-phrases.js';
+import { TaskCardManager } from './task-card-manager.js';
 
 import type { HandleTurnDeps } from './handle-turn.js';
 import type { PlanController } from './plan-controller.js';

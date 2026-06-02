@@ -40,7 +40,24 @@ export interface ReplyCleanupDeps {
   model: string;
 }
 
-/** Tolerantly parse `{"remove": string[]}` from a model response (may be fenced). */
+// ---------------------------------------------------------------------------
+// Model memoization — `buildFireworksModel` is pure / referentially stable for
+// a given (baseUrl, modelId) pair. Rebuilding it on every cleanup call allocates
+// a new object with no behavioural difference. Cache keyed by "<baseUrl>::<modelId>".
+// ---------------------------------------------------------------------------
+
+type FireworksModel = ReturnType<typeof buildFireworksModel>;
+const _modelCache = new Map<string, FireworksModel>();
+
+function _getCachedModel(baseUrl: string, modelId: string): FireworksModel {
+  const key = `${baseUrl}::${modelId}`;
+  const cached = _modelCache.get(key);
+  if (cached !== undefined) return cached;
+  const model = buildFireworksModel({ baseUrl, modelId });
+  _modelCache.set(key, model);
+  return model;
+}
+
 /**
  * Minimum fragment length to act on. Narration the model flags is full
  * phrases/sentences ("Now reply.", "Mark p1 complete."); a 1–5 char fragment
@@ -49,6 +66,11 @@ export interface ReplyCleanupDeps {
  */
 const MIN_FRAGMENT_LEN = 6;
 
+/**
+ * Tolerantly parse `{"remove": string[]}` from a model response (may be fenced).
+ *
+ * @internal — exported for tests only; use `cleanupReply` for production callers.
+ */
 export function parseRemovals(raw: string): string[] {
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
@@ -64,7 +86,11 @@ export function parseRemovals(raw: string): string[] {
   }
 }
 
-/** Delete each verbatim fragment from the draft, then tidy leftover whitespace. */
+/**
+ * Delete each verbatim fragment from the draft, then tidy leftover whitespace.
+ *
+ * @internal — exported for tests only; use `cleanupReply` for production callers.
+ */
 export function applyRemovals(draft: string, fragments: string[]): string {
   let out = draft;
   for (const frag of fragments) {
@@ -83,7 +109,7 @@ export function applyRemovals(draft: string, fragments: string[]): string {
 export async function cleanupReply(draft: string, deps: ReplyCleanupDeps): Promise<string> {
   if (draft.trim().length === 0) return draft;
   try {
-    const model = buildFireworksModel({ baseUrl: deps.fireworks.baseUrl, modelId: deps.model });
+    const model = _getCachedModel(deps.fireworks.baseUrl, deps.model);
     const agent = new Agent({
       initialState: {
         systemPrompt: CLEANUP_SYSTEM_PROMPT,

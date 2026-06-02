@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { pickShimmerPhrase, pickShimmerStatus, SHIMMER_PHRASES } from '../src/thinking-copy.js';
+import { pickShimmerPhrase, pickShimmerStatus, SHIMMER_PHRASES } from '../src/shimmer-phrases.js';
 
 import type { TurnId } from '@sym/contracts';
 

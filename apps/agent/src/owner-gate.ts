@@ -1,3 +1,11 @@
+/**
+ * Owner-gate — enforces Sym's single-owner access policy.
+ *
+ * Every incoming request is checked here before any handler fires.
+ * Non-owner messages are silently dropped to avoid broadcasting Sym's
+ * existence or responses to the whole workspace.
+ */
+
 import type { SlackUserId } from '@sym/contracts';
 import type { OwnerIdentity } from '@sym/kernel';
 

@@ -1,3 +1,12 @@
+/**
+ * Turn-context loaders — fetch the conversation history and any assistant-panel
+ * context that should accompany a turn.
+ *
+ * Reads the Slack thread (or channel history for non-threaded surfaces) and
+ * resolves the assistant's viewed-channel context so `handleTurn` can inject
+ * both as `ChatMessage` history for the Pi loop.
+ */
+
 import { isSlackDmId, isSlackUserId, threadToHistory } from '@sym/adapter-slack';
 
 import type { HandleTurnDeps } from './handle-turn.js';

@@ -1,3 +1,12 @@
+/**
+ * Slack assistant-panel lifecycle handlers.
+ *
+ * Handles `assistant_thread_started` and `assistant_thread_context_changed`
+ * events: sets a friendly title + greeting + suggested prompts in the newly
+ * opened panel. This is the onboarding moment the owner sees when they first
+ * open Sym.
+ */
+
 import { loadStarterPrompts } from './manifest-prompts.js';
 
 import type { AssistantThreadStarted, SlackClient } from '@sym/adapter-slack';

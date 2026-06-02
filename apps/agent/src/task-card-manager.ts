@@ -1,3 +1,12 @@
+/**
+ * Task-card manager — maintains the live tool-progress card in a Slack stream.
+ *
+ * Translates `onToolStart` / `onToolEnd` callbacks from the Pi loop into
+ * `task_update` chunks that render inside the stream message's grouped plan
+ * block. Also binds the `PlanController` so model-authored `set_plan` /
+ * `update_task` rows land in the same card.
+ */
+
 import type { PlanController } from './plan-controller.js';
 import type { TaskUpdateChunk } from '@sym/adapter-slack';
 

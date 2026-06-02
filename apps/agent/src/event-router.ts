@@ -1,3 +1,12 @@
+/**
+ * Slack event router — normalizes raw Slack webhook payloads and dispatches
+ * them to the correct handler (assistant lifecycle, owner confirmations, or
+ * the main `handleTurn` pipeline).
+ *
+ * This module is the single ingress for all Slack event callbacks. It applies
+ * owner-gate filtering before any handler fires.
+ */
+
 import {
   assistantThreadContextChanged,
   assistantThreadStarted,

@@ -1,3 +1,12 @@
+/**
+ * Hono HTTP server — mounts all Slack webhook routes plus the admin API.
+ *
+ * Three public surfaces: `/slack/events` (all Slack event callbacks),
+ * `/slack/interactivity` (button/action payloads), and `/slack/slash`
+ * (slash-command POST). An `/admin/*` loopback surface lets the `sym` CLI
+ * hot-reload connectors and introspect live state without a restart.
+ */
+
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono } from 'hono';
 

@@ -112,6 +112,19 @@ To expose it to Slack during local development, use a tunnel such as
 `ngrok http 3001` and point the Slack app's Event Subscriptions URL at the
 tunnel URL.
 
+## Operator TUI
+
+Run `sym` (or `sym menu`) in a terminal to open the interactive connector dashboard.
+
+- **NO_COLOR**: The TUI honours the [`NO_COLOR`](https://no-color.org) standard. Set
+  `NO_COLOR=1` (any non-empty value) before launching to suppress all colour output:
+  ```sh
+  NO_COLOR=1 sym
+  ```
+- **Non-TTY / pipe safety**: `sym menu` and `sym tui` exit with an error message if
+  stdout is not a TTY (e.g. `sym menu | head`). Use `sym status --json` for
+  machine-readable output in scripts or from the agent's `run_cli`.
+
 ## Repository layout
 
 ```

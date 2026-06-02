@@ -1,3 +1,14 @@
+/**
+ * Per-turn orchestrator — builds the tool registry, runs the Pi loop, and
+ * delivers the reply to Slack.
+ *
+ * `handleTurn` is the main entry point for every user message. It wires the
+ * dependencies (Slack client, Fireworks model, MCP pool, builtin tools) into a
+ * `ToolRegistry`, delegates to `streamReply` for streamed delivery or falls
+ * back to `postMessage`, and drives the `PlanController` that backs the live
+ * task card.
+ */
+
 import { markdownBlocks, receiptToContextBlock, receiptToFooterFields } from '@sym/adapter-slack';
 import { ToolRegistry } from '@sym/kernel';
 

@@ -1,3 +1,12 @@
+/**
+ * Workspace-context builder — resolves boot-time Slack configuration into a
+ * typed `WorkspaceContext` that every request handler shares.
+ *
+ * Fetches owner identity (`users.info` on `SYM_OWNER_SLACK_USER_ID`),
+ * validates bot/owner tokens, and assembles the singleton context that is
+ * passed into the Hono server at startup.
+ */
+
 import { WebApiSlackClient } from '@sym/adapter-slack';
 
 import { NameResolver } from './name-resolver.js';

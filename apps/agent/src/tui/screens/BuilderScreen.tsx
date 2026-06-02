@@ -146,6 +146,7 @@ type Step =
   | 'secret'
   | 'injectAt'
   | 'injectParam'
+  | 'injectValueTemplate'
   | 'trust'
   | 'submit';
 
@@ -539,7 +540,7 @@ function StepContent({
               if (val.length > 0) {
                 setState((s) => ({ ...s, injectParam: val }));
                 if (needsValueTemplate) {
-                  setStep('injectValueTemplate' as Step);
+                  setStep('injectValueTemplate');
                 } else {
                   setStep('trust');
                 }
@@ -552,7 +553,7 @@ function StepContent({
   }
 
   // injectValueTemplate step (header injection only)
-  if (step === ('injectValueTemplate' as Step)) {
+  if (step === 'injectValueTemplate') {
     return (
       <Box flexDirection="column" gap={1}>
         <SummaryLine state={state} upTo="injectParam" />
@@ -643,7 +644,14 @@ function SummaryLine({
 // ---------------------------------------------------------------------------
 
 function StepFooter({ step }: { step: Step }): React.ReactElement {
-  const textSteps: Step[] = ['name', 'target', 'args', 'secret', 'injectParam'];
+  const textSteps: Step[] = [
+    'name',
+    'target',
+    'args',
+    'secret',
+    'injectParam',
+    'injectValueTemplate',
+  ];
   const isText = textSteps.includes(step);
   const hints = [
     ...(isText ? [{ key: 'Enter', label: 'next' }] : []),

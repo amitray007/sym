@@ -35,7 +35,7 @@ vi.mock('@earendil-works/pi-agent-core', () => {
 import { ToolRegistry } from '@sym/kernel';
 
 import { extractUsage, friendlyVerb, runLoopPi, toAgentMessages } from '../src/pi/loop.js';
-import { nextWhimsicalStatus, WHIMSY_WORDS } from '../src/thinking-copy.js';
+import { nextWhimsicalStatus, WHIMSY_WORDS } from '../src/shimmer-phrases.js';
 
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage, Model } from '@earendil-works/pi-ai';

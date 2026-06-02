@@ -639,6 +639,13 @@ export async function main(rawArgs: string[]): Promise<number> {
 
     case 'menu':
     case 'tui':
+      // Guard against non-TTY pipes (`sym menu | head`, the agent's run_cli).
+      // Ink requires a real terminal; rendering to a pipe produces garbled
+      // ANSI output and hangs indefinitely waiting for keystrokes.
+      if (!process.stdout.isTTY) {
+        console.error(`'sym ${group}' requires an interactive terminal (stdout is not a TTY).`);
+        return 1;
+      }
       await (await import('../tui/index.js')).launchTui();
       return 0;
 

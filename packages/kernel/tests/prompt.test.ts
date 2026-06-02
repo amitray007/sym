@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildSystemPrompt, buildTurnContextPrompt, buildUserTurnContent } from '../src/prompt.js';
+import {
+  buildSystemPrompt,
+  buildTurnContextPrompt,
+  buildUserTurnContent,
+  sectionOwnerRelationship,
+  sectionPlanning,
+  sectionReplyDiscipline,
+  sectionVoiceAndStyle,
+} from '../src/prompt.js';
 
 import type { SlackThreadTs, SlackUserId, Turn } from '@sym/contracts';
 
@@ -135,5 +143,57 @@ describe('buildUserTurnContent', () => {
     // When no name resolves, the id stands alone (no "— id" suffix dangling).
     expect(idOnly).toContain('owner: U042MBPUZ9N');
     expect(idOnly).not.toContain('— id U042MBPUZ9N');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Named section extractors
+// ---------------------------------------------------------------------------
+
+describe('section extractors', () => {
+  it('sectionOwnerRelationship returns the correct header', () => {
+    const lines = sectionOwnerRelationship();
+    expect(lines[0]).toBe('## Your relationship with the owner');
+  });
+
+  it('sectionOwnerRelationship content is present in the assembled prompt', () => {
+    const prompt = buildSystemPrompt();
+    for (const line of sectionOwnerRelationship()) {
+      expect(prompt).toContain(line);
+    }
+  });
+
+  it('sectionVoiceAndStyle starts with its header', () => {
+    expect(sectionVoiceAndStyle()[0]).toBe('## Voice and style');
+  });
+
+  it('sectionVoiceAndStyle has at least 4 bullet lines', () => {
+    const bullets = sectionVoiceAndStyle().filter((l) => l.startsWith('-'));
+    expect(bullets.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('sectionPlanning enforces the single-outcome skip rule', () => {
+    const section = sectionPlanning().join('\n');
+    expect(section).toContain('SKIP planning for single-outcome');
+  });
+
+  it('sectionReplyDiscipline forbids narration-style text', () => {
+    const section = sectionReplyDiscipline().join('\n');
+    expect(section).toContain('NEVER write sentences like');
+  });
+
+  it('all section lines appear verbatim in buildSystemPrompt', () => {
+    const prompt = buildSystemPrompt();
+    const sections = [
+      sectionOwnerRelationship(),
+      sectionVoiceAndStyle(),
+      sectionPlanning(),
+      sectionReplyDiscipline(),
+    ];
+    for (const section of sections) {
+      for (const line of section) {
+        expect(prompt, `line "${line.slice(0, 60)}…" should appear in prompt`).toContain(line);
+      }
+    }
   });
 });

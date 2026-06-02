@@ -1,3 +1,11 @@
+/**
+ * Agent entry point — loads configuration and starts the Hono HTTP server.
+ *
+ * Bootstraps the agent: reads env-based config, initialises the MCP pool,
+ * and binds the Hono app to the configured port. In development, loads a
+ * repo-root `.env` file first so local credentials are picked up automatically.
+ */
+
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 

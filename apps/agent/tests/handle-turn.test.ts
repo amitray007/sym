@@ -14,7 +14,7 @@ import type * as PiLoopModuleType from '../src/pi/loop.js';
 vi.mock('../src/pi/loop.js', async (importOriginal) => {
   // Partial mock: stub runLoopPi (hermetic — no real HTTP) but keep real exports
   // (friendlyVerb, SILENT_TOOLS, etc.). WHIMSY_WORDS/nextWhimsicalStatus have
-  // moved to thinking-copy.ts and are no longer exported from loop.js.
+  // moved to shimmer-phrases.ts and are no longer exported from loop.js.
   const actual = await importOriginal<typeof PiLoopModuleType>();
   const mockFn = vi.fn();
   return { ...actual, runLoopPi: mockFn, __mockRunLoopPi: mockFn };
