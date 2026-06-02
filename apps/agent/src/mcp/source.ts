@@ -1,9 +1,9 @@
 /**
  * Connector config source — the single place that decides WHERE Sym's connector
- * wiring comes from. The control plane (the `sym` CLI / TUI, built later) writes
- * a JSON config file on the persistent volume; this loader reads it. Until that
- * file exists, the legacy `SYM_MCP_SERVERS` env var is the fallback, so nothing
- * breaks during the transition and a rollback keeps working.
+ * wiring comes from. The `sym` CLI writes a JSON config file on the persistent
+ * volume; this loader reads it. Until that file exists, the legacy
+ * `SYM_MCP_SERVERS` env var is the fallback, so nothing breaks during the
+ * transition and a rollback keeps working.
  *
  * Precedence:
  *   1. config file at SYM_CONFIG_PATH (default `.sym/config.json`)  →  source: 'file'
@@ -14,6 +14,10 @@
  * A present-but-malformed file is logged and falls through to env (fail-open) —
  * a bad edit must never strand the agent with zero connectors when env still has
  * a valid set. Secrets never live in this file; it holds wiring + secretRefs.
+ *
+ * CLI config helpers (`loadCliAllow`, `loadCliDescribe`) have moved to
+ * `mcp/cli-config.ts` which uses a single `readConfigFile()` primitive to
+ * avoid duplicate file reads per turn.
  *
  * File shape (v1):
  * ```json
@@ -79,57 +83,6 @@ export function loadConnectorConfigs(): LoadedConnectorConfig {
 
   const mcpServers = parseConnectorArray((parsed as Record<string, unknown>)['mcpServers'], path);
   return { mcpServers, source: 'file', path };
-}
-
-/** Read the `cli` object from the config file (or undefined). Fail-open. */
-function readCliSection(): Record<string, unknown> | undefined {
-  let raw: string;
-  try {
-    raw = readFileSync(configPath(), 'utf8');
-  } catch {
-    return undefined;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
-  const cli = (parsed as Record<string, unknown>)['cli'];
-  if (cli === null || typeof cli !== 'object' || Array.isArray(cli)) return undefined;
-  return cli as Record<string, unknown>;
-}
-
-/**
- * Read the run_cli allowlist from the config file's `cli.allow` array, or
- * `undefined` when the file/field is absent or malformed (caller falls back to
- * the `SYM_CLI_ALLOWLIST` env var). Fail-open — never throws.
- *
- * File shape: `{ …, "cli": { "allow": ["sym","gcloud"], "describe": { "gcloud": "…" } } }`.
- * An `allow` entry of `"*"` means "any CLI" (wildcard).
- */
-export function loadCliAllow(): string[] | undefined {
-  const cli = readCliSection();
-  if (cli === undefined) return undefined;
-  const allow = cli['allow'];
-  if (!Array.isArray(allow) || !allow.every((s) => typeof s === 'string')) return undefined;
-  return allow as string[];
-}
-
-/**
- * Read per-CLI descriptions (`cli.describe`) — what each binary is for, so the
- * agent knows a CLI's purpose without it being hardcoded anywhere. Fail-open.
- */
-export function loadCliDescribe(): Record<string, string> {
-  const cli = readCliSection();
-  const describe = cli?.['describe'];
-  if (describe === null || typeof describe !== 'object' || Array.isArray(describe)) return {};
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(describe as Record<string, unknown>)) {
-    if (typeof v === 'string' && v.length > 0) out[k] = v;
-  }
-  return out;
 }
 
 /** Legacy env-var source. Returns 'none' when the var is unset/empty. */

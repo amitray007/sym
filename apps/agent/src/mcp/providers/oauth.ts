@@ -181,12 +181,9 @@ export class SdkOAuthAdapter implements OAuthClientProvider {
 
   invalidateCredentials(scope: 'all' | 'client' | 'tokens' | 'verifier' | 'discovery'): void {
     if (scope === 'all' || scope === 'tokens') {
-      // We don't have a deleteTokens method; overwrite with a sentinel is
-      // not possible without a type-safe sentinel. Clearing via saveTokens
-      // with an obviously expired token is a workaround, but the simplest
-      // behavior is to rely on the next connect triggering a new auth flow
-      // when tokens() returns undefined. Leave as-is for now.
-      // If the store needs clearing, a fresh adapter instance will have no tokens.
+      // Z08-05: actually purge the stored tokens so the next connect triggers
+      // a fresh authorization flow rather than silently serving stale tokens.
+      this.store.deleteTokens(this.connectorName);
     }
     if (scope === 'all' || scope === 'verifier') {
       this.store.clearCodeVerifier(this.connectorName);

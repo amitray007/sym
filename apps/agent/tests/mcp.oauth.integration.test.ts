@@ -576,4 +576,45 @@ describe('C3: OAuthProvider — SdkOAuthAdapter and makeOAuthProvider', () => {
 
     expect(store.getTokens('c1')).toEqual(tokens2);
   });
+
+  it('deleteTokens removes the stored tokens (Z08-05: invalidateCredentials purge)', () => {
+    // WATCHED FAIL: before the fix, invalidateCredentials('tokens') was a no-op.
+    // This test directly validates the new deleteTokens() store method.
+    const key = makeTestKey();
+    const store = new SqliteCredentialStore(':memory:', key);
+
+    const tokens: OAuthTokens = { access_token: 'tok-secret', token_type: 'Bearer' };
+    store.saveTokens('my-conn', tokens);
+
+    // Confirm they're stored.
+    expect(store.getTokens('my-conn')).toEqual(tokens);
+
+    // Delete them.
+    store.deleteTokens('my-conn');
+
+    // Must be gone.
+    expect(store.getTokens('my-conn')).toBeUndefined();
+  });
+
+  it('invalidateCredentials("tokens") purges OAuth tokens via the adapter (Z08-05)', async () => {
+    // WATCHED FAIL: before the fix, the invalidateCredentials('tokens') branch
+    // was a comment/no-op — tokens remained in the store.
+    const key = makeTestKey();
+    const store = new SqliteCredentialStore(':memory:', key);
+    const provider = makeOAuthProvider('inv-conn', store, 'https://example.com');
+
+    const tokens: OAuthTokens = { access_token: 'tok-to-invalidate', token_type: 'Bearer' };
+    store.saveTokens('inv-conn', tokens);
+    expect(store.getTokens('inv-conn')).toEqual(tokens);
+
+    // Trigger invalidation via the SdkOAuthAdapter inside the provider.
+    // We do this via resolve() + casting to reach the adapter's method.
+    const cred = await provider.resolve();
+    const adapter = (
+      cred as { apply: 'native'; oauth: { invalidateCredentials: (scope: string) => void } }
+    ).oauth;
+    adapter.invalidateCredentials('tokens');
+    // Tokens must now be gone.
+    expect(store.getTokens('inv-conn')).toBeUndefined();
+  });
 });

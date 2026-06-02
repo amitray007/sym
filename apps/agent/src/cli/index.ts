@@ -53,7 +53,8 @@ import {
   upsertConnector,
   writeConfigFile,
 } from './config-store.js';
-import { configPath, loadCliDescribe } from '../mcp/source.js';
+import { loadCliDescribe } from '../mcp/cli-config.js';
+import { configPath } from '../mcp/source.js';
 import {
   isCliWildcard,
   resolveAllowlist,

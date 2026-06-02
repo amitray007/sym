@@ -2,23 +2,12 @@ export { parseMcpServers, parseConnectorArray } from './config.js';
 export type { ConnectorConfig } from './config.js';
 export { loadConnectorConfigs, configPath } from './source.js';
 export type { ConfigSource, LoadedConnectorConfig } from './source.js';
-export {
-  McpDispatcher,
-  initMcpPool,
-  reconcileConnectors,
-  getActiveConfigs,
-  listConnectorDetails,
-  getConnectorTools,
-  testConnector,
-  MCP_TOOL_SEPARATOR,
-} from './dispatcher.js';
-export type {
-  ReconcileResult,
-  ConnectorStatus,
-  ConnectorDetail,
-  ToolInfo,
-  ConnectorTestResult,
-} from './dispatcher.js';
+export { loadCliAllow, loadCliDescribe, readConfigFile } from './cli-config.js';
+export { McpDispatcher, initMcpPool, getActiveConfigs, MCP_TOOL_SEPARATOR } from './pool.js';
+export { reconcileConnectors } from './reconcile.js';
+export type { ReconcileResult, ConnectorStatus } from './reconcile.js';
+export { listConnectorDetails, getConnectorTools, testConnector } from './introspect.js';
+export type { ConnectorDetail, ToolInfo, ConnectorTestResult } from './introspect.js';
 export { CompositeDispatcher } from './composite.js';
 export { completeOAuth, getPendingAuth } from './oauth-registry.js';
 export { SqliteCredentialStore } from './store.js';

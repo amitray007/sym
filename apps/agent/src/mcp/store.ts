@@ -42,6 +42,12 @@ export interface CredentialStore {
   saveClientInformation(connectorName: string, info: OAuthClientInformationMixed): void;
   getTokens(connectorName: string): OAuthTokens | undefined;
   saveTokens(connectorName: string, tokens: OAuthTokens): void;
+  /**
+   * Delete the stored OAuth tokens for a connector (Z08-05).
+   * After this call, `getTokens(connectorName)` returns `undefined`,
+   * forcing a fresh authorization flow on the next connect attempt.
+   */
+  deleteTokens(connectorName: string): void;
   getCodeVerifier(connectorName: string): string | undefined;
   saveCodeVerifier(connectorName: string, verifier: string): void;
   clearCodeVerifier(connectorName: string): void;
@@ -236,6 +242,10 @@ export class SqliteCredentialStore implements CredentialStore {
 
   saveTokens(connectorName: string, tokens: OAuthTokens): void {
     this._set(connectorName, 'tokens', JSON.stringify(tokens));
+  }
+
+  deleteTokens(connectorName: string): void {
+    this._delete(connectorName, 'tokens');
   }
 
   getCodeVerifier(connectorName: string): string | undefined {

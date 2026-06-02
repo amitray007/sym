@@ -1169,3 +1169,103 @@ describe('buildTransport — files arm', () => {
     ).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 12. tools.allow enforcement (Z08-01)
+// ---------------------------------------------------------------------------
+
+describe('McpDispatcher — tools.allow enforcement', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetPoolForTesting();
+  });
+
+  it('without tools.allow, all server tools are exposed', async () => {
+    const mockClient = makeMockClient([
+      { name: 'tool_a', inputSchema: { type: 'object', properties: {} } },
+      { name: 'tool_b', inputSchema: { type: 'object', properties: {} } },
+      { name: 'tool_c', inputSchema: { type: 'object', properties: {} } },
+    ]);
+    vi.mocked(MockClient).mockReturnValue(mockClient);
+
+    const config = makeConnector({ name: 'srv_allow', trust: true });
+    const dispatcher = new McpDispatcher([config]);
+    await dispatcher.listAsync();
+
+    const tools = dispatcher.list();
+    expect(tools).toHaveLength(3);
+    expect(tools.map((t) => t.name)).toEqual([
+      `srv_allow${MCP_TOOL_SEPARATOR}tool_a`,
+      `srv_allow${MCP_TOOL_SEPARATOR}tool_b`,
+      `srv_allow${MCP_TOOL_SEPARATOR}tool_c`,
+    ]);
+  });
+
+  it('with tools.allow, only the allowed tool is exposed (Z08-01)', async () => {
+    // WATCHED FAIL: before the fix, this test would fail because tools.allow
+    // was parsed but NOT applied — all 3 tools would appear.
+    const mockClient = makeMockClient([
+      { name: 'tool_a', inputSchema: { type: 'object', properties: {} } },
+      { name: 'tool_b', inputSchema: { type: 'object', properties: {} } },
+      { name: 'tool_c', inputSchema: { type: 'object', properties: {} } },
+    ]);
+    vi.mocked(MockClient).mockReturnValue(mockClient);
+
+    const config = makeConnector({
+      name: 'srv_filtered',
+      trust: true,
+      tools: { allow: ['tool_b'] },
+    });
+    const dispatcher = new McpDispatcher([config]);
+    await dispatcher.listAsync();
+
+    const tools = dispatcher.list();
+    // Only tool_b must be exposed; tool_a and tool_c are filtered out.
+    expect(tools).toHaveLength(1);
+    expect(tools[0]?.name).toBe(`srv_filtered${MCP_TOOL_SEPARATOR}tool_b`);
+  });
+
+  it('with tools.allow of multiple names, exactly those tools are exposed', async () => {
+    const mockClient = makeMockClient([
+      { name: 'alpha', inputSchema: { type: 'object', properties: {} } },
+      { name: 'beta', inputSchema: { type: 'object', properties: {} } },
+      { name: 'gamma', inputSchema: { type: 'object', properties: {} } },
+      { name: 'delta', inputSchema: { type: 'object', properties: {} } },
+    ]);
+    vi.mocked(MockClient).mockReturnValue(mockClient);
+
+    const config = makeConnector({
+      name: 'srv_multi',
+      trust: true,
+      tools: { allow: ['alpha', 'gamma'] },
+    });
+    const dispatcher = new McpDispatcher([config]);
+    await dispatcher.listAsync();
+
+    const tools = dispatcher.list();
+    expect(tools).toHaveLength(2);
+    expect(tools.map((t) => t.name)).toEqual([
+      `srv_multi${MCP_TOOL_SEPARATOR}alpha`,
+      `srv_multi${MCP_TOOL_SEPARATOR}gamma`,
+    ]);
+  });
+
+  it('with an empty tools.allow array, all tools are exposed (empty = no filter)', async () => {
+    const mockClient = makeMockClient([
+      { name: 'tool_x', inputSchema: { type: 'object', properties: {} } },
+    ]);
+    vi.mocked(MockClient).mockReturnValue(mockClient);
+
+    const config = makeConnector({
+      name: 'srv_empty_allow',
+      trust: true,
+      tools: { allow: [] },
+    });
+    const dispatcher = new McpDispatcher([config]);
+    await dispatcher.listAsync();
+
+    const tools = dispatcher.list();
+    // Empty allow-list means no filter — all tools exposed.
+    expect(tools).toHaveLength(1);
+  });
+});
