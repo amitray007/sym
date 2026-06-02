@@ -2,6 +2,7 @@ import { markdownBlocks, receiptToContextBlock, receiptToFooterFields } from '@s
 import { ToolRegistry } from '@sym/kernel';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
+import { logCtx } from './log.js';
 import { CompositeDispatcher, McpDispatcher, initMcpPool, getActiveConfigs } from './mcp/index.js';
 import { PlanController } from './plan-controller.js';
 import {
@@ -144,7 +145,10 @@ async function maybeSetThreadTitleFromTurn(
       title,
     });
   } catch (err) {
-    console.warn('[agent] setTitle from first user turn failed (continuing):', err);
+    console.warn(
+      `${logCtx(turn.id)} [agent] setTitle from first user turn failed (continuing):`,
+      err,
+    );
   }
 }
 
@@ -160,8 +164,9 @@ async function maybeSetThreadTitleFromTurn(
  *  - Unthreaded turns (slash commands etc.): always postMessage.
  */
 export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void> {
+  const ctx = logCtx(turn.id);
   if (!turn.channelId) {
-    console.warn(`[agent] turn ${turn.id} has no channelId; cannot reply`);
+    console.warn(`${ctx} [agent] turn has no channelId; cannot reply`);
     return;
   }
 

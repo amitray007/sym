@@ -16,6 +16,12 @@ const WELCOME_MESSAGE = "👋 Hey! I'm Sym — pick a prompt below or ask me any
  * Greet a freshly opened assistant container: set a friendly title and the
  * starter prompts. Both calls are best-effort and independent — a failure in
  * one must never block the other or throw into the event-ACK path.
+ *
+ * CALLER MUST owner-gate before invoking. This function makes three Slack API
+ * calls (setTitle, setSuggestedPrompts, chatPostMessage) on behalf of the
+ * opening user with no internal ownership check. The caller is responsible for
+ * verifying the event originates from the workspace owner before dispatching
+ * here.
  */
 export async function handleAssistantThreadStarted(
   slackClient: SlackClient,

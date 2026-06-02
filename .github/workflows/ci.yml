@@ -68,6 +68,27 @@ jobs:
         run: pnpm build
 
       # ─────────────────────────────────────────────────────────────────────
+      # Logging hygiene gate (Z16-01)
+      #
+      # Server/package code must NEVER use console.log — only console.info,
+      # .warn, or .error. The sym CLI's --json mode spies on console.log
+      # in-process so any server console.log races into the JSON output.
+      #
+      # Scopes: apps/agent/src (excluding cli/) + packages/**/*.ts(x)
+      # The cli/ directory is the ONLY permitted user of console.log.
+      #
+      # False-positives that use `console.log` (no open paren) are:
+      #   apps/agent/src/workspace-context.ts:101 — a plain comment
+      # Both are safely excluded because the grep anchors on `console.log(`
+      # (the call form with open paren).
+      # ─────────────────────────────────────────────────────────────────────
+      - name: No console.log outside cli/ (logging hygiene)
+        run: |
+          ! grep -rn --include="*.ts" --include="*.tsx" \
+              "console\.log(" apps/agent/src packages \
+              --exclude-dir=cli
+
+      # ─────────────────────────────────────────────────────────────────────
       # Informational analysis steps — run after build, never block CI
       # ─────────────────────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@ import { Agent } from '@earendil-works/pi-agent-core';
 import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
+import { logCtx } from '../log.js';
 import {
   buildCliCatalog,
   isIntrospectionOnly,
@@ -391,7 +392,9 @@ function buildAgentTools(
   const confirmMcp = async (toolName: string, args: Record<string, unknown>): Promise<boolean> => {
     const channelId = turn.channelId;
     if (!channelId || !opts.slackClient) {
-      console.warn(`[pi] mcp tool '${toolName}' blocked: confirmation channel unavailable`);
+      console.warn(
+        `${logCtx(turn.id)} [pi] mcp tool '${toolName}' blocked: confirmation channel unavailable`,
+      );
       return false;
     }
     return requestConfirmation({
@@ -485,7 +488,14 @@ function makeBeforeToolCall(
     // Slack conversations — not an external-system task the model is trying to
     // answer with a Slack search, and not something that would leak the owner's
     // private content into a shared channel. One fast LLM call, cached per turn,
-    // fails OPEN (allow) on any error.
+    // FAILS OPEN (allow) on any error — rationale: the guard is a best-effort
+    // privacy/relevance layer, not a security boundary. Blocking a legitimate
+    // Slack request is a worse outcome than occasionally allowing an ambiguous
+    // one, and the model will self-correct on a useless Slack result. Blast
+    // radius of fail-open: the model may run a Slack search that doesn't find
+    // anything useful and will then try a different approach; it does NOT allow
+    // destructive writes. Blast radius of fail-closed: a broken guard would
+    // silently block all Slack reads, breaking the most common use case.
     // -------------------------------------------------------------------------
     if (SLACK_GUARD_TOOLS.has(toolName)) {
       if (slackGuardVerdict === undefined) {
@@ -516,6 +526,18 @@ function makeBeforeToolCall(
           if (!approved) {
             return { block: true, reason: 'The owner did not approve this Slack operation.' };
           }
+        } else {
+          // No channel context available (e.g. response_url / slash-command turn
+          // with no resolvable channelId, or slackClient absent). The guard
+          // returned 'confirm' — meaning the read is privacy-sensitive — but we
+          // have nowhere to ask the owner. We fail open here (allow) rather than
+          // blocking a potentially legitimate read, but this IS a silent bypass:
+          // the owner's private Slack content may be surfaced without explicit
+          // approval. Z15-02: this is the privacy-sensitive code path on the
+          // response_url flow where no channel is available for confirmation.
+          console.warn(
+            `${logCtx(turn.id)} [pi] guard verdict 'confirm' for '${toolName}' promoted to 'allow': no channel context for owner prompt`,
+          );
         }
         // Approved (or no channel to prompt on → fail open). Don't re-ask for
         // the rest of the turn.
@@ -552,7 +574,9 @@ function makeBeforeToolCall(
     const channelId = turn.channelId;
     if (!channelId || !opts.slackClient) {
       // Fail closed: no channel or no Slack client → cannot prompt → block.
-      console.warn(`[pi] tool '${toolName}' blocked: confirmation channel unavailable`);
+      console.warn(
+        `${logCtx(turn.id)} [pi] tool '${toolName}' blocked: confirmation channel unavailable`,
+      );
       return { block: true, reason: 'Confirmation channel unavailable.' };
     }
 
@@ -752,7 +776,7 @@ export async function runLoopPi(
   // Surface any error from Pi after the run settles.
   const errorMessage = agent.state.errorMessage;
   if (errorMessage) {
-    console.warn('[pi] agent completed with error:', errorMessage);
+    console.warn(`${logCtx(turn.id)} [pi] agent completed with error:`, errorMessage);
   }
 
   // Never deliver a silent empty reply. If the run errored before producing any

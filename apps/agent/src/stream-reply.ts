@@ -5,6 +5,7 @@ import {
   renderIntentToFallbackText,
 } from '@sym/adapter-slack';
 
+import { logCtx } from './log.js';
 import { runLoopPi } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
@@ -89,7 +90,9 @@ export function heroRenderParts(reply: Reply): {
     return { renderBlocks: [], fallbackSuffix: '' };
   }
   if (renders.length > 1) {
-    console.info(`[render] ${renders.length} intents this turn; using last (over-render signal)`);
+    console.info(
+      `${logCtx(reply.turnId)} [render] ${renders.length} intents this turn; using last (over-render signal)`,
+    );
   }
   const hero = renders[renders.length - 1]!;
   return {
@@ -166,6 +169,7 @@ export async function streamReply(
     planController: PlanController;
   },
 ): Promise<boolean> {
+  const lctx = logCtx(turn.id);
   const channel = turn.channelId as SlackChannelId;
   const threadTs = turn.threadTs as SlackThreadTs;
   const isAssistant = turn.entrySurface === 'dm';
@@ -202,7 +206,7 @@ export async function streamReply(
         ...(loadingMessages !== undefined ? { loadingMessages } : {}),
       });
     } catch (err) {
-      console.warn('[agent] setStatus failed (continuing):', err);
+      console.warn(`${lctx} [agent] setStatus failed (continuing):`, err);
     }
   };
 
@@ -275,7 +279,7 @@ export async function streamReply(
         streamTs = handle.ts;
         return true;
       } catch (err) {
-        console.warn('[agent] startStream failed; will fall back to postMessage:', err);
+        console.warn(`${lctx} [agent] startStream failed; will fall back to postMessage:`, err);
         streamOpenFailed = true;
         return false;
       }
@@ -313,7 +317,7 @@ export async function streamReply(
         await deps.slackClient.chatAppendStream(appendParams);
         liveBodyFlushed = true;
       } catch (err) {
-        console.warn('[agent] appendStream failed (continuing):', err);
+        console.warn(`${lctx} [agent] appendStream failed (continuing):`, err);
       }
     };
 
@@ -377,7 +381,7 @@ export async function streamReply(
         await deps.slackClient.chatStopStream({ channel, ts, blocks: [...renderBlocks, receipt] });
         return true;
       } catch (err) {
-        console.warn('[agent] stopStream failed:', err);
+        console.warn(`${lctx} [agent] stopStream failed:`, err);
         return false;
       }
     };
@@ -399,7 +403,10 @@ export async function streamReply(
           }
           appended = true;
         } catch (err) {
-          console.warn('[agent] appendStream (buffered body) failed; will post normally:', err);
+          console.warn(
+            `${lctx} [agent] appendStream (buffered body) failed; will post normally:`,
+            err,
+          );
         }
         if (appended) {
           await closeStream(streamTs);
@@ -439,7 +446,7 @@ export async function streamReply(
             blocks: [...markdownBlocks(cleaned), ...renderBlocks, receipt],
           });
         } catch (err) {
-          console.warn('[agent] cleanup update failed (continuing):', err);
+          console.warn(`${lctx} [agent] cleanup update failed (continuing):`, err);
         }
       }
     }
@@ -458,7 +465,7 @@ export async function streamReply(
         status: '',
       });
     } catch (err) {
-      console.warn('[agent] setStatus clear failed:', err);
+      console.warn(`${lctx} [agent] setStatus clear failed:`, err);
     }
   }
 }

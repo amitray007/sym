@@ -27,7 +27,14 @@ import { buildFireworksModel } from './pi/model.js';
 
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
 
-/** Broad-reach Slack reads worth guarding (workspace-wide, privacy-sensitive). */
+/**
+ * Broad-reach Slack reads worth guarding (workspace-wide, privacy-sensitive).
+ *
+ * IMPORTANT: a tool NOT listed here is NEVER checked by the guard — it
+ * bypasses judgeSlackToolUse entirely. Every author of a new Slack-read
+ * tool MUST add it here, or the guard provides zero protection for that
+ * tool.
+ */
 export const SLACK_GUARD_TOOLS = new Set<string>([
   'search_messages',
   'list_channels',
