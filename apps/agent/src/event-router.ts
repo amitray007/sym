@@ -22,7 +22,7 @@ import type { SlackThreadTs, SlackUserId, Turn } from '@sym/contracts';
  * so every ingress route (events, slash commands, future shortcuts) hands
  * `handleTurn` the same shape — no drift between paths.
  */
-export function buildTurnDeps(
+function buildTurnDeps(
   ctx: WorkspaceContext,
   config: AgentConfig,
   viewedChannelId?: string,

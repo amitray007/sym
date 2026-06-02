@@ -108,9 +108,9 @@ export function makeProvider(
   }
 
   if (auth.kind === 'ambient') {
-    // Model B: the wrapped CLI self-authenticates from disk. Sym injects no
-    // credential — return null (same connect path as no-auth). The connector
-    // keeps the marker so the dispatcher can give a clearer "not logged in" hint.
+    // Wrapped CLI self-authenticates from disk. Sym injects no credential —
+    // return null (same connect path as no-auth). The connector keeps the
+    // marker so the dispatcher can give a clearer "not logged in" hint.
     return null;
   }
 

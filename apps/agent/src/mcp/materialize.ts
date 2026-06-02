@@ -188,12 +188,3 @@ export const defaultMaterializer = new Materializer();
 export function _getActiveDirsForTesting(): Set<string> {
   return _activeDirs;
 }
-
-/**
- * Reset the handler-registered flag.
- * Tests that spin up fresh Materializers and want to test handler registration
- * must call this between tests; do NOT call in production code.
- */
-export function _resetHandlerFlagForTesting(): void {
-  _handlersRegistered = false;
-}

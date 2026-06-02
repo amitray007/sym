@@ -6,7 +6,7 @@
  */
 
 import { Box, Text, useInput } from 'ink';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { applyReload, fetchConnectors, testConnector } from '../../cli/admin-client.js';
 import { loadConfigFile } from '../../cli/config-store.js';

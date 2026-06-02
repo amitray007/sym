@@ -70,7 +70,7 @@ export type AuthConfig =
       inject: Injection | Injection[];
     }
   | { kind: 'oauth' } // C3 — SdkOAuthAdapter + encrypted token store
-  | { kind: 'ambient' }; // Model B — the wrapped CLI self-authenticates from disk; Sym injects nothing
+  | { kind: 'ambient' }; // Wrapped CLI self-authenticates from disk; Sym injects nothing
 
 // ---------------------------------------------------------------------------
 // ConnectorConfig — the top-level shape
@@ -332,7 +332,7 @@ function parseAuth(raw: unknown, index: number, name: string): AuthConfig | null
   }
 
   if (kind === 'ambient') {
-    // Model B: the wrapped CLI self-authenticates from disk (e.g. `gcloud auth login`).
+    // Wrapped CLI self-authenticates from disk (e.g. `gcloud auth login`).
     // Sym injects nothing; relocate the CLI's config dir via transport.env if needed.
     return { kind: 'ambient' };
   }

@@ -92,7 +92,7 @@ export function coerceCardActions(raw: unknown): { label: string; url: string }[
  * `threadToHistory` to use as author labels. Failures fall through to raw
  * id (handled downstream).
  */
-export async function resolveAuthorNames(
+async function resolveAuthorNames(
   messages: SlackThreadMessage[],
   botUserId: SlackUserId,
   slack: SlackClient,

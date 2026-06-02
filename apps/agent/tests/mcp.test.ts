@@ -237,7 +237,7 @@ describe('parseMcpServers', () => {
     expect(result[0]?.auth).toMatchObject({ kind: 'oauth' });
   });
 
-  it('accepts ambient auth (Model B — CLI self-authenticates from disk)', () => {
+  it('accepts ambient auth (CLI self-authenticates from disk)', () => {
     const raw = JSON.stringify([
       {
         name: 'gcloud',
@@ -577,7 +577,7 @@ describe('makeProvider', () => {
     expect(makeProvider(undefined)).toBeNull();
   });
 
-  it('ambient auth → null (Model B injects no credential)', () => {
+  it('ambient auth → null (ambient injects no credential)', () => {
     expect(makeProvider({ kind: 'ambient' })).toBeNull();
   });
 

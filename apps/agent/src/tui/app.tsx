@@ -5,7 +5,7 @@
  */
 
 import { useApp } from 'ink';
-import React, { useState } from 'react';
+import { useState } from 'react';
 
 import { BuilderScreen } from './screens/BuilderScreen.js';
 import { Dashboard } from './screens/Dashboard.js';

@@ -20,7 +20,7 @@ import type {
 } from '@sym/contracts';
 
 // ---------------------------------------------------------------------------
-// Phase B — Act-as-owner write tools (user-token only)
+// Act-as-owner write tools (user-token only)
 // ---------------------------------------------------------------------------
 //
 // These tools use the owner's user token so the action shows up in Slack as

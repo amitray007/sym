@@ -59,20 +59,6 @@ function makeTestKey(): string {
   return nodeCrypto.randomBytes(32).toString('base64');
 }
 
-/** Track and forcibly destroy open sockets on server shutdown. */
-function trackSockets(server: http.Server): { destroy: () => void } {
-  const sockets = new Set<Socket>();
-  server.on('connection', (s) => {
-    sockets.add(s);
-    s.on('close', () => sockets.delete(s));
-  });
-  return {
-    destroy() {
-      for (const s of sockets) s.destroy();
-    },
-  };
-}
-
 /** Start an HTTP server on a random port. Returns port + stop. */
 async function startServer(
   handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
@@ -96,71 +82,6 @@ async function startServer(
       for (const s of sockets) s.destroy();
       return new Promise<void>((r) => server.close(() => r()));
     },
-  };
-}
-
-/**
- * Create a minimal stateless MCP HTTP server handler that:
- *   - Returns 401 + WWW-Authenticate when no valid Bearer token is present.
- *   - Handles MCP requests normally when the Bearer token == expectedToken.
- */
-async function createProtectedMcpHandler(
-  expectedToken: string,
-  resourceMetadataUrl: string,
-): Promise<(req: http.IncomingMessage, res: http.ServerResponse) => void> {
-  return (req, res) => {
-    // Check Authorization header
-    const auth = req.headers['authorization'];
-    const token = auth?.startsWith('Bearer ') ? auth.slice(7) : undefined;
-
-    if (!token || token !== expectedToken) {
-      // Return 401 with resource metadata URL in WWW-Authenticate
-      res.writeHead(401, {
-        'WWW-Authenticate': `Bearer resource_metadata="${resourceMetadataUrl}"`,
-        'Content-Type': 'application/json',
-      });
-      res.end(JSON.stringify({ error: 'unauthorized' }));
-      return;
-    }
-
-    // Valid token — serve as stateless MCP
-    const mcpServer = new McpLowLevelServer(
-      { name: 'protected-mcp', version: '1.0.0' },
-      { capabilities: { tools: {} } },
-    );
-
-    mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: [
-        {
-          name: 'secret_tool',
-          description: 'A tool only available after OAuth',
-          inputSchema: { type: 'object' as const, properties: {}, additionalProperties: false },
-        },
-      ],
-    }));
-
-    mcpServer.setRequestHandler(CallToolRequestSchema, async () => ({
-      content: [{ type: 'text', text: 'authorized_response' }],
-    }));
-
-    const transportOpts = {
-      sessionIdGenerator: undefined,
-    } as unknown as StreamableHTTPServerTransportOptions;
-    const transport = new StreamableHTTPServerTransport(transportOpts);
-
-    (mcpServer.connect as (t: unknown) => Promise<void>)(transport)
-      .then(() => transport.handleRequest(req, res))
-      .then(() => {
-        res.on('close', () => {
-          void transport.close();
-          void mcpServer.close();
-        });
-      })
-      .catch((err: unknown) => {
-        if (!res.headersSent) {
-          res.writeHead(500).end(JSON.stringify({ error: String(err) }));
-        }
-      });
   };
 }
 
@@ -503,15 +424,12 @@ describe('C2: Full OAuth handshake with mock MCP server + mock AS', () => {
       mcpPort = mcpSrv.port;
       stopServers.push(mcpSrv.stop);
 
-      const asBase = getAsBase();
       const mcpBase = getMcpBase();
 
       // --- Set up encryption ---
       const key = makeTestKey();
       process.env['SYM_ENCRYPTION_KEY'] = key;
       process.env['SYM_PUBLIC_URL'] = mcpBase;
-
-      const store = new SqliteCredentialStore(':memory:', key);
 
       const config: ConnectorConfig = {
         name: CONNECTOR_NAME,

@@ -64,7 +64,6 @@ export interface CredentialStore {
 
 const ALGO = 'aes-256-gcm' as const;
 const IV_LEN = 12; // 96-bit IV for GCM
-const TAG_LEN = 16; // 128-bit auth tag
 
 /** Encrypted blob stored in SQLite: `<iv_hex>:<tag_hex>:<ciphertext_hex>` */
 type EncryptedBlob = string;

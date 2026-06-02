@@ -16,12 +16,3 @@ export function healthGlyph(d: { ok: boolean; error?: string }): { glyph: string
   if (d.error !== undefined) return { glyph: '⚠', color: COLORS.warn };
   return { glyph: '○', color: COLORS.dim };
 }
-
-/** Color for a reconcile/test status word. */
-export function statusColor(status: string): string {
-  if (status === 'connected' || status === 'reconnected' || status === 'unchanged')
-    return COLORS.ok;
-  if (status === 'failed-kept-previous' || status === 'removed') return COLORS.warn;
-  if (status === 'failed') return COLORS.bad;
-  return COLORS.dim;
-}

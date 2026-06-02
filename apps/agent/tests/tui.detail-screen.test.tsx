@@ -5,7 +5,6 @@
  */
 
 import { render } from 'ink-testing-library';
-import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DetailScreen } from '../src/tui/screens/DetailScreen.js';

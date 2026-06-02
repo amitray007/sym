@@ -136,8 +136,8 @@ export interface PiLoopOptions {
  *                         for context, not for replay)
  *  - `role:'tool'`      → `ToolResultMessage { role:'toolResult', ... }`
  *
- * // TODO(pi): chunk 3 — for assistant messages that include tool calls, emit
- * the ToolCall content blocks so Pi's context window sees the full tool round-trip.
+ * TODO: for assistant messages that include tool calls, emit the ToolCall
+ * content blocks so Pi's context window sees the full tool round-trip.
  * Currently we surface assistant text only; tool-call content is omitted.
  */
 export function toAgentMessages(history: ChatMessage[]): AgentMessage[] {
@@ -163,7 +163,7 @@ export function toAgentMessages(history: ChatMessage[]): AgentMessage[] {
       case 'assistant': {
         // Stub an AssistantMessage with just the text content Pi needs for context.
         // A real stub needs the full AssistantMessage shape from pi-ai types.
-        // TODO(pi): chunk 3 — include toolCall content blocks for full fidelity.
+        // TODO: include toolCall content blocks for full fidelity.
         const assistantMsg: AssistantMessage = {
           role: 'assistant',
           content: msg.content != null ? [{ type: 'text', text: msg.content }] : [],
@@ -738,7 +738,7 @@ export async function runLoopPi(
   // Pi's Agent doesn't accept an AbortSignal on prompt(); abort via agent.abort().
   // Wire the signal so callers can cancel the run, and clean up the listener in a
   // finally block to avoid an event-listener leak when the signal outlives the run.
-  // TODO(pi): chunk 4 — Pi may expose signal on prompt() in a future version.
+  // TODO: Pi may expose an AbortSignal on prompt() in a future SDK version.
   const abortHandler = (): void => {
     agent.abort();
   };

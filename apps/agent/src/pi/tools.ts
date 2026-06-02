@@ -11,8 +11,8 @@
  * if Pi's argument validator rejects a raw JSON Schema, the `prepareArguments`
  * passthrough below bypasses validation and returns the raw args unchanged.
  *
- * // TODO(pi): chunk 3.5 — if Pi adds strict TypeBox runtime validation and
- * rejects plain JSON Schema, migrate to Type.Unsafe(descriptor.parameters) here.
+ * TODO: if Pi adds strict TypeBox runtime validation and rejects plain JSON
+ * Schema, migrate to Type.Unsafe(descriptor.parameters) here.
  */
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
@@ -55,7 +55,7 @@ function bridgeTool(
     // JSON Schema cast to TSchema — structurally identical at runtime.
     // Pi serialises it to the model as JSON Schema.
     // prepareArguments is set below to bypass TypeBox runtime validation.
-    // TODO(pi): chunk 3.5 — evaluate Type.Unsafe() wrapper if Pi validates args strictly.
+    // TODO: evaluate Type.Unsafe() wrapper if Pi adds strict args validation.
     parameters: descriptor.parameters as unknown as TSchema,
     // Bypass Pi's TypeBox runtime argument validation: return args as-is.
     // Sym's dispatcher validates / coerces args internally.

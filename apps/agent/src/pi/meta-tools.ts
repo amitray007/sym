@@ -130,7 +130,7 @@ export function searchDescriptors(
 }
 
 /** Rank CLI capabilities against a query by term overlap (bin + description). */
-export function searchCli(cli: CliCapability[], query: string, limit: number): CliCapability[] {
+function searchCli(cli: CliCapability[], query: string, limit: number): CliCapability[] {
   return rankByTerms(cli, query, (c) => `${c.bin} ${c.description ?? ''}`, limit);
 }
 

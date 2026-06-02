@@ -27,8 +27,6 @@
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-import { NotImplementedError } from './providers/provider.js';
-
 import type { TransportConfig } from './config.js';
 import type { ResolvedCredential } from './providers/provider.js';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -58,8 +56,7 @@ export interface BuildTransportResult {
  * @returns A `BuildTransportResult`. For OAuth (http + native), `httpTransport`
  *          is set — the caller must call `oauthProvider.wireTransport(httpTransport)`
  *          before connecting.
- * @throws NotImplementedError when the transport kind or credential apply type
- *         is not yet implemented (names the chunk).
+ * @throws Error when the transport kind or credential apply type is not supported.
  */
 export function buildTransport(
   transport: TransportConfig,

@@ -15,7 +15,7 @@
 
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { loadConfigFile } from '../../cli/config-store.js';
 import { listSecrets, removeSecret, setSecret } from '../../cli/secrets.js';

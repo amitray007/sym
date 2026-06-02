@@ -27,7 +27,7 @@
 
 import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { applyReload } from '../../cli/admin-client.js';
 import { loadConfigFile, upsertConnector, writeConfigFile } from '../../cli/config-store.js';

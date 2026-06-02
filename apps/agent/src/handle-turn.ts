@@ -29,8 +29,8 @@ export interface HandleTurnDeps {
   slackClient: SlackClient;
   /**
    * Owner user-token client — present when SLACK_OWNER_USER_TOKEN is set.
-   * Tools declared `actor: 'user'` use this for broader visibility and act-
-   * as-owner writes (Phase B).
+   * Tools declared `actor: 'user'` use this for broader visibility and
+   * act-as-owner writes.
    */
   userSlackClient?: SlackClient;
   /** Sym's own bot user id — lets thread history mark its posts as assistant. */

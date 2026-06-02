@@ -104,8 +104,8 @@ export interface BuiltinToolDeps {
   nameResolver?: NameResolver;
 }
 
-/** Ordered list of all built-in tool descriptors (preserved from original). */
-export const ALL_BUILTIN_DESCRIPTORS: ToolDescriptor[] = [
+/** Ordered list of all built-in tool descriptors. */
+const ALL_BUILTIN_DESCRIPTORS: ToolDescriptor[] = [
   GET_CURRENT_TIME_DESCRIPTOR,
   READ_CHANNEL_DESCRIPTOR,
   READ_THREAD_DESCRIPTOR,
