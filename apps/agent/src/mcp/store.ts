@@ -17,7 +17,7 @@
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
@@ -107,7 +107,7 @@ export function parseEncryptionKey(raw: string | undefined): Buffer {
   if (raw === undefined || raw.trim() === '') {
     throw new Error(
       '[mcp/store] SYM_ENCRYPTION_KEY is required but not set. ' +
-        "Generate a 32-byte key: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"",
+        'Generate a 32-byte key: openssl rand -base64 32',
     );
   }
 
@@ -166,13 +166,25 @@ export class SqliteCredentialStore implements CredentialStore {
     // Create parent dirs if needed (not for :memory:).
     if (resolvedPath !== ':memory:') {
       try {
-        mkdirSync(dirname(resolvedPath), { recursive: true });
+        mkdirSync(dirname(resolvedPath), { recursive: true, mode: 0o700 });
       } catch {
         // Ignore if already exists or can't create (will fail on open).
       }
     }
 
     this.db = new DatabaseSync(resolvedPath);
+
+    // Best-effort: restrict the DB file to owner-only after open. Wrapping in
+    // try/catch because some filesystems (e.g. FAT32, some network mounts)
+    // silently ignore or reject chmod — fail-open so the store still works.
+    if (resolvedPath !== ':memory:') {
+      try {
+        chmodSync(resolvedPath, 0o600);
+      } catch {
+        // Non-fatal — the file is encrypted at rest regardless.
+      }
+    }
+
     this._migrate();
   }
 

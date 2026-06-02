@@ -157,8 +157,11 @@ export function createServer(deps: ServerDeps): Hono {
     }
 
     // Slack Events API endpoint verification handshake.
+    // Cap the echoed challenge at 512 chars as defense-in-depth (the request is
+    // HMAC-verified, but a length cap prevents a crafted oversized challenge from
+    // being reflected verbatim into a log aggregator or downstream consumer).
     if (parsed.type === 'url_verification') {
-      return c.json({ challenge: parsed.challenge ?? '' });
+      return c.json({ challenge: (parsed.challenge ?? '').slice(0, 512) });
     }
 
     // Dedup Slack retries (it re-sends if it doesn't get a fast 200).

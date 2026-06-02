@@ -21,7 +21,7 @@
 
 import { actionsBlock, sectionBlock } from '@sym/adapter-slack';
 
-import type { SlackClient } from '@sym/adapter-slack';
+import type { SlackBlock, SlackClient } from '@sym/adapter-slack';
 import type { SlackChannelId, SlackThreadTs } from '@sym/contracts';
 
 // ---------------------------------------------------------------------------
@@ -198,17 +198,20 @@ export function resolveConfirmation(confirmationId: string, approved: boolean): 
  * decision context block. Falls back to the message text, then a bare line.
  */
 export function buildResolvedConfirmationMessage(
-  original: { blocks?: unknown[]; text?: string },
+  original: { blocks?: SlackBlock[]; text?: string },
   approved: boolean,
-): { text: string; blocks: unknown[] } {
+): { text: string; blocks: SlackBlock[] } {
   const decisionLine = approved ? '✅ *Approved*' : '✋ *Cancelled*';
-  const decisionBlock = { type: 'context', elements: [{ type: 'mrkdwn', text: decisionLine }] };
+  const decisionBlock: SlackBlock = {
+    type: 'context',
+    elements: [{ type: 'mrkdwn', text: decisionLine }],
+  };
 
   const origBlocks = Array.isArray(original.blocks) ? original.blocks : [];
   // Drop the actions (buttons) block — the decision has been made.
-  const kept = origBlocks.filter((b) => (b as { type?: string } | null)?.type !== 'actions');
+  const kept = origBlocks.filter((b) => b.type !== 'actions');
 
-  let blocks: unknown[];
+  let blocks: SlackBlock[];
   if (kept.length > 0) {
     blocks = [...kept, decisionBlock];
   } else if (typeof original.text === 'string' && original.text.length > 0) {

@@ -5,6 +5,8 @@ import {
   formatArgsForConfirmation,
 } from '../src/confirmations.js';
 
+import type { SlackBlock } from '@sym/adapter-slack';
+
 describe('formatArgsForConfirmation', () => {
   it('always shows the target channel even when the body is huge (audit #4)', () => {
     // Model emits body first, channel_id last — the load-bearing field.
@@ -42,7 +44,7 @@ describe('formatArgsForConfirmation', () => {
 });
 
 describe('buildResolvedConfirmationMessage', () => {
-  const original = {
+  const original: { text: string; blocks: SlackBlock[] } = {
     text: '⚠️ Sym wants to run *set_status* — approve?',
     blocks: [
       {
