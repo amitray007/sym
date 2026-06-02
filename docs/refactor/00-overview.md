@@ -178,8 +178,9 @@ critique M1–M5).
 
 Two more that are launch-blockers by their absence rather than their presence:
 
-- **Missing OSS baseline files** (CONTRIBUTING, SECURITY, ARCHITECTURE, CHANGELOG,
-  CODE_OF_CONDUCT, issue templates) — GitHub's community-health floor is unmet.
+- **Missing OSS baseline files** (`CONTRIBUTING`, `SECURITY`, `ARCHITECTURE`,
+  `CHANGELOG`, `CODE_OF_CONDUCT`, issue templates) — GitHub's community-health
+  floor is unmet.
   _Z02-18, Z14-08/09/22/23/24/25._ → C21, C22.
 - **No code-coverage instrumentation anywhere** — all the test gaps are unmeasured
   and invisible. _Z13-02 (critical)._ → C08.
