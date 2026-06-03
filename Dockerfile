@@ -5,7 +5,7 @@
 # (@sym/kernel, @sym/contracts, @sym/adapter-slack), then runs the agent.
 #
 # This image is deliberately CLI-AGNOSTIC. It bakes in only GENERIC runtimes
-# (node, python3, curl) — never a specific CLI. The actual tools you connect —
+# (node, python3, uv/uvx, curl) — never a specific CLI. The actual tools you connect —
 # CLIs like gcloud and the MCP server packages (shopify-dev-mcp, gcloud-mcp, …) —
 # are installed ONCE onto the persistent /data volume, NOT into this image. They
 # live on /data/bin (which is on PATH), so they survive every redeploy/restart
@@ -50,6 +50,14 @@ ENV NODE_ENV=production
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl python3 git \
   && rm -rf /var/lib/apt/lists/*
+
+# uv / uvx — generic Python tool runner (Astral). Some MCP servers ship as
+# Python packages launched via `uvx <pkg>` (e.g. celery-flower-mcp). uv is a
+# generic runtime like python3 (not a specific CLI), so it belongs in the image.
+# Static binaries copied from the official uv image — no apt/curl needed. uvx
+# caches downloaded packages + managed Pythons under HOME=/data/home, so the
+# first-run fetch persists on the volume across redeploys.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 # /data is the ONLY durable state: persistent CLIs / MCP servers + their auth +
 # the OAuth store. Anything on /data/bin is on PATH, so volume-installed tools
