@@ -24,13 +24,18 @@ FROM base AS build
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
-# Prune devDependencies before copying to the runtime stage so vitest, tsx,
-# typescript, and TS source do not land in the production image.
-# ink, react, ink-text-input are in `dependencies` (runtime TUI) — they survive.
-# CI=true suppresses the interactive "confirm removal" prompt in non-TTY builds.
-# --ignore-scripts prevents the root `prepare` lifecycle hook (husky) from
-# running after prune — husky is itself a devDependency just removed.
-RUN CI=true pnpm prune --prod --ignore-scripts
+# Create a self-contained production deployment of apps/agent: its built `dist`
+# plus a complete, flat `node_modules` with every prod dependency AND the injected
+# workspace packages (@sym/kernel, @sym/contracts, @sym/adapter-slack). vitest,
+# tsx, typescript and friends stay out — they're devDependencies.
+#
+# This replaces `pnpm prune --prod`, which is unreliable in a pnpm workspace:
+# pruning the root virtual store left the agent's own runtime deps (e.g.
+# @hono/node-server) unresolvable from apps/agent/dist at boot
+# (ERR_MODULE_NOT_FOUND). `pnpm deploy` is purpose-built for exactly this. The
+# `--legacy` flag is required by pnpm v10 to deploy without setting
+# `inject-workspace-packages` globally.
+RUN pnpm --filter @sym/agent deploy --prod --legacy /prod
 
 # ---- runtime: generic runtimes only; real tools live on the /data volume ----
 FROM node:24-slim@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf AS runtime
@@ -53,7 +58,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /data/bin && chown -R node:node /data
 ENV PATH="/data/bin:$PATH"
 
-COPY --from=build --chown=node:node /repo /repo
+# The self-contained agent deployment (built dist + a complete prod node_modules),
+# placed at the path the agent expects so repo-root-relative reads still resolve
+# (apps/agent/dist → ../../.. == /repo).
+COPY --from=build --chown=node:node /prod /repo/apps/agent
+# The Slack manifest is read at boot for the assistant-panel starter prompts
+# (manifest-prompts.ts → <repoRoot>/slack/…). It lives outside apps/agent, so copy
+# it alongside; without it the agent falls back to a single default prompt.
+COPY --from=build --chown=node:node /repo/slack /repo/slack
 
 # `sym` — the agent's OWN connector control-plane CLI (status/apply/mcp/secret +
 # the interactive TUI). Unlike the third-party tools on /data, sym is first-party
