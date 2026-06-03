@@ -4,6 +4,8 @@
  * one owner, one model provider. No secrets are logged.
  */
 
+import { z } from 'zod';
+
 import { loadConnectorConfigs } from '@sym/mcp-runtime';
 
 import type { ConnectorConfig, ConfigSource } from '@sym/mcp-runtime';
@@ -105,27 +107,36 @@ function required(name: string): string {
   return value;
 }
 
-function taskCardAfter(raw: string | undefined): 'delete' | 'collapse' {
-  if (raw === 'collapse') return 'collapse';
-  return 'delete';
-}
-
 /**
- * Parse a non-negative integer env var, falling back to `def` when the variable
- * is unset OR not a finite number >= 0. This prevents a typo'd value from
- * silently disabling a bound via the `NaN`-falsy / `NaN`-to-0 footgun (the same
- * class of bug fixed for the MCP connect timeout in `mcp/pool.ts`). `0` is a
- * valid value — callers treat it as "no limit / no deadline".
+ * Zod schema for the behavior-knob env vars.
+ *
+ * Non-negative integer knobs use `z.coerce.number().int().nonnegative()` with
+ * `.catch(default)` so a typo'd/missing value silently falls back to the safe
+ * default (same NaN-safe semantics as the old `posIntEnv` helper, but
+ * declarative). `0` is a valid value — callers treat it as "no limit".
  */
-function posIntEnv(name: string, def: number): number {
-  const raw = process.env[name];
-  if (raw === undefined) return def;
-  const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : def;
-}
+const behaviorEnvSchema = z.object({
+  TASK_CARD_THRESHOLD: z.coerce.number().int().nonnegative().catch(DEFAULT_TASK_CARD_THRESHOLD),
+  TASK_CARD_AFTER: z.enum(['collapse', 'delete']).catch('delete'),
+  OWNER_POST_MARKER: z
+    .string()
+    .optional()
+    .transform((v) => v !== 'false'),
+  SYM_CLI_CONFIRM: z
+    .string()
+    .optional()
+    .transform((v) => /^(1|true|yes|on)$/i.test(v ?? '')),
+  SYM_TURN_DEADLINE_MS: z.coerce.number().int().nonnegative().catch(DEFAULT_TURN_DEADLINE_MS),
+  SYM_THREAD_HISTORY_LIMIT: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .catch(DEFAULT_THREAD_HISTORY_LIMIT),
+});
 
 export function loadAgentConfig(): AgentConfig {
   const connectors = loadConnectorConfigs();
+  const behavior = behaviorEnvSchema.parse(process.env);
   return {
     port: Number(process.env['AGENT_PORT'] ?? '3001'),
     slackSigningSecret: required('SLACK_SIGNING_SECRET'),
@@ -140,12 +151,12 @@ export function loadAgentConfig(): AgentConfig {
     fireworksModel: required('FIREWORKS_MODEL'),
     fireworksBaseUrl: process.env['FIREWORKS_BASE_URL'] ?? DEFAULT_FIREWORKS_BASE_URL,
     behavior: {
-      taskCardThreshold: posIntEnv('TASK_CARD_THRESHOLD', DEFAULT_TASK_CARD_THRESHOLD),
-      taskCardAfter: taskCardAfter(process.env['TASK_CARD_AFTER']),
-      ownerPostMarker: process.env['OWNER_POST_MARKER'] !== 'false',
-      cliConfirm: /^(1|true|yes|on)$/i.test(process.env['SYM_CLI_CONFIRM'] ?? ''),
-      turnDeadlineMs: posIntEnv('SYM_TURN_DEADLINE_MS', DEFAULT_TURN_DEADLINE_MS),
-      threadHistoryLimit: posIntEnv('SYM_THREAD_HISTORY_LIMIT', DEFAULT_THREAD_HISTORY_LIMIT),
+      taskCardThreshold: behavior.TASK_CARD_THRESHOLD,
+      taskCardAfter: behavior.TASK_CARD_AFTER,
+      ownerPostMarker: behavior.OWNER_POST_MARKER,
+      cliConfirm: behavior.SYM_CLI_CONFIRM,
+      turnDeadlineMs: behavior.SYM_TURN_DEADLINE_MS,
+      threadHistoryLimit: behavior.SYM_THREAD_HISTORY_LIMIT,
     },
     mcpServers: connectors.mcpServers,
     mcpConfigSource: connectors.source,

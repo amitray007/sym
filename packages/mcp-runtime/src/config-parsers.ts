@@ -9,6 +9,8 @@
  * cleanly at connect time (not yet wired); everything else is implemented.
  */
 
+import { z } from 'zod';
+
 import type {
   AuthConfig,
   ConnectorConfig,
@@ -17,391 +19,303 @@ import type {
   TransportConfig,
 } from './config-types.js';
 
+// ---------------------------------------------------------------------------
+// Zod schemas — mirror config-types.ts
+// ---------------------------------------------------------------------------
+
+const stringRecordSchema = z.record(z.string(), z.string());
+
+const stdioTransportSchema = z.object({
+  kind: z.literal('stdio'),
+  command: z
+    .string()
+    .min(1)
+    .transform((s) => s.trim()),
+  args: z.array(z.string()).optional(),
+  env: stringRecordSchema.optional(),
+});
+
+const httpTransportSchema = z.object({
+  kind: z.literal('http'),
+  url: z
+    .string()
+    .min(1)
+    .transform((s) => s.trim()),
+  headers: stringRecordSchema.optional(),
+});
+
+const transportSchema = z.discriminatedUnion('kind', [stdioTransportSchema, httpTransportSchema]);
+
+const envInjectionSchema = z.object({
+  at: z.literal('env'),
+  name: z
+    .string()
+    .min(1)
+    .transform((s) => s.trim()),
+  field: z.string().optional(),
+});
+
+const argvInjectionSchema = z.object({
+  at: z.literal('argv'),
+  template: z
+    .string()
+    .min(1)
+    .transform((s) => s.trim()),
+  field: z.string().optional(),
+});
+
+const headerInjectionSchema = z.object({
+  at: z.literal('header'),
+  name: z
+    .string()
+    .min(1)
+    .transform((s) => s.trim()),
+  valueTemplate: z.string(),
+});
+
+const fileInjectionSchema = z.object({
+  at: z.literal('file'),
+  path: z
+    .string()
+    .min(1)
+    .transform((s) => s.trim()),
+  pointerEnv: z.string().optional(),
+});
+
+const injectionSchema = z.discriminatedUnion('at', [
+  envInjectionSchema,
+  argvInjectionSchema,
+  headerInjectionSchema,
+  fileInjectionSchema,
+]);
+
+const secretMaterialSchema = z.union([z.string(), stringRecordSchema]);
+
+const staticAuthSchema = z.object({
+  kind: z.literal('static'),
+  secret: secretMaterialSchema.optional(),
+  secretRef: z.string().optional(),
+  inject: z.union([injectionSchema, z.array(injectionSchema)]),
+});
+
+const oauthAuthSchema = z.object({ kind: z.literal('oauth') });
+const ambientAuthSchema = z.object({ kind: z.literal('ambient') });
+
+const authSchema = z.discriminatedUnion('kind', [
+  staticAuthSchema,
+  oauthAuthSchema,
+  ambientAuthSchema,
+]);
+
+const prepareSchema = z.object({
+  command: z
+    .string()
+    .min(1)
+    .transform((s) => s.trim()),
+  args: z.array(z.string()).optional(),
+});
+
+const connectorEntrySchema = z.object({
+  name: z
+    .string()
+    .min(1)
+    .transform((s) => s.trim()),
+  transport: transportSchema,
+  auth: authSchema.optional(),
+  prepare: prepareSchema.optional(),
+  trust: z.boolean().optional(),
+  tools: z.object({ allow: z.array(z.string()).optional() }).optional(),
+});
+
+// ---------------------------------------------------------------------------
+// parseEntry — the public per-entry parser
+// ---------------------------------------------------------------------------
+
 export function parseEntry(entry: unknown, index: number): ConnectorConfig | null {
   if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
     console.warn(`[mcp] SYM_MCP_SERVERS[${index}] is not an object — skipping`);
     return null;
   }
 
+  // Quick pre-check for name (to keep the same per-field warning messages the
+  // tests may depend on, we still extract name early for labelling).
   const e = entry as Record<string, unknown>;
-
-  const name = e['name'];
-  if (typeof name !== 'string' || name.trim().length === 0) {
+  const rawName = e['name'];
+  if (typeof rawName !== 'string' || rawName.trim().length === 0) {
     console.warn(`[mcp] SYM_MCP_SERVERS[${index}] missing required 'name' string — skipping`);
     return null;
   }
-  const trimmedName = name.trim();
+  const name = rawName.trim();
 
-  // ---------------------------------------------------------------------------
-  // Transport (required) — a nested object with a 'kind' field.
-  // ---------------------------------------------------------------------------
-  const transportRaw = e['transport'];
-  if (transportRaw === undefined || transportRaw === null) {
+  // Quick pre-check for transport existence (to produce a better message than a
+  // generic Zod failure when transport is entirely absent).
+  if (e['transport'] === undefined || e['transport'] === null) {
     console.warn(
-      `[mcp] SYM_MCP_SERVERS[${index}] ('${trimmedName}') missing required 'transport' — skipping`,
+      `[mcp] SYM_MCP_SERVERS[${index}] ('${name}') missing required 'transport' — skipping`,
     );
     return null;
   }
 
-  const transport = parseTransport(transportRaw, index, trimmedName);
-  if (transport === null) return null;
-
-  // ---------------------------------------------------------------------------
-  // Auth (optional)
-  // ---------------------------------------------------------------------------
-  const authResult = parseAuth(e['auth'], index, trimmedName);
-  if (authResult === false) return null; // malformed
-  const auth = authResult ?? undefined; // null ⇒ absent ⇒ undefined
-
-  // ---------------------------------------------------------------------------
-  // Prepare (optional, C2.5 stub — just validate shape)
-  // ---------------------------------------------------------------------------
-  const prepareResult = parsePrepare(e['prepare'], index, trimmedName);
-  if (prepareResult === false) return null;
-  const prepare = prepareResult ?? undefined;
-
-  // ---------------------------------------------------------------------------
-  // trust
-  // ---------------------------------------------------------------------------
-  const trust = e['trust'];
-  if (trust !== undefined && typeof trust !== 'boolean') {
+  // Check for unsupported string transport (produce the same specific message).
+  if (typeof e['transport'] === 'string') {
     console.warn(
-      `[mcp] SYM_MCP_SERVERS[${index}] ('${trimmedName}') 'trust' must be a boolean — skipping`,
+      `[mcp] SYM_MCP_SERVERS[${index}] ('${name}') transport='${String(e['transport'])}' is not supported as a string — skipping (use { kind: 'stdio', command: '...' })`,
     );
     return null;
   }
 
-  // ---------------------------------------------------------------------------
-  // tools allowlist (optional)
-  // ---------------------------------------------------------------------------
-  const toolsResult = parseToolsAllowlist(e['tools'], index, trimmedName);
-  if (toolsResult === false) return null;
-  const tools = toolsResult ?? undefined;
+  // Check for unknown transport.kind before Zod so the warning is specific.
+  if (
+    e['transport'] !== null &&
+    typeof e['transport'] === 'object' &&
+    !Array.isArray(e['transport'])
+  ) {
+    const t = e['transport'] as Record<string, unknown>;
+    if (!('kind' in t)) {
+      console.warn(
+        `[mcp] SYM_MCP_SERVERS[${index}] ('${name}') 'transport' object missing required 'kind' field — skipping`,
+      );
+      return null;
+    }
+    const k = t['kind'];
+    if (k !== 'stdio' && k !== 'http') {
+      console.warn(
+        `[mcp] SYM_MCP_SERVERS[${index}] ('${name}') transport.kind='${String(k)}' is not supported — skipping`,
+      );
+      return null;
+    }
+    // Check auth.kind before Zod for a specific warning.
+    if (
+      e['auth'] !== undefined &&
+      e['auth'] !== null &&
+      typeof e['auth'] === 'object' &&
+      !Array.isArray(e['auth'])
+    ) {
+      const a = e['auth'] as Record<string, unknown>;
+      const authKind = a['kind'];
+      if (authKind !== 'static' && authKind !== 'oauth' && authKind !== 'ambient') {
+        console.warn(
+          `[mcp] SYM_MCP_SERVERS[${index}] ('${name}').auth kind='${String(authKind)}' is not recognised — skipping entry`,
+        );
+        return null;
+      }
+    }
+  }
 
+  const result = connectorEntrySchema.safeParse(entry);
+  if (!result.success) {
+    console.warn(
+      `[mcp] SYM_MCP_SERVERS[${index}] ('${name}') invalid config — skipping:`,
+      result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+    );
+    return null;
+  }
+
+  const parsed = result.data;
+
+  // trust: only set when true (undefined or false → absent in output, preserving
+  // the existing "not toHaveProperty('trust')" test assertions).
+  const trustField: { trust?: true } = parsed.trust === true ? { trust: true } : {};
+
+  // prepare: emit info log (preserve the existing behaviour in parsePrepare).
+  if (parsed.prepare !== undefined) {
+    console.info(
+      `[mcp] SYM_MCP_SERVERS[${index}] ('${name}').prepare found — 'prepare' execution is a C2.5 stub`,
+    );
+  }
+
+  // Build the typed ConnectorConfig.
   const config: ConnectorConfig = {
-    name: trimmedName,
-    transport,
-    ...(auth !== undefined ? { auth } : {}),
-    ...(prepare !== undefined ? { prepare } : {}),
-    ...(trust === true ? { trust: true } : {}),
-    ...(tools !== undefined ? { tools } : {}),
+    name: parsed.name,
+    transport: buildTransportConfig(parsed.transport),
+    ...(parsed.auth !== undefined ? { auth: buildAuthConfig(parsed.auth) } : {}),
+    ...(parsed.prepare !== undefined ? { prepare: buildPrepare(parsed.prepare) } : {}),
+    ...trustField,
+    ...(parsed.tools !== undefined
+      ? {
+          tools: parsed.tools.allow !== undefined ? { allow: parsed.tools.allow } : {},
+        }
+      : {}),
   };
   return config;
 }
 
-/**
- * Parse the `transport` field — a nested object `{ kind: 'stdio' | 'http', ... }`.
- *
- * Returns null if parsing fails (logged).
- */
-function parseTransport(raw: unknown, index: number, name: string): TransportConfig | null {
-  const label = `SYM_MCP_SERVERS[${index}] ('${name}')`;
+// ---------------------------------------------------------------------------
+// Helpers to convert Zod output → typed config shapes
+// ---------------------------------------------------------------------------
 
-  // New nested shape: { kind: 'stdio' | 'http', ... }
-  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
-    const t = raw as Record<string, unknown>;
-    const kind = t['kind'];
+type ZodTransport = z.infer<typeof transportSchema>;
+type ZodAuth = z.infer<typeof authSchema>;
+type ZodInjection = z.infer<typeof injectionSchema>;
+type ZodPrepare = z.infer<typeof prepareSchema>;
 
-    if (kind === 'stdio') {
-      return parseStdioTransport(t, label);
-    }
-
-    if (kind === 'http') {
-      const url = t['url'];
-      if (typeof url !== 'string' || url.trim().length === 0) {
-        console.warn(`[mcp] ${label} transport.kind='http' missing required 'url' — skipping`);
-        return null;
-      }
-      const headers = parseStringRecord(t['headers'], `${label}.transport.headers`);
-      if (headers === false) return null;
-      return {
-        kind: 'http',
-        url: url.trim(),
-        ...(headers !== null ? { headers } : {}),
-      };
-    }
-
-    if (kind !== undefined) {
-      console.warn(`[mcp] ${label} transport.kind='${String(kind)}' is not supported — skipping`);
-      return null;
-    }
-
-    // Object with no 'kind' — malformed.
-    console.warn(`[mcp] ${label} 'transport' object missing required 'kind' field — skipping`);
-    return null;
+function buildTransportConfig(t: ZodTransport): TransportConfig {
+  if (t.kind === 'stdio') {
+    return {
+      kind: 'stdio',
+      command: t.command,
+      ...(t.args !== undefined ? { args: t.args } : {}),
+      ...(t.env !== undefined ? { env: t.env } : {}),
+    };
   }
-
-  if (typeof raw === 'string') {
-    console.warn(
-      `[mcp] ${label} transport='${raw}' is not supported as a string — skipping (use { kind: 'stdio', command: '...' })`,
-    );
-    return null;
-  }
-
-  console.warn(`[mcp] ${label} 'transport' must be an object with a 'kind' field — skipping`);
-  return null;
-}
-
-function parseStdioTransport(t: Record<string, unknown>, label: string): TransportConfig | null {
-  const command = t['command'];
-  if (typeof command !== 'string' || command.trim().length === 0) {
-    console.warn(`[mcp] ${label} transport.kind='stdio' missing required 'command' — skipping`);
-    return null;
-  }
-
-  const args = parseStringArray(t['args'], `${label}.transport.args`);
-  if (args === false) return null;
-
-  const env = parseStringRecord(t['env'], `${label}.transport.env`);
-  if (env === false) return null;
-
+  // http
   return {
-    kind: 'stdio',
-    command: command.trim(),
-    ...(args !== null ? { args } : {}),
-    ...(env !== null ? { env } : {}),
+    kind: 'http',
+    url: t.url,
+    ...(t.headers !== undefined ? { headers: t.headers } : {}),
   };
 }
 
-/**
- * Parse auth. Returns the parsed AuthConfig, null (absent), or false (invalid).
- */
-function parseAuth(raw: unknown, index: number, name: string): AuthConfig | null | false {
-  if (raw === undefined || raw === null) return null;
-  const label = `SYM_MCP_SERVERS[${index}] ('${name}').auth`;
-
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    console.warn(`[mcp] ${label} must be an object — skipping entry`);
-    return false;
+function buildInjection(inj: ZodInjection): Injection {
+  switch (inj.at) {
+    case 'env':
+      return {
+        at: 'env',
+        name: inj.name,
+        ...(inj.field !== undefined ? { field: inj.field } : {}),
+      };
+    case 'argv':
+      return {
+        at: 'argv',
+        template: inj.template,
+        ...(inj.field !== undefined ? { field: inj.field } : {}),
+      };
+    case 'header':
+      return { at: 'header', name: inj.name, valueTemplate: inj.valueTemplate };
+    case 'file':
+      return {
+        at: 'file',
+        path: inj.path,
+        ...(inj.pointerEnv !== undefined ? { pointerEnv: inj.pointerEnv } : {}),
+      };
   }
-
-  const a = raw as Record<string, unknown>;
-  const kind = a['kind'];
-
-  if (kind === 'static') {
-    return parseStaticAuth(a, label);
-  }
-
-  if (kind === 'oauth') {
-    // OAuth is implemented (SdkOAuthAdapter + encrypted store).
-    return { kind: 'oauth' };
-  }
-
-  if (kind === 'ambient') {
-    // Wrapped CLI self-authenticates from disk (e.g. `gcloud auth login`).
-    // Sym injects nothing; relocate the CLI's config dir via transport.env if needed.
-    return { kind: 'ambient' };
-  }
-
-  console.warn(`[mcp] ${label} kind='${String(kind)}' is not recognised — skipping entry`);
-  return false;
 }
 
-function parseStaticAuth(a: Record<string, unknown>, label: string): AuthConfig | false {
-  // secret: string | Record<string,string> | absent
-  const secret = a['secret'];
-  if (secret !== undefined && secret !== null) {
-    if (typeof secret !== 'string' && (typeof secret !== 'object' || Array.isArray(secret))) {
-      console.warn(
-        `[mcp] ${label} 'secret' must be a string or Record<string,string> — skipping entry`,
-      );
-      return false;
-    }
-    if (typeof secret === 'object') {
-      // Validate all values are strings
-      if (!Object.values(secret as object).every((v) => typeof v === 'string')) {
-        console.warn(`[mcp] ${label} 'secret' record values must all be strings — skipping entry`);
-        return false;
-      }
-    }
-  }
+function buildAuthConfig(a: ZodAuth): AuthConfig {
+  if (a.kind === 'oauth') return { kind: 'oauth' };
+  if (a.kind === 'ambient') return { kind: 'ambient' };
 
-  const secretRef = a['secretRef'];
-  if (secretRef !== undefined && typeof secretRef !== 'string') {
-    console.warn(`[mcp] ${label} 'secretRef' must be a string — skipping entry`);
-    return false;
-  }
+  // static
+  const injectRaw = a.inject;
+  const injectArr: Injection[] = Array.isArray(injectRaw)
+    ? injectRaw.map((i) => buildInjection(i))
+    : [buildInjection(injectRaw)];
+  const inject: Injection | Injection[] = injectArr.length === 1 ? injectArr[0]! : injectArr;
 
-  // inject: one or many
-  const injectRaw = a['inject'];
-  if (injectRaw === undefined || injectRaw === null) {
-    console.warn(`[mcp] ${label} missing required 'inject' — skipping entry`);
-    return false;
-  }
-
-  const injectArr = Array.isArray(injectRaw) ? injectRaw : [injectRaw];
-  const injections: Injection[] = [];
-  for (const inj of injectArr) {
-    const parsed = parseInjection(inj, label);
-    if (parsed === null) return false;
-    injections.push(parsed);
-  }
-
-  const inject: Injection | Injection[] = injections.length === 1 ? injections[0]! : injections;
+  const secret: SecretMaterial | undefined =
+    a.secret !== undefined ? (a.secret as SecretMaterial) : undefined;
 
   return {
     kind: 'static',
-    ...(secret !== undefined && secret !== null ? { secret: secret as SecretMaterial } : {}),
-    ...(typeof secretRef === 'string' ? { secretRef } : {}),
+    ...(secret !== undefined ? { secret } : {}),
+    ...(typeof a.secretRef === 'string' ? { secretRef: a.secretRef } : {}),
     inject,
   };
 }
 
-function parseInjection(raw: unknown, label: string): Injection | null {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    console.warn(`[mcp] ${label} 'inject' entry must be an object — skipping entry`);
-    return null;
-  }
-
-  const i = raw as Record<string, unknown>;
-  const at = i['at'];
-
-  if (at === 'env') {
-    const envName = i['name'];
-    if (typeof envName !== 'string' || envName.trim().length === 0) {
-      console.warn(`[mcp] ${label} inject.at='env' missing required 'name' — skipping entry`);
-      return null;
-    }
-    const field = i['field'];
-    if (field !== undefined && typeof field !== 'string') {
-      console.warn(`[mcp] ${label} inject.at='env' 'field' must be a string — skipping entry`);
-      return null;
-    }
-    return {
-      at: 'env',
-      name: envName.trim(),
-      ...(typeof field === 'string' ? { field } : {}),
-    };
-  }
-
-  if (at === 'argv') {
-    const template = i['template'];
-    if (typeof template !== 'string' || template.trim().length === 0) {
-      console.warn(`[mcp] ${label} inject.at='argv' missing required 'template' — skipping entry`);
-      return null;
-    }
-    const field = i['field'];
-    if (field !== undefined && typeof field !== 'string') {
-      console.warn(`[mcp] ${label} inject.at='argv' 'field' must be a string — skipping entry`);
-      return null;
-    }
-    return {
-      at: 'argv',
-      template: template.trim(),
-      ...(typeof field === 'string' ? { field } : {}),
-    };
-  }
-
-  if (at === 'header') {
-    const headerName = i['name'];
-    const valueTemplate = i['valueTemplate'];
-    if (typeof headerName !== 'string' || headerName.trim().length === 0) {
-      console.warn(`[mcp] ${label} inject.at='header' missing required 'name' — skipping entry`);
-      return null;
-    }
-    if (typeof valueTemplate !== 'string') {
-      console.warn(
-        `[mcp] ${label} inject.at='header' missing required 'valueTemplate' — skipping entry`,
-      );
-      return null;
-    }
-    return { at: 'header', name: headerName.trim(), valueTemplate };
-  }
-
-  if (at === 'file') {
-    const path = i['path'];
-    if (typeof path !== 'string' || path.trim().length === 0) {
-      console.warn(`[mcp] ${label} inject.at='file' missing required 'path' — skipping entry`);
-      return null;
-    }
-    const pointerEnv = i['pointerEnv'];
-    if (pointerEnv !== undefined && typeof pointerEnv !== 'string') {
-      console.warn(
-        `[mcp] ${label} inject.at='file' 'pointerEnv' must be a string — skipping entry`,
-      );
-      return null;
-    }
-    return {
-      at: 'file',
-      path: path.trim(),
-      ...(typeof pointerEnv === 'string' ? { pointerEnv } : {}),
-    };
-  }
-
-  console.warn(`[mcp] ${label} inject.at='${String(at)}' is not recognised — skipping entry`);
-  return null;
-}
-
-function parsePrepare(
-  raw: unknown,
-  index: number,
-  name: string,
-): { command: string; args?: string[] } | null | false {
-  if (raw === undefined || raw === null) return null;
-  const label = `SYM_MCP_SERVERS[${index}] ('${name}').prepare`;
-
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    console.warn(`[mcp] ${label} must be an object — skipping entry`);
-    return false;
-  }
-
-  const p = raw as Record<string, unknown>;
-  const command = p['command'];
-  if (typeof command !== 'string' || command.trim().length === 0) {
-    console.warn(`[mcp] ${label} missing required 'command' — skipping entry`);
-    return false;
-  }
-
-  const args = parseStringArray(p['args'], `${label}.args`);
-  if (args === false) return false;
-
-  console.info(`[mcp] ${label} found — 'prepare' execution is a C2.5 stub`);
+function buildPrepare(p: ZodPrepare): { command: string; args?: string[] } {
   return {
-    command: command.trim(),
-    ...(args !== null ? { args } : {}),
+    command: p.command,
+    ...(p.args !== undefined ? { args: p.args } : {}),
   };
-}
-
-function parseToolsAllowlist(
-  raw: unknown,
-  index: number,
-  name: string,
-): { allow?: string[] } | null | false {
-  if (raw === undefined || raw === null) return null;
-  const label = `SYM_MCP_SERVERS[${index}] ('${name}').tools`;
-
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    console.warn(`[mcp] ${label} must be an object — skipping entry`);
-    return false;
-  }
-
-  const t = raw as Record<string, unknown>;
-  const allow = parseStringArray(t['allow'], `${label}.allow`);
-  if (allow === false) return false;
-
-  return { ...(allow !== null ? { allow } : {}) };
-}
-
-/** Returns the array, null (absent/undefined), or false (present but invalid). */
-function parseStringArray(raw: unknown, label: string): string[] | null | false {
-  if (raw === undefined || raw === null) return null;
-  if (!Array.isArray(raw) || raw.some((v) => typeof v !== 'string')) {
-    console.warn(`[mcp] ${label} must be an array of strings — skipping entry`);
-    return false;
-  }
-  return raw as string[];
-}
-
-/** Returns the record, null (absent/undefined), or false (present but invalid). */
-function parseStringRecord(raw: unknown, label: string): Record<string, string> | null | false {
-  if (raw === undefined || raw === null) return null;
-  if (
-    typeof raw !== 'object' ||
-    Array.isArray(raw) ||
-    !Object.values(raw as object).every((v) => typeof v === 'string')
-  ) {
-    console.warn(`[mcp] ${label} must be a Record<string,string> — skipping entry`);
-    return false;
-  }
-  return raw as Record<string, string>;
 }
