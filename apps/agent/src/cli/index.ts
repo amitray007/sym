@@ -23,8 +23,9 @@
 import { argv } from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import { configPath } from '@sym/mcp-runtime';
+
 import { applyReload } from './admin-client.js';
-import { configPath } from '../mcp/source.js';
 import { connectorCommand } from './commands/connector.js';
 import { printReload } from './commands/render.js';
 import { secretCommand } from './commands/secret.js';

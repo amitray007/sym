@@ -10,7 +10,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",
     "lint": "eslint .",
     "test": "vitest run",
@@ -18,7 +18,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "sym": "tsx src/cli/index.ts",
-    "qa:mcp": "tsc -p tsconfig.json && node scripts/qa-connector.mjs",
+    "qa:mcp": "pnpm --filter @sym/mcp-runtime build && tsc -p tsconfig.json && node scripts/qa-connector.mjs",
     "qa:delete": "tsc -p tsconfig.json && node scripts/qa-delete.mjs"
   },
   "dependencies": {
@@ -29,6 +29,7 @@
     "@sym/adapter-slack": "workspace:*",
     "@sym/contracts": "workspace:*",
     "@sym/kernel": "workspace:*",
+    "@sym/mcp-runtime": "workspace:*",
     "dotenv": "^16.4.7",
     "hono": "^4.6.14",
     "ink": "^5.1.0",

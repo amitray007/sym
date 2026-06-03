@@ -13,17 +13,18 @@ import * as nodeUrl from 'node:url';
 import { serve } from '@hono/node-server';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { _resetPoolForTesting } from '@sym/mcp-runtime';
+
 import {
   applyReload,
   fetchConnectors,
   fetchConnectorTools,
   testConnector,
 } from '../src/cli/admin-client.js';
-import { _resetPoolForTesting } from '../src/mcp/dispatcher.js';
 import { createServer } from '../src/server.js';
 
 import type { AgentConfig } from '../src/config.js';
-import type { ConnectorConfig } from '../src/mcp/config.js';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 import type { Server } from 'node:http';
 
 const FIXTURE_PATH = nodePath.resolve(

@@ -17,9 +17,8 @@ import {
   _resetPoolForTesting,
   getActiveConfigs,
   reconcileConnectors,
-} from '../src/mcp/dispatcher.js';
+} from '@sym/mcp-runtime';
 
-import type { ConnectorConfig } from '../src/mcp/config.js';
 import type {
   ConversationId,
   JsonObject,
@@ -29,6 +28,7 @@ import type {
   TurnId,
   WorkspaceId,
 } from '@sym/contracts';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 
 const FIXTURE_PATH = nodePath.resolve(
   nodePath.dirname(nodeUrl.fileURLToPath(import.meta.url)),

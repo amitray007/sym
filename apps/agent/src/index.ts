@@ -12,8 +12,9 @@ import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { config as loadDotenv } from 'dotenv';
 
+import { configPath, initMcpPool, McpDispatcher } from '@sym/mcp-runtime';
+
 import { loadAgentConfig } from './config.js';
-import { configPath, initMcpPool, McpDispatcher } from './mcp/index.js';
 import { cliConnectorsSummary } from './run-cli.js';
 import { createServer } from './server.js';
 

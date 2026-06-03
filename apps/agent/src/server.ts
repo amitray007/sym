@@ -11,6 +11,16 @@ import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono } from 'hono';
 
 import { verifySlackSignature } from '@sym/adapter-slack';
+import {
+  completeOAuth,
+  getActiveConfigs,
+  getConnectorTools,
+  listConnectorDetails,
+  loadConnectorConfigs,
+  McpDispatcher,
+  reconcileConnectors,
+  testConnector,
+} from '@sym/mcp-runtime';
 
 import { createAssistantContextStore } from './assistant-context.js';
 import {
@@ -19,16 +29,6 @@ import {
   processInteractivity,
   processSlashCommand,
 } from './event-router.js';
-import {
-  getActiveConfigs,
-  getConnectorTools,
-  listConnectorDetails,
-  McpDispatcher,
-  reconcileConnectors,
-  testConnector,
-} from './mcp/index.js';
-import { completeOAuth } from './mcp/oauth-registry.js';
-import { loadConnectorConfigs } from './mcp/source.js';
 import { formatDeniedAttempt } from './owner-gate.js';
 import { cliConnectorsSummary } from './run-cli.js';
 import {

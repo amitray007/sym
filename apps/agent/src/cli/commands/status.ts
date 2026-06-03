@@ -2,7 +2,8 @@
  * `sym status` — agent reachability + every connector's health + tool counts.
  */
 
-import { configPath } from '../../mcp/source.js';
+import { configPath } from '@sym/mcp-runtime';
+
 import { isCliWildcard, resolveCliConnectors } from '../../run-cli.js';
 import { fetchConnectors, type ConnectorDetail } from '../admin-client.js';
 import { cliConnectorLines, offlineDetails, renderConnectorTable } from './render.js';

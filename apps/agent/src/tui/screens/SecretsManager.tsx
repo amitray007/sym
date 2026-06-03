@@ -17,14 +17,15 @@ import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import { useEffect, useRef, useState } from 'react';
 
+import { configPath } from '@sym/mcp-runtime';
+
 import { loadConfigFile } from '../../cli/config-store.js';
 import { listSecrets, removeSecret, setSecret } from '../../cli/secrets.js';
-import { configPath } from '../../mcp/source.js';
 import { Footer, Frame, Table, type Cell } from '../ui/components.js';
 import { COLORS } from '../ui/theme.js';
 
-import type { SecretRef } from '../../mcp/store.js';
 import type { ScreenProps } from '../types.js';
+import type { SecretRef } from '@sym/mcp-runtime';
 
 // ---------------------------------------------------------------------------
 // Column layout

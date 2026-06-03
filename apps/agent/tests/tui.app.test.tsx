@@ -8,6 +8,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { App } from '../src/tui/app.js';
 
+import type * as McpRuntime from '@sym/mcp-runtime';
+
 vi.mock('../src/cli/admin-client.js', () => ({
   fetchConnectors: vi.fn().mockResolvedValue([]),
   fetchConnectorTools: vi.fn().mockResolvedValue([]),
@@ -20,10 +22,9 @@ vi.mock('../src/cli/config-store.js', () => ({
   writeConfigFile: vi.fn(),
   removeConnector: vi.fn((c) => ({ next: c, removed: false })),
 }));
-vi.mock('../src/mcp/source.js', () => ({
+vi.mock('@sym/mcp-runtime', async (importOriginal) => ({
+  ...(await importOriginal<typeof McpRuntime>()),
   configPath: () => '/tmp/x.json',
-  loadCliAllow: () => undefined,
-  loadCliDescribe: () => ({}),
 }));
 
 const ESC = String.fromCharCode(27);

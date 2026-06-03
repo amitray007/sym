@@ -7,6 +7,8 @@
 import { Box, Text, useInput } from 'ink';
 import { useEffect, useState } from 'react';
 
+import { configPath } from '@sym/mcp-runtime';
+
 import {
   applyReload,
   fetchConnectors,
@@ -14,14 +16,13 @@ import {
   testConnector,
 } from '../../cli/admin-client.js';
 import { loadConfigFile, removeConnector, writeConfigFile } from '../../cli/config-store.js';
-import { configPath } from '../../mcp/source.js';
 import { Footer, Frame, Header, Table } from '../ui/components.js';
 import { COLORS, healthGlyph } from '../ui/theme.js';
 
 import type { ConnectorDetail, ToolInfo } from '../../cli/admin-client.js';
-import type { ConnectorConfig } from '../../mcp/config.js';
 import type { DetailProps } from '../types.js';
 import type { Cell } from '../ui/components.js';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 
 const TOOL_COLUMNS = [
   { header: 'NAME', width: 24 },

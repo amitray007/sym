@@ -15,8 +15,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { ToolRegistry } from '@sym/kernel';
+import { CompositeDispatcher } from '@sym/mcp-runtime';
 
-import { CompositeDispatcher } from '../src/mcp/composite.js';
 import { bridgeTools } from '../src/pi/tools.js';
 
 import type {

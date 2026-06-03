@@ -24,9 +24,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { parseConnectorArray } from '../mcp/config.js';
+import { parseConnectorArray } from '@sym/mcp-runtime';
 
-import type { ConnectorConfig } from '../mcp/config.js';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 
 // ---------------------------------------------------------------------------
 // Public types

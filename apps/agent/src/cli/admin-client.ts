@@ -15,7 +15,7 @@ import type {
   ConnectorTestResult,
   ReconcileResult,
   ToolInfo,
-} from '../mcp/index.js';
+} from '@sym/mcp-runtime';
 
 // Re-export so callers can import these types from here.
 export type { ConnectorStatus, ConnectorDetail, ToolInfo, ConnectorTestResult };

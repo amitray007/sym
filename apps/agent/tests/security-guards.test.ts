@@ -27,19 +27,18 @@ import {
   MCP_TOOL_SEPARATOR,
   _resetPoolForTesting,
   initMcpPool,
-} from '../src/mcp/dispatcher.js';
-import { validateMcpHttpUrl } from '../src/mcp/inject.js';
-import {
+  validateMcpHttpUrl,
   completeOAuth,
   generateState,
   registerPendingAuth,
   _resetRegistryForTesting,
-} from '../src/mcp/oauth-registry.js';
+} from '@sym/mcp-runtime';
+
 import { isBlockedAddress } from '../src/safe-fetch.js';
 import { isSlackResponseUrl, postToResponseUrl } from '../src/server-utils.js';
 
-import type { ConnectorConfig } from '../src/mcp/config.js';
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 
 // ---------------------------------------------------------------------------
 // 1. response_url allow-listing

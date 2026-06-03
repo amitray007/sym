@@ -6,7 +6,8 @@
  * here, consumed by every command surface.
  */
 
-import { configPath } from '../../mcp/source.js';
+import { configPath } from '@sym/mcp-runtime';
+
 import { isCliWildcard, resolveCliConnectors } from '../../run-cli.js';
 import { loadConfigFile } from '../config-store.js';
 

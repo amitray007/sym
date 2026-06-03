@@ -28,17 +28,18 @@
 import { Box, Text, useInput } from 'ink';
 import { useRef, useState } from 'react';
 
+import { configPath } from '@sym/mcp-runtime';
+
 import { DEFAULT_STATE, buildConnectorFromForm } from './builder-state.js';
 import { StepContent } from './BuilderStepContent.js';
 import { applyReload } from '../../cli/admin-client.js';
 import { loadConfigFile, upsertConnector, writeConfigFile } from '../../cli/config-store.js';
-import { configPath } from '../../mcp/source.js';
 import { Frame } from '../ui/components.js';
 import { COLORS } from '../ui/theme.js';
 
-import type { ConnectorConfig } from '../../mcp/config.js';
 import type { FormProps } from '../types.js';
 import type { BuilderState, Step } from './builder-state.js';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 
 // Re-export public surface consumed by tests
 export { buildConnectorFromForm } from './builder-state.js';

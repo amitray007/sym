@@ -12,10 +12,10 @@ import { WebApiSlackClient } from '@sym/adapter-slack';
 import { NameResolver } from './name-resolver.js';
 
 import type { AgentConfig } from './config.js';
-import type { ConnectorConfig } from './mcp/config.js';
 import type { SlackClient } from '@sym/adapter-slack';
 import type { SlackUserId, WorkspaceId } from '@sym/contracts';
 import type { OwnerIdentity } from '@sym/kernel';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 
 /** Everything a turn needs, resolved once from env config (single-tenant). */
 export interface WorkspaceContext {

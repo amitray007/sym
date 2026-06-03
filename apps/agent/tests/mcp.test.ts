@@ -33,21 +33,22 @@ import { Client as MockClient } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport as MockStdioTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CompositeDispatcher } from '../src/mcp/composite.js';
-import { parseMcpServers } from '../src/mcp/config.js';
 import {
+  CompositeDispatcher,
+  parseMcpServers,
   McpDispatcher,
   MCP_TOOL_SEPARATOR,
   _resetPoolForTesting,
   initMcpPool,
   parseConnectTimeoutMs,
-} from '../src/mcp/dispatcher.js';
-import { buildTransport } from '../src/mcp/inject.js';
-import { Materializer, _getActiveDirsForTesting } from '../src/mcp/materialize.js';
-import { makeProvider, NotImplementedError } from '../src/mcp/providers/provider.js';
-import { StaticProvider } from '../src/mcp/providers/static.js';
+  buildTransport,
+  Materializer,
+  _getActiveDirsForTesting,
+  makeProvider,
+  NotImplementedError,
+  StaticProvider,
+} from '@sym/mcp-runtime';
 
-import type { ConnectorConfig, Injection, SecretMaterial } from '../src/mcp/config.js';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type {
   ConversationId,
@@ -62,6 +63,7 @@ import type {
   TurnId,
   WorkspaceId,
 } from '@sym/contracts';
+import type { ConnectorConfig, Injection, SecretMaterial } from '@sym/mcp-runtime';
 
 // ---------------------------------------------------------------------------
 // Helpers

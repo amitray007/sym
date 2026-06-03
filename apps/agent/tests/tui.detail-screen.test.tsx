@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DetailScreen } from '../src/tui/screens/DetailScreen.js';
 
+import type * as McpRuntime from '@sym/mcp-runtime';
+
 vi.mock('../src/cli/admin-client.js', () => ({
   fetchConnectors: vi.fn(),
   fetchConnectorTools: vi.fn(),
@@ -29,7 +31,10 @@ vi.mock('../src/cli/config-store.js', () => ({
   removeConnector: vi.fn((cfg: unknown, _name: string) => ({ next: cfg, removed: true })),
   writeConfigFile: vi.fn(),
 }));
-vi.mock('../src/mcp/source.js', () => ({ configPath: () => '/tmp/x.json' }));
+vi.mock('@sym/mcp-runtime', async (importOriginal) => ({
+  ...(await importOriginal<typeof McpRuntime>()),
+  configPath: () => '/tmp/x.json',
+}));
 
 import {
   applyReload,

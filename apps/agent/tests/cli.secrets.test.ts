@@ -7,8 +7,9 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { SqliteCredentialStore } from '@sym/mcp-runtime';
+
 import { listSecrets, removeSecret, setSecret } from '../src/cli/secrets.js';
-import { SqliteCredentialStore } from '../src/mcp/store.js';
 
 // ---------------------------------------------------------------------------
 // Test fixtures

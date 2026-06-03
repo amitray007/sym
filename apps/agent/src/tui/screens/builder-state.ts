@@ -3,7 +3,7 @@
  * No JSX. Imported by BuilderScreen.tsx and by unit tests.
  */
 
-import type { AuthConfig, ConnectorConfig, Injection, TransportConfig } from '../../mcp/config.js';
+import type { AuthConfig, ConnectorConfig, Injection, TransportConfig } from '@sym/mcp-runtime';
 
 // ---------------------------------------------------------------------------
 // BuilderState — the accumulator filled across steps

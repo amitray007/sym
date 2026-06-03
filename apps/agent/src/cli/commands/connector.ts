@@ -13,8 +13,8 @@
 
 import { parseArgs } from 'node:util';
 
-import { loadCliDescribe } from '../../mcp/cli-config.js';
-import { configPath } from '../../mcp/source.js';
+import { loadCliDescribe, configPath } from '@sym/mcp-runtime';
+
 import {
   isCliWildcard,
   resolveAllowlist,
@@ -34,7 +34,7 @@ import {
 import { healthWord, printReload } from './render.js';
 import { showCommand } from './tools.js';
 
-import type { ConnectorConfig, TransportConfig } from '../../mcp/config.js';
+import type { ConnectorConfig, TransportConfig } from '@sym/mcp-runtime';
 
 export async function connectorCommand(args: string[], json: boolean): Promise<number> {
   const verb = args[0];

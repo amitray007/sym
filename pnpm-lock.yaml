@@ -95,6 +95,9 @@ importers:
       '@sym/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@sym/mcp-runtime':
+        specifier: workspace:*
+        version: link:../../packages/mcp-runtime
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
@@ -152,6 +155,15 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
+
+  packages/mcp-runtime:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@4.4.3)
+      '@sym/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
 packages:
 

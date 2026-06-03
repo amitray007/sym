@@ -29,25 +29,25 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { McpDispatcher, _resetPoolForTesting, initMcpPool } from '../src/mcp/dispatcher.js';
 import {
+  McpDispatcher,
+  _resetPoolForTesting,
+  initMcpPool,
   completeOAuth,
   getPendingAuth,
   _resetRegistryForTesting,
-} from '../src/mcp/oauth-registry.js';
-import { makeOAuthProvider } from '../src/mcp/providers/oauth.js';
-import {
+  makeOAuthProvider,
   SqliteCredentialStore,
   parseEncryptionKey,
   _resetStoreForTesting,
-} from '../src/mcp/store.js';
+} from '@sym/mcp-runtime';
 
-import type { ConnectorConfig } from '../src/mcp/config.js';
 import type { StreamableHTTPServerTransportOptions } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type {
   OAuthClientInformationFull,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 import type { Socket } from 'node:net';
 
 // ---------------------------------------------------------------------------

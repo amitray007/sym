@@ -12,9 +12,9 @@
  * in-memory store; production callers pass nothing and rely on `openStore()`.
  */
 
-import { SqliteCredentialStore } from '../mcp/store.js';
+import { SqliteCredentialStore } from '@sym/mcp-runtime';
 
-import type { CredentialStore, SecretRef } from '../mcp/store.js';
+import type { CredentialStore, SecretRef } from '@sym/mcp-runtime';
 
 // ---------------------------------------------------------------------------
 // Internal store factory

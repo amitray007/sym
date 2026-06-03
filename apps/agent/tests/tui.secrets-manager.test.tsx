@@ -6,6 +6,8 @@
 import { render } from 'ink-testing-library';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type * as McpRuntime from '@sym/mcp-runtime';
+
 vi.mock('../src/cli/secrets.js', () => ({
   listSecrets: vi.fn(() => [{ connector: 'sentry', field: 'SENTRY_AUTH_TOKEN' }]),
   setSecret: vi.fn(),
@@ -17,7 +19,10 @@ vi.mock('../src/cli/config-store.js', () => ({
     mcpServers: [{ name: 'sentry', transport: { kind: 'stdio', command: 'x' } }],
   })),
 }));
-vi.mock('../src/mcp/source.js', () => ({ configPath: () => '/tmp/x.json' }));
+vi.mock('@sym/mcp-runtime', async (importOriginal) => ({
+  ...(await importOriginal<typeof McpRuntime>()),
+  configPath: () => '/tmp/x.json',
+}));
 
 import { listSecrets, removeSecret, setSecret } from '../src/cli/secrets.js';
 import { SecretsManager } from '../src/tui/screens/SecretsManager.js';

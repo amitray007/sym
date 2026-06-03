@@ -8,9 +8,10 @@
 import { Box, Text, useInput } from 'ink';
 import { useEffect, useState } from 'react';
 
+import { configPath } from '@sym/mcp-runtime';
+
 import { applyReload, fetchConnectors, testConnector } from '../../cli/admin-client.js';
 import { loadConfigFile } from '../../cli/config-store.js';
-import { configPath } from '../../mcp/source.js';
 import { isCliWildcard, resolveCliConnectors } from '../../run-cli.js';
 import { Footer, Frame, Header, Table, type Cell } from '../ui/components.js';
 import { COLORS, healthGlyph } from '../ui/theme.js';

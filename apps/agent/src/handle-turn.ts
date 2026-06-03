@@ -11,10 +11,15 @@
 
 import { markdownBlocks, receiptToContextBlock, receiptToFooterFields } from '@sym/adapter-slack';
 import { ToolRegistry } from '@sym/kernel';
+import {
+  CompositeDispatcher,
+  McpDispatcher,
+  initMcpPool,
+  getActiveConfigs,
+} from '@sym/mcp-runtime';
 
 import { createBuiltinDispatcher } from './builtin-tools.js';
 import { logCtx } from './log.js';
-import { CompositeDispatcher, McpDispatcher, initMcpPool, getActiveConfigs } from './mcp/index.js';
 import { PlanController } from './plan-controller.js';
 import { clipNotif, finalReplyBody, heroRenderParts } from './reply-finalize.js';
 import { runTurnLoop } from './run-turn-loop.js';
@@ -22,11 +27,11 @@ import { streamReply } from './stream-reply.js';
 import { loadTurnHistory, loadViewedChannelContext } from './turn-context.js';
 
 import type { BehaviorConfig } from './config.js';
-import type { ConnectorConfig } from './mcp/index.js';
 import type { NameResolver } from './name-resolver.js';
 import type { SlackBlock, SlackClient } from '@sym/adapter-slack';
 import type { ChatMessage, SlackChannelId, SlackThreadTs, SlackUserId, Turn } from '@sym/contracts';
 import type { OwnerIdentity } from '@sym/kernel';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 
 /** Injected dependencies for processing a turn (the testable seam). */
 export interface HandleTurnDeps {

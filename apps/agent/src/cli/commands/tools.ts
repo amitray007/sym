@@ -4,7 +4,8 @@
  * context, so they emit dense, complete data.
  */
 
-import { configPath } from '../../mcp/source.js';
+import { configPath } from '@sym/mcp-runtime';
+
 import { isCliWildcard, resolveCliConnectors } from '../../run-cli.js';
 import {
   fetchConnectors,

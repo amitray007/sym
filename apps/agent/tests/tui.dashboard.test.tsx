@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Dashboard } from '../src/tui/screens/Dashboard.js';
 
+import type * as McpRuntime from '@sym/mcp-runtime';
+
 vi.mock('../src/cli/admin-client.js', () => ({
   fetchConnectors: vi.fn(),
   applyReload: vi.fn(),
@@ -16,10 +18,9 @@ vi.mock('../src/cli/admin-client.js', () => ({
 vi.mock('../src/cli/config-store.js', () => ({
   loadConfigFile: vi.fn(() => ({ version: 1, mcpServers: [] })),
 }));
-vi.mock('../src/mcp/source.js', () => ({
+vi.mock('@sym/mcp-runtime', async (importOriginal) => ({
+  ...(await importOriginal<typeof McpRuntime>()),
   configPath: () => '/tmp/x.json',
-  loadCliAllow: () => undefined,
-  loadCliDescribe: () => ({}),
 }));
 
 import { applyReload, fetchConnectors, testConnector } from '../src/cli/admin-client.js';

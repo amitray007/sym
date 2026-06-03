@@ -28,10 +28,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { McpDispatcher, _resetPoolForTesting, initMcpPool } from '../src/mcp/dispatcher.js';
-import { buildTransport } from '../src/mcp/inject.js';
+import { McpDispatcher, _resetPoolForTesting, initMcpPool, buildTransport } from '@sym/mcp-runtime';
 
-import type { ConnectorConfig } from '../src/mcp/config.js';
 import type { StreamableHTTPServerTransportOptions } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type {
   ConversationId,
@@ -43,6 +41,7 @@ import type {
   TurnId,
   WorkspaceId,
 } from '@sym/contracts';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 import type { Socket } from 'node:net';
 
 // ---------------------------------------------------------------------------

@@ -18,8 +18,9 @@
  * `__` name to the MCP dispatcher — so no extra wiring.
  */
 
+import { MCP_TOOL_SEPARATOR } from '@sym/mcp-runtime';
+
 import { passthroughArgs } from './tools.js';
-import { MCP_TOOL_SEPARATOR } from '../mcp/dispatcher.js';
 
 import type { CliCapability } from '../run-cli.js';
 import type { RenderSink } from './tools.js';

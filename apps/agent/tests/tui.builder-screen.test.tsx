@@ -11,6 +11,8 @@
 import { render } from 'ink-testing-library';
 import { describe, expect, it, vi } from 'vitest';
 
+import type * as McpRuntime from '@sym/mcp-runtime';
+
 // ---------------------------------------------------------------------------
 // Mocks — must come before component import
 // ---------------------------------------------------------------------------
@@ -33,7 +35,8 @@ vi.mock('../src/cli/admin-client.js', () => ({
   }),
 }));
 
-vi.mock('../src/mcp/source.js', () => ({
+vi.mock('@sym/mcp-runtime', async (importOriginal) => ({
+  ...(await importOriginal<typeof McpRuntime>()),
   configPath: () => '/tmp/sym.json',
 }));
 

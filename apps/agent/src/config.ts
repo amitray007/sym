@@ -4,10 +4,9 @@
  * one owner, one model provider. No secrets are logged.
  */
 
-import { loadConnectorConfigs } from './mcp/source.js';
+import { loadConnectorConfigs } from '@sym/mcp-runtime';
 
-import type { ConnectorConfig } from './mcp/config.js';
-import type { ConfigSource } from './mcp/source.js';
+import type { ConnectorConfig, ConfigSource } from '@sym/mcp-runtime';
 /** Runtime behavior knobs — all optional, all have safe defaults. */
 export interface BehaviorConfig {
   /**
