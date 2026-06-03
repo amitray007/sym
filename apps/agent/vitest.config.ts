@@ -16,9 +16,15 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       include: ['src/**/*.{ts,tsx}'],
-      // Threshold ENFORCEMENT is deferred to C24 (promote quality gates) once C09
-      // fills the highest-risk gaps. For now coverage is reported, not enforced,
-      // so the blind spots become visible without breaking a green build.
+      // Regression floor — set a few points below current coverage (lines ~78%,
+      // branches ~83%, funcs ~84%) so a real drop fails CI, while small untested
+      // additions don't immediately break a green build. Raise as coverage climbs.
+      thresholds: {
+        lines: 75,
+        statements: 75,
+        branches: 78,
+        functions: 80,
+      },
     },
   },
 });
