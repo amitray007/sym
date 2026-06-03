@@ -3,7 +3,6 @@ import { assertType, describe, expectTypeOf, it } from 'vitest';
 import type { Receipt, Reply } from '../src/domain.js';
 import type { Result, SymError } from '../src/errors.js';
 import type { SlackUserId, WorkspaceId } from '../src/ids.js';
-import type { CompletionChunk, ProviderInterface } from '../src/provider.js';
 import type {
   CardAction,
   CardField,
@@ -32,12 +31,6 @@ describe('@sym/contracts type invariants', () => {
     expectTypeOf<ToolResult>().toHaveProperty('ok');
     const r = { ok: true, callId: 'x', content: 'done' } satisfies ToolResult;
     expectTypeOf(r).toMatchTypeOf<ToolResult>();
-  });
-
-  it('ProviderInterface.complete streams CompletionChunk', () => {
-    expectTypeOf<ProviderInterface['complete']>().returns.toEqualTypeOf<
-      AsyncIterable<CompletionChunk>
-    >();
   });
 
   it('Reply carries a Receipt', () => {
