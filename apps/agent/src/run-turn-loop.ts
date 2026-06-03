@@ -12,6 +12,7 @@
 import { runLoopPi } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
+import { recordGenAiUsage, withSpan } from './telemetry.js';
 
 import type { HandleTurnDeps } from './handle-turn.js';
 import type { ChatMessage, Reply, Turn } from '@sym/contracts';
@@ -69,21 +70,38 @@ export async function runTurnLoop(
         : AbortSignal.timeout(deadlineMs)
       : signal;
 
-  return runLoopPi(
-    turn,
-    { baseUrl: deps.fireworks.baseUrl, apiKey: deps.fireworks.apiKey, model },
-    registry,
+  // Wrap the model loop in a `gen_ai.chat` span (no-op unless an OTel SDK is
+  // registered — see ./telemetry). Token usage is recorded from the receipt.
+  return withSpan(
+    'gen_ai.chat',
     {
-      history,
-      slackClient: deps.slackClient,
-      thinkingLevel,
-      ...(deps.behavior.cliConfirm === true ? { cliConfirm: true } : {}),
-      ...(onDelta !== undefined ? { onDelta } : {}),
-      ...(onStatus !== undefined ? { onStatus } : {}),
-      ...(onToolStart !== undefined ? { onToolStart } : {}),
-      ...(onToolEnd !== undefined ? { onToolEnd } : {}),
-      ...(deps.ownerProfile !== undefined ? { ownerProfile: deps.ownerProfile } : {}),
-      ...(turnSignal !== undefined ? { signal: turnSignal } : {}),
+      'gen_ai.system': 'fireworks',
+      'gen_ai.operation.name': 'chat',
+      'gen_ai.request.model': deps.model,
+      'gen_ai.request.reasoning_effort': thinkingLevel,
+      'app.turn.id': turn.id,
+      'app.turn.surface': turn.entrySurface,
+    },
+    async () => {
+      const reply = await runLoopPi(
+        turn,
+        { baseUrl: deps.fireworks.baseUrl, apiKey: deps.fireworks.apiKey, model },
+        registry,
+        {
+          history,
+          slackClient: deps.slackClient,
+          thinkingLevel,
+          ...(deps.behavior.cliConfirm === true ? { cliConfirm: true } : {}),
+          ...(onDelta !== undefined ? { onDelta } : {}),
+          ...(onStatus !== undefined ? { onStatus } : {}),
+          ...(onToolStart !== undefined ? { onToolStart } : {}),
+          ...(onToolEnd !== undefined ? { onToolEnd } : {}),
+          ...(deps.ownerProfile !== undefined ? { ownerProfile: deps.ownerProfile } : {}),
+          ...(turnSignal !== undefined ? { signal: turnSignal } : {}),
+        },
+      );
+      recordGenAiUsage(reply.receipt.usage);
+      return reply;
     },
   );
 }

@@ -52,3 +52,21 @@ variable. This page is the canonical reference, grouped by concern.
 | `OWNER_POST_MARKER`        | `true`   | Append `_(via Sym)_` footer on `post_as_owner` messages                                        |
 | `SYM_TURN_DEADLINE_MS`     | `60000`  | Per-turn deadline (ms); a stuck model is aborted and returns a partial reply. `0` disables     |
 | `SYM_THREAD_HISTORY_LIMIT` | `80`     | Max threaded history messages per turn; keeps the most-recent N (tail-slice). `0` disables cap |
+
+## Observability (optional)
+
+Sym instruments its model calls with OpenTelemetry (`@opentelemetry/api`, the
+`gen_ai.*` conventions) — **no-op by default**, zero overhead unless you register
+an SDK. To collect traces, run the agent under a standard OTel SDK pointed at a
+collector:
+
+```sh
+npm i @opentelemetry/auto-instrumentations-node
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318 \
+OTEL_SERVICE_NAME=sym \
+node --import @opentelemetry/auto-instrumentations-node/register dist/index.js
+```
+
+The inbound Slack request is auto-traced; Sym's `gen_ai.chat` span nests beneath
+it with the model id, reasoning effort, and token usage. The `OTEL_*` variables
+are read by the OpenTelemetry SDK, not Sym directly.
