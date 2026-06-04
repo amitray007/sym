@@ -18,8 +18,8 @@ A signed Slack event arrives, passes an owner gate, the full thread history is
 fetched as context, the Pi agent loop calls a Fireworks-hosted LLM, and the
 reply streams back into the thread. No database, no sessions, no state.
 
-**Control tier** — intentional local state. An operator TUI (Ink/React terminal
-dashboard) and `sym` CLI let you manage MCP connectors and their OAuth tokens,
+**Control tier** — intentional local state. A `sym` CLI — with a simple
+interactive menu — lets you manage MCP connectors and their OAuth tokens,
 stored in an AES-256-GCM-encrypted SQLite credential database. This is
 Sym's primary extension surface: wire in any MCP server and its tools become
 available to the agent in every conversation.

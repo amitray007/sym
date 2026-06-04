@@ -41,7 +41,7 @@ A "connector" is anything Sym reaches the outside world with: an MCP connector
 (structured tools, used via find_tools → call_tool) OR a CLI (used via run_cli).
 One surface manages both.
 
-  sym  /  sym menu                              interactive menu (TUI)
+  sym  /  sym menu                              interactive menu
 
 Inspect (add --json for machine/agent-parseable output):
   sym status                                   agent health + every connector + tool counts
@@ -55,6 +55,7 @@ Manage:
   sym connector add --spec '<ConnectorConfig>' add an MCP connector (full generic shape)
   sym connector add --cli <bin> --desc "…"     add a CLI connector (allow + describe it)
   sym connector rm <name>                      remove a connector (MCP or CLI)
+  sym connector reconnect <name>               re-connect one MCP connector against the live pool
   sym apply                                    reconcile the running agent to the config file
   sym secret set|ls|rm                         manage encrypted secrets (never printed)
 
@@ -73,11 +74,10 @@ export async function main(rawArgs: string[]): Promise<number> {
 
   switch (group) {
     case undefined:
-      // Bare `sym` on a terminal launches the interactive TUI; piped/non-TTY
-      // (CI, `sym | cat`, the agent's run_cli) prints help instead of a UI.
+      // Bare `sym` on a terminal opens the interactive menu; piped/non-TTY
+      // (CI, `sym | cat`, the agent's run_cli) prints help instead.
       if (process.stdout.isTTY) {
-        await (await import('../tui/index.js')).launchTui();
-        return 0;
+        return (await import('./menu.js')).launchMenu();
       }
       console.log(HELP);
       return 0;
@@ -85,14 +85,13 @@ export async function main(rawArgs: string[]): Promise<number> {
     case 'menu':
     case 'tui':
       // Guard against non-TTY pipes (`sym menu | head`, the agent's run_cli).
-      // Ink requires a real terminal; rendering to a pipe produces garbled
-      // ANSI output and hangs indefinitely waiting for keystrokes.
+      // The interactive prompts need a real terminal; rendering to a pipe
+      // produces garbled output and hangs waiting for keystrokes.
       if (!process.stdout.isTTY) {
         console.error(`'sym ${group}' requires an interactive terminal (stdout is not a TTY).`);
         return 1;
       }
-      await (await import('../tui/index.js')).launchTui();
-      return 0;
+      return (await import('./menu.js')).launchMenu();
 
     case 'help':
     case '--help':

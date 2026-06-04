@@ -35,14 +35,13 @@ architecture — not "removed":
 - **MCP connectors** — an in-process MCP client (`apps/agent/src/mcp/`) replacing
   the old `packages/ext/mcp`. Static-token and OAuth connectors; the live tool
   pool is reconciled via the operator CLI / `POST /admin/reload`.
-- **Operator control tier** — a `sym` CLI + Ink TUI (`apps/agent/src/cli`,
-  `apps/agent/src/tui`) and an **encrypted local SQLite credential store**
+- **Operator control tier** — a `sym` CLI with a simple interactive menu
+  (`apps/agent/src/cli`) and an **encrypted local SQLite credential store**
   (`apps/agent/.sym/credentials.db`, AES-256-GCM via `mcp/store.ts`) for MCP
   OAuth tokens and static secrets.
 
 So "no database / no dashboard" precisely means **no message database and no
 _web_ dashboard** — the Slack thread remains the conversational memory. The
-operator TUI/CLI and the credential store are a deliberate **local-state control
-tier**, distinct from the stateless conversational tier. (`ink`/`react` are
-therefore runtime dependencies, not dev — the operator TUI runs in production.
-The fuller two-tier model is documented in ARCHITECTURE.md once C22 lands.)
+operator CLI and the credential store are a deliberate **local-state control
+tier**, distinct from the stateless conversational tier. (The operator CLI runs
+in production; the fuller two-tier model is documented in ARCHITECTURE.md.)

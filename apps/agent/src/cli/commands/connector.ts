@@ -21,7 +21,12 @@ import {
   resolveCliCapabilities,
   resolveCliConnectors,
 } from '../../run-cli.js';
-import { applyReload, fetchConnectors, type ConnectorDetail } from '../admin-client.js';
+import {
+  applyReload,
+  fetchConnectors,
+  testConnector,
+  type ConnectorDetail,
+} from '../admin-client.js';
 import {
   loadConfigFile,
   removeCli,
@@ -34,7 +39,7 @@ import {
 import { healthWord, printReload } from './render.js';
 import { showCommand } from './tools.js';
 
-import type { ConnectorConfig, TransportConfig } from '@sym/mcp-runtime';
+import type { ConnectorConfig, ConnectorTestResult, TransportConfig } from '@sym/mcp-runtime';
 
 export async function connectorCommand(args: string[], json: boolean): Promise<number> {
   const verb = args[0];
@@ -192,6 +197,32 @@ export async function connectorCommand(args: string[], json: boolean): Promise<n
     }
     console.log(`no connector named '${name}'`);
     return 1;
+  }
+
+  if (verb === 'reconnect' || verb === 'test') {
+    const name = args[1];
+    if (name === undefined || name.length === 0) {
+      throw new Error('connector reconnect requires a name: sym connector reconnect <name>');
+    }
+    let result: ConnectorTestResult;
+    try {
+      result = await testConnector(name);
+    } catch (err) {
+      console.error(
+        `sym: ${err instanceof Error ? err.message : String(err)} (reconnect needs the running agent)`,
+      );
+      return 1;
+    }
+    if (json) {
+      console.log(JSON.stringify(result, null, 2));
+      return 0;
+    }
+    const s = result.status;
+    const ok = s.status === 'connected' || s.status === 'reconnected' || s.status === 'unchanged';
+    console.log(
+      `${name}: ${s.status}${s.error !== undefined ? ` — ${s.error}` : ''} · ${result.tools.length} tool(s)`,
+    );
+    return ok ? 0 : 1;
   }
 
   throw new Error(`unknown 'connector' verb '${verb ?? ''}' — see 'sym help'`);

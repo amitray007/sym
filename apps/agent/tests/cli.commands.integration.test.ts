@@ -201,4 +201,11 @@ describe('sym read commands (real subprocess wire)', () => {
     const [code] = await run('mcp', 'ls');
     expect(code).toBe(1); // deprecation redirect → non-zero
   });
+
+  it('connector reconnect re-connects a live connector', async () => {
+    const [code, out] = await run('connector', 'reconnect', 'echo');
+    expect(code).toBe(0);
+    expect(out).toContain('echo');
+    expect(out).toMatch(/connected|reconnected|unchanged/);
+  });
 });

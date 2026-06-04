@@ -8,14 +8,17 @@ import { nodeNewBuiltinsPlugin } from './vitest.plugins.js';
 export default defineConfig({
   plugins: [nodeNewBuiltinsPlugin()],
   test: {
-    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    include: ['tests/**/*.test.ts'],
     exclude: ['tests/**/*.integration.test.ts', '**/node_modules/**'],
     testTimeout: 20_000,
     hookTimeout: 20_000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
-      include: ['src/**/*.{ts,tsx}'],
+      include: ['src/**/*.ts'],
+      // The interactive menu is @clack prompt glue — its logic delegates to the
+      // (tested) command functions; the prompts themselves are manually verified.
+      exclude: ['src/cli/menu.ts'],
       // Regression floor — set a few points below current coverage (lines ~78%,
       // branches ~83%, funcs ~84%) so a real drop fails CI, while small untested
       // additions don't immediately break a green build. Raise as coverage climbs.
