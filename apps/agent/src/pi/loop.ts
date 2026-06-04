@@ -5,34 +5,38 @@
  * return type, an `onDelta` callback for streaming, and `history: ChatMessage[]`
  * input. The surrounding pipeline (ingress, owner-gate, context load, Slack
  * streaming) is unchanged.
+ *
+ * This module is the orchestrator and the public face of the pi-loop. Its
+ * decomposed parts live alongside it and are re-exported below so existing
+ * `from './pi/loop'` imports keep working:
+ *  - `./agent-messages`  — ChatMessage ↔ AgentMessage conversion + usage
+ *  - `./friendly-verb`   — tool name → status verb
+ *  - `./agent-setup`     — per-turn tool list + system prompt assembly
+ *  - `./loop-callbacks`  — the beforeToolCall gate + the event subscriber
  */
 
 import { Agent } from '@earendil-works/pi-agent-core';
-import { buildReceipt, buildSystemPrompt, buildUserTurnContent } from '@sym/kernel';
 
-import { requestConfirmation } from '../confirmations.js';
-import { bridgeTools } from './tools.js';
+import { buildReceipt, buildUserTurnContent } from '@sym/kernel';
+
+import { logCtx } from '../log.js';
+import { resolveAllowlist, resolveCliCapabilities } from '../run-cli.js';
+import { extractUsage, toAgentMessages } from './agent-messages.js';
+import { buildAgentSystemPrompt, buildAgentTools, type TurnHelperCtx } from './agent-setup.js';
+import { makeBeforeToolCall, makeSubscriber } from './loop-callbacks.js';
+import { partitionDescriptors } from './meta-tools.js';
 
 import type { ThinkingLevel } from './think-router.js';
-import type {
-  BeforeToolCallContext,
-  AgentEvent,
-  AgentMessage,
-} from '@earendil-works/pi-agent-core';
-import type { AssistantMessage, UserMessage, Model } from '@earendil-works/pi-ai';
+import type { Model } from '@earendil-works/pi-ai';
 import type { SlackClient } from '@sym/adapter-slack';
-import type {
-  ChatMessage,
-  RenderIntent,
-  Reply,
-  SlackChannelId,
-  SlackThreadTs,
-  ToolDescriptor,
-  ToolRuntimeContext,
-  Turn,
-  Usage,
-} from '@sym/contracts';
+import type { ChatMessage, Reply, ToolRuntimeContext, Turn } from '@sym/contracts';
 import type { OwnerIdentity, ToolRegistry } from '@sym/kernel';
+
+// Re-export the decomposed helpers so `pi/loop` stays the module's public
+// surface (tests + callers import toAgentMessages / extractUsage / friendlyVerb
+// from here).
+export { extractUsage, toAgentMessages } from './agent-messages.js';
+export { friendlyVerb } from './friendly-verb.js';
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -73,6 +77,20 @@ export interface PiLoopOptions {
    * checkmark. `toolCallId` matches the value passed to onToolStart.
    */
   onToolEnd?: (toolCallId: string, errored: boolean) => void | Promise<void>;
+  /**
+   * Called when a destructive tool hits the confirm-before-running gate, and
+   * again when the owner decides. Lets the task card show the gate INLINE on the
+   * tool's own row — "<label> — awaiting approval" while blocked, then the row
+   * flips to running on approve or "<label> — denied" on deny — instead of a
+   * separate decision row. `toolCallId` matches the value onToolStart/onToolEnd
+   * use for the same call, so the row is reused, never duplicated. Optional —
+   * the plain (non-streamed) reply path has no task card and omits it.
+   */
+  onToolGate?: (
+    toolCallId: string,
+    phase: 'awaiting' | 'approved' | 'denied',
+    friendlyLabel: string,
+  ) => void | Promise<void>;
   /** Propagate cancellation into the Pi Agent. */
   signal?: AbortSignal;
   /**
@@ -94,200 +112,12 @@ export interface PiLoopOptions {
    * REQUIRES an explicit non-`off` value (see Agent construction below).
    */
   thinkingLevel?: ThinkingLevel;
-}
-
-// ---------------------------------------------------------------------------
-// ChatMessage → AgentMessage conversion
-// ---------------------------------------------------------------------------
-
-/**
- * Convert Sym's `ChatMessage[]` (OpenAI-chat shape) into Pi's `AgentMessage[]`.
- *
- * Pi requires a `timestamp` on every message; history messages get a synthetic
- * monotonic timestamp (0, 1, 2 …) so Pi treats them as ordered without
- * conflicting with real wall-clock values.
- *
- * Mapping:
- *  - `role:'system'`    → dropped (Pi receives the system prompt separately)
- *  - `role:'user'`      → `UserMessage { role:'user', content, timestamp }`
- *  - `role:'assistant'` → `AssistantMessage` (minimal stub; Pi re-uses history
- *                         for context, not for replay)
- *  - `role:'tool'`      → `ToolResultMessage { role:'toolResult', ... }`
- *
- * // TODO(pi): chunk 3 — for assistant messages that include tool calls, emit
- * the ToolCall content blocks so Pi's context window sees the full tool round-trip.
- * Currently we surface assistant text only; tool-call content is omitted.
- */
-function toAgentMessages(history: ChatMessage[]): AgentMessage[] {
-  const out: AgentMessage[] = [];
-  let ts = 0;
-
-  for (const msg of history) {
-    switch (msg.role) {
-      case 'system':
-        // Dropped — Pi gets the system prompt via AgentState.systemPrompt.
-        break;
-
-      case 'user': {
-        const userMsg: UserMessage = {
-          role: 'user',
-          content: msg.content ?? '',
-          timestamp: ts++,
-        };
-        out.push(userMsg);
-        break;
-      }
-
-      case 'assistant': {
-        // Stub an AssistantMessage with just the text content Pi needs for context.
-        // A real stub needs the full AssistantMessage shape from pi-ai types.
-        // TODO(pi): chunk 3 — include toolCall content blocks for full fidelity.
-        const assistantMsg: AssistantMessage = {
-          role: 'assistant',
-          content: msg.content != null ? [{ type: 'text', text: msg.content }] : [],
-          // History stub: align with the live model surface so Pi's re-serialization
-          // for context doesn't see a mixed api union mid-conversation.
-          api: 'anthropic-messages',
-          provider: 'fireworks',
-          model: '',
-          usage: {
-            input: 0,
-            output: 0,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 0,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-          stopReason: 'stop',
-          timestamp: ts++,
-        };
-        out.push(assistantMsg);
-        break;
-      }
-
-      case 'tool': {
-        // ToolResultMessage — Pi uses role 'toolResult' not 'tool'.
-        out.push({
-          role: 'toolResult' as const,
-          toolCallId: msg.toolCallId ?? '',
-          toolName: msg.name ?? '',
-          content: [{ type: 'text', text: msg.content ?? '' }],
-          isError: false,
-          timestamp: ts++,
-        });
-        break;
-      }
-    }
-  }
-
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// Usage bridge
-// ---------------------------------------------------------------------------
-
-/**
- * Translate Pi's usage shape (from the final AssistantMessage) → Sym's `Usage`.
- * Returns `undefined` when no messages are present.
- */
-function extractUsage(messages: AgentMessage[]): Usage | undefined {
-  // Collect usage from all assistant messages produced during this turn.
-  let promptTokens = 0;
-  let completionTokens = 0;
-  let totalTokens = 0;
-  let found = false;
-
-  for (const msg of messages) {
-    if (msg.role === 'assistant') {
-      const am = msg as AssistantMessage;
-      promptTokens += am.usage.input;
-      completionTokens += am.usage.output;
-      totalTokens += am.usage.totalTokens;
-      found = true;
-    }
-  }
-
-  return found ? { promptTokens, completionTokens, totalTokens } : undefined;
-}
-
-// ---------------------------------------------------------------------------
-// Status verbs
-// ---------------------------------------------------------------------------
-
-/**
- * Map a tool name → a friendly present-progressive verb phrase for Slack's
- * setStatus shimmer. Unmapped tools fall back to `using {toolName}`.
- */
-const TOOL_VERBS: Record<string, string> = {
-  read_thread: 'reading the thread',
-  read_channel: 'reading the channel',
-  get_current_time: 'checking the time',
-  read_user_profile: 'looking up the user',
-  fetch_url: 'reading the page',
-  list_channels: 'listing channels',
-  search_messages: 'searching Slack',
-  post_as_owner: 'sending a message as you',
-  react_as_owner: 'reacting as you',
-  set_status: 'updating your status',
-  add_reminder: 'setting a reminder',
-  // NOTE: no entry for set_plan / present_* — they're in SILENT_TOOLS, so a
-  // verb here would be dead (their start never reaches the shimmer/card).
-};
-
-/**
- * Tools whose execution is metadata-only — no shimmer, no task-card row, no
- * receipt entry. The model uses them to mutate plan state; surfacing them in
- * the UI would create noise on every checkmark.
- *
- * `set_plan` lives here because the tool's start fires BEFORE plan-mode
- * latches (the latch happens during the tool's dispatch, in
- * `PlanController.setPlan`). A "Planning the work" tool row would slip
- * onto the card before the actual plan items render, then never settle
- * cleanly — the screenshot from 2026-05-29 showed it sitting at error.
- * The PlanController's own `set_plan` event drives the visible rows; the
- * tool execution itself is invisible.
- */
-const SILENT_TOOLS: ReadonlySet<string> = new Set([
-  'update_task',
-  'set_plan',
-  // present_* render the answer itself — they aren't "work". A "using
-  // present_card" shimmer / card row is noise, so keep them invisible.
-  'present_card',
-  'present_table',
-]);
-
-function friendlyVerb(toolName: string): string {
-  return TOOL_VERBS[toolName] ?? `using ${toolName}`;
-}
-
-// ---------------------------------------------------------------------------
-// Whimsy — playful keepalive rotation
-// ---------------------------------------------------------------------------
-
-/**
- * Curated playful present-progressive words for long "still thinking" stretches.
- * Tool-specific verbs (TOOL_VERBS) stay concrete; this only kicks in on the
- * keepalive cycle when no real phase update has fired.
- */
-export const WHIMSY_WORDS: readonly string[] = [
-  'pondering',
-  'cogitating',
-  'ruminating',
-  'musing',
-  'marinating',
-  'noodling',
-  'wadoodling',
-  'percolating',
-  'mulling it over',
-  'gathering thoughts',
-];
-
-/** Format a whimsical status string for the given keepalive tick. */
-export function nextWhimsicalStatus(tick: number): string {
-  const word =
-    WHIMSY_WORDS[((tick % WHIMSY_WORDS.length) + WHIMSY_WORDS.length) % WHIMSY_WORDS.length]!;
-  return `is ${word}…`;
+  /**
+   * When true, the agent asks the owner to confirm `run_cli` calls before
+   * executing (except help/version introspection). Sourced from
+   * `BehaviorConfig.cliConfirm` (env `SYM_CLI_CONFIRM`). Defaults to false.
+   */
+  cliConfirm?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -324,9 +154,6 @@ export async function runLoopPi(
   // Pi receives the system prompt via AgentState.systemPrompt).
   const historyMessages = toAgentMessages(opts.history);
 
-  // The static base system prompt — byte-stable for provider prompt caching.
-  const systemPrompt = buildSystemPrompt();
-
   // The user's message, with turn metadata framed as context-only so "summarize
   // it" refers to the conversation (in history), not the metadata. Same builder
   // as the kernel's assembleTurnMessages. When ownerProfile is supplied, an
@@ -334,67 +161,30 @@ export async function runLoopPi(
   // metadata block so the model knows who it's talking to.
   const userText = buildUserTurnContent(turn, opts.ownerProfile);
 
-  // Render intents attached to tool results during the turn (search → table,
-  // present_* tools). Collected here because Pi otherwise swallows the result.
-  const renders: RenderIntent[] = [];
+  // Partition the registry into built-ins (always bridged) and MCP tools
+  // (deferred behind find_tools/call_tool to keep per-turn token cost low).
+  const allDescriptors = registry.listTools();
+  const { builtin: builtinDescriptors, mcp: mcpDescriptors } = partitionDescriptors(allDescriptors);
 
-  // Bridge the built-in tools as native Pi tools (full schemas visible up front).
-  const descriptors = registry.listTools();
-  const agentTools = bridgeTools(registry, ctx, descriptors, (r) => renders.push(r));
+  // Resolve the CLI allowlist once per turn so both the tool list and the system
+  // prompt catalog read from the same snapshot (no double config-file read).
+  const cliAllowlist = resolveAllowlist();
+  const cliCaps = resolveCliCapabilities();
 
-  // Build a name → ToolDescriptor map so beforeToolCall can look up destructive hints.
-  const descriptorMap = new Map<string, ToolDescriptor>(descriptors.map((d) => [d.name, d]));
+  const hctx: TurnHelperCtx = { turn, modelCfg, opts, registry, ctx };
 
-  // Accumulate streaming text deltas.
+  const { agentTools, descriptorMap, knownToolNames, renders } = buildAgentTools(
+    hctx,
+    builtinDescriptors,
+    mcpDescriptors,
+    cliCaps,
+  );
+
+  const systemPrompt = buildAgentSystemPrompt(mcpDescriptors, cliAllowlist, cliCaps);
+
+  // Accumulators shared between the subscriber and the post-run collection.
   const draftParts: string[] = [];
-  // Track tool invocations for the receipt.
   const toolsInvoked: string[] = [];
-
-  // ---------------------------------------------------------------------------
-  // Confirm-before-destructive hook
-  //
-  // For any tool whose descriptor carries `destructiveHint: true`, pause and ask
-  // the owner to approve via Slack before executing. Fail CLOSED when the
-  // confirmation channel is unavailable.
-  // ---------------------------------------------------------------------------
-  const beforeToolCall = async (
-    context: BeforeToolCallContext,
-    signal?: AbortSignal,
-  ): Promise<{ block: true; reason?: string } | undefined> => {
-    const toolName = context.toolCall.name;
-    const descriptor = descriptorMap.get(toolName);
-
-    if (descriptor?.destructiveHint !== true) {
-      // Non-destructive or unknown — allow through immediately.
-      return undefined;
-    }
-
-    // Honor abort — treat as deny.
-    if (signal?.aborted) {
-      return { block: true, reason: 'The run was cancelled before the tool could be approved.' };
-    }
-
-    const channelId = turn.channelId;
-    if (!channelId || !opts.slackClient) {
-      // Fail closed: no channel or no Slack client → cannot prompt → block.
-      console.warn(`[pi] destructive tool '${toolName}' blocked: confirmation channel unavailable`);
-      return { block: true, reason: 'Confirmation channel unavailable.' };
-    }
-
-    const approved = await requestConfirmation({
-      slackClient: opts.slackClient,
-      channel: channelId as SlackChannelId,
-      ...(turn.threadTs !== undefined ? { threadTs: turn.threadTs as SlackThreadTs } : {}),
-      toolName,
-      args: (context.args ?? {}) as Record<string, unknown>,
-    });
-
-    if (!approved) {
-      return { block: true, reason: 'The owner did not approve this action.' };
-    }
-
-    return undefined;
-  };
 
   // Construct the Agent.
   //
@@ -414,87 +204,31 @@ export async function runLoopPi(
       thinkingLevel: opts.thinkingLevel ?? 'low',
     },
     getApiKey: (_provider: string) => modelCfg.apiKey,
-    beforeToolCall,
+    beforeToolCall: makeBeforeToolCall(hctx, descriptorMap),
   });
 
-  // The first text_delta (initial reply, or first delta after each tool round)
-  // flips status to "is writing the reply…". Re-armed on every tool start.
-  let emittedWritingStatus = false;
-
-  // Subscribe to events for streaming + tool tracking.
-  // The subscriber is synchronous where possible; async onDelta is awaited in-band.
-  //
-  // NOTE: `thinking_delta` events (Harmony analysis/commentary on the
-  // anthropic-messages surface) are deliberately NOT routed anywhere — neither
-  // onDelta nor onStatus. They're internal reasoning and must never appear in
-  // the Slack message body or shimmer.
-  agent.subscribe(async (event: AgentEvent) => {
-    if (event.type === 'message_update' && event.assistantMessageEvent.type === 'text_delta') {
-      const delta = event.assistantMessageEvent.delta;
-      // Only flip "writing" status when the partial actually carries a non-empty
-      // text-type content block — guards against premature flips from edge-case
-      // events where text_delta arrives before any real text is materialised.
-      if (!emittedWritingStatus && opts.onStatus !== undefined) {
-        const partial = event.assistantMessageEvent.partial;
-        const hasRealText = partial.content.some((b) => b.type === 'text' && b.text.length > 0);
-        if (hasRealText) {
-          emittedWritingStatus = true;
-          await opts.onStatus('is writing the reply…');
-        }
-      }
-      draftParts.push(delta);
-      await opts.onDelta?.(delta);
-    }
-
-    if (event.type === 'tool_execution_start') {
-      const toolName = event.toolName;
-      // Phantom tool guard: if some future model leaks a Harmony tool-call frame
-      // that names a tool we never registered, drop the status update instead of
-      // echoing garbage into the shimmer. Belt-and-braces for the demux fix.
-      if (!descriptorMap.has(toolName)) {
-        console.warn(`[pi] dropping status for unknown tool '${toolName}' (not in registry)`);
-        return;
-      }
-      // Silent tools (e.g. `update_task`) mutate plan state only — no shimmer,
-      // no card row, no receipt entry. The PlanController already drove the
-      // matching UI update via its own event.
-      if (SILENT_TOOLS.has(toolName)) return;
-      toolsInvoked.push(toolName);
-      // Re-arm the "writing" status so the next text_delta after this tool flips it again.
-      emittedWritingStatus = false;
-      const verb = friendlyVerb(toolName);
-      await opts.onStatus?.(`is ${verb}…`);
-      await opts.onToolStart?.(event.toolCallId, verb);
-    }
-
-    if (event.type === 'tool_execution_end') {
-      const toolName = event.toolName;
-      // Same phantom-tool guard as start — we only surface end events for tools
-      // we actually started. Pi feeds the error/result back to the model
-      // internally; this is purely UI-facing.
-      if (!descriptorMap.has(toolName)) return;
-      // Silent tools never fired onToolStart, so onToolEnd would be unbalanced.
-      if (SILENT_TOOLS.has(toolName)) return;
-      await opts.onToolEnd?.(event.toolCallId, event.isError);
-    }
-  });
+  agent.subscribe(makeSubscriber(opts, knownToolNames, draftParts, toolsInvoked));
 
   // Run the full multi-step loop (tools + follow-ups) via a single prompt call.
-  if (opts.signal) {
-    // Pi's Agent doesn't accept an AbortSignal on prompt(); abort via agent.abort().
-    // Wire the signal so callers can cancel the run.
-    // TODO(pi): chunk 4 — Pi may expose signal on prompt() in a future version.
-    opts.signal.addEventListener('abort', () => {
-      agent.abort();
-    });
+  //
+  // Pi's Agent doesn't accept an AbortSignal on prompt(); abort via agent.abort().
+  // Wire the signal so callers can cancel the run, and clean up the listener in a
+  // finally block to avoid an event-listener leak when the signal outlives the run.
+  // TODO: Pi may expose an AbortSignal on prompt() in a future SDK version.
+  const abortHandler = (): void => {
+    agent.abort();
+  };
+  opts.signal?.addEventListener('abort', abortHandler);
+  try {
+    await agent.prompt(userText);
+  } finally {
+    opts.signal?.removeEventListener('abort', abortHandler);
   }
-
-  await agent.prompt(userText);
 
   // Surface any error from Pi after the run settles.
   const errorMessage = agent.state.errorMessage;
   if (errorMessage) {
-    console.warn('[pi] agent completed with error:', errorMessage);
+    console.warn(`${logCtx(turn.id)} [pi] agent completed with error:`, errorMessage);
   }
 
   // Never deliver a silent empty reply. If the run errored before producing any

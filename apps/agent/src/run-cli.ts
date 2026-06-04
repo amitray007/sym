@@ -1,0 +1,279 @@
+/**
+ * run_cli — execute an allowlisted CLI by argv (no shell).
+ *
+ * Full freedom WITHIN a binary allowlist: the allowlist is the safety boundary,
+ * and inside it the agent may run any subcommand (reads and writes) without a
+ * per-command confirmation. Guardrails that always apply:
+ *   - argv array, spawned directly (NO shell) → no injection, no pipes/redirects.
+ *   - argv[0] must be a bare allowlisted binary name (no paths).
+ *   - hard timeout + output cap; every invocation is logged for audit.
+ *
+ * The allowlist comes from SYM_CLI_ALLOWLIST (comma-separated bare names);
+ * `*` permits any binary. Default: the CLIs we install on /data/bin.
+ */
+
+import { spawn } from 'node:child_process';
+import { accessSync, constants } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
+
+import { loadCliAllow, loadCliDescribe } from '@sym/mcp-runtime';
+
+export interface RunCliResult {
+  ok: boolean;
+  binary: string;
+  stdout: string;
+  stderr: string;
+  code: number | null;
+  timedOut: boolean;
+  /** Set for allowlist/spawn failures (the command never ran). */
+  error?: string;
+}
+
+export type Allowlist = Set<string> | '*';
+
+// `sym` is included so the agent can introspect its OWN connectors/tools/health
+// (`sym status`, `sym tools`, `sym show <name>` — all read-only, dense output).
+const DEFAULT_ALLOWLIST = 'sym,gog,gcloud,gsutil,bq,sentry-cli,gh,jq';
+const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_MAX_CHARS = 20_000;
+
+/** Parse SYM_CLI_ALLOWLIST into a Set (or `'*'` for unrestricted). */
+export function parseAllowlist(raw: string | undefined): Allowlist {
+  const value = (raw ?? DEFAULT_ALLOWLIST).trim();
+  if (value === '*') return '*';
+  return new Set(
+    value
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+  );
+}
+
+/** Build an Allowlist from a string array (`['*']` ⇒ wildcard). */
+export function allowlistFromArray(arr: string[]): Allowlist {
+  if (arr.includes('*')) return '*';
+  return new Set(arr.map((s) => s.trim()).filter((s) => s.length > 0));
+}
+
+/**
+ * Resolve the EFFECTIVE allowlist the same way for run_cli and the prompt
+ * catalog: the config file's `cli.allow` when present (sym-managed), else the
+ * `SYM_CLI_ALLOWLIST` env var, else the built-in default. Read fresh so
+ * `sym cli add/rm` takes effect immediately (no agent restart).
+ */
+export function resolveAllowlist(): Allowlist {
+  const fromFile = loadCliAllow();
+  if (fromFile !== undefined) return allowlistFromArray(fromFile);
+  return parseAllowlist(process.env['SYM_CLI_ALLOWLIST']);
+}
+
+/** A CLI the agent can run via run_cli, with what it's for (operator-supplied). */
+export interface CliCapability {
+  bin: string;
+  description?: string;
+}
+
+/**
+ * The CLIs to surface to the agent as named, searchable capabilities: the
+ * explicitly-allowed binaries (excluding the `*` wildcard) plus any binary the
+ * operator described, each with its `cli.describe` text. Under a pure `*`
+ * allowlist with no described bins this is empty — the catalog still tells the
+ * agent it can run "any installed CLI". Nothing is hardcoded; it's all config.
+ */
+export function resolveCliCapabilities(): CliCapability[] {
+  const allow = loadCliAllow() ?? [];
+  const describe = loadCliDescribe();
+  const bins = new Set<string>([...allow.filter((b) => b !== '*'), ...Object.keys(describe)]);
+  return [...bins].sort().map((bin) => ({
+    bin,
+    ...(describe[bin] !== undefined ? { description: describe[bin] } : {}),
+  }));
+}
+
+function isAllowed(list: Allowlist, binary: string): boolean {
+  return list === '*' || list.has(binary);
+}
+
+/** True if `bin` resolves to an executable on `$PATH` (a "connected" CLI). */
+export function binaryOnPath(bin: string): boolean {
+  for (const dir of (process.env['PATH'] ?? '').split(delimiter)) {
+    if (dir.length === 0) continue;
+    try {
+      accessSync(join(dir, bin), constants.X_OK);
+      return true;
+    } catch {
+      // not here — keep scanning
+    }
+  }
+  return false;
+}
+
+/** A CLI connector as shown on every surface: binary, description, PATH health. */
+export interface CliConnector {
+  bin: string;
+  description?: string;
+  /** Whether the binary resolves on $PATH (the CLI equivalent of "connected"). */
+  onPath: boolean;
+}
+
+/**
+ * The CANONICAL CLI-connector list — the single source every surface renders
+ * (sym status / connector ls / tools / apply, the boot + reload logs, and the
+ * TUI). Effective allowlist bins (or the described/featured ones under `*`),
+ * each with its description and a PATH check.
+ */
+export function resolveCliConnectors(): CliConnector[] {
+  const allow = resolveAllowlist();
+  const describe = loadCliDescribe();
+  const bins = allow === '*' ? resolveCliCapabilities().map((c) => c.bin) : [...allow].sort();
+  return bins.map((bin) => ({
+    bin,
+    ...(describe[bin] !== undefined ? { description: describe[bin] } : {}),
+    onPath: binaryOnPath(bin),
+  }));
+}
+
+/** Whether the run_cli allowlist is the `*` wildcard (any installed CLI). */
+export function isCliWildcard(): boolean {
+  return resolveAllowlist() === '*';
+}
+
+/**
+ * A one-line boot/log summary of the CLI connectors: each binary with whether
+ * it's actually on PATH (✓/✗), so a missing CLI is obvious in the logs instead
+ * of silently failing only when the agent tries to run it.
+ */
+export function cliConnectorsSummary(): string {
+  const conns = resolveCliConnectors();
+  const parts = conns.map((c) => `${c.bin} ${c.onPath ? '✓' : '✗ (not on PATH)'}`);
+  if (isCliWildcard()) {
+    return `run_cli allowlist: * (any installed CLI)${parts.length > 0 ? ` — described: ${parts.join(', ')}` : ''}`;
+  }
+  return conns.length === 0
+    ? 'no CLI connectors configured'
+    : `${conns.length} CLI connector(s): ${parts.join(', ')}`;
+}
+
+/**
+ * A system-prompt block telling the model which CLIs it can drive via `run_cli`.
+ * Appended per turn (so it reflects the current allowlist) and points the model
+ * at `sym status` / `sym tools` for its LIVE connector + tool set.
+ */
+export function buildCliCatalog(allowlist: Allowlist, capabilities: CliCapability[]): string {
+  const lines = [
+    '## Command-line tools (run_cli)',
+    '',
+    'Run a CLI by argv array (no shell — no pipes/redirects). If unsure of its',
+    'subcommands, run `["<bin>","--help"]` first, then the real command.',
+  ];
+  if (capabilities.length > 0) {
+    lines.push('Available CLIs:');
+    for (const c of capabilities) {
+      lines.push(`- ${c.bin}${c.description !== undefined ? ` — ${c.description}` : ''}`);
+    }
+  }
+  if (allowlist === '*') {
+    lines.push(
+      capabilities.length > 0
+        ? '…plus ANY other CLI installed on the host (allowlist is `*`).'
+        : 'Allowlist: `*` — any CLI installed on the host is runnable.',
+    );
+  } else if (capabilities.length === 0) {
+    lines.push('(no CLIs allowlisted)');
+  }
+  lines.push(
+    'Run `["sym","status"]` / `["sym","tools"]` for your CURRENT connectors + tools (they change at runtime, so check rather than assume).',
+  );
+  return lines.join('\n');
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}\n…[truncated ${s.length - max} chars]` : s;
+}
+
+function fail(binary: string, error: string): RunCliResult {
+  return { ok: false, binary, stdout: '', stderr: '', code: null, timedOut: false, error };
+}
+
+const HELP_TOKENS = new Set(['-h', '--help', 'help', '-v', '--version', 'version']);
+
+/**
+ * True when an argv is pure introspection (help/version) — safe to run without
+ * confirmation even under SYM_CLI_CONFIRM, since `--help` short-circuits before
+ * any action runs. A bare binary (argv.length <= 1) also counts (prints usage).
+ */
+export function isIntrospectionOnly(argv: string[]): boolean {
+  if (argv.length <= 1) return true;
+  return argv.slice(1).some((a) => HELP_TOKENS.has(a));
+}
+
+export async function runCli(
+  argv: string[],
+  opts: { allowlist?: Allowlist; timeoutMs?: number; maxChars?: number; cwd?: string } = {},
+): Promise<RunCliResult> {
+  const allowlist = opts.allowlist ?? resolveAllowlist();
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const maxChars = opts.maxChars ?? DEFAULT_MAX_CHARS;
+
+  const binary = argv[0];
+  if (binary === undefined || binary.length === 0) {
+    return fail('', 'argv must be a non-empty array, e.g. ["gog","gmail","--help"]');
+  }
+  if (binary.includes('/') || binary.includes('\\')) {
+    return fail(
+      binary,
+      'binary must be a bare command name (no path), e.g. "gcloud" not "/usr/bin/gcloud"',
+    );
+  }
+  if (!isAllowed(allowlist, binary)) {
+    const names = allowlist === '*' ? '*' : [...allowlist].join(', ');
+    return fail(
+      binary,
+      `'${binary}' is not in the CLI allowlist (${names}). Set SYM_CLI_ALLOWLIST to permit it.`,
+    );
+  }
+
+  // Audit: every command the agent runs is logged.
+  console.info(`[run_cli] ${argv.join(' ')}`);
+
+  return new Promise<RunCliResult>((resolve) => {
+    const child = spawn(binary, argv.slice(1), {
+      cwd: opts.cwd ?? tmpdir(),
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, timeoutMs);
+
+    child.stdout.on('data', (d: Buffer) => {
+      stdout += d.toString();
+    });
+    child.stderr.on('data', (d: Buffer) => {
+      stderr += d.toString();
+    });
+    child.on('error', (err: Error) => {
+      clearTimeout(timer);
+      resolve(fail(binary, `spawn failed: ${err.message}`));
+    });
+    child.on('close', (code: number | null) => {
+      clearTimeout(timer);
+      resolve({
+        ok: !timedOut && code === 0,
+        binary,
+        stdout: truncate(stdout, maxChars),
+        stderr: truncate(stderr, maxChars),
+        code,
+        timedOut,
+        ...(timedOut ? { error: `timed out after ${timeoutMs}ms` } : {}),
+      });
+    });
+  });
+}

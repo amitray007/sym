@@ -112,12 +112,10 @@ describe('safeFetch', () => {
   });
 
   it('throws on a redirect loop past the cap', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue({
-        status: 302,
-        headers: new Headers({ location: 'https://a.example.com/' }),
-      });
+    const fetchImpl = vi.fn().mockResolvedValue({
+      status: 302,
+      headers: new Headers({ location: 'https://a.example.com/' }),
+    });
     await expect(
       safeFetch(
         'https://a.example.com/',

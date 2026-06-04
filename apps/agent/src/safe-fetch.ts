@@ -57,8 +57,14 @@ export function isBlockedAddress(ip: string): boolean {
     const mapped = low.match(/(?:^|:)ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/); // ::ffff:a.b.c.d
     if (mapped) return ipv4Blocked(mapped[1]!);
     const head = low.replace(/^\[/, '').split(':')[0] ?? '';
-    if (/^f[cd]/.test(head)) return true; // fc00::/7 unique-local
-    if (/^fe[89ab]/.test(head)) return true; // fe80::/10 link-local
+    if (/^f[cd]/.test(head)) return true; // fc00::/7 unique-local (RFC 4193)
+    if (/^fe[89ab]/.test(head)) return true; // fe80::/10 link-local (RFC 4291)
+    // ff00::/8 multicast (RFC 4291)
+    if (/^ff/.test(head)) return true;
+    // 2001:db8::/32 documentation/example range (RFC 3849)
+    if (low.startsWith('2001:db8:')) return true;
+    // 64:ff9b::/96 NAT64 well-known prefix (RFC 6052)
+    if (low.startsWith('64:ff9b::')) return true;
     return false;
   }
   return true; // not a parseable IP → block

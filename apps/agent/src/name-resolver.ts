@@ -438,17 +438,4 @@ export class NameResolver {
     this.userBulkFill = null;
     this.userBulkFillStarted = false;
   }
-
-  // Type-only helpers to keep the file self-documenting; SlackChannelId / SlackUserId
-  // are used at the boundary but the resolver speaks plain strings internally.
-  static isUserId(s: string): s is SlackUserId {
-    return /^[UW][A-Z0-9]+$/.test(s);
-  }
-  static isChannelId(s: string): s is SlackChannelId {
-    return /^C[A-Z0-9]+$/.test(s);
-  }
-  /** True for a DM channel id (`D…`). */
-  static isDmId(s: string): boolean {
-    return /^D[A-Z0-9]+$/.test(s);
-  }
 }

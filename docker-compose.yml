@@ -1,57 +1,33 @@
-# docker-compose.yml — OPTIONAL local Postgres + Redis for Sym development.
+# docker-compose.yml — run the Sym agent (single deployable).
 #
-# Production and the default dev path use NATIVE installs of Postgres and
-# Redis (see scripts/setup-macos.sh and scripts/setup-linux.sh). This file
-# exists for engineers who cannot or prefer not to run native services.
+# The previous Postgres + Redis dev services were removed: the current agent is
+# a single STATELESS deployable (the Slack thread is conversation memory). Its
+# ONLY durable state is the credential store on the `sym_data` volume.
 #
 # Usage:
-#   docker compose up -d          # start Postgres + Redis in background
-#   docker compose down           # stop and remove containers
-#   docker compose down -v        # also remove named volumes (wipes data)
+#   docker compose up --build          # build + run the agent
+#   docker compose logs -f agent       # follow logs (look for "[mcp] pool warm …")
 #
-# After starting, run: sh scripts/dev-setup.sh
-# (dev-setup.sh honours the DATABASE_URL / REDIS_URL in your .env)
-#
-# If you use this compose file, set in .env:
-#   DATABASE_URL=postgres://sym:sym@localhost:5434/sym_dev
-#   REDIS_URL=redis://localhost:6380
-#
-# Ports are intentionally offset (+2) from default to avoid collisions with
-# any native Postgres (5432) or Redis (6379) you might also have running.
+# Provide secrets/config via a repo-root .env (see docs/mcp-setup.md):
+#   SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN, SLACK_BOT_USER_ID, SLACK_TEAM_ID,
+#   SYM_OWNER_SLACK_USER_ID, FIREWORKS_API_KEY, FIREWORKS_MODEL,
+#   SYM_MCP_SERVERS (optional), and for OAuth connectors:
+#   SYM_ENCRYPTION_KEY + SYM_PUBLIC_URL.
 
 services:
-  postgres:
-    image: postgres:16
-    container_name: sym-postgres
+  agent:
+    build: .
+    image: sym-agent
+    container_name: sym-agent
     restart: unless-stopped
-    environment:
-      POSTGRES_DB: sym_dev
-      POSTGRES_USER: sym
-      POSTGRES_PASSWORD: sym
+    env_file:
+      - .env
     ports:
-      - '5434:5432'
+      - '3001:3001' # AGENT_PORT — Slack events / interactivity / OAuth callback
     volumes:
-      - sym_postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U sym -d sym_dev']
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  redis:
-    image: redis:7
-    container_name: sym-redis
-    restart: unless-stopped
-    ports:
-      - '6380:6379'
-    volumes:
-      - sym_redis_data:/data
-    healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      # The only durable state: OAuth token store (SYM_DB_PATH=/data/credentials.db)
+      # + any ambient CLI config dirs (Model B, e.g. CLOUDSDK_CONFIG=/data/gcloud).
+      - sym_data:/data
 
 volumes:
-  sym_postgres_data:
-  sym_redis_data:
+  sym_data:

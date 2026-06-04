@@ -1,39 +1,48 @@
-import {
-  assistantThreadContextChanged,
-  assistantThreadStarted,
-  normalizeSlackEvent,
-  slackTurnInputToTurn,
-  verifySlackSignature,
-} from '@sym/adapter-slack';
+/**
+ * Hono HTTP server — mounts all Slack webhook routes plus the admin API.
+ *
+ * Three public surfaces: `/slack/events` (all Slack event callbacks),
+ * `/slack/interactivity` (button/action payloads), and `/slack/slash`
+ * (slash-command POST). An `/admin/*` loopback surface lets the `sym` CLI
+ * hot-reload connectors and introspect live state without a restart.
+ */
+
+import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono } from 'hono';
 
+import { verifySlackSignature } from '@sym/adapter-slack';
+import {
+  completeOAuth,
+  getActiveConfigs,
+  getConnectorTools,
+  listConnectorDetails,
+  loadConnectorConfigs,
+  McpDispatcher,
+  reconcileConnectors,
+  testConnector,
+} from '@sym/mcp-runtime';
+
 import { createAssistantContextStore } from './assistant-context.js';
-import { handleAssistantThreadStarted } from './assistant.js';
-import { resolveConfirmation } from './confirmations.js';
-import { handleTurn, type HandleTurnDeps } from './handle-turn.js';
-import { buildOwnerDeclineMessage, checkOwnerAccess } from './owner-gate.js';
+import { processEvent, processInteractivity, processSlashCommand } from './event-router.js';
+import { formatDeniedAttempt } from './owner-gate.js';
+import { cliConnectorsSummary } from './run-cli.js';
+import {
+  createDedup,
+  escapeHtml,
+  htmlPage,
+  isLoopback,
+  isSlackResponseUrl,
+  postToResponseUrl,
+  truncate,
+} from './server-utils.js';
 import { healthCheckTokens, loadWorkspaceContext } from './workspace-context.js';
 
 import type { AgentConfig } from './config.js';
 import type { RawSlackEvent } from '@sym/adapter-slack';
-import type { SlackThreadTs, SlackUserId, Turn } from '@sym/contracts';
+import type { SlackUserId } from '@sym/contracts';
 
 export interface ServerDeps {
   config: AgentConfig;
-}
-
-/** Bounded in-memory dedup by Slack `event_id`. */
-function createDedup(max = 10_000): (id: string) => boolean {
-  const seen = new Set<string>();
-  return (id: string): boolean => {
-    if (seen.has(id)) return true;
-    seen.add(id);
-    if (seen.size > max) {
-      // Drop the oldest half (insertion order preserved by Set).
-      for (const old of [...seen].slice(0, max / 2)) seen.delete(old);
-    }
-    return false;
-  };
 }
 
 /**
@@ -56,178 +65,90 @@ export function createServer(deps: ServerDeps): Hono {
   // in the logs at boot without blocking server start.
   void healthCheckTokens(ctx);
 
-  async function processEvent(raw: RawSlackEvent, teamId: string): Promise<void> {
-    // Single workspace: ignore events from any other Slack team.
-    if (teamId !== config.slackTeamId) {
-      console.warn(`[agent] ignoring event from foreign team ${teamId}`);
-      return;
-    }
-
-    // Assistant container lifecycle: track context changes before anything else.
-    // Owner-gated — a non-owner navigating their own Sym panel must NOT cause
-    // Sym to update any panel state on their behalf. Silent drop, no API calls.
-    const ctxChanged = assistantThreadContextChanged(raw);
-    if (ctxChanged) {
-      if (ctxChanged.userId !== ctx.ownerSlackUserId) return;
-      assistantContext.remember(
-        ctxChanged.channelId,
-        ctxChanged.threadTs,
-        ctxChanged.contextChannelId,
-      );
-      return;
-    }
-
-    // Assistant container lifecycle: greet a freshly opened panel. Not a Turn.
-    // Owner-gated — without this, a non-owner opening the Sym Assistant panel
-    // would see a furnished bot (title, starter prompts, welcome message) that
-    // implies Sym serves them. Their messages still get declined later, but the
-    // first impression must not contradict the lock.
-    const assistantStart = assistantThreadStarted(raw);
-    if (assistantStart) {
-      if (assistantStart.userId !== ctx.ownerSlackUserId) return;
-      assistantContext.remember(
-        assistantStart.channelId,
-        assistantStart.threadTs,
-        assistantStart.contextChannelId,
-      );
-      await handleAssistantThreadStarted(ctx.slackClient, assistantStart);
-      return;
-    }
-
-    const input = normalizeSlackEvent({
-      event: raw,
-      workspaceId: ctx.workspaceId,
-      botUserId: ctx.botUserId,
-    });
-    if (!input) return; // an event we don't act on
-    const turn = slackTurnInputToTurn(input);
-
-    // Single-owner gate: Sym acts only on its owner's requests. Non-owner turns
-    // are dropped — silently in channels (Sym stays invisible to the rest of the
-    // team), with one polite line in a DM (silence in a 1:1 just looks broken).
-    if (checkOwnerAccess(turn.requester, ctx.ownerSlackUserId) === 'deny') {
-      if (turn.entrySurface === 'dm' && turn.channelId !== undefined) {
-        try {
-          await ctx.slackClient.chatPostMessage({
-            channel: turn.channelId,
-            // Owner-aware so the requester gets a clickable next step
-            // (mention the owner) instead of a dead-end "not for you".
-            text: buildOwnerDeclineMessage(ctx.ownerSlackUserId, ctx.ownerProfile),
-            ...(turn.threadTs !== undefined ? { thread_ts: turn.threadTs } : {}),
-          });
-        } catch (postErr) {
-          console.warn('[agent] owner-gate decline post failed (continuing):', postErr);
-        }
-      }
-      return;
-    }
-
-    const viewedChannelId =
-      turn.channelId !== undefined && turn.threadTs !== undefined
-        ? assistantContext.lookup(turn.channelId, turn.threadTs)
-        : undefined;
-    await handleTurn(turn, buildTurnDeps(viewedChannelId));
+  /**
+   * THE single owner gate. Every Slack ingress (DM, mention, slash command,
+   * button click, assistant-panel lifecycle) routes its access decision through
+   * here — there is no second copy of the `requester === owner` comparison. Add
+   * a new ingress and you physically cannot let a non-owner through without
+   * calling this, which keeps the "Sym works for exactly one human" invariant
+   * structural rather than a thing each handler remembers to re-check.
+   *
+   * Returns `true` for the owner. On deny it fires {@link logDeniedAttempt}
+   * (fire-and-forget — name resolution hits Slack and must never delay the 3s
+   * ACK) and returns `false`. The CALLER owns the surface-specific response: a
+   * polite line in a DM, total silence everywhere else. Fails closed via
+   * `checkOwnerAccess` (unset owner ⇒ nobody passes).
+   */
+  function ownerGate(requester: SlackUserId, surface: string, text?: string): boolean {
+    if (requester === ctx.ownerSlackUserId) return true;
+    void logDeniedAttempt(requester, surface, text);
+    return false;
   }
 
   /**
-   * Build the per-turn `HandleTurnDeps` from the workspace context. Extracted
-   * so every ingress route (events, slash commands, future shortcuts) hands
-   * `handleTurn` the same shape — no drift between paths.
+   * Audit a non-owner attempt to reach Sym: WHO (resolved display name + id),
+   * WHAT (their request text / clicked action, truncated), WHERE (surface), and
+   * WHEN (ISO timestamp), plus the deny reason. One structured `console.warn`
+   * line so it greps cleanly out of the deploy logs. Name resolution is
+   * best-effort — a miss falls back to the raw id, never blocks, never throws.
    */
-  function buildTurnDeps(viewedChannelId?: string): HandleTurnDeps {
-    return {
-      fireworks: ctx.fireworks,
-      model: ctx.model,
-      slackClient: ctx.slackClient,
-      ...(ctx.userSlackClient !== undefined ? { userSlackClient: ctx.userSlackClient } : {}),
-      botUserId: ctx.botUserId,
-      slackTeamId: ctx.slackTeamId,
-      behavior: config.behavior,
-      ...(viewedChannelId !== undefined ? { viewedChannelId } : {}),
-      // Latest resolved owner profile (mutates onto ctx async — once boot
-      // completes, every subsequent turn picks it up).
-      ...(ctx.ownerProfile !== undefined ? { ownerProfile: ctx.ownerProfile } : {}),
-      nameResolver: ctx.nameResolver,
-    };
-  }
-
-  /**
-   * Process a slash command turn. The flow:
-   *   1. Post a visible seed message in the channel attributing the command to
-   *      the owner ("`<@owner> via /sym`: <text>"). This gives us a `threadTs`
-   *      so the streamed reply lands in a thread under it — full task cards +
-   *      streaming + interactivity work, identical to an `app_mention` turn.
-   *   2. Run the turn through `handleTurn`, threaded under the seed.
-   *
-   * If the seed post fails — typically `not_in_channel` for a channel Sym
-   * isn't a member of — fall back to a private hint via `response_url`
-   * explaining that Sym needs to be invited first. We never drop silently:
-   * the owner deserves to see why their command did nothing.
-   *
-   * `responseUrl` is only used on the failure path; the success path is
-   * indistinguishable from a normal threaded reply.
-   */
-  async function processSlashCommand(
-    rawEvent: RawSlackEvent,
+  async function logDeniedAttempt(
     requester: SlackUserId,
-    responseUrl: string,
+    surface: string,
+    text?: string,
   ): Promise<void> {
-    const input = normalizeSlackEvent({
-      event: rawEvent,
-      workspaceId: ctx.workspaceId,
-      botUserId: ctx.botUserId,
-    });
-    if (!input) return;
-    const turn = slackTurnInputToTurn(input);
-    if (turn.channelId === undefined) return;
-
-    // Seed the channel with a one-line attribution; its ts becomes the thread
-    // root so the streamed reply renders as a normal in-thread answer.
-    const seedText = turn.text && turn.text.length > 0 ? turn.text : '(no text)';
-    let seedTs: SlackThreadTs;
+    const at = new Date().toISOString();
+    let name = requester as string;
     try {
-      const result = await ctx.slackClient.chatPostMessage({
-        channel: turn.channelId,
-        text: `<@${requester}> via \`/sym\`: ${seedText}`,
-      });
-      seedTs = result.ts;
-    } catch (err) {
-      console.warn('[agent] /sym seed post failed — falling back to response_url:', err);
-      // Most common cause is `not_in_channel`. Surface a private, actionable
-      // hint to the owner via Slack's response_url (ephemeral by default).
-      try {
-        await fetch(responseUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            response_type: 'ephemeral',
-            text:
-              "I couldn't post in this channel — invite me first with `/invite @Sym`, then try `/sym` again. " +
-              '(Or run it from a channel I’m already in, or from our DM.)',
-          }),
-        });
-      } catch (postErr) {
-        console.warn('[agent] /sym response_url fallback failed (continuing):', postErr);
-      }
-      return;
+      name = await ctx.nameResolver.resolveUser(requester, ctx.slackClient);
+    } catch {
+      // Best-effort: keep the raw id if the lookup fails for any reason.
     }
+    console.warn(
+      formatDeniedAttempt({
+        requester,
+        name,
+        surface,
+        at,
+        ownerSlackUserId: ctx.ownerSlackUserId,
+        ...(text !== undefined && text.length > 0 ? { text: truncate(text) } : {}),
+      }),
+    );
+  }
 
-    // Re-issue the turn with the seed message's ts as the thread root so
-    // `streamReply` engages (task cards + streaming require a threadTs).
-    const threadedTurn: Turn = { ...turn, threadTs: seedTs };
-    await handleTurn(threadedTurn, buildTurnDeps());
+  /**
+   * Consolidated Slack signature verification — used by all three Slack ingress
+   * routes (/slack/events, /slack/interactivity, /slack/commands). The raw body
+   * must be read BEFORE calling this so the exact bytes Slack sent are verified.
+   *
+   * Returns `{ ok: false }` on failure (caller should return 401).
+   * Returns `{ ok: true }` when the signature and timestamp window are valid.
+   */
+  function verifySlack(
+    signingSecret: string,
+    headers: { timestamp: string; signature: string },
+    rawBody: string,
+  ): { ok: boolean; reason?: string } {
+    return verifySlackSignature({
+      signingSecret,
+      headers: {
+        'x-slack-request-timestamp': headers.timestamp,
+        'x-slack-signature': headers.signature,
+      },
+      rawBody,
+    });
   }
 
   app.post('/slack/events', async (c) => {
     const rawBody = await c.req.text();
-    const verification = verifySlackSignature({
-      signingSecret: config.slackSigningSecret,
-      headers: {
-        'x-slack-request-timestamp': c.req.header('x-slack-request-timestamp') ?? '',
-        'x-slack-signature': c.req.header('x-slack-signature') ?? '',
+    const verification = verifySlack(
+      config.slackSigningSecret,
+      {
+        timestamp: c.req.header('x-slack-request-timestamp') ?? '',
+        signature: c.req.header('x-slack-signature') ?? '',
       },
       rawBody,
-    });
+    );
     if (!verification.ok) {
       return c.json({ error: verification.reason }, 401);
     }
@@ -240,8 +161,11 @@ export function createServer(deps: ServerDeps): Hono {
     }
 
     // Slack Events API endpoint verification handshake.
+    // Cap the echoed challenge at 512 chars as defense-in-depth (the request is
+    // HMAC-verified, but a length cap prevents a crafted oversized challenge from
+    // being reflected verbatim into a log aggregator or downstream consumer).
     if (parsed.type === 'url_verification') {
-      return c.json({ challenge: parsed.challenge ?? '' });
+      return c.json({ challenge: (parsed.challenge ?? '').slice(0, 512) });
     }
 
     // Dedup Slack retries (it re-sends if it doesn't get a fast 200).
@@ -252,9 +176,11 @@ export function createServer(deps: ServerDeps): Hono {
     // ACK now; do the slow work (LLM call + reply) after responding.
     if (parsed.team_id) {
       const teamId = parsed.team_id;
-      void processEvent(parsed, teamId).catch((err: unknown) => {
-        console.error('[agent] processEvent failed', err);
-      });
+      void processEvent(parsed, teamId, ctx, config, assistantContext, ownerGate).catch(
+        (err: unknown) => {
+          console.error('[agent] processEvent failed', err);
+        },
+      );
     }
     return c.json({ ok: true });
   });
@@ -272,97 +198,44 @@ export function createServer(deps: ServerDeps): Hono {
     // Slack signature over the exact bytes Slack sent.
     const rawBody = await c.req.text();
 
-    const verification = verifySlackSignature({
-      signingSecret: config.slackSigningSecret,
-      headers: {
-        'x-slack-request-timestamp': c.req.header('x-slack-request-timestamp') ?? '',
-        'x-slack-signature': c.req.header('x-slack-signature') ?? '',
+    const verification = verifySlack(
+      config.slackSigningSecret,
+      {
+        timestamp: c.req.header('x-slack-request-timestamp') ?? '',
+        signature: c.req.header('x-slack-signature') ?? '',
       },
       rawBody,
-    });
+    );
     if (!verification.ok) {
       return c.json({ error: verification.reason }, 401);
     }
 
-    // Parse `application/x-www-form-urlencoded` → extract `payload` field.
-    let payloadJson: string;
-    try {
-      const params = new URLSearchParams(rawBody);
-      const raw = params.get('payload');
-      if (!raw) {
-        return c.json({ error: 'missing_payload' }, 400);
+    const result = processInteractivity(rawBody, config.slackTeamId, ownerGate);
+
+    if (result.status === 'resolved') {
+      // Confirmation resolved — DELETE the prompt so it doesn't linger as a spent
+      // buttons message. The decision lives on the task card (the tool's own row
+      // flips to running/✓ or denied/✗ via onToolGate), not on a leftover prompt.
+      if (result.responseUrl) {
+        // SSRF guard: only fetch URLs on the hooks.slack.com allow-list.
+        if (!isSlackResponseUrl(result.responseUrl)) {
+          console.warn(
+            `[agent] interactivity response_url blocked — not hooks.slack.com: ${result.responseUrl}`,
+          );
+        } else {
+          void fetch(result.responseUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ delete_original: true }),
+          }).catch((err: unknown) => {
+            console.warn('[agent] interactivity prompt delete failed (non-blocking):', err);
+          });
+        }
       }
-      payloadJson = raw;
-    } catch {
-      return c.json({ error: 'invalid_form' }, 400);
-    }
-
-    // Parse the block_actions payload.
-    let payload: {
-      type?: string;
-      user?: { id?: string };
-      team?: { id?: string };
-      actions?: { action_id?: string }[];
-      response_url?: string;
-    };
-    try {
-      payload = JSON.parse(payloadJson) as typeof payload;
-    } catch {
-      return c.json({ error: 'invalid_payload_json' }, 400);
-    }
-
-    if (payload.type !== 'block_actions') {
-      // We only handle block_actions; ACK other interaction types without error.
       return c.json({ ok: true });
     }
 
-    const clickerId = payload.user?.id;
-    const teamId = payload.team?.id;
-    const actionId = payload.actions?.[0]?.action_id ?? '';
-    const responseUrl = payload.response_url;
-
-    if (!clickerId || !teamId) {
-      return c.json({ error: 'missing_user_or_team' }, 400);
-    }
-
-    // ---------------------------------------------------------------------------
-    // Owner gate — only the owner's click, from our workspace, resolves a
-    // confirmation. Anything else is silently ACK'd (no Slack error shown).
-    // ---------------------------------------------------------------------------
-    if (teamId !== config.slackTeamId || clickerId !== config.ownerSlackUserId) {
-      return c.json({ ok: true });
-    }
-
-    // ---------------------------------------------------------------------------
-    // Parse action_id: `sym_confirm:<id>:approve|deny`
-    // ---------------------------------------------------------------------------
-    const match = /^sym_confirm:([^:]+):(approve|deny)$/.exec(actionId);
-    if (!match) {
-      // Not a sym_confirm action — ACK without processing.
-      return c.json({ ok: true });
-    }
-
-    const confirmationId = match[1] ?? '';
-    const verdict = match[2] ?? '';
-    const approved = verdict === 'approve';
-
-    resolveConfirmation(confirmationId, approved);
-
-    // ACK Slack immediately (already done implicitly by returning below).
-    // Best-effort: update the interactive message via response_url so the
-    // buttons are replaced with a status line. Never block the ACK on this.
-    if (responseUrl) {
-      const statusText = approved ? 'Approved ✅' : 'Cancelled ✋';
-      void fetch(responseUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ replace_original: true, text: statusText }),
-      }).catch((err: unknown) => {
-        console.warn('[agent] interactivity response_url update failed (non-blocking):', err);
-      });
-    }
-
-    return c.json({ ok: true });
+    return c.json(result.body, result.status);
   });
 
   // --- Slack Slash Commands -------------------------------------------------
@@ -380,14 +253,14 @@ export function createServer(deps: ServerDeps): Hono {
   app.post('/slack/commands', async (c) => {
     const rawBody = await c.req.text();
 
-    const verification = verifySlackSignature({
-      signingSecret: config.slackSigningSecret,
-      headers: {
-        'x-slack-request-timestamp': c.req.header('x-slack-request-timestamp') ?? '',
-        'x-slack-signature': c.req.header('x-slack-signature') ?? '',
+    const verification = verifySlack(
+      config.slackSigningSecret,
+      {
+        timestamp: c.req.header('x-slack-request-timestamp') ?? '',
+        signature: c.req.header('x-slack-signature') ?? '',
       },
       rawBody,
-    });
+    );
     if (!verification.ok) {
       return c.json({ error: verification.reason }, 401);
     }
@@ -403,10 +276,21 @@ export function createServer(deps: ServerDeps): Hono {
     const teamId = params.get('team_id') ?? '';
     const userId = params.get('user_id') ?? '';
     const channelId = params.get('channel_id') ?? '';
+    const channelName = params.get('channel_name') ?? '';
     const command = params.get('command') ?? '';
     const text = params.get('text') ?? '';
     const triggerId = params.get('trigger_id') ?? '';
     const responseUrl = params.get('response_url') ?? '';
+
+    // Is this a DM-style conversation (1:1 `im` or group `mpim`)? Slack tags a
+    // 1:1 DM with channel_name "directmessage" and an `im` id (`D…`); a group
+    // DM with "mpdm-…". This matters for the response_url fallback: a DELAYED
+    // `in_channel` reply is silently dropped by Slack in DM contexts (returns
+    // 200 but never renders), so there we must answer `ephemeral` instead.
+    const isDm =
+      channelName === 'directmessage' ||
+      channelName.startsWith('mpdm') ||
+      channelId.startsWith('D');
 
     // Foreign-workspace guard — silent-ACK so a misconfigured second install
     // doesn't get a Slack-visible error pointing back at us.
@@ -416,8 +300,9 @@ export function createServer(deps: ServerDeps): Hono {
 
     // Owner gate. The slash command surface looks identical for owner and
     // non-owner — silent ACK either way, no telltale Slack error. Non-owner
-    // commands simply do nothing visible.
-    if (checkOwnerAccess(userId as SlackUserId, ctx.ownerSlackUserId) === 'deny') {
+    // commands simply do nothing visible (but the attempt is logged: name,
+    // the command text, and time).
+    if (!ownerGate(userId as SlackUserId, 'slash_command', text)) {
       return c.body(null, 200);
     }
 
@@ -435,16 +320,23 @@ export function createServer(deps: ServerDeps): Hono {
     // Empty `/sym` with no text — nudge the owner ephemerally rather than
     // posting a blank seed in the channel.
     if (text.trim().length === 0) {
-      void fetch(responseUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          response_type: 'ephemeral',
-          text: 'Usage: `/sym <question or instruction>` — e.g. `/sym recap #eng-platform from this morning`',
-        }),
-      }).catch((err: unknown) => {
-        console.warn('[agent] /sym usage hint post failed:', err);
-      });
+      // SSRF guard: response_url must be on the hooks.slack.com allow-list.
+      if (isSlackResponseUrl(responseUrl)) {
+        void fetch(responseUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            response_type: 'ephemeral',
+            text: 'Usage: `/sym <question or instruction>` — e.g. `/sym recap #eng-platform from this morning`',
+          }),
+        }).catch((err: unknown) => {
+          console.warn('[agent] /sym usage hint post failed:', err);
+        });
+      } else {
+        console.warn(
+          `[agent] /sym usage hint: response_url blocked — not hooks.slack.com: ${responseUrl}`,
+        );
+      }
       return c.body(null, 200);
     }
 
@@ -459,13 +351,144 @@ export function createServer(deps: ServerDeps): Hono {
       channel_id: channelId,
       text,
     };
-    void processSlashCommand(rawEvent, userId as SlackUserId, responseUrl).catch((err: unknown) => {
+    void processSlashCommand(
+      rawEvent,
+      userId as SlackUserId,
+      responseUrl,
+      isDm,
+      ctx,
+      config,
+      postToResponseUrl,
+    ).catch((err: unknown) => {
       console.error('[agent] processSlashCommand failed', err);
     });
     return c.body(null, 200);
   });
 
+  // --- OAuth callback (MCP connector authorization) -------------------------
+  // The authorization server redirects here after the user authorizes.
+  // Shape: GET /oauth/callback/:slug?code=<authcode>&state=<state>
+  //
+  // Security:
+  //   - `state` is verified BEFORE `code` is used (CSRF protection).
+  //   - `code` and `state` are NEVER echoed into logs or the response page.
+  //   - This endpoint does not require Slack signature verification because
+  //     it is driven by the OAuth authorization server, not Slack.
+  app.get('/oauth/callback/:slug', async (c) => {
+    const slug = c.req.param('slug') ?? '';
+    const code = c.req.query('code') ?? '';
+    const state = c.req.query('state') ?? '';
+
+    if (!slug || !code || !state) {
+      return c.html(
+        htmlPage(
+          'Authorization Failed',
+          '<p>Missing required parameters (slug, code, or state). ' +
+            'This link may be invalid or expired.</p>',
+          false,
+        ),
+        400,
+      );
+    }
+
+    try {
+      await completeOAuth(slug, code, state);
+      console.info(`[oauth] connector '${slug}' successfully authorized`);
+      return c.html(
+        htmlPage(
+          'Authorization Successful',
+          `<p>Connector <strong>${escapeHtml(slug)}</strong> has been authorized. ` +
+            'You can close this window and return to Slack.</p>',
+          true,
+        ),
+        200,
+      );
+    } catch (err) {
+      // Log the error server-side; show a minimal error to the browser.
+      // Never include code/state/tokens in the response.
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error(`[oauth] completeOAuth failed for connector '${slug}':`, message);
+      return c.html(
+        htmlPage(
+          'Authorization Failed',
+          `<p>Could not complete authorization for connector <strong>${escapeHtml(slug)}</strong>. ` +
+            'Please try again or contact your administrator.</p>',
+          false,
+        ),
+        400,
+      );
+    }
+  });
+
   app.get('/health', (c) => c.json({ ok: true }));
+
+  // --- Admin control plane (loopback-only) ----------------------------------
+  // The `sym` CLI (run via `docker exec` inside the container) drives the live
+  // connector pool through these routes. They are bound to loopback only: a
+  // request whose remote address is not 127.0.0.1 / ::1 is refused. The CLI hits
+  // http://127.0.0.1:<port> directly; proxied traffic arrives with the proxy's
+  // address (or X-Forwarded-For) and is rejected. No secrets cross these routes.
+
+  /** GET /admin/status — current live connector set + tool count (read-only). */
+  app.get('/admin/status', (c) => {
+    if (!isLoopback(getConnInfo(c).remote.address)) {
+      return c.json({ error: 'forbidden', detail: 'admin endpoints are loopback-only' }, 403);
+    }
+    const active = getActiveConfigs();
+    return c.json({
+      connectors: active.map((s) => s.name),
+      totalTools: new McpDispatcher(active).list().length,
+    });
+  });
+
+  /**
+   * POST /admin/reload — re-read the config file and reconcile the live pool.
+   * This is the seam `sym apply` calls. Validate-then-swap happens inside
+   * reconcileConnectors: a connector that fails to connect leaves the previous
+   * healthy one serving. Returns a per-connector status report.
+   */
+  app.post('/admin/reload', async (c) => {
+    if (!isLoopback(getConnInfo(c).remote.address)) {
+      return c.json({ error: 'forbidden', detail: 'admin endpoints are loopback-only' }, 403);
+    }
+    const loaded = loadConnectorConfigs();
+    const result = await reconcileConnectors(loaded.mcpServers);
+    console.info(
+      `[admin] reload from ${loaded.source} (${loaded.path}) — ${result.totalTools} tool(s) live ` +
+        `across ${result.connectors.length} connector(s)`,
+    );
+    console.info(`[cli] ${cliConnectorsSummary()}`);
+    return c.json({ source: loaded.source, path: loaded.path, ...result });
+  });
+
+  /** GET /admin/connectors — per-connector wiring + live health (dashboard rows). */
+  app.get('/admin/connectors', (c) => {
+    if (!isLoopback(getConnInfo(c).remote.address)) {
+      return c.json({ error: 'forbidden', detail: 'admin endpoints are loopback-only' }, 403);
+    }
+    return c.json({ connectors: listConnectorDetails() });
+  });
+
+  /** GET /admin/connectors/:name/tools — the tools a connector serves. */
+  app.get('/admin/connectors/:name/tools', (c) => {
+    if (!isLoopback(getConnInfo(c).remote.address)) {
+      return c.json({ error: 'forbidden', detail: 'admin endpoints are loopback-only' }, 403);
+    }
+    const tools = getConnectorTools(c.req.param('name'));
+    if (tools === null) {
+      return c.json({ error: 'not_connected', detail: 'unknown or unconnected connector' }, 404);
+    }
+    return c.json({ tools });
+  });
+
+  /** POST /admin/connectors/:name/test — re-connect one connector in isolation. */
+  app.post('/admin/connectors/:name/test', async (c) => {
+    if (!isLoopback(getConnInfo(c).remote.address)) {
+      return c.json({ error: 'forbidden', detail: 'admin endpoints are loopback-only' }, 403);
+    }
+    const result = await testConnector(c.req.param('name'));
+    return c.json(result);
+  });
 
   return app;
 }

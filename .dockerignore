@@ -1,0 +1,30 @@
+# Keep the build context small + correct (reinstall deps, rebuild dist in-image).
+**/node_modules
+**/dist
+**/.next
+**/*.tsbuildinfo
+**/coverage
+**/.turbo
+.turbo
+.git
+.gitignore
+.github
+
+# Never ship secrets or local state into the image.
+.env
+.env.*
+**/.env
+.sym
+**/*.db
+data
+
+# Dev-only dirs — never needed in the build context
+dev/
+tmp/
+.claude/
+docs/refactor/
+
+# Editor / OS noise
+.vscode
+.idea
+.DS_Store

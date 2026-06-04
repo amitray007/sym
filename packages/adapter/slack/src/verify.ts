@@ -6,7 +6,9 @@ export interface SlackHeaders {
   'x-slack-signature': string;
 }
 
-type VerifyResult = { ok: true } | { ok: false; reason: 'invalid_signature' | 'stale_timestamp' };
+export type VerifyResult =
+  | { ok: true }
+  | { ok: false; reason: 'invalid_signature' | 'stale_timestamp' };
 
 const FIVE_MINUTES_S = 5 * 60;
 

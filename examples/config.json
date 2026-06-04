@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "mcpServers": [
+    {
+      "name": "sentry",
+      "transport": { "kind": "stdio", "command": "sentry-mcp" },
+      "auth": {
+        "kind": "static",
+        "secret": "REPLACE_ME",
+        "inject": { "at": "env", "name": "SENTRY_AUTH_TOKEN" }
+      }
+    },
+    {
+      "name": "example-remote",
+      "transport": { "kind": "http", "url": "https://mcp.example.com/mcp" },
+      "auth": { "kind": "oauth" }
+    }
+  ]
+}

@@ -49,11 +49,7 @@ Thumbs.db
 # Transient agent worktrees (parallel stream builds)
 .claude/worktrees/
 
-# Drizzle
-drizzle/.snapshots
-drizzle-meta
-
-# Local dev databases
+# Local credential store (operator control tier — intentional, not dead)
 *.sqlite
 *.sqlite3
 *.db
@@ -70,3 +66,6 @@ slack/manifest.yml
 .parcel-cache
 .eslintcache
 tmp/
+
+# Personal server provisioning scripts (custom /data setup, not part of the build)
+dev/

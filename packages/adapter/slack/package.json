@@ -2,6 +2,15 @@
   "name": "@sym/adapter-slack",
   "version": "0.0.0",
   "private": true,
+  "description": "Sym Slack adapter — Block Kit rendering, event normalisation, Web API client wrappers.",
+  "license": "MIT",
+  "author": "Amit Ray",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amitray007/sym",
+    "directory": "packages/adapter/slack"
+  },
+  "sideEffects": false,
   "type": "module",
   "exports": {
     ".": {
@@ -15,7 +24,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc -p tsconfig.test.json",
     "lint": "eslint .",
     "test": "vitest run"
@@ -24,6 +34,6 @@
     "@sym/contracts": "workspace:*"
   },
   "devDependencies": {
-    "vitest": "^2.1.8"
+    "vitest": "catalog:"
   }
 }
