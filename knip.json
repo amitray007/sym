@@ -48,6 +48,7 @@
     "@vitest/coverage-v8",
     "typescript-eslint",
     "eslint-config-prettier",
-    "eslint-import-resolver-typescript"
+    "eslint-import-resolver-typescript",
+    "vite"
   ]
 }

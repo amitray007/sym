@@ -2,7 +2,7 @@
 // Per-package configs can extend this via `export default [...root, ...local]`.
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
-import importPlugin from 'eslint-plugin-import';
+import importX from 'eslint-plugin-import-x';
 import unusedImports from 'eslint-plugin-unused-imports';
 import prettierConfig from 'eslint-config-prettier';
 
@@ -42,7 +42,7 @@ export default [
   {
     files: ['**/*.{ts,tsx,mts,cts}'],
     plugins: {
-      import: importPlugin,
+      'import-x': importX,
       'unused-imports': unusedImports,
     },
     languageOptions: {
@@ -70,7 +70,7 @@ export default [
       ],
 
       // Import hygiene
-      'import/order': [
+      'import-x/order': [
         'warn',
         {
           groups: ['builtin', 'external', 'internal', ['parent', 'sibling', 'index'], 'type'],
@@ -87,7 +87,7 @@ export default [
           alphabetize: { order: 'asc', caseInsensitive: true },
         },
       ],
-      'import/no-duplicates': 'error',
+      'import-x/no-duplicates': 'error',
 
       // Architecture guard: packages/* must not import apps/* source.
       // (dependency-cruiser enforces this at the file level too, but this
@@ -115,7 +115,7 @@ export default [
       'no-implicit-coercion': 'warn',
     },
     settings: {
-      'import/resolver': {
+      'import-x/resolver': {
         typescript: {
           project: [
             './packages/*/tsconfig.json',
@@ -156,6 +156,9 @@ export default [
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
       'no-console': 'off',
+      // Empty mock implementations (e.g. vi.spyOn(console, 'log').mockImplementation(() => {}))
+      // are an idiomatic way to silence/stub in tests.
+      '@typescript-eslint/no-empty-function': 'off',
       // Tests can be long — exempt from size/complexity limits
       'max-lines': 'off',
       complexity: 'off',
