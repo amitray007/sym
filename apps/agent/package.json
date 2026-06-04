@@ -32,7 +32,7 @@
     "@sym/contracts": "workspace:*",
     "@sym/kernel": "workspace:*",
     "@sym/mcp-runtime": "workspace:*",
-    "dotenv": "^16.4.7",
+    "dotenv": "^17.4.2",
     "hono": "^4.6.14",
     "yaml": "^2.9.0",
     "zod": "catalog:"
