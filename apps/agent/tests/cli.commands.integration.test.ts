@@ -208,4 +208,14 @@ describe('sym read commands (real subprocess wire)', () => {
     expect(out).toContain('echo');
     expect(out).toMatch(/connected|reconnected|unchanged/);
   });
+
+  it('connector untrust + trust --all toggle the trust flag', async () => {
+    const [c1, o1] = await run('connector', 'untrust', 'echo');
+    expect(c1).toBe(0);
+    expect(o1).toContain('untrusted: echo');
+
+    const [c2, o2] = await run('connector', 'trust', '--all');
+    expect(c2).toBe(0);
+    expect(o2).toContain('trusted: echo');
+  });
 });

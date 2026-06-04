@@ -17,7 +17,7 @@ import { connectorCommand } from './commands/connector.js';
 import { printReload } from './commands/render.js';
 import { statusCommand } from './commands/status.js';
 import { toolsCommand } from './commands/tools.js';
-import { loadConfigFile } from './config-store.js';
+import { loadConfigFile, setConnectorTrust, writeConfigFile } from './config-store.js';
 
 /** Run the interactive menu loop until the user quits. Returns 0. */
 export async function launchMenu(): Promise<number> {
@@ -31,6 +31,7 @@ export async function launchMenu(): Promise<number> {
         { value: 'list', label: 'List connectors' },
         { value: 'add', label: 'Add a connector' },
         { value: 'reconnect', label: 'Reconnect a connector' },
+        { value: 'trust', label: 'Trust connectors', hint: 'toggle which skip the confirm gate' },
         { value: 'secrets', label: 'Manage secrets' },
         { value: 'tools', label: 'List tools' },
         { value: 'apply', label: 'Apply config (reconcile the running agent)' },
@@ -70,6 +71,9 @@ async function runAction(action: string): Promise<void> {
       return;
     case 'reconnect':
       await reconnectFlow();
+      return;
+    case 'trust':
+      await trustFlow();
       return;
     case 'secrets':
       await secretsFlow();
@@ -145,6 +149,40 @@ async function reconnectFlow(): Promise<void> {
   });
   if (p.isCancel(name)) return;
   await connectorCommand(['reconnect', name], false);
+}
+
+/**
+ * Toggle which connectors are trusted via a checkbox list — the easy "trust all
+ * or none" surface. Checked = trusted (skips the confirm-before-destructive gate).
+ * Writes the config + reconciles the running pool.
+ */
+async function trustFlow(): Promise<void> {
+  const path = configPath();
+  const cfg = loadConfigFile(path);
+  if (cfg.mcpServers.length === 0) {
+    p.log.warn('no MCP connectors configured');
+    return;
+  }
+  const selected = await p.multiselect({
+    message:
+      'Trusted connectors — checked ones skip the confirm-before-destructive gate (space toggles, enter confirms):',
+    options: cfg.mcpServers.map((s) => ({ value: s.name, label: s.name })),
+    initialValues: cfg.mcpServers.filter((s) => s.trust === true).map((s) => s.name),
+    required: false,
+  });
+  if (p.isCancel(selected)) return;
+
+  const trusted = new Set(selected);
+  let next = cfg;
+  for (const s of cfg.mcpServers) next = setConnectorTrust(next, s.name, trusted.has(s.name));
+  writeConfigFile(path, next);
+
+  try {
+    printReload(await applyReload(), false);
+  } catch {
+    p.log.warn('config written; not applied (agent not running — run `sym apply` once it is up)');
+  }
+  p.log.success(`trusted: ${[...trusted].join(', ') || '(none)'}`);
 }
 
 /** Interactive secret management. The value is read from a hidden prompt (never argv). */

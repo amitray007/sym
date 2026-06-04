@@ -56,6 +56,8 @@ Manage:
   sym connector add --cli <bin> --desc "…"     add a CLI connector (allow + describe it)
   sym connector rm <name>                      remove a connector (MCP or CLI)
   sym connector reconnect <name>               re-connect one MCP connector against the live pool
+  sym connector trust <name> | --all           trust a connector (skip the confirm gate); --all = every one
+  sym connector untrust <name> | --all         require confirmation again for it (or all)
   sym apply                                    reconcile the running agent to the config file
   sym secret set|ls|rm                         manage encrypted secrets (never printed)
 

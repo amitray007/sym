@@ -33,6 +33,7 @@ import {
   removeConnector,
   setCliAllow,
   setCliDesc,
+  setConnectorTrust,
   upsertConnector,
   writeConfigFile,
 } from '../config-store.js';
@@ -223,6 +224,30 @@ export async function connectorCommand(args: string[], json: boolean): Promise<n
       `${name}: ${s.status}${s.error !== undefined ? ` — ${s.error}` : ''} · ${result.tools.length} tool(s)`,
     );
     return ok ? 0 : 1;
+  }
+
+  if (verb === 'trust' || verb === 'untrust') {
+    const value = verb === 'trust';
+    const all = args.includes('--all');
+    const name = args.slice(1).find((a) => !a.startsWith('-'));
+    if (!all && (name === undefined || name.length === 0)) {
+      throw new Error(
+        `connector ${verb} requires a name or --all: sym connector ${verb} <name> | --all`,
+      );
+    }
+    const cfg = loadConfigFile(path);
+    const known = new Set(cfg.mcpServers.map((s) => s.name));
+    const affected = (all ? [...known] : [name!]).filter((n) => known.has(n));
+    if (affected.length === 0) {
+      console.log(all ? 'no MCP connectors configured' : `no MCP connector named '${name ?? ''}'`);
+      return 1;
+    }
+    let next = cfg;
+    for (const n of affected) next = setConnectorTrust(next, n, value);
+    writeConfigFile(path, next);
+    console.log(`${value ? 'trusted' : 'untrusted'}: ${affected.join(', ')}`);
+    await tryApply(json);
+    return 0;
   }
 
   throw new Error(`unknown 'connector' verb '${verb ?? ''}' — see 'sym help'`);
