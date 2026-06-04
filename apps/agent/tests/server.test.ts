@@ -585,6 +585,41 @@ describe('agent server /slack/interactivity — adversarial', () => {
     // Confirm resolving again still returns false (idempotent non-operation).
     expect(resolveConfirmation(timedOutId, true)).toBe(false);
   });
+
+  // Scenario 7: a resolved click DELETES the prompt (removes it from Slack)
+  // rather than editing it in place. The decision is recorded on the task card,
+  // not by leaving a spent prompt behind.
+  it('S7: a resolved click deletes the prompt via response_url (delete_original)', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 200 }));
+    try {
+      const responseUrl = 'https://hooks.slack.com/actions/T-TEST/123/abc';
+      const body = interactivityBody(
+        interactivityPayload({
+          actionId: 'sym_confirm:00000000-0000-0000-0000-0000000000aa:approve',
+          responseUrl,
+        }),
+      );
+      const res = await postInteractivity(body, signedHeaders(body));
+      expect(res.status).toBe(200);
+
+      // Find the response_url call (other in-flight background turns from earlier
+      // tests may also touch fetch; match on our URL, don't assume a total count).
+      const deleteCall = fetchSpy.mock.calls.find(([u]) => u === responseUrl);
+      expect(deleteCall).toBeDefined();
+      const payload = JSON.parse(String((deleteCall![1] as RequestInit).body)) as Record<
+        string,
+        unknown
+      >;
+      expect(payload['delete_original']).toBe(true);
+      // No in-place rebuild: we don't ship replacement blocks anymore.
+      expect(payload['replace_original']).toBeUndefined();
+      expect(payload['blocks']).toBeUndefined();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -45,6 +45,11 @@ export async function runTurnLoop(
   onStatus?: (status: string) => void | Promise<void>,
   onToolStart?: (toolCallId: string, friendlyLabel: string) => void | Promise<void>,
   onToolEnd?: (toolCallId: string, errored: boolean) => void | Promise<void>,
+  onToolGate?: (
+    toolCallId: string,
+    phase: 'awaiting' | 'approved' | 'denied',
+    friendlyLabel: string,
+  ) => void | Promise<void>,
   signal?: AbortSignal,
 ): Promise<Reply> {
   const model = buildFireworksModel({
@@ -96,6 +101,7 @@ export async function runTurnLoop(
           ...(onStatus !== undefined ? { onStatus } : {}),
           ...(onToolStart !== undefined ? { onToolStart } : {}),
           ...(onToolEnd !== undefined ? { onToolEnd } : {}),
+          ...(onToolGate !== undefined ? { onToolGate } : {}),
           ...(deps.ownerProfile !== undefined ? { ownerProfile: deps.ownerProfile } : {}),
           ...(turnSignal !== undefined ? { signal: turnSignal } : {}),
         },

@@ -67,6 +67,12 @@ export function makeBeforeToolCall(
   ): Promise<{ block: true; reason?: string } | undefined> => {
     const toolName = context.toolCall.name;
 
+    // Reflect this call's confirmation gate on its OWN task-card row — it shares
+    // the toolCallId, so onToolStart's row is reused, not duplicated. No-op when
+    // there's no task card (the plain reply path) or the call isn't gated.
+    const emitGate = (phase: 'awaiting' | 'approved' | 'denied'): void | Promise<void> =>
+      opts.onToolGate?.(context.toolCall.id, phase, friendlyVerb(toolName, context.args));
+
     // -------------------------------------------------------------------------
     // Slack-read relevance guard
     //
@@ -102,6 +108,7 @@ export function makeBeforeToolCall(
       if (slackGuardVerdict === 'confirm') {
         const channelId = turn.channelId;
         if (channelId && opts.slackClient) {
+          await emitGate('awaiting');
           const approved = await requestConfirmation({
             slackClient: opts.slackClient,
             channel: channelId as SlackChannelId,
@@ -109,6 +116,7 @@ export function makeBeforeToolCall(
             toolName,
             args: (context.args ?? {}) as Record<string, unknown>,
           });
+          await emitGate(approved ? 'approved' : 'denied');
           if (!approved) {
             return { block: true, reason: 'The owner did not approve this Slack operation.' };
           }
@@ -166,6 +174,7 @@ export function makeBeforeToolCall(
       return { block: true, reason: 'Confirmation channel unavailable.' };
     }
 
+    await emitGate('awaiting');
     const approved = await requestConfirmation({
       slackClient: opts.slackClient,
       channel: channelId as SlackChannelId,
@@ -173,6 +182,7 @@ export function makeBeforeToolCall(
       toolName,
       args: (context.args ?? {}) as Record<string, unknown>,
     });
+    await emitGate(approved ? 'approved' : 'denied');
 
     if (!approved) {
       return { block: true, reason: 'The owner did not approve this action.' };

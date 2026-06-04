@@ -240,6 +240,17 @@ export async function streamReply(
       await taskCard?.onToolEnd(toolCallId, errored);
     };
 
+    // Reflect a destructive tool's confirmation gate inline on its own task-card
+    // row (awaiting → running/✓ or denied/✗). The buttons prompt is a separate,
+    // ephemeral message deleted on decision; this row is the durable record.
+    const onToolGate = async (
+      toolCallId: string,
+      phase: 'awaiting' | 'approved' | 'denied',
+      friendlyLabel: string,
+    ): Promise<void> => {
+      await taskCard?.onToolGate(toolCallId, phase, friendlyLabel);
+    };
+
     const reply = await runTurnLoop(
       turn,
       deps,
@@ -249,6 +260,7 @@ export async function streamReply(
       sendStatus,
       onToolStart,
       onToolEnd,
+      onToolGate,
     );
 
     // Settle the task card before or alongside reply delivery.

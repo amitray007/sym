@@ -23,12 +23,7 @@ import {
 } from '@sym/mcp-runtime';
 
 import { createAssistantContextStore } from './assistant-context.js';
-import {
-  buildResolvedConfirmationMessage,
-  processEvent,
-  processInteractivity,
-  processSlashCommand,
-} from './event-router.js';
+import { processEvent, processInteractivity, processSlashCommand } from './event-router.js';
 import { formatDeniedAttempt } from './owner-gate.js';
 import { cliConnectorsSummary } from './run-cli.js';
 import {
@@ -218,8 +213,9 @@ export function createServer(deps: ServerDeps): Hono {
     const result = processInteractivity(rawBody, config.slackTeamId, ownerGate);
 
     if (result.status === 'resolved') {
-      // Confirmation resolved — best-effort update the interactive message via
-      // response_url so the buttons are replaced with a status line.
+      // Confirmation resolved — DELETE the prompt so it doesn't linger as a spent
+      // buttons message. The decision lives on the task card (the tool's own row
+      // flips to running/✓ or denied/✗ via onToolGate), not on a leftover prompt.
       if (result.responseUrl) {
         // SSRF guard: only fetch URLs on the hooks.slack.com allow-list.
         if (!isSlackResponseUrl(result.responseUrl)) {
@@ -227,13 +223,12 @@ export function createServer(deps: ServerDeps): Hono {
             `[agent] interactivity response_url blocked — not hooks.slack.com: ${result.responseUrl}`,
           );
         } else {
-          const update = buildResolvedConfirmationMessage(result.message, result.approved);
           void fetch(result.responseUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ replace_original: true, ...update }),
+            body: JSON.stringify({ delete_original: true }),
           }).catch((err: unknown) => {
-            console.warn('[agent] interactivity response_url update failed (non-blocking):', err);
+            console.warn('[agent] interactivity prompt delete failed (non-blocking):', err);
           });
         }
       }

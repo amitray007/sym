@@ -29,8 +29,16 @@ import type { TSchema } from '@earendil-works/pi-ai';
 import type { JsonObject, ToolDescriptor, ToolRuntimeContext } from '@sym/contracts';
 import type { ToolRegistry } from '@sym/kernel';
 
-/** Owner-confirmation callback for a destructive MCP tool. Returns true if approved. */
-export type ConfirmFn = (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
+/**
+ * Owner-confirmation callback for a destructive MCP tool. Returns true if
+ * approved. `toolCallId` is the enclosing `call_tool` call id — passed so the
+ * confirm flow can reflect the gate on that row in the task card.
+ */
+export type ConfirmFn = (
+  toolName: string,
+  args: Record<string, unknown>,
+  toolCallId: string,
+) => Promise<boolean>;
 
 /** Split a descriptor list into built-in (no `__`) and MCP (`<server>__<tool>`). */
 export function partitionDescriptors(all: ToolDescriptor[]): {
@@ -258,7 +266,7 @@ export function makeCallTool(opts: {
       // Confirm destructive tools (MCP tools default to destructiveHint=true unless
       // the connector is trusted). Built-ins are gated separately via beforeToolCall.
       if (descriptor.destructiveHint === true) {
-        const approved = await confirm(name, args);
+        const approved = await confirm(name, args, toolCallId);
         if (!approved) {
           throw new Error('The owner did not approve this action.');
         }

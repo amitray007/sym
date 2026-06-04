@@ -9,6 +9,7 @@ import { buildSystemPrompt } from '@sym/kernel';
 import { requestConfirmation } from '../confirmations.js';
 import { logCtx } from '../log.js';
 import { buildCliCatalog } from '../run-cli.js';
+import { friendlyVerb } from './friendly-verb.js';
 import { buildConnectorCatalog, makeCallTool, makeFindTools } from './meta-tools.js';
 import { bridgeTools } from './tools.js';
 
@@ -58,7 +59,11 @@ export function buildAgentTools(
 
   // MCP confirm — call_tool self-gates because the model invokes `call_tool`,
   // not the underlying MCP tool name. Fails CLOSED when channel is unavailable.
-  const confirmMcp = async (toolName: string, args: Record<string, unknown>): Promise<boolean> => {
+  const confirmMcp = async (
+    toolName: string,
+    args: Record<string, unknown>,
+    toolCallId: string,
+  ): Promise<boolean> => {
     const channelId = turn.channelId;
     if (!channelId || !opts.slackClient) {
       console.warn(
@@ -66,13 +71,20 @@ export function buildAgentTools(
       );
       return false;
     }
-    return requestConfirmation({
+    // Reflect the gate on the enclosing call_tool row (shared toolCallId) — the
+    // label matches what the subscriber rendered for it ("running <connector>:
+    // <tool>") so the row reads consistently from start → awaiting → settle.
+    const label = friendlyVerb('call_tool', { name: toolName, arguments: args });
+    await opts.onToolGate?.(toolCallId, 'awaiting', label);
+    const approved = await requestConfirmation({
       slackClient: opts.slackClient,
       channel: channelId as SlackChannelId,
       ...(turn.threadTs !== undefined ? { threadTs: turn.threadTs as SlackThreadTs } : {}),
       toolName,
       args,
     });
+    await opts.onToolGate?.(toolCallId, approved ? 'approved' : 'denied', label);
+    return approved;
   };
 
   const agentTools = [

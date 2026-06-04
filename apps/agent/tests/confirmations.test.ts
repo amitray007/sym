@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  buildResolvedConfirmationMessage,
-  formatArgsForConfirmation,
-} from '../src/confirmations.js';
-
-import type { SlackBlock } from '@sym/adapter-slack';
+import { formatArgsForConfirmation } from '../src/confirmations.js';
 
 describe('formatArgsForConfirmation', () => {
   it('always shows the target channel even when the body is huge (audit #4)', () => {
@@ -40,51 +35,5 @@ describe('formatArgsForConfirmation', () => {
       channel_id: 'C1',
     });
     expect(out.split('\n')).toEqual(['channel_id: C1', 'user_id: U9', 'reason: because']);
-  });
-});
-
-describe('buildResolvedConfirmationMessage', () => {
-  const original: { text: string; blocks: SlackBlock[] } = {
-    text: '⚠️ Sym wants to run *set_status* — approve?',
-    blocks: [
-      {
-        type: 'section',
-        text: { type: 'mrkdwn', text: '⚠️ run *set_status*\n```status: busy```' },
-      },
-      { type: 'actions', elements: [{ type: 'button', action_id: 'sym_confirm:1:approve' }] },
-    ],
-  };
-
-  it('keeps the question, drops the buttons, and appends an Approved line', () => {
-    const { blocks, text } = buildResolvedConfirmationMessage(original, true);
-    // The actions (buttons) block is removed.
-    expect(blocks.some((b) => (b as { type?: string }).type === 'actions')).toBe(false);
-    // The original question section is retained (history shows WHAT was approved).
-    expect(blocks[0]).toEqual(original.blocks[0]);
-    // The decision is appended as the last block.
-    const last = blocks[blocks.length - 1] as { type?: string; elements?: { text?: string }[] };
-    expect(last.type).toBe('context');
-    expect(last.elements?.[0]?.text).toContain('Approved');
-    expect(text).toContain('Approved');
-  });
-
-  it('shows Cancelled when denied', () => {
-    const { blocks, text } = buildResolvedConfirmationMessage(original, false);
-    const last = blocks[blocks.length - 1] as { elements?: { text?: string }[] };
-    expect(last.elements?.[0]?.text).toContain('Cancelled');
-    expect(text).toContain('Cancelled');
-  });
-
-  it('falls back to a section from the message text when blocks are absent', () => {
-    const { blocks } = buildResolvedConfirmationMessage({ text: 'do the thing?' }, true);
-    expect(blocks).toHaveLength(2);
-    expect((blocks[0] as { type?: string }).type).toBe('section');
-    expect((blocks[1] as { type?: string }).type).toBe('context');
-  });
-
-  it('produces a bare decision when there is no original content', () => {
-    const { blocks } = buildResolvedConfirmationMessage({}, false);
-    expect(blocks).toHaveLength(1);
-    expect((blocks[0] as { type?: string }).type).toBe('context');
   });
 });

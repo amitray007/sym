@@ -149,20 +149,7 @@ export class TaskCardManager {
       // task that already ended (sequential mode) is complete/error; any still
       // running (parallel mode) is in_progress and will update on its onToolEnd.
       this.active = true;
-      const chunks: TaskUpdateChunk[] = this.taskOrder
-        .map((tid) => this.tasks.get(tid))
-        .filter((t): t is TrackedTask => t !== undefined)
-        .map(
-          (t): TaskUpdateChunk => ({
-            type: 'task_update',
-            id: t.id,
-            title: t.title,
-            status: t.status,
-          }),
-        );
-      await this.sendChunks(chunks).catch((err) =>
-        console.warn('[agent] task card start failed (continuing):', err),
-      );
+      await this.flushAll();
     } else if (this.active) {
       await this.sendChunks([{ type: 'task_update', id, title, status: 'in_progress' }]).catch(
         (err) => console.warn('[agent] task card update failed (continuing):', err),
@@ -182,6 +169,75 @@ export class TaskCardManager {
         { type: 'task_update', id: task.id, title: task.title, status: task.status },
       ]).catch((err) => console.warn('[agent] task card settle failed (continuing):', err));
     }
+  }
+
+  /**
+   * Reflect a destructive tool's confirmation gate ON ITS OWN ROW — never as a
+   * second "decision" row. Pi emits `tool_execution_start` (→ onToolStart, which
+   * creates the row) BEFORE `beforeToolCall`, so the row keyed by this
+   * `toolCallId` already exists when the gate fires; we just update it. The
+   * interactive prompt itself is a separate, ephemeral Slack message that gets
+   * deleted once the owner decides — this row is the durable record.
+   *
+   *  - `awaiting`  — owner is being asked: "<label> — awaiting approval" (live).
+   *                  A gate is always worth showing, so this forces the card
+   *                  visible even below the buffering threshold.
+   *  - `approved`  — restore the plain running label; the tool then runs and its
+   *                  `onToolEnd` settles the SAME row (✓). In plan-mode no
+   *                  onToolEnd fires (tool rows are suppressed), so settle here.
+   *  - `denied`    — "<label> — denied" (✗). The tool won't run; a later
+   *                  blocked `onToolEnd` keeps this title (it never rewrites it).
+   *
+   * In plan-mode the matching `onToolStart` was suppressed, so the row may not
+   * exist yet — we create it, because a confirmation gate is too important to
+   * hide even when plain tool rows are.
+   */
+  async onToolGate(
+    toolCallId: string,
+    phase: 'awaiting' | 'approved' | 'denied',
+    friendlyLabel: string,
+  ): Promise<void> {
+    const base = capitalize(friendlyLabel);
+    let task = this.tasks.get(toolCallId);
+    if (task === undefined) {
+      task = { id: `task-${++this.taskCounter}`, title: base, status: 'in_progress' };
+      this.tasks.set(toolCallId, task);
+      this.taskOrder.push(toolCallId);
+    }
+
+    if (phase === 'awaiting') {
+      task.title = `${base} — awaiting approval`;
+      task.status = 'in_progress';
+    } else if (phase === 'denied') {
+      task.title = `${base} — denied`;
+      task.status = 'error';
+    } else {
+      task.title = base;
+      // tool-mode: onToolEnd settles it; plan-mode: it won't fire, so settle now.
+      task.status = this.planMode ? 'complete' : 'in_progress';
+    }
+
+    // A gate must be visible regardless of the buffering threshold.
+    if (!this.active) {
+      this.active = true;
+      await this.flushAll();
+      return;
+    }
+    await this.sendChunks([
+      { type: 'task_update', id: task.id, title: task.title, status: task.status },
+    ]).catch((err) => console.warn('[agent] task card gate update failed (continuing):', err));
+  }
+
+  /** Flush every known task at its current status (threshold-cross + gate-reveal). */
+  private async flushAll(): Promise<void> {
+    const chunks: TaskUpdateChunk[] = this.taskOrder
+      .map((tid) => this.tasks.get(tid))
+      .filter((t): t is TrackedTask => t !== undefined)
+      .map((t) => ({ type: 'task_update', id: t.id, title: t.title, status: t.status }));
+    if (chunks.length === 0) return;
+    await this.sendChunks(chunks).catch((err) =>
+      console.warn('[agent] task card flush failed (continuing):', err),
+    );
   }
 
   async finish(): Promise<void> {

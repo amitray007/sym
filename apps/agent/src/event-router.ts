@@ -15,7 +15,7 @@ import {
 } from '@sym/adapter-slack';
 
 import { handleAssistantThreadStarted } from './assistant.js';
-import { resolveConfirmation, buildResolvedConfirmationMessage } from './confirmations.js';
+import { resolveConfirmation } from './confirmations.js';
 import { handleTurn } from './handle-turn.js';
 import { buildOwnerDeclineMessage } from './owner-gate.js';
 
@@ -23,7 +23,7 @@ import type { AssistantContextStore } from './assistant-context.js';
 import type { AgentConfig } from './config.js';
 import type { HandleTurnDeps } from './handle-turn.js';
 import type { WorkspaceContext } from './workspace-context.js';
-import type { RawSlackEvent, SlackBlock } from '@sym/adapter-slack';
+import type { RawSlackEvent } from '@sym/adapter-slack';
 import type { SlackThreadTs, SlackUserId, Turn } from '@sym/contracts';
 
 /**
@@ -269,7 +269,6 @@ export type InteractivityResult =
       status: 'resolved';
       approved: boolean;
       responseUrl: string | undefined;
-      message: { blocks?: SlackBlock[]; text?: string };
     };
 
 /**
@@ -305,7 +304,6 @@ export function processInteractivity(
     team?: { id?: string };
     actions?: { action_id?: string }[];
     response_url?: string;
-    message?: { blocks?: SlackBlock[]; text?: string };
   };
   try {
     payload = JSON.parse(payloadJson) as typeof payload;
@@ -361,8 +359,5 @@ export function processInteractivity(
     status: 'resolved',
     approved,
     responseUrl,
-    message: payload.message ?? {},
   };
 }
-
-export { buildResolvedConfirmationMessage };

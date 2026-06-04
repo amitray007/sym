@@ -77,6 +77,20 @@ export interface PiLoopOptions {
    * checkmark. `toolCallId` matches the value passed to onToolStart.
    */
   onToolEnd?: (toolCallId: string, errored: boolean) => void | Promise<void>;
+  /**
+   * Called when a destructive tool hits the confirm-before-running gate, and
+   * again when the owner decides. Lets the task card show the gate INLINE on the
+   * tool's own row — "<label> — awaiting approval" while blocked, then the row
+   * flips to running on approve or "<label> — denied" on deny — instead of a
+   * separate decision row. `toolCallId` matches the value onToolStart/onToolEnd
+   * use for the same call, so the row is reused, never duplicated. Optional —
+   * the plain (non-streamed) reply path has no task card and omits it.
+   */
+  onToolGate?: (
+    toolCallId: string,
+    phase: 'awaiting' | 'approved' | 'denied',
+    friendlyLabel: string,
+  ) => void | Promise<void>;
   /** Propagate cancellation into the Pi Agent. */
   signal?: AbortSignal;
   /**
