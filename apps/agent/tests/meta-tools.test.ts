@@ -7,8 +7,9 @@
  * ToolRegistry dispatcher), with owner-confirmation for destructive tools.
  */
 
-import { ToolRegistry } from '@sym/kernel';
 import { describe, expect, it, vi } from 'vitest';
+
+import { ToolRegistry } from '@sym/kernel';
 
 import {
   buildConnectorCatalog,
@@ -145,7 +146,9 @@ describe('call_tool', () => {
       arguments: { project: 'web' },
     });
 
-    expect(confirm).toHaveBeenCalledWith('sentry__list_issues', { project: 'web' });
+    // call_tool threads its own toolCallId into confirm so the gate can land on
+    // that row in the task card.
+    expect(confirm).toHaveBeenCalledWith('sentry__list_issues', { project: 'web' }, 'cid');
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(textOf(res)).toContain('ran sentry__list_issues');
   });

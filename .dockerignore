@@ -18,6 +18,12 @@
 **/*.db
 data
 
+# Dev-only dirs — never needed in the build context
+dev/
+tmp/
+.claude/
+docs/refactor/
+
 # Editor / OS noise
 .vscode
 .idea

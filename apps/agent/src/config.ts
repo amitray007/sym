@@ -4,10 +4,11 @@
  * one owner, one model provider. No secrets are logged.
  */
 
-import { loadConnectorConfigs } from './mcp/source.js';
+import { z } from 'zod';
 
-import type { ConnectorConfig } from './mcp/config.js';
-import type { ConfigSource } from './mcp/source.js';
+import { loadConnectorConfigs } from '@sym/mcp-runtime';
+
+import type { ConnectorConfig, ConfigSource } from '@sym/mcp-runtime';
 /** Runtime behavior knobs — all optional, all have safe defaults. */
 export interface BehaviorConfig {
   /**
@@ -29,6 +30,31 @@ export interface BehaviorConfig {
    * relay it. Defaults to true for transparency; set to false to suppress.
    */
   ownerPostMarker: boolean;
+  /**
+   * When true, the agent asks the owner to confirm `run_cli` calls before
+   * executing — except help/version introspection (`--help`, `--version`,
+   * bare binary), which remain unconfirmed so the agent can learn a CLI
+   * without prompting. Defaults to false (full freedom within the allowlist).
+   * Optional so existing callers that don't set it yet default to false.
+   */
+  cliConfirm?: boolean;
+  /**
+   * Per-turn deadline in milliseconds. A stuck model or a Fireworks error-loop
+   * is aborted after this many ms, producing a partial/timed-out reply instead
+   * of consuming credits without bound.
+   * Default: 60 000 (60 s). Set to 0 to disable.
+   * Optional so existing callers that don't set it yet use the default.
+   */
+  turnDeadlineMs?: number;
+  /**
+   * Maximum number of threaded history messages fed to the model per turn.
+   * The most-recent N messages are kept (tail-slice). A 200-reply thread would
+   * otherwise send all 200 messages to the model on every turn, growing cost
+   * linearly with thread length.
+   * Default: 80. Set to 0 to disable the cap (send all messages).
+   * Optional so existing callers that don't set it yet use the default.
+   */
+  threadHistoryLimit?: number;
 }
 
 export interface AgentConfig {
@@ -70,6 +96,8 @@ export interface AgentConfig {
 
 const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
 const DEFAULT_TASK_CARD_THRESHOLD = 1;
+const DEFAULT_TURN_DEADLINE_MS = 60_000;
+const DEFAULT_THREAD_HISTORY_LIMIT = 80;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -79,13 +107,36 @@ function required(name: string): string {
   return value;
 }
 
-function taskCardAfter(raw: string | undefined): 'delete' | 'collapse' {
-  if (raw === 'collapse') return 'collapse';
-  return 'delete';
-}
+/**
+ * Zod schema for the behavior-knob env vars.
+ *
+ * Non-negative integer knobs use `z.coerce.number().int().nonnegative()` with
+ * `.catch(default)` so a typo'd/missing value silently falls back to the safe
+ * default (same NaN-safe semantics as the old `posIntEnv` helper, but
+ * declarative). `0` is a valid value — callers treat it as "no limit".
+ */
+const behaviorEnvSchema = z.object({
+  TASK_CARD_THRESHOLD: z.coerce.number().int().nonnegative().catch(DEFAULT_TASK_CARD_THRESHOLD),
+  TASK_CARD_AFTER: z.enum(['collapse', 'delete']).catch('delete'),
+  OWNER_POST_MARKER: z
+    .string()
+    .optional()
+    .transform((v) => v !== 'false'),
+  SYM_CLI_CONFIRM: z
+    .string()
+    .optional()
+    .transform((v) => /^(1|true|yes|on)$/i.test(v ?? '')),
+  SYM_TURN_DEADLINE_MS: z.coerce.number().int().nonnegative().catch(DEFAULT_TURN_DEADLINE_MS),
+  SYM_THREAD_HISTORY_LIMIT: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .catch(DEFAULT_THREAD_HISTORY_LIMIT),
+});
 
 export function loadAgentConfig(): AgentConfig {
   const connectors = loadConnectorConfigs();
+  const behavior = behaviorEnvSchema.parse(process.env);
   return {
     port: Number(process.env['AGENT_PORT'] ?? '3001'),
     slackSigningSecret: required('SLACK_SIGNING_SECRET'),
@@ -100,9 +151,12 @@ export function loadAgentConfig(): AgentConfig {
     fireworksModel: required('FIREWORKS_MODEL'),
     fireworksBaseUrl: process.env['FIREWORKS_BASE_URL'] ?? DEFAULT_FIREWORKS_BASE_URL,
     behavior: {
-      taskCardThreshold: Number(process.env['TASK_CARD_THRESHOLD'] ?? DEFAULT_TASK_CARD_THRESHOLD),
-      taskCardAfter: taskCardAfter(process.env['TASK_CARD_AFTER']),
-      ownerPostMarker: process.env['OWNER_POST_MARKER'] !== 'false',
+      taskCardThreshold: behavior.TASK_CARD_THRESHOLD,
+      taskCardAfter: behavior.TASK_CARD_AFTER,
+      ownerPostMarker: behavior.OWNER_POST_MARKER,
+      cliConfirm: behavior.SYM_CLI_CONFIRM,
+      turnDeadlineMs: behavior.SYM_TURN_DEADLINE_MS,
+      threadHistoryLimit: behavior.SYM_THREAD_HISTORY_LIMIT,
     },
     mcpServers: connectors.mcpServers,
     mcpConfigSource: connectors.source,

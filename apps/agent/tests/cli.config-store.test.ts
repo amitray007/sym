@@ -20,7 +20,7 @@ import {
 } from '../src/cli/config-store.js';
 
 import type { SymConfigFile } from '../src/cli/config-store.js';
-import type { ConnectorConfig } from '../src/mcp/config.js';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 
 // ---------------------------------------------------------------------------
 // Fixture helpers

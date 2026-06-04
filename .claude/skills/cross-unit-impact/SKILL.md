@@ -1,13 +1,26 @@
 ---
 name: cross-unit-impact
-description: Use whenever changing a database schema, contract type, shared interface, or any package consumed by multiple streams in Sym. Forces you to think through how every other unit reacts to the change, with production-grade migration discipline drawn from how Stripe, Shopify, Linear, Honeycomb, GitHub, and DHH-style Rails shops manage live systems. Run BEFORE writing the change and again before opening the PR.
+description: Use whenever changing a contract type, shared interface, or any package consumed by multiple units in Sym. Forces you to think through how every other unit reacts to the change, with production-grade migration discipline drawn from how Stripe, Shopify, Linear, Honeycomb, GitHub, and DHH-style Rails shops manage live systems. Run BEFORE writing the change and again before opening the PR.
 ---
 
 # Cross-Unit Impact Discipline
 
 **Core principle:** every change is a multi-unit change. The unit you're editing is never the only unit affected. Before touching code, name every other unit that reacts to this change, and design the change so all of them remain working at every intermediate state — including a half-deployed state, and a rolled-back state.
 
-This skill exists because Sym is config-as-database with two services sharing one Postgres. The Dashboard writer and the Agent reader can be at different versions during deploy. Schema changes that look local are global. Type changes that look local are global. Migration discipline is not optional.
+This skill exists because Sym is a pnpm monorepo with a layered package graph.
+`@sym/contracts` has three consumers (`@sym/kernel`, `@sym/adapter-slack`,
+`@sym/agent`). Interface changes that look local to one package are global.
+Type changes that look local are global. The single deployable means there
+is no database schema migration to coordinate, but there is a build graph to
+keep acyclic and a public surface contract to keep intentional.
+
+> **Architecture context.** Sym has two tiers: a stateless _conversational_
+> tier (no message DB; Slack thread is the memory) and an intentional
+> _local-state control_ tier (operator TUI/CLI + AES-256-GCM SQLite credential
+> store). There is no Postgres, no web dashboard, no second service. "Schema
+> change" in this skill means TypeScript contract changes in `@sym/contracts`,
+> changes to the encrypted credential store's table shape, or changes to the
+> connector config file format — not a relational migration.
 
 ---
 
@@ -17,11 +30,19 @@ For the change you're about to make, answer these in order. If you can't answer 
 
 ### 1. What units consume this?
 
-List every package, service, deploy target, or external integration that reads or writes the thing you're changing. Be specific. "Everyone" means you haven't thought about it.
+List every package or external integration that reads or writes the thing you're
+changing. Be specific. "Everyone" means you haven't thought about it.
 
-- Schema change → list every Drizzle query that hits this table
-- Contract change → list every package that imports the type
-- API change → list every caller
+- Contract type change → list every package that imports the type (use
+  `pnpm typecheck` after the change; the compiler names the callers)
+- `@sym/contracts` change → all three consumers: `@sym/kernel`,
+  `@sym/adapter-slack`, `@sym/agent`
+- Credential store schema change → `mcp/store.ts` is the only writer/reader;
+  but the on-disk `credentials.db` lives on the `/data` volume in production —
+  any breaking table change needs a migration or a version guard
+- Connector config file format change → `mcp/source.ts` (reader) +
+  `mcp/cli-config.ts` (cli section reader) + `sym apply` flow
+- HTTP API change (`/admin/*`) → `cli/admin-client.ts` is the sole consumer
 - Behavior change → list every caller relying on the old behavior
 
 ### 2. Is the change backward compatible?
@@ -49,22 +70,34 @@ Stripe API versioning, gh-ost online schema changes, Shopify's "one-deploy-compa
 
 ### 4. What's the deploy order?
 
-Sym is two services sharing one DB. Order matters. State it explicitly:
+Sym is a single deployable (`apps/agent`). There is no second service to
+coordinate. Deployment order is usually "build, push, restart." State it
+explicitly anyway when a credential store schema change or config file format
+change is involved — those affect the on-disk `/data` volume which persists
+across redeploys.
 
-- DB migration → which service deploys first?
-- Does the order assume the migration ran? What if it didn't?
-- Can the Dashboard ship before the Agent? Vice versa?
+- Credential store schema change → does the new code handle a pre-migration DB?
+  (It must: the volume survives redeploy; the new binary boots against the old
+  schema before any migration code runs.)
+- Config file format change → does `mcp/source.ts` handle old-format files
+  gracefully, or does it need a version gate?
 
-If the answer is "doesn't matter, fully compatible," good — write that down in the PR.
+If the answer is "no persistent state affected — redeploy is safe," write that
+down in the PR.
 
 ### 5. What's the rollback plan?
 
 For every change, the rollback story must exist. Write it in the PR:
 
-- "Revert PR + redeploy" is a valid rollback only if the schema change is reversible. Most aren't.
-- For schema migrations: rollback usually means leaving the new shape in place but reverting the code. Plan for that.
-- For data backfills: are they idempotent? Can they be re-run?
-- For type-only changes in `@sym/contracts`: rollback is the inverse PR; track all consumers.
+- "Revert PR + redeploy" is valid if no persistent state was affected.
+- For credential store schema changes: rollback usually means reverting the code
+  and leaving the table shape in place. Plan for the old binary seeing the new
+  schema (or vice versa) on a fresh redeploy.
+- For config file format changes: old config files on `/data` will be read by
+  the new binary — ensure the reader handles both formats or bumps the
+  `version` field with a fallback path.
+- For type-only changes in `@sym/contracts`: rollback is the inverse PR;
+  track all three consumers.
 
 Honeycomb's rule: "if you can't rollback, you can't deploy."
 
@@ -72,19 +105,26 @@ Honeycomb's rule: "if you can't rollback, you can't deploy."
 
 If the change introduces new behavior:
 
-- Audit event with the right semantic key? (See `specs/logging/`)
-- OTel span/event with `gen_ai.*` / `app.*` keys?
-- Metric to detect when the change is misbehaving in production?
+- Does the new path emit `console.info` / `console.warn` / `console.error` log
+  lines prefixed with `logCtx(turnId)` so concurrent turns are distinguishable?
+  (Server code must never use `console.log` — CI-enforced.)
+- Is the new behavior observable in `sym status --json` or the TUI dashboard
+  when relevant (e.g., a new connector state, a new CLI capability)?
+- Is there a metric or log line that signals when the change misbehaves in
+  production without requiring a debugger?
 
 Adding observability after the fact is 10× the work. Bake it into the same PR.
 
 ### 7. What eval changes?
 
-For changes touching memory, soul, prompt assembly, retrieval, or anything model-behavior-shaped:
+For changes touching prompt assembly, system-prompt content, or anything
+model-behavior-shaped:
 
-- promptfoo eval set updated?
-- Thresholds tightened or loosened? Document why.
-- Did the change pass eval at the existing threshold?
+- Does `packages/kernel/src/prompt.ts` (`buildSystemPrompt`,
+  `buildUserTurnContent`) need updating?
+- Does the change affect the model's tool-call behavior in a way that should be
+  tested end-to-end (e.g., a new tool descriptor, a changed `destructiveHint`)?
+- Run `pnpm test:integration` — the real-wire MCP/HTTP tests cover the turn loop.
 
 ### 8. What's the contract surface?
 
@@ -96,39 +136,52 @@ If your change touches `@sym/contracts`:
 
 ---
 
-## Schema change subroutine
+## Credential store schema subroutine
 
-Database schema is the highest-blast-radius change in Sym. Run this every time:
+The encrypted SQLite credential store (`mcp/store.ts`, `credentials.db`) is the
+highest-blast-radius persistent state in Sym. Run this whenever the table shape
+or serialization format changes:
 
-1. **Additive only by default.** New tables, new nullable columns, new indexes — generally safe.
-2. **`NOT NULL` only after backfill.** Never add `NOT NULL` in the same migration that adds the column. Two migrations: add nullable + backfill → add `NOT NULL`.
-3. **Drops are two-phase.** First migration: stop writing. Deploy. Verify. Second migration: drop.
-4. **Renames are three-phase.** Add new column → dual-write → switch readers → drop old. Same for renamed tables.
-5. **Indexes use `CONCURRENTLY`** in Postgres. No locking migrations during business hours.
-6. **Enums grow only.** Adding a value is safe. Removing a value is a multi-phase migration (stop writing → wait → drop).
-7. **Migration file is reviewed independently of code.** Schema review is its own discipline.
-8. **Drizzle types regenerated and committed in the same PR as the migration.**
+1. **Additive only by default.** New tables, new nullable columns — generally
+   safe. Never add a `NOT NULL` constraint in the same change that adds the
+   column; add nullable first, then tighten in a follow-up.
+2. **Drops are two-phase.** Stop writing to the old column → redeploy → verify →
+   drop. The volume persists across redeploys; a one-step drop breaks the running
+   binary before it restarts.
+3. **Renames are three-phase.** Add new column → dual-write → switch readers →
+   drop old.
+4. **The `DatabaseSync` constructor runs at boot** in `mcp/store.ts`. Any schema
+   migration code that runs there must be idempotent (safe to re-run if the
+   process restarts mid-migration).
+5. **Schema change is reviewed independently of feature code.** The table DDL
+   gets its own PR section.
+6. **Test with `:memory:` and with a real file.** `mcp/store.ts` accepts
+   `:memory:` for tests; ensure the migration path is exercised against both.
 
-Reference: gh-ost, pt-online-schema-change, Vitess online DDL, Square Sake all encode these rules in tools. Sym does it by discipline because we're small.
+For `@sym/contracts` type changes (no DB): the expand-contract discipline in
+§"What's the expand-contract plan?" above applies directly — old shape
+stays until all three consumers are updated in the same PR.
 
 ---
 
 ## What top developers do, condensed
 
-- **Stripe** — date-based API versions, server-side translation, never silent break. Apply: when our contracts evolve, mark old shapes deprecated with a removal date, don't surprise consumers.
-- **Shopify** — every deploy backward + forward compatible for at least one prior deploy. Apply: rollback to yesterday's binary must keep working with today's schema.
+- **Stripe** — date-based API versions, server-side translation, never silent break. Apply: when `@sym/contracts` evolves, mark old shapes deprecated with a removal date, don't surprise consumers.
+- **Shopify** — every deploy backward + forward compatible for at least one prior deploy. Apply: rollback to yesterday's binary must keep working with today's on-disk state (credential store, config file on `/data`).
 - **Linear / cross-repo coordination** — bot opens PRs in every consumer; nothing merges until all green. Apply: when changing `@sym/contracts`, the same PR touches every consumer package — turbo's affected graph is your friend.
-- **Honeycomb / deploy ordering** — explicit, documented, rehearsed. Apply: PR description lists deploy order and rollback steps; if it doesn't, the PR is incomplete.
-- **GitHub / gh-ost** — online schema changes, never lock production tables. Apply: every Sym migration is written with the assumption that production reads/writes continue throughout.
+- **Honeycomb / deploy ordering** — explicit, documented, rehearsed. Apply: PR description lists deploy steps and rollback; if it doesn't, the PR is incomplete.
+- **GitHub / gh-ost** — online schema changes, never lock production tables. Apply: credential store schema changes are additive-first; never a destructive single-step migration.
 - **DHH / Basecamp** — every commit on main is shippable; no WIP on main. Apply: a half-finished `@sym/contracts` change can't sit on main; either complete it or land behind a feature gate.
 - **Google / protobuf** — types reviewed as their own artifact. Apply: contract changes get their own PR conversation; implementation follows.
-- **Anthropic / model versioning** — pin models, change versions explicitly. Apply: provider config in Sym pins model versions; upgrades are conscious dashboard actions, not silent.
+- **Anthropic / model versioning** — pin models, change versions explicitly. Apply: `FIREWORKS_MODEL` is an explicit env var; model upgrades are conscious operator decisions, not silent drift.
 
 ---
 
 ## Output
 
-Every PR that touches schema, `@sym/contracts`, or any cross-stream interface includes this section in its description:
+Every PR that touches `@sym/contracts`, the credential store schema, the config
+file format, or any cross-package interface includes this section in its
+description:
 
 ```md
 ## Cross-unit impact
@@ -137,10 +190,10 @@ Every PR that touches schema, `@sym/contracts`, or any cross-stream interface in
 - Units consuming: [list]
 - Backward compatible: [yes / expand-contract / breaking]
 - Expand-contract plan: [N/A or 3 phases]
-- Deploy order: [doesn't matter / DB → Dashboard → Agent / etc.]
+- Deploy / volume impact: [safe redeploy / credential store migration / config version bump]
 - Rollback plan: [revert / two-step / etc.]
-- Audit + OTel added: [list of events]
-- Eval impact: [N/A / set updated / thresholds]
+- Observability added: [log lines / sym status fields / N/A]
+- Eval impact: [N/A / prompt.ts updated / integration test added]
 ```
 
 If any line is "N/A," explain why.

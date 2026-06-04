@@ -5,7 +5,7 @@
  *  1.  Config parsing (valid/invalid/empty SYM_MCP_SERVERS values)
  *  2.  StaticProvider.resolve — string secret, record secret, argv, array
  *  3.  buildTransport — env merge order, argv append, stub arms
- *  4.  makeProvider — static→provider, oauth→throw, undefined→null
+ *  4.  makeProvider — static→StaticProvider, oauth→OAuthProvider (C3), undefined→null
  *  5.  CompositeDispatcher prefix routing
  *  6.  McpDispatcher — MCP result → ToolResult mapping + security annotations
  *  7.  FAIL OPEN — down server → zero tools, no throw
@@ -14,7 +14,8 @@
  * MCP Client/Transport are fully mocked — no real subprocess is spawned.
  */
 
-// Module mocks must be declared before imports (hoisted by vitest).
+// vi.mock() calls are hoisted to the top of the file by the vitest transform,
+// so they execute before any imports regardless of where they appear in source.
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
   return { Client: vi.fn() };
 });
@@ -32,15 +33,23 @@ import { Client as MockClient } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport as MockStdioTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CompositeDispatcher } from '../src/mcp/composite.js';
-import { parseMcpServers } from '../src/mcp/config.js';
-import { McpDispatcher, MCP_TOOL_SEPARATOR, _resetPoolForTesting } from '../src/mcp/dispatcher.js';
-import { buildTransport } from '../src/mcp/inject.js';
-import { Materializer, _getActiveDirsForTesting } from '../src/mcp/materialize.js';
-import { makeProvider, NotImplementedError } from '../src/mcp/providers/provider.js';
-import { StaticProvider } from '../src/mcp/providers/static.js';
+import {
+  CompositeDispatcher,
+  parseMcpServers,
+  McpDispatcher,
+  MCP_TOOL_SEPARATOR,
+  _resetPoolForTesting,
+  initMcpPool,
+  parseConnectTimeoutMs,
+  buildTransport,
+  Materializer,
+  _getActiveDirsForTesting,
+  makeProvider,
+  NotImplementedError,
+  StaticProvider,
+} from '@sym/mcp-runtime';
 
-import type { ConnectorConfig, Injection, SecretMaterial } from '../src/mcp/config.js';
+import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type {
   ConversationId,
   JsonObject,
@@ -54,6 +63,7 @@ import type {
   TurnId,
   WorkspaceId,
 } from '@sym/contracts';
+import type { ConnectorConfig, Injection, SecretMaterial } from '@sym/mcp-runtime';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -237,7 +247,7 @@ describe('parseMcpServers', () => {
     expect(result[0]?.auth).toMatchObject({ kind: 'oauth' });
   });
 
-  it('accepts ambient auth (Model B — CLI self-authenticates from disk)', () => {
+  it('accepts ambient auth (CLI self-authenticates from disk)', () => {
     const raw = JSON.stringify([
       {
         name: 'gcloud',
@@ -563,7 +573,12 @@ describe('buildTransport', () => {
 
   it('native credential on stdio → throws (OAuth not supported over stdio)', () => {
     expect(() =>
-      buildTransport({ kind: 'stdio', command: '/bin/srv' }, { apply: 'native', oauth: {} }),
+      buildTransport(
+        { kind: 'stdio', command: '/bin/srv' },
+        // Cast a stub as OAuthClientProvider — the value is never read because
+        // the function throws before it reaches the native branch for stdio.
+        { apply: 'native', oauth: {} as unknown as OAuthClientProvider },
+      ),
     ).toThrow(/OAuth.*stdio/i);
   });
 });
@@ -577,7 +592,7 @@ describe('makeProvider', () => {
     expect(makeProvider(undefined)).toBeNull();
   });
 
-  it('ambient auth → null (Model B injects no credential)', () => {
+  it('ambient auth → null (ambient injects no credential)', () => {
     expect(makeProvider({ kind: 'ambient' })).toBeNull();
   });
 
@@ -704,7 +719,7 @@ describe('McpDispatcher', () => {
     const config = makeConnector({ name: 'srv' });
     const dispatcher = new McpDispatcher([config]);
 
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const tools = dispatcher.list();
     expect(tools).toHaveLength(1);
@@ -720,7 +735,7 @@ describe('McpDispatcher', () => {
 
     const config = makeConnector({ name: 'srv2' });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const tools = dispatcher.list();
     expect(tools[0]?.destructiveHint).toBe(true);
@@ -734,7 +749,7 @@ describe('McpDispatcher', () => {
 
     const config = makeConnector({ name: 'trusted', trust: true });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const tools = dispatcher.list();
     expect(tools[0]?.destructiveHint).toBeUndefined();
@@ -749,7 +764,7 @@ describe('McpDispatcher', () => {
 
     const config = makeConnector({ name: 'greeter', trust: true });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const result = await dispatcher.dispatch(
       makeCall(`greeter${MCP_TOOL_SEPARATOR}greet`, {}, 'call_xyz'),
@@ -771,7 +786,7 @@ describe('McpDispatcher', () => {
 
     const config = makeConnector({ name: 'failer', trust: true });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const result = await dispatcher.dispatch(
       makeCall(`failer${MCP_TOOL_SEPARATOR}fail_tool`, {}, 'call_fail'),
@@ -793,7 +808,7 @@ describe('McpDispatcher', () => {
 
     const config = makeConnector({ name: 'boomer', trust: true });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     const result = await dispatcher.dispatch(
       makeCall(`boomer${MCP_TOOL_SEPARATOR}boom`, {}, 'call_boom'),
@@ -816,8 +831,7 @@ describe('McpDispatcher', () => {
       transport: { kind: 'stdio', command: '/bin/srv', env: { BASE: 'base' } },
       auth: { kind: 'static', secret: 'tok-123', inject: { at: 'env', name: 'API_KEY' } },
     });
-    const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync();
+    await initMcpPool([config]);
 
     // StdioClientTransport should have been called with merged env
     expect(vi.mocked(MockStdioTransport)).toHaveBeenCalledWith(
@@ -851,7 +865,7 @@ describe('McpDispatcher — FAIL OPEN', () => {
     const config = makeConnector({ name: 'down_srv' });
     const dispatcher = new McpDispatcher([config]);
 
-    await expect(dispatcher.listAsync()).resolves.toEqual([]);
+    await initMcpPool([config]);
     expect(dispatcher.list()).toEqual([]);
   });
 
@@ -867,7 +881,7 @@ describe('McpDispatcher — FAIL OPEN', () => {
     const config = makeConnector({ name: 'list_fail_srv' });
     const dispatcher = new McpDispatcher([config]);
 
-    await expect(dispatcher.listAsync()).resolves.toEqual([]);
+    await initMcpPool([config]);
     expect(dispatcher.list()).toEqual([]);
   });
 
@@ -882,7 +896,7 @@ describe('McpDispatcher — FAIL OPEN', () => {
 
     const config = makeConnector({ name: 'conn_fail' });
     const dispatcher = new McpDispatcher([config]);
-    await dispatcher.listAsync(); // fails internally — pool entry ok=false
+    await initMcpPool([config]); // fails internally — pool entry ok=false
 
     const result = await dispatcher.dispatch(
       makeCall(`conn_fail${MCP_TOOL_SEPARATOR}anything`, {}, 'call_x'),
@@ -925,19 +939,61 @@ describe('McpDispatcher — connect TIMEOUT', () => {
     vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
 
     const config = makeConnector({ name: 'hanging_srv' });
+    // McpDispatcher reads from the shared pool — initMcpPool populates it.
     const dispatcher = new McpDispatcher([config]);
 
     // Start the connect attempt and advance time past the timeout.
-    const connectPromise = dispatcher.listAsync();
-    // Advance past the default 10s timeout
-    vi.advanceTimersByTime(11_000);
+    const connectPromise = initMcpPool([config]);
+    // Advance past the default 10s timeout (async variant flushes microtasks too)
+    await vi.advanceTimersByTimeAsync(11_000);
 
-    const result = await connectPromise;
-    expect(result).toEqual([]);
+    await connectPromise;
     expect(dispatcher.list()).toEqual([]);
 
     // Clean up the hanging promise so node doesn't complain
     resolveHang();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8b. parseConnectTimeoutMs validation (Z08-26)
+// ---------------------------------------------------------------------------
+
+describe('parseConnectTimeoutMs', () => {
+  it('returns defaultMs when raw is undefined', () => {
+    expect(parseConnectTimeoutMs(undefined, 10_000)).toBe(10_000);
+  });
+
+  it('parses a valid numeric string', () => {
+    expect(parseConnectTimeoutMs('5000', 10_000)).toBe(5_000);
+  });
+
+  it('clamps to 1000ms minimum when value is below 1000', () => {
+    expect(parseConnectTimeoutMs('500', 10_000)).toBe(1_000);
+  });
+
+  it('falls back to defaultMs for a non-numeric string (NaN guard)', () => {
+    expect(parseConnectTimeoutMs('abc', 10_000)).toBe(10_000);
+  });
+
+  it('falls back to defaultMs for "NaN"', () => {
+    expect(parseConnectTimeoutMs('NaN', 10_000)).toBe(10_000);
+  });
+
+  it('falls back to defaultMs for an empty string', () => {
+    expect(parseConnectTimeoutMs('', 10_000)).toBe(10_000);
+  });
+
+  it('falls back to defaultMs for Infinity', () => {
+    expect(parseConnectTimeoutMs('Infinity', 10_000)).toBe(10_000);
+  });
+
+  it('falls back to defaultMs for a negative number', () => {
+    expect(parseConnectTimeoutMs('-5000', 10_000)).toBe(10_000);
+  });
+
+  it('falls back to defaultMs for zero', () => {
+    expect(parseConnectTimeoutMs('0', 10_000)).toBe(10_000);
   });
 });
 
@@ -1167,5 +1223,105 @@ describe('buildTransport — files arm', () => {
         { apply: 'files', dir: '/tmp/dir', vars: { X: '/tmp/dir/k' } },
       ),
     ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 12. tools.allow enforcement (Z08-01)
+// ---------------------------------------------------------------------------
+
+describe('McpDispatcher — tools.allow enforcement', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetPoolForTesting();
+  });
+
+  it('without tools.allow, all server tools are exposed', async () => {
+    const mockClient = makeMockClient([
+      { name: 'tool_a', inputSchema: { type: 'object', properties: {} } },
+      { name: 'tool_b', inputSchema: { type: 'object', properties: {} } },
+      { name: 'tool_c', inputSchema: { type: 'object', properties: {} } },
+    ]);
+    vi.mocked(MockClient).mockReturnValue(mockClient);
+
+    const config = makeConnector({ name: 'srv_allow', trust: true });
+    const dispatcher = new McpDispatcher([config]);
+    await initMcpPool([config]);
+
+    const tools = dispatcher.list();
+    expect(tools).toHaveLength(3);
+    expect(tools.map((t) => t.name)).toEqual([
+      `srv_allow${MCP_TOOL_SEPARATOR}tool_a`,
+      `srv_allow${MCP_TOOL_SEPARATOR}tool_b`,
+      `srv_allow${MCP_TOOL_SEPARATOR}tool_c`,
+    ]);
+  });
+
+  it('with tools.allow, only the allowed tool is exposed (Z08-01)', async () => {
+    // WATCHED FAIL: before the fix, this test would fail because tools.allow
+    // was parsed but NOT applied — all 3 tools would appear.
+    const mockClient = makeMockClient([
+      { name: 'tool_a', inputSchema: { type: 'object', properties: {} } },
+      { name: 'tool_b', inputSchema: { type: 'object', properties: {} } },
+      { name: 'tool_c', inputSchema: { type: 'object', properties: {} } },
+    ]);
+    vi.mocked(MockClient).mockReturnValue(mockClient);
+
+    const config = makeConnector({
+      name: 'srv_filtered',
+      trust: true,
+      tools: { allow: ['tool_b'] },
+    });
+    const dispatcher = new McpDispatcher([config]);
+    await initMcpPool([config]);
+
+    const tools = dispatcher.list();
+    // Only tool_b must be exposed; tool_a and tool_c are filtered out.
+    expect(tools).toHaveLength(1);
+    expect(tools[0]?.name).toBe(`srv_filtered${MCP_TOOL_SEPARATOR}tool_b`);
+  });
+
+  it('with tools.allow of multiple names, exactly those tools are exposed', async () => {
+    const mockClient = makeMockClient([
+      { name: 'alpha', inputSchema: { type: 'object', properties: {} } },
+      { name: 'beta', inputSchema: { type: 'object', properties: {} } },
+      { name: 'gamma', inputSchema: { type: 'object', properties: {} } },
+      { name: 'delta', inputSchema: { type: 'object', properties: {} } },
+    ]);
+    vi.mocked(MockClient).mockReturnValue(mockClient);
+
+    const config = makeConnector({
+      name: 'srv_multi',
+      trust: true,
+      tools: { allow: ['alpha', 'gamma'] },
+    });
+    const dispatcher = new McpDispatcher([config]);
+    await initMcpPool([config]);
+
+    const tools = dispatcher.list();
+    expect(tools).toHaveLength(2);
+    expect(tools.map((t) => t.name)).toEqual([
+      `srv_multi${MCP_TOOL_SEPARATOR}alpha`,
+      `srv_multi${MCP_TOOL_SEPARATOR}gamma`,
+    ]);
+  });
+
+  it('with an empty tools.allow array, all tools are exposed (empty = no filter)', async () => {
+    const mockClient = makeMockClient([
+      { name: 'tool_x', inputSchema: { type: 'object', properties: {} } },
+    ]);
+    vi.mocked(MockClient).mockReturnValue(mockClient);
+
+    const config = makeConnector({
+      name: 'srv_empty_allow',
+      trust: true,
+      tools: { allow: [] },
+    });
+    const dispatcher = new McpDispatcher([config]);
+    await initMcpPool([config]);
+
+    const tools = dispatcher.list();
+    // Empty allow-list means no filter — all tools exposed.
+    expect(tools).toHaveLength(1);
   });
 });

@@ -12,9 +12,9 @@
  * in-memory store; production callers pass nothing and rely on `openStore()`.
  */
 
-import { SqliteCredentialStore } from '../mcp/store.js';
+import { SqliteCredentialStore } from '@sym/mcp-runtime';
 
-import type { CredentialStore, SecretRef } from '../mcp/store.js';
+import type { CredentialStore, SecretRef } from '@sym/mcp-runtime';
 
 // ---------------------------------------------------------------------------
 // Internal store factory
@@ -33,7 +33,7 @@ function openStore(): CredentialStore {
     throw new Error(
       '[sym secret] Cannot open the credential store. ' +
         'Ensure SYM_ENCRYPTION_KEY is set to a valid 32-byte base64 or hex key. ' +
-        "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"",
+        'Generate one with: openssl rand -base64 32',
       { cause },
     );
   }

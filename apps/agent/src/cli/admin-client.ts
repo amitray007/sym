@@ -15,7 +15,7 @@ import type {
   ConnectorTestResult,
   ReconcileResult,
   ToolInfo,
-} from '../mcp/index.js';
+} from '@sym/mcp-runtime';
 
 // Re-export so callers can import these types from here.
 export type { ConnectorStatus, ConnectorDetail, ToolInfo, ConnectorTestResult };
@@ -32,7 +32,7 @@ export type { ConnectorStatus, ConnectorDetail, ToolInfo, ConnectorTestResult };
  *  2. `http://127.0.0.1:<AGENT_PORT>` — loopback at the configured port
  *  3. `http://127.0.0.1:3001`         — hardcoded default
  */
-export function adminBaseUrl(): string {
+function adminBaseUrl(): string {
   const explicit = process.env['SYM_ADMIN_URL'];
   if (explicit !== undefined && explicit.length > 0) {
     return explicit;

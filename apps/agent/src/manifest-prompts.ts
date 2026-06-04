@@ -1,3 +1,12 @@
+/**
+ * Manifest-prompts loader — reads the Slack `manifest.yml` (or its template)
+ * at boot and returns the `suggested_prompts` array for the assistant panel.
+ *
+ * Keeps the runtime prompt list in sync with the install-time manifest so
+ * there is a single source of truth for what Sym shows users when they open
+ * a fresh assistant thread.
+ */
+
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

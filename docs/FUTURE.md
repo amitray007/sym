@@ -25,3 +25,23 @@ The following were removed and can be restored from git history if revisited:
 Still present (the 4 kept packages): `apps/agent`, `packages/adapter/slack`,
 `packages/kernel` (prompt builders + `ToolRegistry`; its old runLoop is retired,
 Pi is the only turn path), and `packages/contracts`.
+
+## Rebuilt in-agent since the collapse — 2026-06
+
+The collapse above is dated 2026-05-27. Since then, two capabilities were rebuilt
+**inside `apps/agent`** (not as separate services) and are now intended
+architecture — not "removed":
+
+- **MCP connectors** — an in-process MCP client (`apps/agent/src/mcp/`) replacing
+  the old `packages/ext/mcp`. Static-token and OAuth connectors; the live tool
+  pool is reconciled via the operator CLI / `POST /admin/reload`.
+- **Operator control tier** — a `sym` CLI with a simple interactive menu
+  (`apps/agent/src/cli`) and an **encrypted local SQLite credential store**
+  (`apps/agent/.sym/credentials.db`, AES-256-GCM via `mcp/store.ts`) for MCP
+  OAuth tokens and static secrets.
+
+So "no database / no dashboard" precisely means **no message database and no
+_web_ dashboard** — the Slack thread remains the conversational memory. The
+operator CLI and the credential store are a deliberate **local-state control
+tier**, distinct from the stateless conversational tier. (The operator CLI runs
+in production; the fuller two-tier model is documented in ARCHITECTURE.md.)

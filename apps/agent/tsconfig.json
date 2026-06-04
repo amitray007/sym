@@ -4,10 +4,8 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "types": ["node"],
-    // The `sym` TUI is React (Ink). react-jsx = automatic runtime; @types/react
-    // references DOM lib types, so DOM is added for type resolution only (no
-    // server code uses the browser globals).
-    "jsx": "react-jsx",
+    // DOM lib provides a few web-platform types used in code + tests (e.g.
+    // EventListener for AbortSignal handlers). No browser globals are used.
     "lib": ["ES2023", "DOM"]
   },
   "include": ["src/**/*"],

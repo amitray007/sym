@@ -12,9 +12,9 @@ import type * as PiLoopModuleType from '../src/pi/loop.js';
 // ---------------------------------------------------------------------------
 
 vi.mock('../src/pi/loop.js', async (importOriginal) => {
-  // Partial mock: stub runLoopPi (hermetic — no real HTTP), but keep the real
-  // exports for whimsy helpers (WHIMSY_WORDS, nextWhimsicalStatus) that
-  // handle-turn imports.
+  // Partial mock: stub runLoopPi (hermetic — no real HTTP) but keep real exports
+  // (friendlyVerb, SILENT_TOOLS, etc.). WHIMSY_WORDS/nextWhimsicalStatus have
+  // moved to shimmer-phrases.ts and are no longer exported from loop.js.
   const actual = await importOriginal<typeof PiLoopModuleType>();
   const mockFn = vi.fn();
   return { ...actual, runLoopPi: mockFn, __mockRunLoopPi: mockFn };
@@ -1269,6 +1269,142 @@ describe('handleTurn', () => {
       // token kept verbatim inside the transcript body (Slack renders @Bob).
       expect(backgroundMsg).toContain('viewing #rollout');
       expect(backgroundMsg).toContain('<@U999>');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Z16-05: Threaded history cap
+  // ---------------------------------------------------------------------------
+
+  describe('threaded history limit (Z16-05)', () => {
+    it('caps threaded history to the configured limit and keeps the most-recent messages', async () => {
+      let capturedHistory: ChatMessage[] = [];
+      mockRunLoopPi.mockImplementationOnce(
+        async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+          capturedHistory = (opts as { history?: ChatMessage[] }).history ?? [];
+          return makeReply();
+        },
+      );
+
+      const slack = new MockSlackClient();
+      // Build 10 messages: user/bot alternating. After excluding the trigger (last),
+      // we have 9 messages. Set the limit to 5 — expect only the last 5.
+      slack.replies = [
+        { user: 'U1' as SlackUserId, text: 'msg-1', ts: '900.1' as SlackThreadTs },
+        { user: BOT, text: 'reply-1', ts: '900.2' as SlackThreadTs },
+        { user: 'U1' as SlackUserId, text: 'msg-2', ts: '900.3' as SlackThreadTs },
+        { user: BOT, text: 'reply-2', ts: '900.4' as SlackThreadTs },
+        { user: 'U1' as SlackUserId, text: 'msg-3', ts: '900.5' as SlackThreadTs },
+        { user: BOT, text: 'reply-3', ts: '900.6' as SlackThreadTs },
+        { user: 'U1' as SlackUserId, text: 'msg-4', ts: '900.7' as SlackThreadTs },
+        { user: BOT, text: 'reply-4', ts: '900.8' as SlackThreadTs },
+        { user: 'U1' as SlackUserId, text: 'msg-5', ts: '900.9' as SlackThreadTs },
+        // triggering message — excluded by `excludeTs`
+        { user: 'U1' as SlackUserId, text: 'final question', ts: '901.0' as SlackThreadTs },
+      ];
+
+      await handleTurn(
+        makeTurn({
+          threadTs: '900.1' as SlackThreadTs,
+          ts: '901.0' as SlackThreadTs, // the triggering message — excluded
+          text: 'final question',
+        }),
+        {
+          fireworks: FAKE_FIREWORKS,
+          model: 'accounts/fireworks/models/gpt-oss-120b',
+          slackClient: slack,
+          botUserId: BOT,
+          slackTeamId: 'T-TEST',
+          behavior: { ...FAKE_BEHAVIOR, threadHistoryLimit: 5 },
+          nameResolver: FAKE_RESOLVER,
+        },
+      );
+
+      // The thread has 9 messages after the trigger is excluded. With limit=5 we
+      // keep the tail — the 5 most-recent messages.
+      expect(capturedHistory).toHaveLength(5);
+      // The LAST message in capturedHistory is the most-recent remaining one.
+      expect(capturedHistory[4]?.content).toBe('U1: msg-5');
+    });
+
+    it('does not cap when the thread is shorter than the limit', async () => {
+      let capturedHistory: ChatMessage[] = [];
+      mockRunLoopPi.mockImplementationOnce(
+        async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+          capturedHistory = (opts as { history?: ChatMessage[] }).history ?? [];
+          return makeReply();
+        },
+      );
+
+      const slack = new MockSlackClient();
+      slack.replies = [
+        { user: 'U1' as SlackUserId, text: 'msg-a', ts: '900.1' as SlackThreadTs },
+        { user: BOT, text: 'reply-a', ts: '900.2' as SlackThreadTs },
+        // triggering message
+        { user: 'U1' as SlackUserId, text: 'follow-up', ts: '900.3' as SlackThreadTs },
+      ];
+
+      await handleTurn(
+        makeTurn({
+          threadTs: '900.1' as SlackThreadTs,
+          ts: '900.3' as SlackThreadTs,
+          text: 'follow-up',
+        }),
+        {
+          fireworks: FAKE_FIREWORKS,
+          model: 'accounts/fireworks/models/gpt-oss-120b',
+          slackClient: slack,
+          botUserId: BOT,
+          slackTeamId: 'T-TEST',
+          behavior: { ...FAKE_BEHAVIOR, threadHistoryLimit: 80 },
+          nameResolver: FAKE_RESOLVER,
+        },
+      );
+
+      // 2 messages after excluding the trigger — well under the limit.
+      expect(capturedHistory).toHaveLength(2);
+    });
+
+    it('disables the cap when threadHistoryLimit is 0', async () => {
+      let capturedHistory: ChatMessage[] = [];
+      mockRunLoopPi.mockImplementationOnce(
+        async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+          capturedHistory = (opts as { history?: ChatMessage[] }).history ?? [];
+          return makeReply();
+        },
+      );
+
+      const slack = new MockSlackClient();
+      // 6 messages total (trigger excluded → 5 remaining), limit=0 → send all.
+      slack.replies = [
+        { user: 'U1' as SlackUserId, text: 'a', ts: '900.1' as SlackThreadTs },
+        { user: BOT, text: 'b', ts: '900.2' as SlackThreadTs },
+        { user: 'U1' as SlackUserId, text: 'c', ts: '900.3' as SlackThreadTs },
+        { user: BOT, text: 'd', ts: '900.4' as SlackThreadTs },
+        { user: 'U1' as SlackUserId, text: 'e', ts: '900.5' as SlackThreadTs },
+        // trigger
+        { user: 'U1' as SlackUserId, text: 'q', ts: '900.6' as SlackThreadTs },
+      ];
+
+      await handleTurn(
+        makeTurn({
+          threadTs: '900.1' as SlackThreadTs,
+          ts: '900.6' as SlackThreadTs,
+          text: 'q',
+        }),
+        {
+          fireworks: FAKE_FIREWORKS,
+          model: 'accounts/fireworks/models/gpt-oss-120b',
+          slackClient: slack,
+          botUserId: BOT,
+          slackTeamId: 'T-TEST',
+          behavior: { ...FAKE_BEHAVIOR, threadHistoryLimit: 0 },
+          nameResolver: FAKE_RESOLVER,
+        },
+      );
+
+      // All 5 messages are passed — cap disabled.
+      expect(capturedHistory).toHaveLength(5);
     });
   });
 });

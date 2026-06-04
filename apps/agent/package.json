@@ -6,36 +6,39 @@
   "bin": {
     "sym": "./dist/cli/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.test.json",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:integration": "vitest run -c vitest.config.integration.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "sym": "tsx src/cli/index.ts",
-    "qa:mcp": "tsc -p tsconfig.json && node scripts/qa-connector.mjs",
+    "qa:mcp": "pnpm --filter @sym/mcp-runtime build && tsc -p tsconfig.json && node scripts/qa-connector.mjs",
     "qa:delete": "tsc -p tsconfig.json && node scripts/qa-delete.mjs"
   },
   "dependencies": {
+    "@clack/prompts": "^1.5.1",
     "@earendil-works/pi-agent-core": "0.75.5",
     "@earendil-works/pi-ai": "0.75.5",
     "@hono/node-server": "^1.13.7",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@opentelemetry/api": "^1.9.1",
     "@sym/adapter-slack": "workspace:*",
     "@sym/contracts": "workspace:*",
     "@sym/kernel": "workspace:*",
+    "@sym/mcp-runtime": "workspace:*",
+    "dotenv": "^16.4.7",
     "hono": "^4.6.14",
-    "ink": "^5.1.0",
-    "ink-text-input": "^6.0.0",
-    "react": "^18.3.1",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/react": "^18.3.12",
-    "dotenv": "^16.4.7",
-    "ink-testing-library": "^4.0.0",
     "tsx": "^4.19.2",
-    "vitest": "^2.1.8"
+    "vitest": "catalog:"
   }
 }

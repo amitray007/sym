@@ -1,11 +1,11 @@
-// ---------------------------------------------------------------------------
-// In-memory viewed-channel context store
-//
-// Tracks the Slack channel a user is currently viewing for each assistant
-// panel thread. Updated by `assistant_thread_started` and
-// `assistant_thread_context_changed` lifecycle events; read by `handleTurn`
-// to provide background context to the model.
-// ---------------------------------------------------------------------------
+/**
+ * In-memory viewed-channel context store.
+ *
+ * Tracks the Slack channel a user is currently viewing for each assistant
+ * panel thread. Updated by `assistant_thread_started` and
+ * `assistant_thread_context_changed` lifecycle events; read by `handleTurn`
+ * to provide background context to the model.
+ */
 
 export interface AssistantContextStore {
   /** Record the channel the user is viewing for an assistant thread (clears when undefined). */

@@ -157,6 +157,98 @@ export function buildSystemPrompt(): string {
   ].join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Named section extractors — let callers (and tests) inspect individual
+// prompt sections without duplicating the string literals.
+//
+// Each function parses the assembled prompt once and returns the lines for
+// that "## Header" block. The strings live in exactly one place (the array
+// inside buildSystemPrompt) so there is no drift risk.
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the lines for a named `## Header` section from the assembled
+ * system prompt. Returns the header + all bullet lines up to (not including)
+ * the next `##` header or end of string.
+ *
+ * @internal — shared by the exported section helpers below.
+ */
+function _extractSection(header: string): string[] {
+  const prompt = buildSystemPrompt();
+  const lines = prompt.split('\n');
+  const start = lines.findIndex((l) => l === header);
+  if (start === -1) return [];
+  const end = lines.findIndex((l, i) => i > start && l.startsWith('## '));
+  return lines.slice(start, end === -1 ? lines.length : end).filter((l) => l.length > 0);
+}
+
+/** Lines for the "## Your relationship with the owner" section. */
+export function sectionOwnerRelationship(): string[] {
+  return _extractSection('## Your relationship with the owner');
+}
+
+/** Lines for the "## Voice and style" section. */
+export function sectionVoiceAndStyle(): string[] {
+  return _extractSection('## Voice and style');
+}
+
+/** Lines for the "## How you work" section. */
+export function sectionHowYouWork(): string[] {
+  return _extractSection('## How you work');
+}
+
+/** Lines for the "## Your connectors (how you reach the outside world)" section. */
+export function sectionConnectors(): string[] {
+  return _extractSection('## Your connectors (how you reach the outside world)');
+}
+
+/** Lines for the "## Planning multi-step work" section. */
+export function sectionPlanning(): string[] {
+  return _extractSection('## Planning multi-step work');
+}
+
+/** Lines for the "## Reply discipline (the streamed text is the ANSWER, not narration)" section. */
+export function sectionReplyDiscipline(): string[] {
+  return _extractSection('## Reply discipline (the streamed text is the ANSWER, not narration)');
+}
+
+/** Lines for the "## Quality bar" section. */
+export function sectionQualityBar(): string[] {
+  return _extractSection('## Quality bar');
+}
+
+/** Lines for the "## Acting as your owner" section. */
+export function sectionActingAsOwner(): string[] {
+  return _extractSection('## Acting as your owner');
+}
+
+/** Lines for the "## Slack output (standard Markdown — rendered by a Block Kit markdown block)" section. */
+export function sectionSlackOutput(): string[] {
+  return _extractSection(
+    '## Slack output (standard Markdown — rendered by a Block Kit markdown block)',
+  );
+}
+
+/** Lines for the "## Presentation surfaces (default is prose — escalate deliberately)" section. */
+export function sectionPresentationSurfaces(): string[] {
+  return _extractSection('## Presentation surfaces (default is prose — escalate deliberately)');
+}
+
+/** Lines for the "## Who you are talking to" section. */
+export function sectionWhoYouAreTalkingTo(): string[] {
+  return _extractSection('## Who you are talking to');
+}
+
+/** Lines for the "## Your boundaries" section. */
+export function sectionBoundaries(): string[] {
+  return _extractSection('## Your boundaries');
+}
+
+/** Lines for the "## When you mess up" section. */
+export function sectionWhenYouMessUp(): string[] {
+  return _extractSection('## When you mess up');
+}
+
 /**
  * Per-turn volatile metadata, rendered as ONE terse line. `buildUserTurnContent`
  * wraps it in a clearly-labeled "context only" frame so the model never mistakes

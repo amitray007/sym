@@ -12,7 +12,9 @@
 # and you never edit this file to add a tool.
 # See docs/mcp-setup.md → "Persistent tools on /data (no CLIs in the image)".
 
-FROM node:24-slim AS base
+# Pin to a specific digest so the base image is immutable and auditable.
+# To update: docker pull node:24-slim && docker inspect node:24-slim --format '{{index .RepoDigests 0}}'
+FROM node:24-slim@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf AS base
 ENV PNPM_HOME="/pnpm" PATH="/pnpm:$PATH"
 RUN corepack enable
 WORKDIR /repo
@@ -22,9 +24,21 @@ FROM base AS build
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
+# Create a self-contained production deployment of apps/agent: its built `dist`
+# plus a complete, flat `node_modules` with every prod dependency AND the injected
+# workspace packages (@sym/kernel, @sym/contracts, @sym/adapter-slack). vitest,
+# tsx, typescript and friends stay out — they're devDependencies.
+#
+# This replaces `pnpm prune --prod`, which is unreliable in a pnpm workspace:
+# pruning the root virtual store left the agent's own runtime deps (e.g.
+# @hono/node-server) unresolvable from apps/agent/dist at boot
+# (ERR_MODULE_NOT_FOUND). `pnpm deploy` is purpose-built for exactly this. The
+# `--legacy` flag is required by pnpm v10 to deploy without setting
+# `inject-workspace-packages` globally.
+RUN pnpm --filter @sym/agent deploy --prod --legacy /prod
 
 # ---- runtime: generic runtimes only; real tools live on the /data volume ----
-FROM node:24-slim AS runtime
+FROM node:24-slim@sha256:242549cd46785b480c832479a730f4f2a20865d61ea2e404fdb2a5c3d3b73ecf AS runtime
 ENV NODE_ENV=production
 
 # Generic runtimes ONLY (not specific CLIs):
@@ -52,7 +66,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 RUN mkdir -p /data/bin && chown -R node:node /data
 ENV PATH="/data/bin:$PATH"
 
-COPY --from=build --chown=node:node /repo /repo
+# The self-contained agent deployment (built dist + a complete prod node_modules),
+# placed at the path the agent expects so repo-root-relative reads still resolve
+# (apps/agent/dist → ../../.. == /repo).
+COPY --from=build --chown=node:node /prod /repo/apps/agent
+# The Slack manifest is read at boot for the assistant-panel starter prompts
+# (manifest-prompts.ts → <repoRoot>/slack/…). It lives outside apps/agent, so copy
+# it alongside; without it the agent falls back to a single default prompt.
+COPY --from=build --chown=node:node /repo/slack /repo/slack
 
 # `sym` — the agent's OWN connector control-plane CLI (status/apply/mcp/secret +
 # the interactive TUI). Unlike the third-party tools on /data, sym is first-party
@@ -80,6 +101,10 @@ ENV SYM_DB_PATH=/data/credentials.db
 ENV SYM_CONFIG_PATH=/data/sym/config.json
 # AGENT_PORT (default 3001) — the HTTP server Slack + the OAuth callback reach.
 EXPOSE 3001
+# Health check: GET /health returns {"ok":true}. curl is installed in the apt
+# step above. Uses AGENT_PORT default 3001; start period allows cold-start time.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -sf "http://localhost:${AGENT_PORT:-3001}/health" || exit 1
 # Ensure $HOME exists (fresh volume) before starting; `exec` keeps node as PID 1
 # so SIGTERM still reaches it for graceful shutdown.
 CMD ["sh", "-c", "mkdir -p \"$HOME\" && exec node dist/index.js"]

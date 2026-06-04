@@ -1,11 +1,21 @@
+/**
+ * Workspace-context builder — resolves boot-time Slack configuration into a
+ * typed `WorkspaceContext` that every request handler shares.
+ *
+ * Fetches owner identity (`users.info` on `SYM_OWNER_SLACK_USER_ID`),
+ * validates bot/owner tokens, and assembles the singleton context that is
+ * passed into the Hono server at startup.
+ */
+
+import { WebApiSlackClient } from '@sym/adapter-slack';
+
 import { NameResolver } from './name-resolver.js';
-import { WebApiSlackClient } from './slack-client.js';
 
 import type { AgentConfig } from './config.js';
-import type { ConnectorConfig } from './mcp/config.js';
 import type { SlackClient } from '@sym/adapter-slack';
 import type { SlackUserId, WorkspaceId } from '@sym/contracts';
 import type { OwnerIdentity } from '@sym/kernel';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 
 /** Everything a turn needs, resolved once from env config (single-tenant). */
 export interface WorkspaceContext {

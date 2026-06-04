@@ -30,6 +30,8 @@ env:
   - SLACK_TEAM_ID
   # Owner
   - SYM_OWNER_SLACK_USER_ID
+  # Owner user token (optional — unlocks real workspace search + act-as-owner)
+  - SLACK_OWNER_USER_TOKEN
   # Fireworks (required)
   - FIREWORKS_API_KEY
   - FIREWORKS_MODEL
@@ -37,6 +39,21 @@ env:
   - FIREWORKS_BASE_URL
   # Agent (optional — defaults to 3001)
   - AGENT_PORT
+  # MCP / connectors (optional unless using OAuth connectors)
+  - SYM_PUBLIC_URL
+  - SYM_ENCRYPTION_KEY
+  - SYM_DB_PATH
+  - SYM_CONFIG_PATH
+  - SYM_MCP_SERVERS
+  - SYM_MCP_CONNECT_TIMEOUT_MS
+  # Operator / CLI (optional — all have safe defaults)
+  - SYM_CLI_ALLOWLIST
+  - SYM_CLI_CONFIRM
+  - SYM_ADMIN_URL
+  # Behavior knobs (optional — all have safe defaults)
+  - TASK_CARD_THRESHOLD
+  - TASK_CARD_AFTER
+  - OWNER_POST_MARKER
 
 # ── Hooks ─────────────────────────────────────────────────────────────────────
 hooks:

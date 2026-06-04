@@ -28,10 +28,8 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { McpDispatcher, _resetPoolForTesting } from '../src/mcp/dispatcher.js';
-import { buildTransport } from '../src/mcp/inject.js';
+import { McpDispatcher, _resetPoolForTesting, initMcpPool, buildTransport } from '@sym/mcp-runtime';
 
-import type { ConnectorConfig } from '../src/mcp/config.js';
 import type { StreamableHTTPServerTransportOptions } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type {
   ConversationId,
@@ -43,6 +41,7 @@ import type {
   TurnId,
   WorkspaceId,
 } from '@sym/contracts';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 import type { Socket } from 'node:net';
 
 // ---------------------------------------------------------------------------
@@ -222,7 +221,8 @@ describe('Integration — stdio subprocess injection', () => {
       const dispatcher = new McpDispatcher([config]);
 
       // Step 1: list tools — forces real subprocess spawn + SDK connect
-      const tools = await dispatcher.listAsync();
+      await initMcpPool([config]);
+      const tools = dispatcher.list();
       expect(tools.some((t) => t.name === 'echo-env__get_env')).toBe(true);
 
       // Step 2: dispatch get_env — child reads INJECTED_TOKEN from its own process.env
@@ -269,7 +269,8 @@ describe('Integration — stdio subprocess injection', () => {
       const dispatcher = new McpDispatcher([config]);
 
       // Step 1: list tools
-      const tools = await dispatcher.listAsync();
+      await initMcpPool([config]);
+      const tools = dispatcher.list();
       expect(tools.some((t) => t.name === 'echo-file__read_cred_file')).toBe(true);
 
       // Step 2: dispatch read_cred_file — child reads file at GOOGLE_APPLICATION_CREDENTIALS
@@ -337,9 +338,10 @@ describe('Integration — HTTP header injection', () => {
       const dispatcher = new McpDispatcher([config]);
 
       // Step 1: list tools — forces real HTTP connect (sends Authorization header)
-      const tools = await dispatcher.listAsync();
+      await initMcpPool([config]);
+      const tools = dispatcher.list();
 
-      // (i) listAsync returns the namespaced tool
+      // (i) initMcpPool warms the pool; dispatcher.list() returns the namespaced tool
       expect(tools.some((t) => t.name === 'http-ping__ping')).toBe(true);
 
       // (ii) The server captured Authorization: Bearer tok-xyz on the wire
@@ -392,7 +394,8 @@ describe('Integration — HTTP header injection', () => {
         };
 
         const dispatcher = new McpDispatcher([config]);
-        const tools = await dispatcher.listAsync();
+        await initMcpPool([config]);
+        const tools = dispatcher.list();
 
         expect(tools.some((t) => t.name === 'http-multi__ping')).toBe(true);
         // Injected secret header

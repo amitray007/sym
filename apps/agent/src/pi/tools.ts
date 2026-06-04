@@ -11,8 +11,8 @@
  * if Pi's argument validator rejects a raw JSON Schema, the `prepareArguments`
  * passthrough below bypasses validation and returns the raw args unchanged.
  *
- * // TODO(pi): chunk 3.5 — if Pi adds strict TypeBox runtime validation and
- * rejects plain JSON Schema, migrate to Type.Unsafe(descriptor.parameters) here.
+ * TODO: if Pi adds strict TypeBox runtime validation and rejects plain JSON
+ * Schema, migrate to Type.Unsafe(descriptor.parameters) here.
  */
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
@@ -22,6 +22,16 @@ import type { ToolRegistry } from '@sym/kernel';
 
 /** Sink for render intents attached to tool results (collected by the loop). */
 export type RenderSink = (render: RenderIntent) => void;
+
+/**
+ * Pi requires `prepareArguments` to return the schema's static type, but Sym
+ * validates and coerces tool arguments inside its own dispatcher rather than via
+ * Pi/TypeBox — so the raw args are passed straight through. The generic return
+ * keeps the bridge type-safe without an `any` cast.
+ */
+export function passthroughArgs<T>(args: unknown): T {
+  return args as T;
+}
 
 /**
  * Convert a single Sym `ToolDescriptor` into a Pi `AgentTool`.
@@ -45,12 +55,11 @@ function bridgeTool(
     // JSON Schema cast to TSchema — structurally identical at runtime.
     // Pi serialises it to the model as JSON Schema.
     // prepareArguments is set below to bypass TypeBox runtime validation.
-    // TODO(pi): chunk 3.5 — evaluate Type.Unsafe() wrapper if Pi validates args strictly.
+    // TODO: evaluate Type.Unsafe() wrapper if Pi adds strict args validation.
     parameters: descriptor.parameters as unknown as TSchema,
     // Bypass Pi's TypeBox runtime argument validation: return args as-is.
     // Sym's dispatcher validates / coerces args internally.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prepareArguments: (args: unknown) => args as any,
+    prepareArguments: passthroughArgs,
     execute: async (toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
       const dispatcher = registry.getDispatcher();
       if (!dispatcher) {

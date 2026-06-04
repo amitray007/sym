@@ -17,7 +17,7 @@ import { accessSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
-import { loadCliAllow, loadCliDescribe } from './mcp/source.js';
+import { loadCliAllow, loadCliDescribe } from '@sym/mcp-runtime';
 
 export interface RunCliResult {
   ok: boolean;

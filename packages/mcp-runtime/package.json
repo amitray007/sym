@@ -1,0 +1,37 @@
+{
+  "name": "@sym/mcp-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Sym MCP connector runtime — pool, reconcile, OAuth, encrypted credential store, config schema.",
+  "license": "MIT",
+  "author": "Amit Ray",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/amitray007/sym",
+    "directory": "packages/mcp-runtime"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist tsconfig.tsbuildinfo && tsc -p tsconfig.json",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@sym/contracts": "workspace:*",
+    "zod": "catalog:"
+  }
+}

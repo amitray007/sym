@@ -1,0 +1,53 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "scripts/*.{js,mjs,cjs}",
+        "eslint.config.js",
+        "commitlint.config.js",
+        "lint-staged.config.js",
+        ".dependency-cruiser.cjs"
+      ],
+      "project": ["scripts/**/*.{js,mjs,cjs}"]
+    },
+    "apps/agent": {
+      "entry": [
+        "src/index.ts",
+        "src/cli/index.ts",
+        "src/run-cli.ts",
+        "vitest.config.ts",
+        "vitest.config.integration.ts",
+        "vitest.plugins.ts",
+        "scripts/*.{mjs,js}"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"]
+    },
+    "packages/contracts": {
+      "entry": ["src/index.ts", "vitest.config.ts", "tests/**/*.test-d.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    },
+    "packages/kernel": {
+      "entry": ["src/index.ts", "vitest.config.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    },
+    "packages/adapter/slack": {
+      "entry": ["src/index.ts", "vitest.config.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    }
+  },
+  "ignore": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/.turbo/**",
+    "**/coverage/**",
+    "**/.next/**",
+    "**/*.d.ts"
+  ],
+  "ignoreDependencies": [
+    "@vitest/coverage-v8",
+    "typescript-eslint",
+    "eslint-config-prettier",
+    "eslint-import-resolver-typescript"
+  ]
+}

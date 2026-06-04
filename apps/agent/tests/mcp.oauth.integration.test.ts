@@ -29,25 +29,25 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { McpDispatcher, _resetPoolForTesting } from '../src/mcp/dispatcher.js';
 import {
+  McpDispatcher,
+  _resetPoolForTesting,
+  initMcpPool,
   completeOAuth,
   getPendingAuth,
   _resetRegistryForTesting,
-} from '../src/mcp/oauth-registry.js';
-import { makeOAuthProvider } from '../src/mcp/providers/oauth.js';
-import {
+  makeOAuthProvider,
   SqliteCredentialStore,
   parseEncryptionKey,
   _resetStoreForTesting,
-} from '../src/mcp/store.js';
+} from '@sym/mcp-runtime';
 
-import type { ConnectorConfig } from '../src/mcp/config.js';
 import type { StreamableHTTPServerTransportOptions } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type {
   OAuthClientInformationFull,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 import type { Socket } from 'node:net';
 
 // ---------------------------------------------------------------------------
@@ -57,20 +57,6 @@ import type { Socket } from 'node:net';
 /** Generate a valid 32-byte base64 encryption key for tests. */
 function makeTestKey(): string {
   return nodeCrypto.randomBytes(32).toString('base64');
-}
-
-/** Track and forcibly destroy open sockets on server shutdown. */
-function trackSockets(server: http.Server): { destroy: () => void } {
-  const sockets = new Set<Socket>();
-  server.on('connection', (s) => {
-    sockets.add(s);
-    s.on('close', () => sockets.delete(s));
-  });
-  return {
-    destroy() {
-      for (const s of sockets) s.destroy();
-    },
-  };
 }
 
 /** Start an HTTP server on a random port. Returns port + stop. */
@@ -96,71 +82,6 @@ async function startServer(
       for (const s of sockets) s.destroy();
       return new Promise<void>((r) => server.close(() => r()));
     },
-  };
-}
-
-/**
- * Create a minimal stateless MCP HTTP server handler that:
- *   - Returns 401 + WWW-Authenticate when no valid Bearer token is present.
- *   - Handles MCP requests normally when the Bearer token == expectedToken.
- */
-async function createProtectedMcpHandler(
-  expectedToken: string,
-  resourceMetadataUrl: string,
-): Promise<(req: http.IncomingMessage, res: http.ServerResponse) => void> {
-  return (req, res) => {
-    // Check Authorization header
-    const auth = req.headers['authorization'];
-    const token = auth?.startsWith('Bearer ') ? auth.slice(7) : undefined;
-
-    if (!token || token !== expectedToken) {
-      // Return 401 with resource metadata URL in WWW-Authenticate
-      res.writeHead(401, {
-        'WWW-Authenticate': `Bearer resource_metadata="${resourceMetadataUrl}"`,
-        'Content-Type': 'application/json',
-      });
-      res.end(JSON.stringify({ error: 'unauthorized' }));
-      return;
-    }
-
-    // Valid token — serve as stateless MCP
-    const mcpServer = new McpLowLevelServer(
-      { name: 'protected-mcp', version: '1.0.0' },
-      { capabilities: { tools: {} } },
-    );
-
-    mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: [
-        {
-          name: 'secret_tool',
-          description: 'A tool only available after OAuth',
-          inputSchema: { type: 'object' as const, properties: {}, additionalProperties: false },
-        },
-      ],
-    }));
-
-    mcpServer.setRequestHandler(CallToolRequestSchema, async () => ({
-      content: [{ type: 'text', text: 'authorized_response' }],
-    }));
-
-    const transportOpts = {
-      sessionIdGenerator: undefined,
-    } as unknown as StreamableHTTPServerTransportOptions;
-    const transport = new StreamableHTTPServerTransport(transportOpts);
-
-    (mcpServer.connect as (t: unknown) => Promise<void>)(transport)
-      .then(() => transport.handleRequest(req, res))
-      .then(() => {
-        res.on('close', () => {
-          void transport.close();
-          void mcpServer.close();
-        });
-      })
-      .catch((err: unknown) => {
-        if (!res.headersSent) {
-          res.writeHead(500).end(JSON.stringify({ error: String(err) }));
-        }
-      });
   };
 }
 
@@ -503,15 +424,12 @@ describe('C2: Full OAuth handshake with mock MCP server + mock AS', () => {
       mcpPort = mcpSrv.port;
       stopServers.push(mcpSrv.stop);
 
-      const asBase = getAsBase();
       const mcpBase = getMcpBase();
 
       // --- Set up encryption ---
       const key = makeTestKey();
       process.env['SYM_ENCRYPTION_KEY'] = key;
       process.env['SYM_PUBLIC_URL'] = mcpBase;
-
-      const store = new SqliteCredentialStore(':memory:', key);
 
       const config: ConnectorConfig = {
         name: CONNECTOR_NAME,
@@ -522,7 +440,8 @@ describe('C2: Full OAuth handshake with mock MCP server + mock AS', () => {
 
       // --- First connect: should fail open with 0 tools (UnauthorizedError path) ---
       const dispatcher = new McpDispatcher([config]);
-      const toolsBefore = await dispatcher.listAsync();
+      await initMcpPool([config]);
+      const toolsBefore = dispatcher.list();
 
       expect(toolsBefore).toHaveLength(0);
 
@@ -556,11 +475,12 @@ describe('C2: Full OAuth handshake with mock MCP server + mock AS', () => {
 
       // --- Second connect: tokens available → should succeed ---
       // No manual pool reset: ensureEntry() retries failed OAuth connectors, so
-      // the next listAsync reconnects with the now-stored tokens and comes online.
+      // the next initMcpPool reconnects with the now-stored tokens and comes online.
       // The dispatcher uses the module-level store (getStore()) which was
       // initialized with SYM_ENCRYPTION_KEY. The tokens are stored there.
       const dispatcher2 = new McpDispatcher([config]);
-      const toolsAfter = await dispatcher2.listAsync();
+      await initMcpPool([config]);
+      const toolsAfter = dispatcher2.list();
 
       // Should now have the tool (OAuth tokens persisted → Bearer sent → 200)
       expect(toolsAfter.some((t) => t.name === `${CONNECTOR_NAME}__secret_tool`)).toBe(true);
@@ -595,8 +515,7 @@ describe('C2: Full OAuth handshake with mock MCP server + mock AS', () => {
         trust: true,
       };
 
-      const dispatcher = new McpDispatcher([config]);
-      await dispatcher.listAsync(); // triggers UnauthorizedError → registry
+      await initMcpPool([config]); // triggers UnauthorizedError → registry
 
       const pending = getPendingAuth(CONNECTOR_NAME);
       expect(pending).toBeDefined();
@@ -657,5 +576,46 @@ describe('C3: OAuthProvider — SdkOAuthAdapter and makeOAuthProvider', () => {
     store.saveTokens('c1', tokens2);
 
     expect(store.getTokens('c1')).toEqual(tokens2);
+  });
+
+  it('deleteTokens removes the stored tokens (Z08-05: invalidateCredentials purge)', () => {
+    // WATCHED FAIL: before the fix, invalidateCredentials('tokens') was a no-op.
+    // This test directly validates the new deleteTokens() store method.
+    const key = makeTestKey();
+    const store = new SqliteCredentialStore(':memory:', key);
+
+    const tokens: OAuthTokens = { access_token: 'tok-secret', token_type: 'Bearer' };
+    store.saveTokens('my-conn', tokens);
+
+    // Confirm they're stored.
+    expect(store.getTokens('my-conn')).toEqual(tokens);
+
+    // Delete them.
+    store.deleteTokens('my-conn');
+
+    // Must be gone.
+    expect(store.getTokens('my-conn')).toBeUndefined();
+  });
+
+  it('invalidateCredentials("tokens") purges OAuth tokens via the adapter (Z08-05)', async () => {
+    // WATCHED FAIL: before the fix, the invalidateCredentials('tokens') branch
+    // was a comment/no-op — tokens remained in the store.
+    const key = makeTestKey();
+    const store = new SqliteCredentialStore(':memory:', key);
+    const provider = makeOAuthProvider('inv-conn', store, 'https://example.com');
+
+    const tokens: OAuthTokens = { access_token: 'tok-to-invalidate', token_type: 'Bearer' };
+    store.saveTokens('inv-conn', tokens);
+    expect(store.getTokens('inv-conn')).toEqual(tokens);
+
+    // Trigger invalidation via the SdkOAuthAdapter inside the provider.
+    // We do this via resolve() + casting to reach the adapter's method.
+    const cred = await provider.resolve();
+    const adapter = (
+      cred as { apply: 'native'; oauth: { invalidateCredentials: (scope: string) => void } }
+    ).oauth;
+    adapter.invalidateCredentials('tokens');
+    // Tokens must now be gone.
+    expect(store.getTokens('inv-conn')).toBeUndefined();
   });
 });

@@ -18,7 +18,9 @@
  * `__` name to the MCP dispatcher — so no extra wiring.
  */
 
-import { MCP_TOOL_SEPARATOR } from '../mcp/dispatcher.js';
+import { MCP_TOOL_SEPARATOR } from '@sym/mcp-runtime';
+
+import { passthroughArgs } from './tools.js';
 
 import type { CliCapability } from '../run-cli.js';
 import type { RenderSink } from './tools.js';
@@ -27,8 +29,16 @@ import type { TSchema } from '@earendil-works/pi-ai';
 import type { JsonObject, ToolDescriptor, ToolRuntimeContext } from '@sym/contracts';
 import type { ToolRegistry } from '@sym/kernel';
 
-/** Owner-confirmation callback for a destructive MCP tool. Returns true if approved. */
-export type ConfirmFn = (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
+/**
+ * Owner-confirmation callback for a destructive MCP tool. Returns true if
+ * approved. `toolCallId` is the enclosing `call_tool` call id — passed so the
+ * confirm flow can reflect the gate on that row in the task card.
+ */
+export type ConfirmFn = (
+  toolName: string,
+  args: Record<string, unknown>,
+  toolCallId: string,
+) => Promise<boolean>;
 
 /** Split a descriptor list into built-in (no `__`) and MCP (`<server>__<tool>`). */
 export function partitionDescriptors(all: ToolDescriptor[]): {
@@ -43,18 +53,53 @@ export function partitionDescriptors(all: ToolDescriptor[]): {
   return { builtin, mcp };
 }
 
+/**
+ * Parse a `<server>__<tool>` name into `{ connector, local }`.
+ * Falls back to the full name for both when there is no `__`.
+ * Centralises the three places that previously duplicated this split.
+ */
+export function parseMcpName(name: string): { connector: string; local: string } {
+  const sep = name.indexOf(MCP_TOOL_SEPARATOR);
+  if (sep <= 0) return { connector: name, local: name };
+  return {
+    connector: name.slice(0, sep),
+    local: name.slice(sep + MCP_TOOL_SEPARATOR.length),
+  };
+}
+
 /** Group MCP tools by connector (the segment before `__`). */
 function groupByConnector(mcp: ToolDescriptor[]): Map<string, string[]> {
   const byConnector = new Map<string, string[]>();
   for (const d of mcp) {
-    const sep = d.name.indexOf(MCP_TOOL_SEPARATOR);
-    const connector = sep > 0 ? d.name.slice(0, sep) : d.name;
-    const local = sep > 0 ? d.name.slice(sep + MCP_TOOL_SEPARATOR.length) : d.name;
+    const { connector, local } = parseMcpName(d.name);
     const arr = byConnector.get(connector) ?? [];
     arr.push(local);
     byConnector.set(connector, arr);
   }
   return byConnector;
+}
+
+/**
+ * Rank items against a free-text query by term overlap in `hayFn(item)`.
+ * Returns up to `limit` matches, scored highest-first. Returns the first
+ * `limit` items unchanged when the query is empty.
+ */
+function rankByTerms<T>(items: T[], query: string, hayFn: (item: T) => string, limit: number): T[] {
+  const terms = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 1);
+  if (terms.length === 0) return items.slice(0, limit);
+  const scored = items
+    .map((item) => {
+      const hay = hayFn(item).toLowerCase();
+      let score = 0;
+      for (const t of terms) if (hay.includes(t)) score += 1;
+      return { item, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit).map((x) => x.item);
 }
 
 /**
@@ -90,40 +135,12 @@ export function searchDescriptors(
   query: string,
   limit: number,
 ): ToolDescriptor[] {
-  const terms = query
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length > 1);
-  if (terms.length === 0) return mcp.slice(0, limit);
-  const scored = mcp
-    .map((d) => {
-      const hay = `${d.name} ${d.description ?? ''}`.toLowerCase();
-      let score = 0;
-      for (const t of terms) if (hay.includes(t)) score += 1;
-      return { d, score };
-    })
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit).map((x) => x.d);
+  return rankByTerms(mcp, query, (d) => `${d.name} ${d.description ?? ''}`, limit);
 }
 
 /** Rank CLI capabilities against a query by term overlap (bin + description). */
-export function searchCli(cli: CliCapability[], query: string, limit: number): CliCapability[] {
-  const terms = query
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length > 1);
-  if (terms.length === 0) return cli.slice(0, limit);
-  const scored = cli
-    .map((c) => {
-      const hay = `${c.bin} ${c.description ?? ''}`.toLowerCase();
-      let score = 0;
-      for (const t of terms) if (hay.includes(t)) score += 1;
-      return { c, score };
-    })
-    .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score);
-  return scored.slice(0, limit).map((x) => x.c);
+function searchCli(cli: CliCapability[], query: string, limit: number): CliCapability[] {
+  return rankByTerms(cli, query, (c) => `${c.bin} ${c.description ?? ''}`, limit);
 }
 
 const FIND_TOOLS_PARAMS = {
@@ -157,8 +174,7 @@ export function makeFindTools(
       'by what you want to do. Returns MCP tool names+schemas (use with call_tool) and matching ' +
       'CLIs (use with run_cli). Call this before deciding you cannot do something.',
     parameters: FIND_TOOLS_PARAMS as unknown as TSchema,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prepareArguments: (args: unknown) => args as any,
+    prepareArguments: passthroughArgs,
     execute: async (_toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
       const query = String((params as { query?: unknown })?.query ?? '').trim();
       const mcpMatches = searchDescriptors(mcp, query, limit);
@@ -235,8 +251,7 @@ export function makeCallTool(opts: {
       'Execute a connector tool by its exact name (from find_tools) with arguments matching its ' +
       'input schema.',
     parameters: CALL_TOOL_PARAMS as unknown as TSchema,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    prepareArguments: (args: unknown) => args as any,
+    prepareArguments: passthroughArgs,
     execute: async (toolCallId: string, params: unknown): Promise<AgentToolResult<unknown>> => {
       const name = String((params as { name?: unknown })?.name ?? '');
       const args = ((params as { arguments?: unknown })?.arguments ?? {}) as JsonObject;
@@ -251,7 +266,7 @@ export function makeCallTool(opts: {
       // Confirm destructive tools (MCP tools default to destructiveHint=true unless
       // the connector is trusted). Built-ins are gated separately via beforeToolCall.
       if (descriptor.destructiveHint === true) {
-        const approved = await confirm(name, args);
+        const approved = await confirm(name, args, toolCallId);
         if (!approved) {
           throw new Error('The owner did not approve this action.');
         }

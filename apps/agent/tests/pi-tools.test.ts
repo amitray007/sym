@@ -12,10 +12,11 @@
  * No SDK involved — CompositeDispatcher + bridgeTools are pure routing/mapping.
  */
 
-import { ToolRegistry } from '@sym/kernel';
 import { describe, expect, it } from 'vitest';
 
-import { CompositeDispatcher } from '../src/mcp/composite.js';
+import { ToolRegistry } from '@sym/kernel';
+import { CompositeDispatcher } from '@sym/mcp-runtime';
+
 import { bridgeTools } from '../src/pi/tools.js';
 
 import type {

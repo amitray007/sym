@@ -24,9 +24,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { parseConnectorArray } from '../mcp/config.js';
+import { parseConnectorArray } from '@sym/mcp-runtime';
 
-import type { ConnectorConfig } from '../mcp/config.js';
+import type { ConnectorConfig } from '@sym/mcp-runtime';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -153,6 +153,29 @@ export function upsertConnector(cfg: SymConfigFile, connector: ConnectorConfig):
       ? [...cfg.mcpServers, connector]
       : cfg.mcpServers.map((s, i) => (i === idx ? connector : s));
   return { ...cfg, mcpServers };
+}
+
+// ---------------------------------------------------------------------------
+// setConnectorTrust (pure)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a new `SymConfigFile` with the `trust` flag set on the MCP connector
+ * named `name`. `trust: true` skips the confirm-before-destructive gate for that
+ * server's tools; `false` drops the field (default is untrusted). The input
+ * `cfg` is never mutated; an unknown name is a no-op.
+ */
+export function setConnectorTrust(cfg: SymConfigFile, name: string, value: boolean): SymConfigFile {
+  return {
+    ...cfg,
+    mcpServers: cfg.mcpServers.map((s) => {
+      if (s.name !== name) return s;
+      if (value) return { ...s, trust: true };
+      const next = { ...s };
+      delete next.trust;
+      return next;
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------------

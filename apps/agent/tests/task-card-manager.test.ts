@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { TaskCardManager } from '../src/handle-turn.js';
 import { PlanController } from '../src/plan-controller.js';
+import { TaskCardManager } from '../src/task-card-manager.js';
 
 import type { TaskUpdateChunk } from '@sym/adapter-slack';
 
@@ -158,5 +158,102 @@ describe('TaskCardManager — tool mode', () => {
     expect(chunks).toEqual([
       { type: 'task_update', id: 'task-1', title: 'Reading the channel', status: 'complete' },
     ]);
+  });
+});
+
+describe('TaskCardManager — confirmation gate (merged into the tool row)', () => {
+  it('shows awaiting → running → complete on the SAME row when approved', async () => {
+    const { chunks, send } = collector();
+    const card = new TaskCardManager(send, 1);
+    // Pi emits tool_execution_start (→ onToolStart) BEFORE beforeToolCall, so
+    // the row already exists when the gate fires.
+    await card.onToolStart('c1', 'posting a message as you'); // task-1, in_progress
+    chunks.length = 0;
+
+    await card.onToolGate('c1', 'awaiting', 'posting a message as you');
+    expect(chunks).toEqual([
+      {
+        type: 'task_update',
+        id: 'task-1',
+        title: 'Posting a message as you — awaiting approval',
+        status: 'in_progress',
+      },
+    ]);
+    chunks.length = 0;
+
+    await card.onToolGate('c1', 'approved', 'posting a message as you');
+    expect(chunks).toEqual([
+      {
+        type: 'task_update',
+        id: 'task-1',
+        title: 'Posting a message as you',
+        status: 'in_progress',
+      },
+    ]);
+    chunks.length = 0;
+
+    // The tool then runs to completion — the row settles normally (same id).
+    await card.onToolEnd('c1', false);
+    expect(chunks).toEqual([
+      { type: 'task_update', id: 'task-1', title: 'Posting a message as you', status: 'complete' },
+    ]);
+  });
+
+  it('settles the row to "denied", preserved through the blocked tool end', async () => {
+    const { chunks, send } = collector();
+    const card = new TaskCardManager(send, 1);
+    await card.onToolStart('c1', 'deleting its message'); // task-1
+    chunks.length = 0;
+
+    await card.onToolGate('c1', 'awaiting', 'deleting its message');
+    await card.onToolGate('c1', 'denied', 'deleting its message');
+    // A blocked tool still emits tool_execution_end with isError=true; the
+    // "denied" title must survive (onToolEnd keeps the row's title).
+    await card.onToolEnd('c1', true);
+
+    expect(chunks[chunks.length - 1]).toEqual({
+      type: 'task_update',
+      id: 'task-1',
+      title: 'Deleting its message — denied',
+      status: 'error',
+    });
+    // Exactly one row id throughout — no duplicate "decision" row.
+    expect(new Set(chunks.map((c) => c.id))).toEqual(new Set(['task-1']));
+  });
+
+  it('forces the card visible for a gate even below the buffering threshold', async () => {
+    const { chunks, send } = collector();
+    const card = new TaskCardManager(send, 5); // high threshold → onToolStart buffers
+    await card.onToolStart('c1', 'posting a message as you');
+    expect(chunks).toEqual([]); // buffered, nothing on the card yet
+
+    await card.onToolGate('c1', 'awaiting', 'posting a message as you');
+    expect(chunks).toEqual([
+      {
+        type: 'task_update',
+        id: 'task-1',
+        title: 'Posting a message as you — awaiting approval',
+        status: 'in_progress',
+      },
+    ]);
+  });
+
+  it('records the gate even in plan mode (where plain tool rows are suppressed)', async () => {
+    const { chunks, send } = collector();
+    const card = new TaskCardManager(send, 1);
+    const plan = new PlanController();
+    card.bindPlan(plan);
+    await plan.setPlan(['Do the thing']); // plan-mode latches
+    chunks.length = 0;
+
+    await card.onToolStart('c1', 'posting a message as you'); // suppressed → []
+    expect(chunks).toEqual([]);
+
+    await card.onToolGate('c1', 'awaiting', 'posting a message as you');
+    await card.onToolGate('c1', 'denied', 'posting a message as you');
+
+    const last = chunks[chunks.length - 1];
+    expect(last?.title).toBe('Posting a message as you — denied');
+    expect(last?.status).toBe('error');
   });
 });

@@ -12,7 +12,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { loadConnectorConfigs } from '../src/mcp/source.js';
+import { loadConnectorConfigs } from '@sym/mcp-runtime';
 
 const STDIO = { kind: 'stdio', command: 'echo-server' };
 const ENV_ONE = JSON.stringify([{ name: 'envone', transport: STDIO }]);

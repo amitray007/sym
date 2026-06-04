@@ -29,6 +29,10 @@
       ],
       "outputs": ["coverage/**"]
     },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
     "lint": {
       "inputs": [
         "src/**",
@@ -52,6 +56,7 @@
       "outputs": ["*.tsbuildinfo"]
     },
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     },

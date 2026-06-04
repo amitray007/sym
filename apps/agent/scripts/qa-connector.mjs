@@ -13,7 +13,7 @@
 //   SYM_QA_TOOL='x__search_docs_chunks' SYM_QA_ARGS='{"prompt":"hello"}' ... pnpm --filter @sym/agent qa:mcp
 //
 // Slow first run (cold `npx` download) — bump SYM_MCP_CONNECT_TIMEOUT_MS, e.g. 60000.
-import { parseMcpServers, McpDispatcher } from '../dist/mcp/index.js';
+import { parseMcpServers, McpDispatcher } from '@sym/mcp-runtime';
 
 const raw = process.env.SYM_MCP_SERVERS;
 if (raw === undefined || raw.trim() === '') {
