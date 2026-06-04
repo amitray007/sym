@@ -69,7 +69,7 @@ export function loadConfigFile(path: string): SymConfigFile {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    throw new Error(`[config-store] ${path} is not valid JSON: ${String(err)}`);
+    throw new Error(`[config-store] ${path} is not valid JSON: ${String(err)}`, { cause: err });
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {

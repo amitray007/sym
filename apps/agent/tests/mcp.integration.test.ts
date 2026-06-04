@@ -199,91 +199,83 @@ describe('Integration — stdio subprocess injection', () => {
     _resetPoolForTesting();
   });
 
-  it(
-    'Test A1: env injection — secret reaches the real child process env',
-    async () => {
-      // ConnectorConfig with env injection: injects 's3cr3t' as INJECTED_TOKEN
-      const config: ConnectorConfig = {
-        name: 'echo-env',
-        transport: {
-          kind: 'stdio',
-          command: 'node',
-          args: [FIXTURE_PATH],
+  it('Test A1: env injection — secret reaches the real child process env', async () => {
+    // ConnectorConfig with env injection: injects 's3cr3t' as INJECTED_TOKEN
+    const config: ConnectorConfig = {
+      name: 'echo-env',
+      transport: {
+        kind: 'stdio',
+        command: 'node',
+        args: [FIXTURE_PATH],
+      },
+      auth: {
+        kind: 'static',
+        secret: 's3cr3t',
+        inject: { at: 'env', name: 'INJECTED_TOKEN' },
+      },
+      trust: true,
+    };
+
+    const dispatcher = new McpDispatcher([config]);
+
+    // Step 1: list tools — forces real subprocess spawn + SDK connect
+    await initMcpPool([config]);
+    const tools = dispatcher.list();
+    expect(tools.some((t) => t.name === 'echo-env__get_env')).toBe(true);
+
+    // Step 2: dispatch get_env — child reads INJECTED_TOKEN from its own process.env
+    const result = await dispatcher.dispatch(
+      makeCall('echo-env__get_env', { name: 'INJECTED_TOKEN' } satisfies JsonObject),
+      makeCtx(),
+    );
+
+    expect(result.ok).toBe(true);
+    // Assert: the child process received the injected secret in its env
+    if (result.ok) {
+      expect(result.content).toBe('s3cr3t');
+    }
+  }, 30_000);
+
+  it('Test A2: file injection — materialized credential file reaches real child process', async () => {
+    const secretContent = '{"type":"service_account","project_id":"test-proj"}';
+
+    // ConnectorConfig with file injection: writes secret to key.json,
+    // sets GOOGLE_APPLICATION_CREDENTIALS to the file path
+    const config: ConnectorConfig = {
+      name: 'echo-file',
+      transport: {
+        kind: 'stdio',
+        command: 'node',
+        args: [FIXTURE_PATH],
+      },
+      auth: {
+        kind: 'static',
+        secret: secretContent,
+        inject: {
+          at: 'file',
+          path: 'key.json',
+          pointerEnv: 'GOOGLE_APPLICATION_CREDENTIALS',
         },
-        auth: {
-          kind: 'static',
-          secret: 's3cr3t',
-          inject: { at: 'env', name: 'INJECTED_TOKEN' },
-        },
-        trust: true,
-      };
+      },
+      trust: true,
+    };
 
-      const dispatcher = new McpDispatcher([config]);
+    const dispatcher = new McpDispatcher([config]);
 
-      // Step 1: list tools — forces real subprocess spawn + SDK connect
-      await initMcpPool([config]);
-      const tools = dispatcher.list();
-      expect(tools.some((t) => t.name === 'echo-env__get_env')).toBe(true);
+    // Step 1: list tools
+    await initMcpPool([config]);
+    const tools = dispatcher.list();
+    expect(tools.some((t) => t.name === 'echo-file__read_cred_file')).toBe(true);
 
-      // Step 2: dispatch get_env — child reads INJECTED_TOKEN from its own process.env
-      const result = await dispatcher.dispatch(
-        makeCall('echo-env__get_env', { name: 'INJECTED_TOKEN' } satisfies JsonObject),
-        makeCtx(),
-      );
+    // Step 2: dispatch read_cred_file — child reads file at GOOGLE_APPLICATION_CREDENTIALS
+    const result = await dispatcher.dispatch(makeCall('echo-file__read_cred_file'), makeCtx());
 
-      expect(result.ok).toBe(true);
-      // Assert: the child process received the injected secret in its env
-      if (result.ok) {
-        expect(result.content).toBe('s3cr3t');
-      }
-    },
-    { timeout: 30_000 },
-  );
-
-  it(
-    'Test A2: file injection — materialized credential file reaches real child process',
-    async () => {
-      const secretContent = '{"type":"service_account","project_id":"test-proj"}';
-
-      // ConnectorConfig with file injection: writes secret to key.json,
-      // sets GOOGLE_APPLICATION_CREDENTIALS to the file path
-      const config: ConnectorConfig = {
-        name: 'echo-file',
-        transport: {
-          kind: 'stdio',
-          command: 'node',
-          args: [FIXTURE_PATH],
-        },
-        auth: {
-          kind: 'static',
-          secret: secretContent,
-          inject: {
-            at: 'file',
-            path: 'key.json',
-            pointerEnv: 'GOOGLE_APPLICATION_CREDENTIALS',
-          },
-        },
-        trust: true,
-      };
-
-      const dispatcher = new McpDispatcher([config]);
-
-      // Step 1: list tools
-      await initMcpPool([config]);
-      const tools = dispatcher.list();
-      expect(tools.some((t) => t.name === 'echo-file__read_cred_file')).toBe(true);
-
-      // Step 2: dispatch read_cred_file — child reads file at GOOGLE_APPLICATION_CREDENTIALS
-      const result = await dispatcher.dispatch(makeCall('echo-file__read_cred_file'), makeCtx());
-
-      expect(result.ok).toBe(true);
-      // Assert: the child process read the materialized key.json and returned its contents
-      if (result.ok) {
-        expect(result.content).toBe(secretContent);
-      }
-    },
-    { timeout: 30_000 },
-  );
+    expect(result.ok).toBe(true);
+    // Assert: the child process read the materialized key.json and returned its contents
+    if (result.ok) {
+      expect(result.content).toBe(secretContent);
+    }
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -314,18 +306,70 @@ describe('Integration — HTTP header injection', () => {
     await stopServer();
   });
 
-  it(
-    'Test B1: Authorization header reaches the real HTTP MCP server',
-    async () => {
+  it('Test B1: Authorization header reaches the real HTTP MCP server', async () => {
+    const config: ConnectorConfig = {
+      name: 'http-ping',
+      transport: {
+        kind: 'http',
+        url: `http://127.0.0.1:${serverPort}`,
+      },
+      auth: {
+        kind: 'static',
+        secret: 'tok-xyz',
+        inject: {
+          at: 'header',
+          name: 'Authorization',
+          valueTemplate: 'Bearer {{token}}',
+        },
+      },
+      trust: true,
+    };
+
+    const dispatcher = new McpDispatcher([config]);
+
+    // Step 1: list tools — forces real HTTP connect (sends Authorization header)
+    await initMcpPool([config]);
+    const tools = dispatcher.list();
+
+    // (i) initMcpPool warms the pool; dispatcher.list() returns the namespaced tool
+    expect(tools.some((t) => t.name === 'http-ping__ping')).toBe(true);
+
+    // (ii) The server captured Authorization: Bearer tok-xyz on the wire
+    expect(capturedAuthHeader).toBe('Bearer tok-xyz');
+
+    // Step 2: dispatch ping → asserts round-trip tool call returns 'pong'
+    const result = await dispatcher.dispatch(makeCall('http-ping__ping'), makeCtx());
+
+    // (iii) dispatch returns 'pong'
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.content).toBe('pong');
+    }
+  }, 30_000);
+
+  it('Test B2: transport.headers (static) + injected secret header both reach the server', async () => {
+    let capturedClientHeader: string | undefined;
+
+    // Start a second server that also captures X-Client
+    const srv2 = await startHttpMcpServer((req) => {
+      const auth = req.headers['authorization'];
+      if (auth !== undefined) capturedAuthHeader = auth;
+      const client = req.headers['x-client'];
+      if (typeof client === 'string') capturedClientHeader = client;
+    });
+
+    try {
       const config: ConnectorConfig = {
-        name: 'http-ping',
+        name: 'http-multi',
         transport: {
           kind: 'http',
-          url: `http://127.0.0.1:${serverPort}`,
+          url: `http://127.0.0.1:${srv2.port}`,
+          // Non-secret static header — merged by buildTransport
+          headers: { 'x-client': 'sym' },
         },
         auth: {
           kind: 'static',
-          secret: 'tok-xyz',
+          secret: 'tok-multi',
           inject: {
             at: 'header',
             name: 'Authorization',
@@ -336,78 +380,18 @@ describe('Integration — HTTP header injection', () => {
       };
 
       const dispatcher = new McpDispatcher([config]);
-
-      // Step 1: list tools — forces real HTTP connect (sends Authorization header)
       await initMcpPool([config]);
       const tools = dispatcher.list();
 
-      // (i) initMcpPool warms the pool; dispatcher.list() returns the namespaced tool
-      expect(tools.some((t) => t.name === 'http-ping__ping')).toBe(true);
-
-      // (ii) The server captured Authorization: Bearer tok-xyz on the wire
-      expect(capturedAuthHeader).toBe('Bearer tok-xyz');
-
-      // Step 2: dispatch ping → asserts round-trip tool call returns 'pong'
-      const result = await dispatcher.dispatch(makeCall('http-ping__ping'), makeCtx());
-
-      // (iii) dispatch returns 'pong'
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.content).toBe('pong');
-      }
-    },
-    { timeout: 30_000 },
-  );
-
-  it(
-    'Test B2: transport.headers (static) + injected secret header both reach the server',
-    async () => {
-      let capturedClientHeader: string | undefined;
-
-      // Start a second server that also captures X-Client
-      const srv2 = await startHttpMcpServer((req) => {
-        const auth = req.headers['authorization'];
-        if (auth !== undefined) capturedAuthHeader = auth;
-        const client = req.headers['x-client'];
-        if (typeof client === 'string') capturedClientHeader = client;
-      });
-
-      try {
-        const config: ConnectorConfig = {
-          name: 'http-multi',
-          transport: {
-            kind: 'http',
-            url: `http://127.0.0.1:${srv2.port}`,
-            // Non-secret static header — merged by buildTransport
-            headers: { 'x-client': 'sym' },
-          },
-          auth: {
-            kind: 'static',
-            secret: 'tok-multi',
-            inject: {
-              at: 'header',
-              name: 'Authorization',
-              valueTemplate: 'Bearer {{token}}',
-            },
-          },
-          trust: true,
-        };
-
-        const dispatcher = new McpDispatcher([config]);
-        await initMcpPool([config]);
-        const tools = dispatcher.list();
-
-        expect(tools.some((t) => t.name === 'http-multi__ping')).toBe(true);
-        // Injected secret header
-        expect(capturedAuthHeader).toBe('Bearer tok-multi');
-        // Non-secret static transport header
-        expect(capturedClientHeader).toBe('sym');
-      } finally {
-        await srv2.stop();
-      }
-    },
-    { timeout: 30_000 },
-  );
+      expect(tools.some((t) => t.name === 'http-multi__ping')).toBe(true);
+      // Injected secret header
+      expect(capturedAuthHeader).toBe('Bearer tok-multi');
+      // Non-secret static transport header
+      expect(capturedClientHeader).toBe('sym');
+    } finally {
+      await srv2.stop();
+    }
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------

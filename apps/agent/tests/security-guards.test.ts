@@ -15,7 +15,9 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
 });
 vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
   return {
-    StdioClientTransport: vi.fn().mockImplementation((opts: unknown) => ({ _opts: opts })),
+    StdioClientTransport: vi.fn().mockImplementation(function (opts: unknown) {
+      return { _opts: opts };
+    }),
   };
 });
 
@@ -272,7 +274,9 @@ describe('McpDispatcher — inputSchema structural validation', () => {
       }),
       callTool: vi.fn(),
     };
-    vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient as unknown as InstanceType<typeof MockClient>;
+    });
 
     const cfg = makeConnector('schema-null');
     const dispatcher = new McpDispatcher([cfg]);
@@ -290,7 +294,9 @@ describe('McpDispatcher — inputSchema structural validation', () => {
       }),
       callTool: vi.fn(),
     };
-    vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient as unknown as InstanceType<typeof MockClient>;
+    });
 
     const cfg = makeConnector('schema-string');
     const dispatcher = new McpDispatcher([cfg]);
@@ -307,7 +313,9 @@ describe('McpDispatcher — inputSchema structural validation', () => {
       }),
       callTool: vi.fn(),
     };
-    vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient as unknown as InstanceType<typeof MockClient>;
+    });
 
     const cfg = makeConnector('schema-array');
     const dispatcher = new McpDispatcher([cfg]);
@@ -330,7 +338,9 @@ describe('McpDispatcher — inputSchema structural validation', () => {
       }),
       callTool: vi.fn(),
     };
-    vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient as unknown as InstanceType<typeof MockClient>;
+    });
 
     const cfg = makeConnector('schema-valid');
     const dispatcher = new McpDispatcher([cfg]);
@@ -353,7 +363,9 @@ describe('McpDispatcher — inputSchema structural validation', () => {
       }),
       callTool: vi.fn(),
     };
-    vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient as unknown as InstanceType<typeof MockClient>;
+    });
 
     const cfg = makeConnector('mixed');
     const dispatcher = new McpDispatcher([cfg]);

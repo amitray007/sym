@@ -1,138 +1,461 @@
 # Sym
 
-A personal AI teammate that lives in your Slack workspace — DM it, @mention it,
-or use `/sym <prompt>` from any channel. No web dashboard, no message database.
+**An open-source AI teammate that lives in your Slack workspace.**
 
 [![CI](https://github.com/amitray007/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/amitray007/sym/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node >=24](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org)
 
+Sym is a single-tenant, single-deployable Slack bot. DM it, @mention it, or use `/sym <prompt>` from any channel. It replies inline in threads using rich Slack Block Kit formatting, with a live task card that tracks tool calls as they happen. Its primary extension surface is the [Model Context Protocol (MCP)](https://modelcontextprotocol.io): wire in any MCP server via the `sym` CLI and its tools are immediately available to the agent in every conversation.
+
 ---
 
-## What is Sym
+## Table of contents
 
-Sym is a single-tenant, single-deployable Slack bot built on a **two-tier model**:
+- [Key features](#key-features)
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Slack app setup](#slack-app-setup)
+- [Usage](#usage)
+- [MCP connectors](#mcp-connectors)
+- [Development](#development)
+- [Deployment](#deployment)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
 
-**Conversational tier** — completely stateless. The Slack thread is the memory.
-A signed Slack event arrives, passes an owner gate, the full thread history is
-fetched as context, the Pi agent loop calls a Fireworks-hosted LLM, and the
-reply streams back into the thread. No database, no sessions, no state.
+---
 
-**Control tier** — intentional local state. A `sym` CLI — with a simple
-interactive menu — lets you manage MCP connectors and their OAuth tokens,
-stored in an AES-256-GCM-encrypted SQLite credential database. This is
-Sym's primary extension surface: wire in any MCP server and its tools become
-available to the agent in every conversation.
+## Key features
 
-## How it works
+- **Slack-native** — responds to DMs, @mentions, `/sym` slash commands, and the
+  native Slack assistant panel, all through the same `handleTurn` entry point.
+- **Stateless conversational tier** — no message database. The Slack thread is
+  the only memory. A restart drops nothing a user would notice.
+- **Rich Block Kit replies** — streams replies with a live task card that tracks
+  tool calls in real time; collapses or removes on completion.
+- **MCP client** — connects to MCP servers over `stdio` or HTTP, with `static`,
+  `oauth`, and `ambient` auth. External tools become available to the agent
+  without a restart.
+- **On-demand tool loading** — MCP tools are not injected into every prompt.
+  Two meta-tools (`find_tools`, `call_tool`) give the model on-demand access,
+  keeping the cost of a connector-free turn low.
+- **`sym` operator CLI** — an interactive TUI (via `sym menu`) and a
+  machine-readable flag API (`sym status --json`, `sym connector ls`, etc.) for
+  managing connectors and secrets without touching a config file by hand.
+- **Encrypted credential store** — OAuth tokens and static secrets are stored in
+  an AES-256-GCM-encrypted SQLite database. Secrets are never echoed to the
+  terminal.
+- **Confirmation gate** — destructive tool calls (and `run_cli` when
+  `SYM_CLI_CONFIRM=true`) pause for owner approval via Slack buttons before
+  executing.
+- **Single owner** — the `SYM_OWNER_SLACK_USER_ID` gate silently ignores
+  messages from anyone else, making the bot safe to install in a shared workspace
+  without exposing it to all members.
+- **OpenTelemetry instrumentation** — model calls are traced with `gen_ai.*`
+  conventions; no-op by default, zero overhead unless you register an SDK.
 
-1. Slack sends a signed HTTP event to the Hono server at `/slack/events`.
-2. The server verifies the signing secret and drops events from other workspaces.
-3. The owner gate (`SYM_OWNER_SLACK_USER_ID`) silently ignores non-owner messages.
-4. The full thread is fetched and passed to `handleTurn`, the Pi loop's sole entry point.
-5. Pi calls Fireworks with built-in tools (Slack reads/writes, web fetch, CLI
-   execution, planning) and on-demand MCP connector tools.
-6. The reply streams back via Slack's streaming API, with a live task card that
-   tracks tool calls in real time.
+---
 
-**Additional surfaces:**
+## Architecture
 
-- `/sym <prompt>` — slash command that answers from any channel or DM.
-- Assistant panel — Sym appears in Slack's native AI panel with suggested prompts.
-- Confirmation buttons — destructive tools (and `run_cli` when `SYM_CLI_CONFIRM`
-  is set) pause for owner approval before executing.
-- `/admin/*` — loopback-only HTTP surface for the `sym` CLI to hot-reload
-  connectors without restarting the agent.
+Sym has two architectural tiers:
 
-## Repository layout
+**Conversational tier (stateless):** A Slack event arrives at the Hono server,
+passes signature verification and the owner gate, the full thread is fetched as
+context, and the Pi agent loop calls a Fireworks-hosted LLM. The reply streams
+back into the thread. No state persists between turns.
+
+**Control tier (intentional local state):** The `sym` CLI manages MCP connector
+wiring and OAuth tokens stored in an encrypted SQLite credential database. This
+is the extension surface — where you add or rotate connectors without restarting
+the agent.
+
+### Monorepo packages
+
+| Package                  | npm name             | Purpose                                                                                         |
+| ------------------------ | -------------------- | ----------------------------------------------------------------------------------------------- |
+| `apps/agent`             | `@sym/agent`         | The Hono server — mounts all packages, runs the Pi loop, hosts the `sym` CLI                    |
+| `packages/contracts`     | `@sym/contracts`     | Shared TypeScript types (domain models, tool interfaces, render primitives, Slack shapes)       |
+| `packages/kernel`        | `@sym/kernel`        | Prompt assembly, receipt formatting, `ToolRegistry` — no Slack or I/O dependency                |
+| `packages/mcp-runtime`   | `@sym/mcp-runtime`   | MCP connector pool, hot-reload reconcile, credential store, transport builder, OAuth store      |
+| `packages/adapter/slack` | `@sym/adapter-slack` | Slack Web API client, Block Kit rendering pipeline, event normalisation, signature verification |
+
+**Dependency DAG** (enforced by dependency-cruiser):
 
 ```
-sym/
-  apps/
-    agent/          Main Hono server — the single deployable
-      src/
-        server.ts             HTTP entrypoint; routes /slack/* + /admin/*
-        event-router.ts       Processes events, slash commands, interactivity
-        handle-turn.ts        Per-turn orchestrator (Pi loop entry point)
-        turn-context.ts       Thread history loader + viewed-channel resolver
-        stream-reply.ts       Streaming delivery helpers
-        task-card-manager.ts  Live task-card state machine
-        owner-gate.ts         Single-owner access control
-        slack-guard.ts        LLM relevance + injection guard (fail-open)
-        confirmations.ts      Destructive-tool confirm/cancel registry
-        assistant.ts          Assistant panel lifecycle (setTitle, prompts)
-        builtin-tools.ts      Built-in tool wiring (delegates to tools/)
-        tools/                One file per tool family + shared helpers
-        pi/                   Pi agent loop (loop.ts, meta-tools, model, think-router)
-        mcp/                  MCP connector pool, reconcile, introspect, OAuth store
-        cli/                  `sym` operator CLI (status, connector, apply, secret)
-        tui/                  Ink/React operator dashboard (Dashboard, SecretsManager, …)
-        config.ts             AgentConfig — reads all env vars
-        workspace-context.ts  Boot-time Slack workspace bootstrap
-  packages/
-    contracts/      @sym/contracts — shared TypeScript types (domain models,
-                    tool interfaces, render primitives, Slack types)
-    kernel/         @sym/kernel — prompt assembly, receipt formatting, tool registry
-    adapter/
-      slack/        @sym/adapter-slack — Slack Web API client, Block Kit rendering,
-                    event normalisation, signature verification, thread fetching
-  slack/
-    manifest.template.yml   Canonical Slack app manifest (scopes, events, features)
-    README.md               Slack app setup guide
-  dokploy/          Dokploy deployment config + env template
-  scripts/          render-manifest.js + setup.sh
-  assets/           Bot avatar images
-  examples/         Sample connector config.json + setup walkthrough (examples/README.md)
-  docs/             Internal docs (refactor audit, mcp-setup, dependency graph)
-  Dockerfile        Production image (node:24-slim, /data volume for CLIs + auth)
+               @sym/contracts
+      ↑               ↑                ↑
+@sym/kernel   @sym/mcp-runtime   @sym/adapter-slack
+      └───────────────┴────────────────┘
+                      ↑
+                 @sym/agent
 ```
 
-## Environment variables
+`packages/*` never import from `apps/*`. Circular dependencies are a CI error.
 
-Copy `.env.example` to `.env` and fill in the values. See `.env.example` for
-one-line comments on every variable.
+For the full codemap, architecture invariants, and per-turn latency budget, see
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
-**Required at minimum:** `SLACK_SIGNING_SECRET`, `SLACK_BOT_TOKEN`,
-`SLACK_BOT_USER_ID`, `SLACK_TEAM_ID`, `SYM_OWNER_SLACK_USER_ID`,
-`FIREWORKS_API_KEY`, `FIREWORKS_MODEL`.
+---
 
-Connectors, the operator CLI, and behavior knobs are all optional. The full,
-grouped reference — every variable, its default, and what it does — lives in
-**[docs/reference/env-vars.md](docs/reference/env-vars.md)**.
+## Prerequisites
+
+- **Node.js >= 24** — the repo ships an `.nvmrc`; `nvm use` or `fnm use` picks
+  it up automatically.
+- **pnpm >= 10** — install via Corepack: `corepack enable && corepack install`.
+- **A Slack app** — see [Slack app setup](#slack-app-setup).
+- **A Fireworks AI account** — an API key and a model ID from
+  [fireworks.ai](https://fireworks.ai). The model must be accessible via the
+  OpenAI-compatible chat-completions API.
+
+---
 
 ## Quick start
 
-### Local development
-
 ```sh
-# 1. Install dependencies
+# 1. Clone and install
+git clone https://github.com/amitray007/sym.git
+cd sym
 pnpm install
 
-# 2. One-time setup (installs git hooks and checks Node/pnpm versions)
+# 2. One-time setup (installs Git hooks, checks Node/pnpm versions)
 bash scripts/setup.sh
 
 # 3. Copy and fill in the env file
 cp .env.example .env
-# edit .env — fill in the required variables (Slack + Fireworks at minimum)
+# Edit .env — at minimum: SLACK_* vars + FIREWORKS_API_KEY + FIREWORKS_MODEL
 
-# 4. Start the agent (hot-reloads on file changes)
+# 4. Build all workspace packages
+pnpm build
+
+# 5. Start the agent in watch mode (hot-reloads on file changes)
 pnpm --filter @sym/agent dev
 ```
 
 The agent listens on `http://localhost:3001` (or `$AGENT_PORT`).
 
-To receive Slack events during local development, expose the server with a
-tunnel and point the Slack app's Event Subscriptions URL at it:
+To receive Slack events during local development, expose the server with a tunnel
+and point your Slack app's Event Subscriptions URL at it:
 
 ```sh
 ngrok http 3001
-# Set https://<your-tunnel-id>.ngrok-free.app as the event request URL
+# Then set https://<your-tunnel>.ngrok-free.app as the event request URL in
+# your Slack app's Event Subscriptions settings.
 ```
+
+---
+
+## Configuration
+
+Copy `.env.example` to `.env`. Every variable has a comment in that file.
+
+### Required
+
+| Variable                  | Description                                                         |
+| ------------------------- | ------------------------------------------------------------------- |
+| `SLACK_SIGNING_SECRET`    | From your Slack app's Basic Information page                        |
+| `SLACK_BOT_TOKEN`         | Bot token (`xoxb-…`) from OAuth & Permissions                       |
+| `SLACK_BOT_USER_ID`       | Bot's member ID (`U…`) from Slack app settings                      |
+| `SLACK_TEAM_ID`           | Your workspace team ID (`T…`)                                       |
+| `SYM_OWNER_SLACK_USER_ID` | Slack user ID of the single owner                                   |
+| `FIREWORKS_API_KEY`       | API key from [fireworks.ai](https://fireworks.ai)                   |
+| `FIREWORKS_MODEL`         | Model ID, e.g. `accounts/fireworks/models/llama-v3p1-405b-instruct` |
+
+### Core (optional)
+
+| Variable                 | Default                                 | Description                                                                        |
+| ------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------- |
+| `AGENT_PORT`             | `3001`                                  | Port for the Hono HTTP server                                                      |
+| `FIREWORKS_BASE_URL`     | `https://api.fireworks.ai/inference/v1` | Override the Fireworks inference endpoint                                          |
+| `SLACK_OWNER_USER_TOKEN` | —                                       | Owner's user token (`xoxp-…`); unlocks real workspace search + act-as-owner writes |
+
+### MCP / connectors (optional unless using OAuth connectors)
+
+| Variable                     | Default               | Description                                                                                  |
+| ---------------------------- | --------------------- | -------------------------------------------------------------------------------------------- |
+| `SYM_CONFIG_PATH`            | `.sym/config.json`    | Path to the connector config file (written by `sym connector add`)                           |
+| `SYM_MCP_SERVERS`            | —                     | Legacy inline JSON connector array (superseded by `SYM_CONFIG_PATH` when the file exists)    |
+| `SYM_ENCRYPTION_KEY`         | —                     | 32-byte AES-256-GCM key (base64/hex) for the credential store; required for OAuth connectors |
+| `SYM_DB_PATH`                | `.sym/credentials.db` | Path to the encrypted SQLite credential database                                             |
+| `SYM_PUBLIC_URL`             | —                     | Public HTTPS base URL of this agent; required for OAuth callbacks                            |
+| `SYM_MCP_CONNECT_TIMEOUT_MS` | `10000`               | Max ms to wait for connect + `listTools` on startup per connector                            |
+
+### Operator / CLI (optional)
+
+| Variable            | Default                                     | Description                                                                     |
+| ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------- |
+| `SYM_CLI_ALLOWLIST` | `sym,gog,gcloud,gsutil,bq,sentry-cli,gh,jq` | Comma-separated CLIs the agent may execute via `run_cli`; `*` allows any        |
+| `SYM_CLI_CONFIRM`   | `false`                                     | Require owner confirmation before `run_cli` executes non-introspection commands |
+| `SYM_ADMIN_URL`     | `http://127.0.0.1:<AGENT_PORT>`             | Override the admin HTTP base URL used by the `sym` CLI                          |
+
+### Behavior knobs (optional)
+
+| Variable                   | Default  | Description                                                                                  |
+| -------------------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `TASK_CARD_THRESHOLD`      | `1`      | Minimum tool calls before the live task card appears; `0` disables                           |
+| `TASK_CARD_AFTER`          | `delete` | What happens to the task card after reply: `delete` or `collapse`                            |
+| `OWNER_POST_MARKER`        | `true`   | Append `_(via Sym)_` footer on `post_as_owner` messages                                      |
+| `SYM_TURN_DEADLINE_MS`     | `60000`  | Per-turn deadline (ms); a stuck model is aborted and returns a partial reply; `0` disables   |
+| `SYM_THREAD_HISTORY_LIMIT` | `80`     | Max thread history messages per turn; keeps the most-recent N (tail-slice); `0` disables cap |
+
+The full reference with one-line descriptions on every variable is also in
+[docs/reference/env-vars.md](docs/reference/env-vars.md).
+
+---
+
+## Slack app setup
+
+The canonical source of truth for scopes, events, and features is
+`slack/manifest.template.yml`. Render it for your public URL and paste the
+output into Slack's app manifest editor:
+
+```sh
+SLACK_PUBLIC_BASE_URL=https://your-agent-host.example.com pnpm manifest:render
+```
+
+Then in [api.slack.com/apps](https://api.slack.com/apps):
+
+1. **Create a new app** → From an app manifest.
+2. **Paste** the rendered YAML output.
+3. **Install** the app to your workspace.
+4. Copy the **Bot User OAuth Token** (`xoxb-…`) → `SLACK_BOT_TOKEN`.
+5. Copy the **Signing Secret** from Basic Information → `SLACK_SIGNING_SECRET`.
+6. Find the **Bot User ID** in App Home → `SLACK_BOT_USER_ID`.
+
+> **Use the rendered manifest — do not hand-copy scopes from this README.** The
+> manifest template is the authoritative source and is already correct.
+
+The manifest enables:
+
+- `app_mention`, `message.im`, `message.mpim` — message events
+- `assistant_thread_started`, `assistant_thread_context_changed` — assistant
+  panel lifecycle
+- `/sym` slash command
+- Interactivity (confirmation buttons, `response_url`)
+- `is_mcp_enabled: true` — Slack's native MCP surface
+
+---
+
+## Usage
+
+### Running the agent
+
+```sh
+# Development (watch mode, hot-reloads on file changes)
+pnpm --filter @sym/agent dev
+
+# Production (built dist)
+pnpm --filter @sym/agent start
+```
+
+Once running, Sym responds to:
+
+- **DMs** — message the bot directly.
+- **@mentions** — `@Sym <your question>` in any channel.
+- **Slash command** — `/sym <your question>` from any channel or DM.
+- **Assistant panel** — Sym appears in Slack's native AI panel with suggested
+  prompts.
+
+### `sym` CLI
+
+The `sym` CLI is the operator control plane. It manages MCP connector wiring and
+the encrypted secret store without hand-editing JSON.
+
+```sh
+# When installed via the package bin or inside Docker:
+sym <command>
+
+# During local development:
+pnpm --filter @sym/agent sym <command>
+```
+
+#### Interactive menu
+
+```sh
+sym           # opens the interactive TUI menu on a terminal
+sym menu      # same as bare `sym`
+```
+
+The menu has three screens: **Status** (live connector health, `[a]` apply,
+`[r]` refresh), **Add connector** (form for stdio/http), and **Secrets**
+(list names, add, delete). Exits with an error when stdout is not a TTY — use
+flag commands for scripts.
+
+#### Inspect commands
+
+All inspect commands support `--json` for machine-readable output.
+
+| Command                     | Description                                             |
+| --------------------------- | ------------------------------------------------------- |
+| `sym status`                | Agent reachability, every connector, total tool count   |
+| `sym connector ls`          | All connectors (MCP + CLI): health, tools, descriptions |
+| `sym connector show <name>` | One connector in full detail                            |
+| `sym tools [name]`          | Every tool — MCP tools and CLI connectors               |
+| `sym secret ls`             | Stored secret names only (values are never shown)       |
+
+#### Manage commands
+
+| Command                                        | Description                                             |
+| ---------------------------------------------- | ------------------------------------------------------- |
+| `sym connector add --name N --command C`       | Add an MCP connector (stdio); repeat `--arg` per arg    |
+| `sym connector add --name N --url U [--trust]` | Add an MCP connector (HTTP)                             |
+| `sym connector add --spec '<ConnectorConfig>'` | Add an MCP connector (full generic JSON shape)          |
+| `sym connector add --cli <bin> --desc "…"`     | Add a CLI connector (allow + describe it for `run_cli`) |
+| `sym connector rm <name>`                      | Remove a connector (MCP or CLI)                         |
+| `sym connector trust <name> \| --all`          | Skip confirmation gate for this connector's tools       |
+| `sym connector untrust <name> \| --all`        | Re-enable confirmation gate                             |
+| `sym connector reconnect <name>`               | Re-connect one MCP connector against the live pool      |
+| `sym apply`                                    | Reconcile the running agent to the config file          |
+| `sym secret set <connector> <field>`           | Store a secret (value read from stdin)                  |
+| `sym secret rm <connector> <field>`            | Remove a stored secret                                  |
+
+**Secret values are always read from stdin** — never accepted as arguments —
+to prevent exposure via the process table:
+
+```sh
+printf %s "$MY_TOKEN" | sym secret set sentry SENTRY_AUTH_TOKEN
+```
+
+**`NO_COLOR`** — the TUI respects the [`NO_COLOR`](https://no-color.org)
+standard: `NO_COLOR=1 sym`.
+
+---
+
+## MCP connectors
+
+Sym's primary extension surface. A connector is anything Sym reaches the outside
+world with: an **MCP connector** (structured tools, used via `find_tools` →
+`call_tool`) or a **CLI** (used via `run_cli`).
+
+### Connector anatomy
+
+```
+Connector = Transport × Auth × Injection
+  transport:   stdio (spawn a local binary)  |  http (Streamable HTTP)
+  auth:        static (token you provide)  |  oauth  |  ambient (CLI holds its own)
+  injection:   env | argv | file | header  (how Sym hands a static secret to the server)
+```
+
+### Adding a connector
+
+```sh
+# stdio with a static token (e.g. Sentry)
+sym connector add --name sentry --command sentry-mcp
+printf %s "$SENTRY_AUTH_TOKEN" | sym secret set sentry SENTRY_AUTH_TOKEN
+
+# HTTP connector
+sym connector add --name remote --url https://mcp.example.com/mcp
+
+# Apply without a restart
+sym apply
+```
+
+Or write `.sym/config.json` directly and `sym apply`. A ready-to-copy example
+lives in [`examples/config.json`](examples/config.json).
+
+### Auth models
+
+**Model A — Sym holds the credential.** A static token injected via `env` or
+`header`, or a service-account key materialized to a tmpfile via `file`
+injection, or OAuth tokens in the encrypted credential store.
+
+**Model B — the wrapped CLI holds its own credential (ambient).** Log into the
+CLI once (e.g. `gcloud auth login`); it writes creds to its own config directory.
+Sym spawns the CLI as an MCP server and injects nothing. Use this when you want
+"log in once, no key in Sym".
+
+See [`docs/mcp-setup.md`](docs/mcp-setup.md) for setup guides, a model-selection
+decision tree, and a table of Model B edge cases.
+
+### Hot reload
+
+The running agent reconciles the live connector pool without a restart:
+
+```sh
+sym apply
+# or directly: curl -s -X POST http://127.0.0.1:3001/admin/reload | jq
+```
+
+Reconcile is validate-then-swap: a connector that fails to connect leaves the
+previously-healthy one serving; unchanged connectors are untouched; dropped ones
+are closed.
+
+---
+
+## Development
+
+### Scripts
+
+| Script                  | What it does                                                     |
+| ----------------------- | ---------------------------------------------------------------- |
+| `pnpm build`            | Build all packages (Turbo)                                       |
+| `pnpm dev`              | Start all packages in watch mode (Turbo)                         |
+| `pnpm test`             | Run unit tests across all packages (Vitest)                      |
+| `pnpm test:integration` | Run real-wire integration tests (MCP + HTTP; no Slack required)  |
+| `pnpm test:coverage`    | Unit tests with v8 coverage                                      |
+| `pnpm typecheck`        | Type-check every package with tsc                                |
+| `pnpm lint`             | ESLint + Prettier check                                          |
+| `pnpm lint:fix`         | ESLint autofix + Prettier write                                  |
+| `pnpm format`           | Prettier write across the repo                                   |
+| `pnpm depcruise`        | Dependency graph analysis (enforces the DAG; informational only) |
+| `pnpm knip`             | Dead code analysis (informational only)                          |
+| `pnpm manifest:render`  | Render the Slack app manifest template to stdout                 |
+| `pnpm clean`            | Remove all build artifacts and `node_modules`                    |
+
+**Full gate before pushing:**
+
+```sh
+pnpm typecheck && pnpm lint && pnpm test && pnpm test:integration && pnpm build
+```
+
+### Testing approach
+
+- Unit tests live in `tests/` inside each package (e.g. `apps/agent/tests/`,
+  `packages/kernel/tests/`), not co-located with source.
+- Integration tests are real-wire (no mocks) and also live in `tests/`. They
+  spin up ephemeral in-process servers; no external services are required.
+- Every test file imports from `vitest` explicitly (`globals: false`).
+
+### Project structure
+
+```
+sym/
+  apps/
+    agent/              The single deployable (Hono server + Pi loop + sym CLI)
+      src/
+        server.ts       HTTP entry point; all Slack + admin routes
+        handle-turn.ts  Pi loop entry point (every message passes through here)
+        tools/          Built-in tool families (slack-read/write/search/users,
+                        web, planning, presentation, time)
+        mcp/            MCP connector pool, reconcile, credential store
+        pi/             Pi agent loop (loop, meta-tools, model, think-router)
+        cli/            `sym` operator CLI (commands + interactive TUI)
+        config.ts       AgentConfig — reads all env vars
+  packages/
+    contracts/          @sym/contracts — shared types (zero runtime code)
+    kernel/             @sym/kernel — prompt assembly, receipt, tool registry
+    mcp-runtime/        @sym/mcp-runtime — connector runtime (reusable)
+    adapter/
+      slack/            @sym/adapter-slack — Slack API client + Block Kit renderer
+  slack/
+    manifest.template.yml  Canonical Slack app manifest
+  examples/             Sample connector config.json + setup walkthrough
+  docs/                 Reference docs (env vars, MCP setup, architecture notes)
+  Dockerfile            Production image (node:24-slim, /data volume)
+  docker-compose.yml    Single-service local run (agent + sym_data volume)
+```
+
+---
+
+## Deployment
 
 ### Docker
 
 ```sh
-# Build the image
+# Build
 docker build -t sym-agent .
 
 # Run — mount a persistent volume for CLIs, auth state, and the credential store
@@ -144,67 +467,60 @@ docker run -d \
   sym-agent
 ```
 
-The `/data` volume persists across redeploys:
-CLI auth (`gcloud`, `gh`, etc.), MCP server packages, and the OAuth credential
-store (`/data/credentials.db`). See the Dockerfile for details.
+The `/data` volume persists across redeploys. The image is deliberately
+**CLI-agnostic** — it bakes in only generic runtimes (Node, Python 3, uv/uvx,
+curl, git). Actual tool binaries (gcloud, sentry-cli, MCP server packages) are
+installed onto `/data/bin` once via `docker exec` and survive every redeploy
+because the volume persists. `HOME` is set to `/data/home` so every CLI's login
+credentials also persist tool-agnostically.
 
-## Slack app setup
-
-The canonical source of truth for scopes, events, and features is
-`slack/manifest.template.yml`. Render it and paste the output into Slack's
-app manifest editor:
-
-```sh
-# Set SLACK_PUBLIC_BASE_URL to your public HTTPS URL first
-SLACK_PUBLIC_BASE_URL=https://your-agent-host.example.com pnpm manifest:render
-```
-
-Then in [api.slack.com/apps](https://api.slack.com/apps):
-
-1. Create a new app → **From an app manifest**.
-2. Paste the rendered YAML output.
-3. Install the app to your workspace.
-4. Copy the **Bot User OAuth Token** (`xoxb-…`) → `SLACK_BOT_TOKEN`.
-5. Copy the **Signing Secret** from Basic Information → `SLACK_SIGNING_SECRET`.
-6. Note the **Bot User ID** from App Home → `SLACK_BOT_USER_ID`.
-
-> **Do not hand-copy scopes from this README** — the manifest template is the
-> source of truth and is already correct. Past README prose had wrong scopes
-> (`im:write` instead of `im:read`; missing `commands`, `assistant:write`).
-
-## Operator control tier
-
-Run `sym` (or `sym menu`) in a terminal to open the interactive connector
-dashboard. This is separate from the conversational tier — it manages MCP
-connector configuration and OAuth tokens stored in the encrypted credential
-store.
+The `sym` CLI is baked into the image:
 
 ```sh
-# Interactive TUI dashboard
-sym
-
-# CLI commands (machine-readable, safe for scripts)
-sym status --json            # show agent + connector health
-sym connector list           # list configured connectors
-sym apply                    # hot-reload connector config without restart
-sym secret set <name>        # add/rotate a stored secret (reads from stdin)
+docker exec sym sym status
+docker exec -it sym sym menu    # interactive TUI (needs -it)
 ```
 
-**NO_COLOR** — the TUI honours the [`NO_COLOR`](https://no-color.org) standard:
+The image exposes a `/health` endpoint: `GET /health` returns `{"ok":true}`.
+
+### docker-compose
+
+A `docker-compose.yml` is included in the repo root for local single-command
+runs. It defines one stateless `agent` service (the Slack thread is the
+conversation memory) with a `sym_data` volume for the only durable state — the
+credential store and any ambient CLI config:
 
 ```sh
-NO_COLOR=1 sym
+docker compose up --build      # build + run the agent
+docker compose logs -f agent   # follow logs
 ```
 
-**Non-TTY / pipe safety** — `sym menu` and `sym tui` exit with an error when
-stdout is not a TTY. Use `sym status --json` for machine-readable output in
-scripts or from the agent's `run_cli`.
+### Dokploy
+
+A `dokploy/` directory contains deployment config and an env template for
+[Dokploy](https://dokploy.com)-based deploys. See `dokploy/` for details.
+
+---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, commit conventions, and
-the pull request process.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development loop, commit
+conventions, cross-unit impact checklist, and pull request process.
+
+For questions, open a [GitHub Discussion](https://github.com/amitray007/sym/discussions).
+For bugs, use the [Bug Report issue template](https://github.com/amitray007/sym/issues/new?template=bug_report.yml).
+
+---
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+---
+
+## Acknowledgements
+
+- **[Pi agent runtime](https://github.com/earendil-works/pi)** (`@earendil-works/pi-agent-core` / `@earendil-works/pi-ai`) — the agent loop Sym runs on.
+- **[Model Context Protocol](https://modelcontextprotocol.io)** (`@modelcontextprotocol/sdk`) — the extension protocol that powers Sym's connector surface.
+- **[Hono](https://hono.dev)** — the lightweight HTTP server framework.
+- **[Fireworks AI](https://fireworks.ai)** — the LLM inference provider.

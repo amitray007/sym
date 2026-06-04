@@ -21,7 +21,9 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => {
 });
 vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => {
   return {
-    StdioClientTransport: vi.fn().mockImplementation((opts: unknown) => ({ _opts: opts })),
+    StdioClientTransport: vi.fn().mockImplementation(function (opts: unknown) {
+      return { _opts: opts };
+    }),
   };
 });
 
@@ -714,7 +716,9 @@ describe('McpDispatcher', () => {
         inputSchema: { type: 'object', properties: {} },
       },
     ]);
-    vi.mocked(MockClient).mockReturnValue(mockClient);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient;
+    });
 
     const config = makeConnector({ name: 'srv' });
     const dispatcher = new McpDispatcher([config]);
@@ -731,7 +735,9 @@ describe('McpDispatcher', () => {
     const mockClient = makeMockClient([
       { name: 'do_thing', inputSchema: { type: 'object', properties: {} } },
     ]);
-    vi.mocked(MockClient).mockReturnValue(mockClient);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient;
+    });
 
     const config = makeConnector({ name: 'srv2' });
     const dispatcher = new McpDispatcher([config]);
@@ -745,7 +751,9 @@ describe('McpDispatcher', () => {
     const mockClient = makeMockClient([
       { name: 'do_thing', inputSchema: { type: 'object', properties: {} } },
     ]);
-    vi.mocked(MockClient).mockReturnValue(mockClient);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient;
+    });
 
     const config = makeConnector({ name: 'trusted', trust: true });
     const dispatcher = new McpDispatcher([config]);
@@ -760,7 +768,9 @@ describe('McpDispatcher', () => {
       [{ name: 'greet', inputSchema: { type: 'object', properties: {} } }],
       { content: [{ type: 'text', text: 'Hello, world!' }], isError: false },
     );
-    vi.mocked(MockClient).mockReturnValue(mockClient);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient;
+    });
 
     const config = makeConnector({ name: 'greeter', trust: true });
     const dispatcher = new McpDispatcher([config]);
@@ -782,7 +792,9 @@ describe('McpDispatcher', () => {
       [{ name: 'fail_tool', inputSchema: { type: 'object', properties: {} } }],
       { content: [{ type: 'text', text: 'something broke' }], isError: true },
     );
-    vi.mocked(MockClient).mockReturnValue(mockClient);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient;
+    });
 
     const config = makeConnector({ name: 'failer', trust: true });
     const dispatcher = new McpDispatcher([config]);
@@ -804,7 +816,9 @@ describe('McpDispatcher', () => {
       [{ name: 'boom', inputSchema: { type: 'object', properties: {} } }],
       new Error('network error'),
     );
-    vi.mocked(MockClient).mockReturnValue(mockClient);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient;
+    });
 
     const config = makeConnector({ name: 'boomer', trust: true });
     const dispatcher = new McpDispatcher([config]);
@@ -824,7 +838,9 @@ describe('McpDispatcher', () => {
     const mockClient = makeMockClient([
       { name: 'work', inputSchema: { type: 'object', properties: {} } },
     ]);
-    vi.mocked(MockClient).mockReturnValue(mockClient);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient;
+    });
 
     const config = makeConnector({
       name: 'env-srv',
@@ -860,7 +876,9 @@ describe('McpDispatcher — FAIL OPEN', () => {
       listTools: vi.fn(),
       callTool: vi.fn(),
     };
-    vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient as unknown as InstanceType<typeof MockClient>;
+    });
 
     const config = makeConnector({ name: 'down_srv' });
     const dispatcher = new McpDispatcher([config]);
@@ -876,7 +894,9 @@ describe('McpDispatcher — FAIL OPEN', () => {
       listTools: vi.fn().mockRejectedValue(new Error('list failed')),
       callTool: vi.fn(),
     };
-    vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient as unknown as InstanceType<typeof MockClient>;
+    });
 
     const config = makeConnector({ name: 'list_fail_srv' });
     const dispatcher = new McpDispatcher([config]);
@@ -892,7 +912,9 @@ describe('McpDispatcher — FAIL OPEN', () => {
       listTools: vi.fn(),
       callTool: vi.fn(),
     };
-    vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient as unknown as InstanceType<typeof MockClient>;
+    });
 
     const config = makeConnector({ name: 'conn_fail' });
     const dispatcher = new McpDispatcher([config]);
@@ -936,7 +958,9 @@ describe('McpDispatcher — connect TIMEOUT', () => {
       listTools: vi.fn(),
       callTool: vi.fn(),
     };
-    vi.mocked(MockClient).mockReturnValue(mockClient as unknown as InstanceType<typeof MockClient>);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient as unknown as InstanceType<typeof MockClient>;
+    });
 
     const config = makeConnector({ name: 'hanging_srv' });
     // McpDispatcher reads from the shared pool — initMcpPool populates it.
@@ -1242,7 +1266,9 @@ describe('McpDispatcher — tools.allow enforcement', () => {
       { name: 'tool_b', inputSchema: { type: 'object', properties: {} } },
       { name: 'tool_c', inputSchema: { type: 'object', properties: {} } },
     ]);
-    vi.mocked(MockClient).mockReturnValue(mockClient);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient;
+    });
 
     const config = makeConnector({ name: 'srv_allow', trust: true });
     const dispatcher = new McpDispatcher([config]);
@@ -1265,7 +1291,9 @@ describe('McpDispatcher — tools.allow enforcement', () => {
       { name: 'tool_b', inputSchema: { type: 'object', properties: {} } },
       { name: 'tool_c', inputSchema: { type: 'object', properties: {} } },
     ]);
-    vi.mocked(MockClient).mockReturnValue(mockClient);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient;
+    });
 
     const config = makeConnector({
       name: 'srv_filtered',
@@ -1288,7 +1316,9 @@ describe('McpDispatcher — tools.allow enforcement', () => {
       { name: 'gamma', inputSchema: { type: 'object', properties: {} } },
       { name: 'delta', inputSchema: { type: 'object', properties: {} } },
     ]);
-    vi.mocked(MockClient).mockReturnValue(mockClient);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient;
+    });
 
     const config = makeConnector({
       name: 'srv_multi',
@@ -1310,7 +1340,9 @@ describe('McpDispatcher — tools.allow enforcement', () => {
     const mockClient = makeMockClient([
       { name: 'tool_x', inputSchema: { type: 'object', properties: {} } },
     ]);
-    vi.mocked(MockClient).mockReturnValue(mockClient);
+    vi.mocked(MockClient).mockImplementation(function () {
+      return mockClient;
+    });
 
     const config = makeConnector({
       name: 'srv_empty_allow',

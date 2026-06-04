@@ -406,127 +406,119 @@ describe('C2: Full OAuth handshake with mock MCP server + mock AS', () => {
     return { port: srv.port, stop: srv.stop };
   }
 
-  it(
-    'C2a: connect → UnauthorizedError captured → completeOAuth → finishAuth → tokens stored → reconnect returns tools',
-    async () => {
-      // Reserve ports by starting placeholder servers, then replace with real ones.
-      // Use lazy getters so the servers can reference each other.
-      let asPort = 0;
-      let mcpPort = 0;
-      const getAsBase = () => `http://127.0.0.1:${asPort}`;
-      const getMcpBase = () => `http://127.0.0.1:${mcpPort}`;
+  it('C2a: connect → UnauthorizedError captured → completeOAuth → finishAuth → tokens stored → reconnect returns tools', async () => {
+    // Reserve ports by starting placeholder servers, then replace with real ones.
+    // Use lazy getters so the servers can reference each other.
+    let asPort = 0;
+    let mcpPort = 0;
+    const getAsBase = () => `http://127.0.0.1:${asPort}`;
+    const getMcpBase = () => `http://127.0.0.1:${mcpPort}`;
 
-      const asSrv = await startMockAS(getAsBase);
-      asPort = asSrv.port;
-      stopServers.push(asSrv.stop);
+    const asSrv = await startMockAS(getAsBase);
+    asPort = asSrv.port;
+    stopServers.push(asSrv.stop);
 
-      const mcpSrv = await startMockMcpServer(getAsBase, getMcpBase);
-      mcpPort = mcpSrv.port;
-      stopServers.push(mcpSrv.stop);
+    const mcpSrv = await startMockMcpServer(getAsBase, getMcpBase);
+    mcpPort = mcpSrv.port;
+    stopServers.push(mcpSrv.stop);
 
-      const mcpBase = getMcpBase();
+    const mcpBase = getMcpBase();
 
-      // --- Set up encryption ---
-      const key = makeTestKey();
-      process.env['SYM_ENCRYPTION_KEY'] = key;
-      process.env['SYM_PUBLIC_URL'] = mcpBase;
+    // --- Set up encryption ---
+    const key = makeTestKey();
+    process.env['SYM_ENCRYPTION_KEY'] = key;
+    process.env['SYM_PUBLIC_URL'] = mcpBase;
 
-      const config: ConnectorConfig = {
-        name: CONNECTOR_NAME,
-        transport: { kind: 'http', url: mcpBase },
-        auth: { kind: 'oauth' },
-        trust: true,
-      };
+    const config: ConnectorConfig = {
+      name: CONNECTOR_NAME,
+      transport: { kind: 'http', url: mcpBase },
+      auth: { kind: 'oauth' },
+      trust: true,
+    };
 
-      // --- First connect: should fail open with 0 tools (UnauthorizedError path) ---
-      const dispatcher = new McpDispatcher([config]);
-      await initMcpPool([config]);
-      const toolsBefore = dispatcher.list();
+    // --- First connect: should fail open with 0 tools (UnauthorizedError path) ---
+    const dispatcher = new McpDispatcher([config]);
+    await initMcpPool([config]);
+    const toolsBefore = dispatcher.list();
 
-      expect(toolsBefore).toHaveLength(0);
+    expect(toolsBefore).toHaveLength(0);
 
-      // Registry must have captured the pending auth
-      const pending = getPendingAuth(CONNECTOR_NAME);
-      expect(pending).toBeDefined();
-      expect(pending?.authorizeUrl).toBeDefined();
-      expect(pending?.state).toBeDefined();
+    // Registry must have captured the pending auth
+    const pending = getPendingAuth(CONNECTOR_NAME);
+    expect(pending).toBeDefined();
+    expect(pending?.authorizeUrl).toBeDefined();
+    expect(pending?.state).toBeDefined();
 
-      // --- Simulate user visiting the authorize URL ---
-      // The AS /authorize endpoint redirects to our callback with code+state.
-      // We follow the redirect manually to extract code+state.
-      const authorizeUrl = pending!.authorizeUrl;
-      const authState = pending!.state;
+    // --- Simulate user visiting the authorize URL ---
+    // The AS /authorize endpoint redirects to our callback with code+state.
+    // We follow the redirect manually to extract code+state.
+    const authorizeUrl = pending!.authorizeUrl;
+    const authState = pending!.state;
 
-      const asResponse = await fetch(authorizeUrl.toString(), { redirect: 'manual' });
-      expect(asResponse.status).toBe(302);
-      const location = asResponse.headers.get('location') ?? '';
-      const callbackUrl = new URL(location);
-      const code = callbackUrl.searchParams.get('code') ?? '';
-      const returnedState = callbackUrl.searchParams.get('state') ?? '';
+    const asResponse = await fetch(authorizeUrl.toString(), { redirect: 'manual' });
+    expect(asResponse.status).toBe(302);
+    const location = asResponse.headers.get('location') ?? '';
+    const callbackUrl = new URL(location);
+    const code = callbackUrl.searchParams.get('code') ?? '';
+    const returnedState = callbackUrl.searchParams.get('state') ?? '';
 
-      expect(code).toBeTruthy();
-      expect(returnedState).toBe(authState);
+    expect(code).toBeTruthy();
+    expect(returnedState).toBe(authState);
 
-      // --- Complete the OAuth flow (this calls transport.finishAuth) ---
-      // Note: completeOAuth uses the transport from the registry,
-      // which has the OAuthProvider backed by the module-level getStore().
-      // Our test store is a separate instance, so we verify via the module store.
-      await completeOAuth(CONNECTOR_NAME, code, returnedState);
+    // --- Complete the OAuth flow (this calls transport.finishAuth) ---
+    // Note: completeOAuth uses the transport from the registry,
+    // which has the OAuthProvider backed by the module-level getStore().
+    // Our test store is a separate instance, so we verify via the module store.
+    await completeOAuth(CONNECTOR_NAME, code, returnedState);
 
-      // --- Second connect: tokens available → should succeed ---
-      // No manual pool reset: ensureEntry() retries failed OAuth connectors, so
-      // the next initMcpPool reconnects with the now-stored tokens and comes online.
-      // The dispatcher uses the module-level store (getStore()) which was
-      // initialized with SYM_ENCRYPTION_KEY. The tokens are stored there.
-      const dispatcher2 = new McpDispatcher([config]);
-      await initMcpPool([config]);
-      const toolsAfter = dispatcher2.list();
+    // --- Second connect: tokens available → should succeed ---
+    // No manual pool reset: ensureEntry() retries failed OAuth connectors, so
+    // the next initMcpPool reconnects with the now-stored tokens and comes online.
+    // The dispatcher uses the module-level store (getStore()) which was
+    // initialized with SYM_ENCRYPTION_KEY. The tokens are stored there.
+    const dispatcher2 = new McpDispatcher([config]);
+    await initMcpPool([config]);
+    const toolsAfter = dispatcher2.list();
 
-      // Should now have the tool (OAuth tokens persisted → Bearer sent → 200)
-      expect(toolsAfter.some((t) => t.name === `${CONNECTOR_NAME}__secret_tool`)).toBe(true);
-    },
-    { timeout: 30_000 },
-  );
+    // Should now have the tool (OAuth tokens persisted → Bearer sent → 200)
+    expect(toolsAfter.some((t) => t.name === `${CONNECTOR_NAME}__secret_tool`)).toBe(true);
+  }, 30_000);
 
-  it(
-    'C2b: completeOAuth with wrong state is REJECTED (CSRF protection)',
-    async () => {
-      let asPort = 0;
-      let mcpPort = 0;
-      const getAsBase = () => `http://127.0.0.1:${asPort}`;
-      const getMcpBase = () => `http://127.0.0.1:${mcpPort}`;
+  it('C2b: completeOAuth with wrong state is REJECTED (CSRF protection)', async () => {
+    let asPort = 0;
+    let mcpPort = 0;
+    const getAsBase = () => `http://127.0.0.1:${asPort}`;
+    const getMcpBase = () => `http://127.0.0.1:${mcpPort}`;
 
-      const asSrv = await startMockAS(getAsBase);
-      asPort = asSrv.port;
-      stopServers.push(asSrv.stop);
+    const asSrv = await startMockAS(getAsBase);
+    asPort = asSrv.port;
+    stopServers.push(asSrv.stop);
 
-      const mcpSrv = await startMockMcpServer(getAsBase, getMcpBase);
-      mcpPort = mcpSrv.port;
-      stopServers.push(mcpSrv.stop);
+    const mcpSrv = await startMockMcpServer(getAsBase, getMcpBase);
+    mcpPort = mcpSrv.port;
+    stopServers.push(mcpSrv.stop);
 
-      const key = makeTestKey();
-      process.env['SYM_ENCRYPTION_KEY'] = key;
-      process.env['SYM_PUBLIC_URL'] = getMcpBase();
+    const key = makeTestKey();
+    process.env['SYM_ENCRYPTION_KEY'] = key;
+    process.env['SYM_PUBLIC_URL'] = getMcpBase();
 
-      const config: ConnectorConfig = {
-        name: CONNECTOR_NAME,
-        transport: { kind: 'http', url: getMcpBase() },
-        auth: { kind: 'oauth' },
-        trust: true,
-      };
+    const config: ConnectorConfig = {
+      name: CONNECTOR_NAME,
+      transport: { kind: 'http', url: getMcpBase() },
+      auth: { kind: 'oauth' },
+      trust: true,
+    };
 
-      await initMcpPool([config]); // triggers UnauthorizedError → registry
+    await initMcpPool([config]); // triggers UnauthorizedError → registry
 
-      const pending = getPendingAuth(CONNECTOR_NAME);
-      expect(pending).toBeDefined();
+    const pending = getPendingAuth(CONNECTOR_NAME);
+    expect(pending).toBeDefined();
 
-      // Try completeOAuth with WRONG state — must be rejected
-      await expect(completeOAuth(CONNECTOR_NAME, 'some-code', 'WRONG-STATE-CSRF')).rejects.toThrow(
-        /state mismatch|CSRF/i,
-      );
-    },
-    { timeout: 15_000 },
-  );
+    // Try completeOAuth with WRONG state — must be rejected
+    await expect(completeOAuth(CONNECTOR_NAME, 'some-code', 'WRONG-STATE-CSRF')).rejects.toThrow(
+      /state mismatch|CSRF/i,
+    );
+  }, 15_000);
 });
 
 // ---------------------------------------------------------------------------

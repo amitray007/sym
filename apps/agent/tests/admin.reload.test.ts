@@ -103,114 +103,94 @@ afterEach(async () => {
 });
 
 describe('admin control plane (real loopback socket)', () => {
-  it(
-    'POST /admin/reload picks up a connector written to the config file (no restart)',
-    async () => {
-      // Boot started with zero connectors; status confirms it.
-      const status0 = await getJson<StatusBody>(`${baseUrl}/admin/status`);
-      expect(status0.connectors).toEqual([]);
-      expect(status0.totalTools).toBe(0);
+  it('POST /admin/reload picks up a connector written to the config file (no restart)', async () => {
+    // Boot started with zero connectors; status confirms it.
+    const status0 = await getJson<StatusBody>(`${baseUrl}/admin/status`);
+    expect(status0.connectors).toEqual([]);
+    expect(status0.totalTools).toBe(0);
 
-      // Operator writes the config file and applies.
-      writeConfig([ECHO]);
-      const reload = await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
-      expect(reload.status).toBe(200);
-      const body = (await reload.json()) as ReloadBody;
-      expect(body.source).toBe('file');
-      const echo = body.connectors.find((c) => c.name === 'echo');
-      expect(echo?.status).toBe('connected');
-      expect(echo?.tools).toBeGreaterThan(0);
-      expect(body.totalTools).toBeGreaterThan(0);
+    // Operator writes the config file and applies.
+    writeConfig([ECHO]);
+    const reload = await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
+    expect(reload.status).toBe(200);
+    const body = (await reload.json()) as ReloadBody;
+    expect(body.source).toBe('file');
+    const echo = body.connectors.find((c) => c.name === 'echo');
+    expect(echo?.status).toBe('connected');
+    expect(echo?.tools).toBeGreaterThan(0);
+    expect(body.totalTools).toBeGreaterThan(0);
 
-      // Status now reflects the live connector.
-      const status1 = await getJson<StatusBody>(`${baseUrl}/admin/status`);
-      expect(status1.connectors).toEqual(['echo']);
-      expect(status1.totalTools).toBeGreaterThan(0);
-    },
-    { timeout: 30_000 },
-  );
+    // Status now reflects the live connector.
+    const status1 = await getJson<StatusBody>(`${baseUrl}/admin/status`);
+    expect(status1.connectors).toEqual(['echo']);
+    expect(status1.totalTools).toBeGreaterThan(0);
+  }, 30_000);
 
-  it(
-    'POST /admin/reload removes a connector when the config file drops it',
-    async () => {
-      writeConfig([ECHO]);
-      await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
+  it('POST /admin/reload removes a connector when the config file drops it', async () => {
+    writeConfig([ECHO]);
+    await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
 
-      writeConfig([]);
-      const body = await getJson<ReloadBody>(`${baseUrl}/admin/reload`, { method: 'POST' });
-      const echo = body.connectors.find((c) => c.name === 'echo');
-      expect(echo?.status).toBe('removed');
-      expect(body.totalTools).toBe(0);
+    writeConfig([]);
+    const body = await getJson<ReloadBody>(`${baseUrl}/admin/reload`, { method: 'POST' });
+    const echo = body.connectors.find((c) => c.name === 'echo');
+    expect(echo?.status).toBe('removed');
+    expect(body.totalTools).toBe(0);
 
-      const status = await getJson<StatusBody>(`${baseUrl}/admin/status`);
-      expect(status.connectors).toEqual([]);
-    },
-    { timeout: 30_000 },
-  );
+    const status = await getJson<StatusBody>(`${baseUrl}/admin/status`);
+    expect(status.connectors).toEqual([]);
+  }, 30_000);
 
-  it(
-    'POST /admin/reload responds 200 (not 500) when the config file is missing',
-    async () => {
-      // SYM_CONFIG_PATH points to cfgPath which was NEVER written — simulates
-      // a fresh deploy where the operator hasn't applied yet. The loader
-      // falls back to source:'none', mcpServers:[].
-      const reload = await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
-      expect(reload.status).toBe(200);
-      const body = (await reload.json()) as ReloadBody;
-      // source reports 'none' (file missing → env fallback → env unset → none)
-      expect(body.source).toBe('none');
-      expect(body.totalTools).toBe(0);
-      expect(body.connectors).toEqual([]);
-    },
-    { timeout: 10_000 },
-  );
+  it('POST /admin/reload responds 200 (not 500) when the config file is missing', async () => {
+    // SYM_CONFIG_PATH points to cfgPath which was NEVER written — simulates
+    // a fresh deploy where the operator hasn't applied yet. The loader
+    // falls back to source:'none', mcpServers:[].
+    const reload = await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
+    expect(reload.status).toBe(200);
+    const body = (await reload.json()) as ReloadBody;
+    // source reports 'none' (file missing → env fallback → env unset → none)
+    expect(body.source).toBe('none');
+    expect(body.totalTools).toBe(0);
+    expect(body.connectors).toEqual([]);
+  }, 10_000);
 
-  it(
-    'POST /admin/reload responds 200 when the config file is malformed JSON',
-    async () => {
-      // Write garbage JSON — loader logs a warning and falls back to env (unset
-      // in this test env) → source:'none'. Must not 500.
-      writeFileSync(cfgPath, '{ invalid json !!!', 'utf8');
+  it('POST /admin/reload responds 200 when the config file is malformed JSON', async () => {
+    // Write garbage JSON — loader logs a warning and falls back to env (unset
+    // in this test env) → source:'none'. Must not 500.
+    writeFileSync(cfgPath, '{ invalid json !!!', 'utf8');
 
-      const reload = await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
-      expect(reload.status).toBe(200);
-      const body = (await reload.json()) as ReloadBody;
-      expect(body.source).toBe('none');
-      expect(body.totalTools).toBe(0);
-    },
-    { timeout: 10_000 },
-  );
+    const reload = await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
+    expect(reload.status).toBe(200);
+    const body = (await reload.json()) as ReloadBody;
+    expect(body.source).toBe('none');
+    expect(body.totalTools).toBe(0);
+  }, 10_000);
 
-  it(
-    'POST /admin/reload reports a failed connector in the connectors array, not a 500',
-    async () => {
-      // Write a connector with a command that does not exist (guaranteed spawn fail).
-      const broken: ConnectorConfig = {
-        name: 'broken',
-        transport: {
-          kind: 'stdio',
-          command: '/this/binary/does/not/exist/sym-fake-mcp',
-        },
-        trust: true,
-      };
-      writeConfig([broken]);
+  it('POST /admin/reload reports a failed connector in the connectors array, not a 500', async () => {
+    // Write a connector with a command that does not exist (guaranteed spawn fail).
+    const broken: ConnectorConfig = {
+      name: 'broken',
+      transport: {
+        kind: 'stdio',
+        command: '/this/binary/does/not/exist/sym-fake-mcp',
+      },
+      trust: true,
+    };
+    writeConfig([broken]);
 
-      const reload = await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
-      // Must respond with 200 — reconcileConnectors absorbs per-connector errors.
-      expect(reload.status).toBe(200);
-      const body = (await reload.json()) as ReloadBody;
-      // The broken connector appears in the connectors array with an error status.
-      const entry = body.connectors.find((c) => c.name === 'broken');
-      expect(entry).toBeDefined();
-      // reconcileConnectors uses 'failed' (not 'error') for a connect-failure.
-      expect(entry?.status).toBe('failed');
-      // error field carries a human-readable message (not an empty string).
-      expect(typeof entry?.error).toBe('string');
-      expect((entry?.error ?? '').length).toBeGreaterThan(0);
-      // Zero tools since the connector failed.
-      expect(entry?.tools).toBe(0);
-      expect(body.totalTools).toBe(0);
-    },
-    { timeout: 15_000 },
-  );
+    const reload = await fetch(`${baseUrl}/admin/reload`, { method: 'POST' });
+    // Must respond with 200 — reconcileConnectors absorbs per-connector errors.
+    expect(reload.status).toBe(200);
+    const body = (await reload.json()) as ReloadBody;
+    // The broken connector appears in the connectors array with an error status.
+    const entry = body.connectors.find((c) => c.name === 'broken');
+    expect(entry).toBeDefined();
+    // reconcileConnectors uses 'failed' (not 'error') for a connect-failure.
+    expect(entry?.status).toBe('failed');
+    // error field carries a human-readable message (not an empty string).
+    expect(typeof entry?.error).toBe('string');
+    expect((entry?.error ?? '').length).toBeGreaterThan(0);
+    // Zero tools since the connector failed.
+    expect(entry?.tools).toBe(0);
+    expect(body.totalTools).toBe(0);
+  }, 15_000);
 });
