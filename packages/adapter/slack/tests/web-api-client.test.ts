@@ -540,6 +540,14 @@ describe('WebApiSlackClient branded-id safety (Z03)', () => {
     );
   });
 
+  it('chatStartStream throws on missing ts in response', async () => {
+    mockFetch([{ ok: true, channel: 'D1' }]); // ts absent — would otherwise poison the handle
+    const client = new WebApiSlackClient('xoxb-test');
+    await expect(
+      client.chatStartStream({ channel: 'D1' as SlackChannelId, threadTs: ROOT }),
+    ).rejects.toThrow('missing_ts');
+  });
+
   it('usersInfo throws when user.id is absent from Slack response', async () => {
     mockFetch([{ ok: true, user: { profile: {} } }]); // no id field
     const client = new WebApiSlackClient('xoxb-test');

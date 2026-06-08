@@ -261,9 +261,16 @@ export class WebApiSlackClient implements SlackClient {
         ? { task_display_mode: params.taskDisplayMode }
         : {}),
     });
+    // Mirror chatPostMessage: a missing ts is a hard failure, not an empty
+    // string. Coercing to '' would hand back a poisoned StreamHandle — every
+    // later appendStream/stopStream on ts='' fails, and the streamReply caller
+    // never sees it as a stream-open failure (so it can't fall back to a plain
+    // postMessage). Throwing here routes it cleanly into that fallback.
+    const ts = json.ts;
+    if (!ts) throw new SlackWebApiError('missing_ts', { error: 'missing_ts' });
     return {
       channel: (json.channel ?? params.channel) as SlackChannelId,
-      ts: (json.ts ?? '') as SlackThreadTs,
+      ts: ts as SlackThreadTs,
     };
   }
 

@@ -240,6 +240,26 @@ export class TaskCardManager {
    */
   async touch(): Promise<void> {
     if (!this.active) return;
+    // Plan-mode rows live in the bound controller, NOT in `tasks` (which only
+    // ever holds tool-keyed rows, all suppressed once plan mode latches). A
+    // plain `flushAll` would re-emit nothing on a set_plan-first turn — the
+    // common long-turn case — leaving the stream to idle out. Re-emit the plan
+    // snapshot instead, mirroring `bindPlan`'s update_task chunk mapping so the
+    // re-send is byte-identical (blocked → error, note → details preserved).
+    if (this.planMode && this.boundPlan !== null) {
+      const chunks: TaskUpdateChunk[] = this.boundPlan.snapshot().map((item) => ({
+        type: 'task_update',
+        id: item.id,
+        title: item.title,
+        status: item.status === 'blocked' ? 'error' : item.status,
+        ...(item.note !== undefined ? { details: item.note } : {}),
+      }));
+      if (chunks.length === 0) return;
+      await this.sendChunks(chunks).catch((err) =>
+        console.warn('[agent] task card touch (plan) failed (continuing):', err),
+      );
+      return;
+    }
     await this.flushAll();
   }
 

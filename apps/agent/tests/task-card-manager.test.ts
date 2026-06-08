@@ -48,6 +48,32 @@ describe('TaskCardManager — plan mode', () => {
     ]);
   });
 
+  it('touch() re-emits the plan snapshot to keep the stream warm (set_plan-first turn)', async () => {
+    const { chunks, send } = collector();
+    const card = new TaskCardManager(send, 1);
+    const plan = new PlanController();
+    card.bindPlan(plan);
+    await plan.setPlan(['Find it', 'Summarize']);
+    await plan.updateTask('p1', 'complete');
+    await plan.updateTask('p2', 'blocked', 'need owner input');
+    chunks.length = 0;
+
+    await card.touch();
+    // No pre-plan tool rows exist; the rows live in the controller. touch() must
+    // re-emit the plan snapshot at current status (blocked → error + details),
+    // not silently send nothing.
+    expect(chunks).toEqual([
+      { type: 'task_update', id: 'p1', title: 'Find it', status: 'complete' },
+      {
+        type: 'task_update',
+        id: 'p2',
+        title: 'Summarize',
+        status: 'error',
+        details: 'need owner input',
+      },
+    ]);
+  });
+
   it('suppresses tool-derived rows once plan mode has latched', async () => {
     const { chunks, send } = collector();
     const card = new TaskCardManager(send, 1);
