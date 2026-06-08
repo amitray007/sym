@@ -195,6 +195,22 @@ describe('createBuiltinDispatcher', () => {
       expect(tools).toHaveLength(18);
     });
 
+    it('describes fetch_url as a fallback that defers to better readers', () => {
+      const dispatcher = createBuiltinDispatcher({
+        slackClient: makeSlackClient({}),
+        botUserId: BOT,
+      });
+      const fetchUrl = dispatcher.list().find((t) => t.name === 'fetch_url');
+      const desc = fetchUrl?.description ?? '';
+      // Demoted to a fallback, and steers Slack/connector links elsewhere — so
+      // the model stops reflexively fetching every link the owner hands it.
+      expect(desc).toContain('FALLBACK');
+      expect(desc).toContain('read_thread');
+      expect(desc).toContain('find_tools');
+      // Must NOT re-advertise itself as the generic link reader.
+      expect(desc).not.toContain('pages a user links to');
+    });
+
     it('declares actor:"user" on every tool that should act under owner identity', () => {
       const dispatcher = createBuiltinDispatcher({
         slackClient: makeSlackClient({}),

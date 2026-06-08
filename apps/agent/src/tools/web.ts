@@ -23,7 +23,7 @@ export const FETCH_URL_DESCRIPTOR: ToolDescriptor = {
   name: 'fetch_url',
   // READ tool: arbitrary http(s) fetch with HTML stripped to text. No JS rendering.
   description:
-    'Fetch a web URL and return its text content (HTML stripped). Use to read docs, articles, or pages a user links to. Only http(s) URLs; 10s timeout; output is truncated.',
+    'Fetch a PUBLIC web page and return its text (HTML stripped, NO JavaScript rendering). This is the FALLBACK reader — reach for it only when no better tool fits the link. NOT for a slack.com/archives/… permalink (that is a Slack message: read it with read_thread/read_channel using the channel id + timestamp from the URL). NOT for a link into a system you have a connector or CLI for (a GitHub PR/issue → gh via find_tools; a Notion/Linear/cloud-console page → that connector) — those return structured, authed data instead of stripped HTML. Auth-walled or JS-heavy pages come back as junk here. http(s) only; 10s timeout; output truncated.',
   parameters: {
     type: 'object',
     properties: {

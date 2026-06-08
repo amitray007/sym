@@ -4,6 +4,7 @@ import {
   buildSystemPrompt,
   buildTurnContextPrompt,
   buildUserTurnContent,
+  sectionHowYouWork,
   sectionOwnerRelationship,
   sectionPlanning,
   sectionReplyDiscipline,
@@ -180,6 +181,15 @@ describe('section extractors', () => {
   it('sectionReplyDiscipline forbids narration-style text', () => {
     const section = sectionReplyDiscipline().join('\n');
     expect(section).toContain('NEVER write sentences like');
+  });
+
+  it('sectionHowYouWork routes a handed link to the right reader, not a reflex fetch_url', () => {
+    const section = sectionHowYouWork().join('\n');
+    expect(section).toContain('A LINK IS NOT AUTOMATICALLY A `fetch_url`');
+    // Names the two better readers and demotes fetch_url to last resort.
+    expect(section).toContain('read_thread');
+    expect(section).toContain('find_tools');
+    expect(section).toContain('LAST resort');
   });
 
   it('all section lines appear verbatim in buildSystemPrompt', () => {
