@@ -228,6 +228,21 @@ export class TaskCardManager {
     ]).catch((err) => console.warn('[agent] task card gate update failed (continuing):', err));
   }
 
+  /**
+   * Re-emit the current card verbatim to keep the Slack stream in its
+   * streaming state. Slack auto-finalizes an idle streaming message, so on a
+   * long buffer-mode turn (a single long-running tool, or a slow final answer)
+   * the stream can expire between tool events and the closing body append then
+   * fails with `message_not_in_streaming_state`. A periodic touch from the
+   * keepalive timer resets Slack's idle clock. The chunks carry the same ids
+   * and statuses, so the re-send is visually idempotent (rows replace in place).
+   * No-op until the card is visible — nothing to keep alive before then.
+   */
+  async touch(): Promise<void> {
+    if (!this.active) return;
+    await this.flushAll();
+  }
+
   /** Flush every known task at its current status (threshold-cross + gate-reveal). */
   private async flushAll(): Promise<void> {
     const chunks: TaskUpdateChunk[] = this.taskOrder

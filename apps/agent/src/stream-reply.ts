@@ -120,6 +120,10 @@ export async function streamReply(
   // tick that fires during teardown can't re-issue a non-empty status AFTER the
   // clear and leave the shimmer stuck until Slack's 2-min timeout (audit #12).
   let turnEnded = false;
+  // Set once the stream is open in buffer mode, so the keepalive can also touch
+  // the stream itself (not just the shimmer). Wired below once `taskCard` and
+  // the buffer-mode/streamTs state exist; read here via the closure refs.
+  let streamKeepalive: (() => void) | undefined;
   const keepaliveTimer = setInterval(() => {
     if (turnEnded) return;
     if (phaseUpdated) {
@@ -128,6 +132,11 @@ export async function streamReply(
       // Still in the open phase — keep Slack's native rotation primed.
       void sendStatus(nextWhimsicalStatus(++whimsyTick), openerLoadingMessages);
     }
+    // Slack auto-finalizes an idle streaming message; in buffer mode the stream
+    // gets no appends between the last tool event and the closing body append,
+    // so on long turns it expires and that final append fails. Re-emit the card
+    // to reset Slack's idle clock (visually idempotent — same rows/statuses).
+    streamKeepalive?.();
   }, STATUS_KEEPALIVE_MS);
 
   try {
@@ -194,6 +203,14 @@ export async function streamReply(
     // (threshold disabled), the plan controller still mutates harmlessly; no
     // listener fires.
     taskCard?.bindPlan(ctx.planController);
+
+    // Wire the keepalive's stream-touch now that the card and buffer state
+    // exist. Only fires in buffer mode with an open stream — the live path
+    // appends body text regularly and would race a touch, and a closed/never
+    // opened stream has nothing to keep warm.
+    streamKeepalive = (): void => {
+      if (bufferMode && streamTs !== undefined) void taskCard?.touch();
+    };
 
     // No prelude task row. Slack's default "Thinking..." placeholder in the
     // streamed message body briefly shows for empty streams, but we can't
@@ -265,6 +282,12 @@ export async function streamReply(
 
     // Settle the task card before or alongside reply delivery.
     await taskCard?.finish();
+
+    // Stop the keepalive before final delivery — a tick firing during the
+    // body-append/close would race those appends (and a touch landing after
+    // closeStream would itself fail with message_not_in_streaming_state, the
+    // very error we're suppressing). The interval is still cleared in finally.
+    turnEnded = true;
 
     const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
     const receipt = receiptToContextBlock(reply.receipt);

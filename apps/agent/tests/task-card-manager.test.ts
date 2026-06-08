@@ -148,6 +148,33 @@ describe('TaskCardManager — tool mode', () => {
     ]);
   });
 
+  it('touch() re-emits the current rows verbatim to keep the stream warm', async () => {
+    const { chunks, send } = collector();
+    const card = new TaskCardManager(send, 1);
+    await card.onToolStart('c1', 'reading the channel'); // visible, in_progress
+    await card.onToolEnd('c1', false); // → complete
+    await card.onToolStart('c2', 'searching slack'); // still in_progress
+    chunks.length = 0;
+
+    await card.touch();
+    // Both rows re-sent at their current status, in insertion order — visually
+    // idempotent, but a fresh appendStream that resets Slack's idle clock.
+    expect(chunks).toEqual([
+      { type: 'task_update', id: 'task-1', title: 'Reading the channel', status: 'complete' },
+      { type: 'task_update', id: 'task-2', title: 'Searching slack', status: 'in_progress' },
+    ]);
+  });
+
+  it('touch() is a no-op before the card is visible (nothing to keep warm)', async () => {
+    const { chunks, send } = collector();
+    const card = new TaskCardManager(send, 2);
+    await card.onToolStart('c1', 'reading the channel'); // count 1 < 2 → not visible
+
+    await card.touch();
+    expect(send).not.toHaveBeenCalled();
+    expect(chunks).toEqual([]);
+  });
+
   it('finish() completes a tool row left stuck in_progress', async () => {
     const { chunks, send } = collector();
     const card = new TaskCardManager(send, 1);
