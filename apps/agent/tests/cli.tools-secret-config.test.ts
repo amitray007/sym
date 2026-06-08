@@ -595,7 +595,7 @@ describe('loadAgentConfig', () => {
     expect(cfg.behavior.taskCardAfter).toBe('delete');
     expect(cfg.behavior.ownerPostMarker).toBe(true);
     expect(cfg.behavior.cliConfirm).toBe(false);
-    expect(cfg.behavior.turnDeadlineMs).toBe(60_000);
+    expect(cfg.behavior.turnDeadlineMs).toBe(1_800_000);
     expect(cfg.behavior.threadHistoryLimit).toBe(80);
   });
 
@@ -711,12 +711,12 @@ describe('loadAgentConfig', () => {
     expect(cfg.behavior.turnDeadlineMs).toBe(0);
   });
 
-  it('SYM_TURN_DEADLINE_MS: invalid value falls back to 60000', () => {
+  it('SYM_TURN_DEADLINE_MS: invalid value falls back to 1800000', () => {
     setRequiredEnv();
     process.env['SYM_TURN_DEADLINE_MS'] = 'bad';
 
     const cfg = loadAgentConfig();
-    expect(cfg.behavior.turnDeadlineMs).toBe(60_000);
+    expect(cfg.behavior.turnDeadlineMs).toBe(1_800_000);
   });
 
   it('SYM_THREAD_HISTORY_LIMIT: custom value is parsed', () => {

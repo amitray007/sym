@@ -45,13 +45,13 @@ variable. This page is the canonical reference, grouped by concern.
 
 ## Behavior knobs (optional)
 
-| Variable                   | Default  | Description                                                                                    |
-| -------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
-| `TASK_CARD_THRESHOLD`      | `1`      | Minimum tool calls before the live task card appears; `0` disables                             |
-| `TASK_CARD_AFTER`          | `delete` | What happens to the task card after reply: `delete` or `collapse`                              |
-| `OWNER_POST_MARKER`        | `true`   | Append `_(via Sym)_` footer on `post_as_owner` messages                                        |
-| `SYM_TURN_DEADLINE_MS`     | `60000`  | Per-turn deadline (ms); a stuck model is aborted and returns a partial reply. `0` disables     |
-| `SYM_THREAD_HISTORY_LIMIT` | `80`     | Max threaded history messages per turn; keeps the most-recent N (tail-slice). `0` disables cap |
+| Variable                   | Default   | Description                                                                                        |
+| -------------------------- | --------- | -------------------------------------------------------------------------------------------------- |
+| `TASK_CARD_THRESHOLD`      | `1`       | Minimum tool calls before the live task card appears; `0` disables                                 |
+| `TASK_CARD_AFTER`          | `delete`  | What happens to the task card after reply: `delete` or `collapse`                                  |
+| `OWNER_POST_MARKER`        | `true`    | Append `_(via Sym)_` footer on `post_as_owner` messages                                            |
+| `SYM_TURN_DEADLINE_MS`     | `1800000` | Per-turn deadline (ms, 30 min); a stuck model is aborted and returns a partial reply. `0` disables |
+| `SYM_THREAD_HISTORY_LIMIT` | `80`      | Max threaded history messages per turn; keeps the most-recent N (tail-slice). `0` disables cap     |
 
 ## Observability (optional)
 

@@ -151,10 +151,13 @@ without a structured-logging framework.
 Every Slack turn runs against these bounds. Exceeding them is a bug to
 investigate, not a tuning parameter.
 
-**60-second hard deadline** (`SYM_TURN_DEADLINE_MS`, default 60 000 ms).
-A stuck Fireworks call or an infinite tool-call loop is aborted after 60 s.
-The partial reply is delivered to Slack with a timeout notice. Set to `0` to
-disable (not recommended in production). Implemented in `pi/loop.ts` via an
+**30-minute hard deadline** (`SYM_TURN_DEADLINE_MS`, default 1 800 000 ms).
+A stuck Fireworks call or an infinite tool-call loop is aborted after 30 min.
+The deadline is generous because Sym also runs as a debugger bot, where a single
+turn can legitimately span long builds, test suites, and multi-step
+investigation. The partial reply is delivered to Slack with a timeout notice.
+Set to `0` to disable (not recommended in production). Implemented in
+`pi/loop.ts` via an
 `AbortController` wired to a `setTimeout`.
 
 **80-message thread history cap** (`SYM_THREAD_HISTORY_LIMIT`, default 80).

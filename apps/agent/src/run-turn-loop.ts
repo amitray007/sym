@@ -22,7 +22,7 @@ import type { ToolRegistry } from '@sym/kernel';
  * Default per-turn deadline used when `SYM_TURN_DEADLINE_MS` is not set via
  * `BehaviorConfig`. Matches the default in `config.ts`.
  */
-const DEFAULT_TURN_DEADLINE_MS = 60_000;
+const DEFAULT_TURN_DEADLINE_MS = 1_800_000;
 
 /**
  * Run the turn through the Pi loop.
@@ -31,7 +31,7 @@ const DEFAULT_TURN_DEADLINE_MS = 60_000;
  * streaming / postMessage pipeline is unchanged.
  *
  * A per-turn deadline is applied via `AbortSignal.timeout` (sourced from
- * `deps.behavior.turnDeadlineMs`; default 60 s). If a caller also supplies a
+ * `deps.behavior.turnDeadlineMs`; default 30 min). If a caller also supplies a
  * `signal`, the two are combined with `AbortSignal.any` so EITHER the user-cancel
  * OR the deadline can abort the run. A timeout abort flows into Pi's graceful
  * abort path (partial reply), not an unhandled rejection.

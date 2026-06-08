@@ -41,8 +41,10 @@ export interface BehaviorConfig {
   /**
    * Per-turn deadline in milliseconds. A stuck model or a Fireworks error-loop
    * is aborted after this many ms, producing a partial/timed-out reply instead
-   * of consuming credits without bound.
-   * Default: 60 000 (60 s). Set to 0 to disable.
+   * of consuming credits without bound. Sym also runs as a debugger bot, where
+   * a single turn can legitimately run for many minutes (long builds, test
+   * suites, multi-step investigation), so the default is generous.
+   * Default: 1 800 000 (30 min). Set to 0 to disable.
    * Optional so existing callers that don't set it yet use the default.
    */
   turnDeadlineMs?: number;
@@ -96,7 +98,7 @@ export interface AgentConfig {
 
 const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
 const DEFAULT_TASK_CARD_THRESHOLD = 1;
-const DEFAULT_TURN_DEADLINE_MS = 60_000;
+const DEFAULT_TURN_DEADLINE_MS = 1_800_000;
 const DEFAULT_THREAD_HISTORY_LIMIT = 80;
 
 function required(name: string): string {

@@ -35,7 +35,10 @@ export type Allowlist = Set<string> | '*';
 // `sym` is included so the agent can introspect its OWN connectors/tools/health
 // (`sym status`, `sym tools`, `sym show <name>` — all read-only, dense output).
 const DEFAULT_ALLOWLIST = 'sym,gog,gcloud,gsutil,bq,sentry-cli,gh,jq';
-const DEFAULT_TIMEOUT_MS = 60_000;
+// 10 min — generous enough for real builds / test suites a debugger bot runs.
+// The overall turn is still bounded by SYM_TURN_DEADLINE_MS (default 30 min);
+// callers may override per-invocation via `opts.timeoutMs`.
+const DEFAULT_TIMEOUT_MS = 600_000;
 const DEFAULT_MAX_CHARS = 20_000;
 
 /** Parse SYM_CLI_ALLOWLIST into a Set (or `'*'` for unrestricted). */
