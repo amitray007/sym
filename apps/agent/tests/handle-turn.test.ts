@@ -1084,6 +1084,50 @@ describe('handleTurn', () => {
     expect(slack.posts).toHaveLength(0);
   });
 
+  it('self-heals when the stream is finalized mid-turn: swallows message_not_in_streaming_state, falls back to postMessage, never tries to close', async () => {
+    // Regression for the recurring "task card touch (plan) failed:
+    // message_not_in_streaming_state" log. Slack can finalize a streaming
+    // message on its own (undocumented idle / max-lifetime) — once it does,
+    // every appendStream throws. The keepalive touch and the buffered-body
+    // append must treat that as benign: latch the stream dead, deliver the
+    // answer as a normal post, and NOT attempt a doomed stopStream.
+    mockRunLoopPi.mockImplementationOnce(
+      async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {
+        const o = opts as {
+          onDelta?: (d: string) => Promise<void>;
+          onToolStart?: (id: string, label: string) => Promise<void>;
+        };
+        await o.onToolStart?.('c1', 'searching'); // buffer mode — flush hits the dead stream
+        await o.onDelta?.('the buffered answer');
+        return makeReply({ markdown: 'the buffered answer' });
+      },
+    );
+    mockCleanupReply.mockResolvedValueOnce('the buffered answer');
+
+    const slack = new MockSlackClient();
+    // Stream finalized by Slack: EVERY appendStream rejects with this code.
+    slack.appendStreamError = new Error('message_not_in_streaming_state');
+
+    // Must not throw — the error is benign and fully handled internally.
+    await expect(
+      handleTurn(makeTurn({ threadTs: '957.1' as SlackThreadTs }), {
+        fireworks: FAKE_FIREWORKS,
+        model: 'accounts/fireworks/models/gpt-oss-120b',
+        slackClient: slack,
+        botUserId: BOT,
+        slackTeamId: 'T-TEST',
+        behavior: { taskCardThreshold: 1, taskCardAfter: 'delete' as const, ownerPostMarker: true },
+        nameResolver: FAKE_RESOLVER,
+      }),
+    ).resolves.not.toThrow();
+
+    // Answer still lands, as a normal posted message (the universal fallback).
+    expect(slack.posts).toHaveLength(1);
+    expect(slack.posts[0]?.text).toContain('the buffered answer');
+    // We must NOT have tried to close a stream we already know is finalized.
+    expect(slack.stopStreamCalls).toHaveLength(0);
+  });
+
   it('streams live (no buffering, no cleanup) for a no-tool reply', async () => {
     mockRunLoopPi.mockImplementationOnce(
       async (_turn: unknown, _cfg: unknown, _reg: unknown, opts: unknown) => {

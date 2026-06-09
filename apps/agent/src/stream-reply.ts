@@ -158,6 +158,15 @@ export async function streamReply(
     };
     let streamTs: SlackThreadTs | undefined;
     let streamOpenFailed = false;
+    // Set once the stream is no longer appendable — our own stopStream ran, or a
+    // write detected Slack finalized it (idle / max-lifetime / user-stop, none of
+    // which Slack documents). Guards the keepalive touch and the buffered-body
+    // append so neither hits a dead stream and re-throws message_not_in_streaming_state.
+    let streamFinalized = false;
+    // The most recent keepalive touch dispatched by `streamKeepalive` (fire-and-
+    // forget). Drained before final delivery so an in-flight appendStream can't
+    // land after stopStream — the recurring "task card touch (plan) failed" log.
+    let inFlightTouch: Promise<void> | undefined;
     let buffer = '';
     // Stream-vs-buffer decision (see below). The model only narrates its steps
     // when it's USING TOOLS, so we align display with that:
@@ -195,8 +204,22 @@ export async function streamReply(
     const cardThreshold =
       turn.entrySurface === 'slash_command' ? 1 : deps.behavior.taskCardThreshold;
     const sendTaskChunks = async (chunks: TaskUpdateChunk[]): Promise<void> => {
+      if (streamFinalized) return;
       if (!(await ensureStreamOpen())) return;
-      await deps.slackClient.chatAppendStream({ channel, ts: streamTs!, chunks });
+      try {
+        await deps.slackClient.chatAppendStream({ channel, ts: streamTs!, chunks });
+      } catch (err) {
+        // A finalized stream is benign for these best-effort card writes: Slack
+        // closed it (idle / max-lifetime / user-stop) or our own stopStream
+        // already ran. Latch it so the keepalive stops touching and the buffered
+        // body falls back to postMessage — and swallow so the card never logs
+        // the scary message_not_in_streaming_state line.
+        if (isStreamFinalized(err)) {
+          streamFinalized = true;
+          return;
+        }
+        throw err;
+      }
     };
     const taskCard = cardThreshold > 0 ? new TaskCardManager(sendTaskChunks, cardThreshold) : null;
     // Wire model-authored plan rows into the same card. When no card exists
@@ -209,7 +232,10 @@ export async function streamReply(
     // appends body text regularly and would race a touch, and a closed/never
     // opened stream has nothing to keep warm.
     streamKeepalive = (): void => {
-      if (bufferMode && streamTs !== undefined) void taskCard?.touch();
+      // Capture the touch so teardown can drain it before stopStream — a fire-and-
+      // forget append that lands after close throws message_not_in_streaming_state.
+      if (bufferMode && streamTs !== undefined && !streamFinalized)
+        inFlightTouch = taskCard?.touch();
     };
 
     // No prelude task row. Slack's default "Thinking..." placeholder in the
@@ -288,6 +314,11 @@ export async function streamReply(
     // closeStream would itself fail with message_not_in_streaming_state, the
     // very error we're suppressing). The interval is still cleared in finally.
     turnEnded = true;
+    // Drain a keepalive touch already dispatched by the last tick: turnEnded only
+    // stops *future* ticks, so without this its in-flight appendStream can land
+    // after the stopStream below and throw message_not_in_streaming_state. The
+    // touch swallows its own errors, so awaiting it never rejects here.
+    await inFlightTouch;
 
     const { renderBlocks, fallbackSuffix } = heroRenderParts(reply);
     const receipt = receiptToContextBlock(reply.receipt);
@@ -312,6 +343,8 @@ export async function streamReply(
       } catch (err) {
         console.warn(`${lctx} [agent] stopStream failed:`, err);
         return false;
+      } finally {
+        streamFinalized = true; // no longer appendable either way — block any later touch
       }
     };
     const cleanBody = (): Promise<string> =>
@@ -324,7 +357,7 @@ export async function streamReply(
     // append fails (or no stream), postFinal so the answer still lands.
     if (bufferMode) {
       const body = await cleanBody();
-      if (streamTs !== undefined) {
+      if (streamTs !== undefined && !streamFinalized) {
         let appended = false;
         try {
           if (body.length > 0) {
@@ -397,4 +430,20 @@ export async function streamReply(
       console.warn(`${lctx} [agent] setStatus clear failed:`, err);
     }
   }
+}
+
+/**
+ * True when a Slack stream write failed because the message is no longer in a
+ * streaming state — Slack finalized it (idle / max-lifetime, none documented),
+ * the user stopped it (`stopped_by_user`), or our own stopStream already ran.
+ * The adapter maps both reasons to the catch-all `api_error` code (neither is in
+ * its codeMap), so we match the raw Slack reason it carries as the error
+ * message. Benign for best-effort keepalive touches; the cue for real delivery
+ * to fall back to postMessage.
+ */
+function isStreamFinalized(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    (err.message === 'message_not_in_streaming_state' || err.message === 'stopped_by_user')
+  );
 }
