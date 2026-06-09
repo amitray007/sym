@@ -47,8 +47,12 @@ ENV NODE_ENV=production
 #   git            — generic VCS; gh shells out to it (clone/checkout) and the
 #                    agent uses it via run_cli. apt-based (not a static binary),
 #                    so it belongs in the image, not on /data.
+#   openssh-client — generic `ssh`/`scp`; the agent runs ssh one-liners via
+#                    run_cli. apt-based, general-purpose (not a specific CLI), so
+#                    it belongs in the image. Keys/known_hosts live under $HOME
+#                    (/data/home/.ssh), so they persist across redeploys.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl python3 git \
+      ca-certificates curl python3 git openssh-client \
   && rm -rf /var/lib/apt/lists/*
 
 # uv / uvx — generic Python tool runner (Astral). Some MCP servers ship as
