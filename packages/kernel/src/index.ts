@@ -3,6 +3,8 @@ export {
   buildTurnContextPrompt,
   buildUserTurnContent,
   buildHomePersonaOverride,
+  isPersonaName,
+  resolvePersona,
   PERSONAS,
   PERSONA_NAMES,
   DEFAULT_PERSONA,

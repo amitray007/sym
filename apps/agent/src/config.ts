@@ -6,7 +6,7 @@
 
 import { z } from 'zod';
 
-import { DEFAULT_PERSONA, PERSONA_NAMES } from '@sym/kernel';
+import { resolvePersona } from '@sym/kernel';
 import { loadConnectorConfigs } from '@sym/mcp-runtime';
 
 import type { PersonaName } from '@sym/kernel';
@@ -143,14 +143,9 @@ const behaviorEnvSchema = z.object({
     .int()
     .nonnegative()
     .catch(DEFAULT_THREAD_HISTORY_LIMIT),
-  // Home/default persona. Case-insensitive; an unknown/missing value falls back
-  // to the default voice (`sym`) rather than crashing boot.
-  SYM_PERSONA: z
-    .preprocess(
-      (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v),
-      z.enum(PERSONA_NAMES as [PersonaName, ...PersonaName[]]),
-    )
-    .catch(DEFAULT_PERSONA),
+  // Home/default persona. Case-insensitive; unknown/missing falls back to the
+  // default voice via the shared `resolvePersona` (same rule the CLI uses).
+  SYM_PERSONA: z.string().optional().transform(resolvePersona),
 });
 
 export function loadAgentConfig(): AgentConfig {

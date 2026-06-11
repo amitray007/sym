@@ -27,6 +27,7 @@ import { configPath } from '@sym/mcp-runtime';
 
 import { applyReload } from './admin-client.js';
 import { connectorCommand } from './commands/connector.js';
+import { personaCommand } from './commands/persona.js';
 import { printReload } from './commands/render.js';
 import { secretCommand } from './commands/secret.js';
 import { statusCommand } from './commands/status.js';
@@ -48,6 +49,8 @@ Inspect (add --json for machine/agent-parseable output):
   sym connector ls                             all connectors (MCP + CLI): health, tools, descriptions
   sym connector show <name>                    one connector in full
   sym tools [name]                             every tool — MCP tools (call_tool) + CLIs (run_cli)
+  sym persona [ls]                             the voices Sym speaks in + the deployment's home voice
+  sym persona show [name]                      one persona (defaults to the home voice)
 
 Manage:
   sym connector add --name N --command C       add an MCP connector (stdio; repeat --arg per token)
@@ -111,6 +114,10 @@ export async function main(rawArgs: string[]): Promise<number> {
 
     case 'tools':
       return toolsCommand(args[0], json);
+
+    case 'persona':
+    case 'personas':
+      return personaCommand(args, json);
 
     case 'show':
       // `sym show <name>` is shorthand for `sym connector show <name>`.

@@ -284,21 +284,41 @@ export function sectionWhenYouMessUp(): string[] {
 //
 // The six voices are DEFINED in prose inside `## Your personas` (that is what
 // the model reads). This registry is the STRUCTURED mirror — a stable id +
-// label per voice — so config (`SYM_PERSONA`) and a future `sym persona` CLI
-// share one source of truth, and so the home/default voice can be overridden
-// per deployment WITHOUT editing the cached base prompt.
+// label + one-line blurb per voice — so config (`SYM_PERSONA`) and the
+// `sym persona` CLI share one source of truth, and so the home/default voice
+// can be overridden per deployment WITHOUT editing the cached base prompt.
 // ---------------------------------------------------------------------------
 
-/** The structured persona roster (id → label). Insertion order is display order
- *  (home first). Labels MUST match the names used in the `## Your personas`
- *  prose — a test asserts each label appears there, so the mirror can't drift. */
+/** The structured persona roster (id → label + one-line blurb). Insertion order
+ *  is display order (home first). Labels MUST match the names used in the
+ *  `## Your personas` prose — a test asserts each label appears there, so the
+ *  mirror can't drift. The blurb is the human-facing one-liner shown by
+ *  `sym persona`. */
 export const PERSONAS = {
-  sym: { label: 'Sym' },
-  operator: { label: 'Operator' },
-  sensei: { label: 'Sensei' },
-  concierge: { label: 'Concierge' },
-  hype: { label: 'Hype' },
-  goblin: { label: 'Goblin' },
+  sym: {
+    label: 'Sym',
+    blurb: 'sharp junior teammate; witty when it lands, warm when earned — the home voice',
+  },
+  operator: {
+    label: 'Operator',
+    blurb: 'deadpan, terse, pure signal — for incidents and heads-down execution',
+  },
+  sensei: {
+    label: 'Sensei',
+    blurb: 'patient teacher who explains the why — for learning and pairing',
+  },
+  concierge: {
+    label: 'Concierge',
+    blurb: 'buttoned-up, professional, zero slang — for exec / client / formal rooms',
+  },
+  hype: {
+    label: 'Hype',
+    blurb: 'high-energy, celebratory — for ships and milestones (sparingly)',
+  },
+  goblin: {
+    label: 'Goblin',
+    blurb: 'unhinged-when-it-fits, gently roasting — DM-only banter or an explicit "roast this"',
+  },
 } as const;
 
 /** A valid persona id (`'sym' | 'operator' | …`). */
@@ -309,6 +329,22 @@ export const PERSONA_NAMES = Object.keys(PERSONAS) as PersonaName[];
 
 /** The default / home voice when none is configured. */
 export const DEFAULT_PERSONA: PersonaName = 'sym';
+
+/** True when `name` is a valid persona id. */
+export function isPersonaName(name: string): name is PersonaName {
+  return (PERSONA_NAMES as readonly string[]).includes(name);
+}
+
+/**
+ * Resolve a raw `SYM_PERSONA` value to a valid persona id: trimmed,
+ * case-insensitive, with unknown / empty / undefined falling back to the home
+ * default. The ONE implementation of this rule — both the config schema and the
+ * `sym persona` CLI call it, so they can't drift.
+ */
+export function resolvePersona(raw: string | undefined): PersonaName {
+  const v = raw?.trim().toLowerCase();
+  return v !== undefined && isPersonaName(v) ? v : DEFAULT_PERSONA;
+}
 
 /**
  * Build the per-deployment "home persona" override block.

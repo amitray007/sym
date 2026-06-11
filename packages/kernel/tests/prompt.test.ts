@@ -6,8 +6,10 @@ import {
   buildTurnContextPrompt,
   buildUserTurnContent,
   DEFAULT_PERSONA,
+  isPersonaName,
   PERSONA_NAMES,
   PERSONAS,
+  resolvePersona,
   sectionHowYouWork,
   sectionOwnerRelationship,
   sectionPersonas,
@@ -290,5 +292,19 @@ describe('persona registry + home-persona override', () => {
       expect(block.length).toBeGreaterThan(0);
       expect(block).toContain(PERSONAS[name].label);
     }
+  });
+
+  it('isPersonaName guards valid ids', () => {
+    expect(isPersonaName('operator')).toBe(true);
+    expect(isPersonaName('wizard')).toBe(false);
+    expect(isPersonaName('')).toBe(false);
+  });
+
+  it('resolvePersona trims, lowercases, and falls back to the default on unknown/empty/undefined', () => {
+    expect(resolvePersona('concierge')).toBe('concierge');
+    expect(resolvePersona('  GOBLIN ')).toBe('goblin');
+    expect(resolvePersona('wizard')).toBe('sym');
+    expect(resolvePersona('')).toBe('sym');
+    expect(resolvePersona(undefined)).toBe('sym');
   });
 });
