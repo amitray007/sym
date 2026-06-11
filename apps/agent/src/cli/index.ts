@@ -51,6 +51,7 @@ Inspect (add --json for machine/agent-parseable output):
   sym tools [name]                             every tool — MCP tools (call_tool) + CLIs (run_cli)
   sym persona [ls]                             the voices Sym speaks in + the deployment's home voice
   sym persona show [name]                      one persona (defaults to the home voice)
+  sym persona channels                         per-channel home overrides
 
 Manage:
   sym connector add --name N --command C       add an MCP connector (stdio; repeat --arg per token)
@@ -63,6 +64,7 @@ Manage:
   sym connector untrust <name> | --all         require confirmation again for it (or all)
   sym apply                                    reconcile the running agent to the config file
   sym secret set|ls|rm                         manage encrypted secrets (never printed)
+  sym persona set <ch> <name> | unset <ch>     home a channel to a voice (overrides SYM_PERSONA there)
 
 Connectors live in SYM_CONFIG_PATH (default .sym/config.json); secrets in the
 encrypted store (SYM_ENCRYPTION_KEY).`;
@@ -156,8 +158,9 @@ if (argv[1] !== undefined && fileURLToPath(import.meta.url) === argv[1]) {
       // dir (e.g. `/`). Point at the fix rather than leaving a bare EACCES.
       if (/EACCES|permission denied|mkdir/i.test(msg)) {
         console.error(
-          `hint: set SYM_CONFIG_PATH to a writable path, e.g. ` +
-            `export SYM_CONFIG_PATH=/data/sym/config.json   (current: ${configPath()})`,
+          `hint: a data path isn't writable. Point the relevant one at a writable dir — ` +
+            `SYM_CONFIG_PATH (connectors, current: ${configPath()}), ` +
+            `SYM_SETTINGS_DB_PATH (per-channel personas), or SYM_DB_PATH (secrets).`,
         );
       }
       process.exit(1);

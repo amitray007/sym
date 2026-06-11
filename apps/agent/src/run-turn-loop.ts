@@ -9,6 +9,7 @@
  * reply), not an unhandled rejection.
  */
 
+import { effectiveHomePersona } from './persona-resolve.js';
 import { runLoopPi } from './pi/loop.js';
 import { buildFireworksModel } from './pi/model.js';
 import { pickThinkingLevel } from './pi/think-router.js';
@@ -64,6 +65,10 @@ export async function runTurnLoop(
     threadDepth: history.length,
   });
 
+  // Effective home voice: a per-channel override (sym persona set) wins over the
+  // deployment-global home (SYM_PERSONA). Fail-open — never breaks a turn.
+  const persona = effectiveHomePersona(turn.channelId, deps.behavior.persona);
+
   // Build the per-turn deadline signal. A deadline of 0 means "no cap".
   // Combine with any caller-supplied signal so both the user-cancel and the
   // deadline can abort the run — whichever fires first wins.
@@ -97,7 +102,7 @@ export async function runTurnLoop(
           slackClient: deps.slackClient,
           thinkingLevel,
           ...(deps.behavior.cliConfirm === true ? { cliConfirm: true } : {}),
-          ...(deps.behavior.persona !== undefined ? { persona: deps.behavior.persona } : {}),
+          ...(persona !== undefined ? { persona } : {}),
           ...(onDelta !== undefined ? { onDelta } : {}),
           ...(onStatus !== undefined ? { onStatus } : {}),
           ...(onToolStart !== undefined ? { onToolStart } : {}),
