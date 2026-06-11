@@ -188,10 +188,12 @@ describe('section extractors', () => {
     expect(sectionPersonas()[0]).toBe('## Your personas (one voice per reply — you pick it)');
   });
 
-  it('sectionPersonas defines all six voices', () => {
+  it('sectionPersonas defines all six voices (each pinned to its own bullet)', () => {
     const section = sectionPersonas().join('\n');
     for (const voice of ['Sym', 'Operator', 'Sensei', 'Concierge', 'Hype', 'Goblin']) {
-      expect(section).toContain(voice);
+      // Match the voice's definition bullet ("• <Name>"), not just any mention —
+      // otherwise "Sym" passes trivially since it appears throughout the section.
+      expect(section).toMatch(new RegExp(`•\\s+${voice}\\b`));
     }
   });
 
