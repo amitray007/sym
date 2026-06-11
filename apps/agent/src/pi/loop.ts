@@ -17,9 +17,10 @@
 
 import { Agent } from '@earendil-works/pi-agent-core';
 
-import { buildReceipt, buildUserTurnContent } from '@sym/kernel';
+import { buildReceipt, buildUserTurnContent, DEFAULT_PERSONA } from '@sym/kernel';
 
 import { logCtx } from '../log.js';
+import { loadPersonaSpec } from '../persona-spec-loader.js';
 import { resolveAllowlist, resolveCliCapabilities } from '../run-cli.js';
 import { extractUsage, toAgentMessages } from './agent-messages.js';
 import { buildAgentSystemPrompt, buildAgentTools, type TurnHelperCtx } from './agent-setup.js';
@@ -186,7 +187,16 @@ export async function runLoopPi(
     cliCaps,
   );
 
-  const systemPrompt = buildAgentSystemPrompt(mcpDescriptors, cliAllowlist, cliCaps, opts.persona);
+  // Resolve the active persona + its spec (a .sym/personas/<id>.md override, else
+  // the default) here at the turn boundary, alongside the other per-turn inputs.
+  const activePersona = opts.persona ?? DEFAULT_PERSONA;
+  const systemPrompt = buildAgentSystemPrompt(
+    mcpDescriptors,
+    cliAllowlist,
+    cliCaps,
+    activePersona,
+    loadPersonaSpec(activePersona),
+  );
 
   // Accumulators shared between the subscriber and the post-run collection.
   const draftParts: string[] = [];

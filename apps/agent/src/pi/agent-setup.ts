@@ -124,13 +124,16 @@ export function buildAgentSystemPrompt(
   cliAllowlist: ReturnType<typeof resolveAllowlist>,
   cliCaps: ReturnType<typeof resolveCliCapabilities>,
   persona: PersonaName = DEFAULT_PERSONA,
+  personaSpec?: string,
 ): string {
   const baseSystemPrompt = buildSystemPrompt();
   // The turn's ACTIVE persona — its full situation-by-situation spec, injected as
-  // the "## Active persona" block. `persona` is resolved per turn (per-channel
-  // override else the SYM_PERSONA home); for a given persona+spec the block is
-  // constant, so it sits in the cached prefix ahead of the per-turn catalogs.
-  const activePersona = buildActivePersonaPrompt(persona);
+  // the "## Active persona" block. `persona` + `personaSpec` are resolved at the
+  // turn boundary (pi/loop): the id from the per-channel override or the
+  // SYM_PERSONA home, the spec from a `.sym/personas/<id>.md` override or (when
+  // omitted) the shipped default. For a given persona+spec the block is constant,
+  // so it sits in the cached prefix ahead of the per-turn catalogs.
+  const activePersona = buildActivePersonaPrompt(persona, personaSpec);
   // Append live capability catalogs so the model knows what's reachable THIS turn:
   // MCP connectors (via find_tools/call_tool) + CLIs (via run_cli, with what each
   // is for). Both are per-turn snapshots; the static prompt tells the model to

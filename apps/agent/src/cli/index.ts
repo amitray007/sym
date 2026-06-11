@@ -50,7 +50,7 @@ Inspect (add --json for machine/agent-parseable output):
   sym connector show <name>                    one connector in full
   sym tools [name]                             every tool — MCP tools (call_tool) + CLIs (run_cli)
   sym persona [ls]                             the voices Sym speaks in + the deployment's home voice
-  sym persona show [name]                      one persona (defaults to the home voice)
+  sym persona show <name>                      one persona: its effective spec + home/customized status
   sym persona channels                         per-channel home overrides
 
 Manage:
@@ -64,6 +64,7 @@ Manage:
   sym connector untrust <name> | --all         require confirmation again for it (or all)
   sym apply                                    reconcile the running agent to the config file
   sym secret set|ls|rm                         manage encrypted secrets (never printed)
+  sym persona edit <name> | reset <name>       customize a voice's spec (.sym/personas/<id>.md) | revert
   sym persona set <ch> <name> | unset <ch>     home a channel to a voice (overrides SYM_PERSONA there)
 
 Connectors live in SYM_CONFIG_PATH (default .sym/config.json); secrets in the

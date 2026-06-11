@@ -4,6 +4,10 @@
  * verbs (reset between tests) so nothing leaks to disk.
  */
 
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { _resetChannelPersonaStoreForTesting } from '@sym/mcp-runtime';
@@ -15,6 +19,9 @@ describe('personaCommand', () => {
   let err: string[];
   let savedPersona: string | undefined;
   let savedSettingsDb: string | undefined;
+  let savedPersonasDir: string | undefined;
+  let personasDir: string;
+  let savedIsTTY: boolean | undefined;
 
   beforeEach(() => {
     log = [];
@@ -27,10 +34,17 @@ describe('personaCommand', () => {
     });
     savedPersona = process.env['SYM_PERSONA'];
     savedSettingsDb = process.env['SYM_SETTINGS_DB_PATH'];
+    savedPersonasDir = process.env['SYM_PERSONAS_DIR'];
     delete process.env['SYM_PERSONA'];
     // Channel verbs hit the settings store — point it at an in-memory DB and
     // reset the singleton so each test starts empty.
     process.env['SYM_SETTINGS_DB_PATH'] = ':memory:';
+    // Spec overrides write files — point them at a throwaway temp dir.
+    personasDir = mkdtempSync(join(tmpdir(), 'sym-personas-'));
+    process.env['SYM_PERSONAS_DIR'] = personasDir;
+    // Force non-TTY so `edit` never tries to spawn a real $EDITOR (would hang).
+    savedIsTTY = process.stdout.isTTY;
+    Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true });
     _resetChannelPersonaStoreForTesting();
   });
 
@@ -39,6 +53,9 @@ describe('personaCommand', () => {
     _resetChannelPersonaStoreForTesting();
     restore('SYM_PERSONA', savedPersona);
     restore('SYM_SETTINGS_DB_PATH', savedSettingsDb);
+    restore('SYM_PERSONAS_DIR', savedPersonasDir);
+    rmSync(personasDir, { recursive: true, force: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: savedIsTTY, configurable: true });
   });
 
   function restore(key: string, value: string | undefined): void {
@@ -161,5 +178,47 @@ describe('personaCommand', () => {
       label: string;
     }[];
     expect(parsed).toEqual([{ channelId: 'C_exec', persona: 'concierge', label: 'Concierge' }]);
+  });
+
+  // --- editable spec overrides ---
+
+  it('show <name> prints the effective spec (the default when not customized)', async () => {
+    expect(await personaCommand(['show', 'operator'], false)).toBe(0);
+    const out = log.join('\n');
+    expect(out).toContain('Operator');
+    expect(out).toContain('deadpan'); // from the default Operator spec body
+    expect(out).toContain('default —'); // marked as using the default
+  });
+
+  it('reset with no override reports the persona already uses the default', async () => {
+    expect(await personaCommand(['reset', 'goblin'], false)).toBe(0);
+    expect(log.join('\n')).toContain('already uses the default spec');
+  });
+
+  it('edit needs a terminal and writes nothing off-TTY (just points at the path)', async () => {
+    expect(await personaCommand(['edit', 'goblin'], false)).toBe(1); // non-TTY guard
+    expect(err.join('\n')).toContain('goblin.md');
+    expect(existsSync(join(personasDir, 'goblin.md'))).toBe(false); // no file written off-TTY
+  });
+
+  it('show marks a persona customized and prints the override when one exists', async () => {
+    writeFileSync(join(personasDir, 'goblin.md'), 'CUSTOM GOBLIN SPEC', 'utf8');
+    await personaCommand(['show', 'goblin'], false);
+    const out = log.join('\n');
+    expect(out).toContain('customized');
+    expect(out).toContain('CUSTOM GOBLIN SPEC');
+  });
+
+  it('reset removes an existing override and reports it', async () => {
+    writeFileSync(join(personasDir, 'hype.md'), 'CUSTOM', 'utf8');
+    expect(await personaCommand(['reset', 'hype'], false)).toBe(0);
+    expect(log.join('\n')).toContain('reset Hype to its default spec');
+    expect(existsSync(join(personasDir, 'hype.md'))).toBe(false);
+  });
+
+  it('rejects edit/reset for an unknown persona', async () => {
+    expect(await personaCommand(['edit', 'wizard'], false)).toBe(1);
+    expect(await personaCommand(['reset', 'wizard'], false)).toBe(1);
+    expect(err.join('\n')).toContain('usage');
   });
 });
