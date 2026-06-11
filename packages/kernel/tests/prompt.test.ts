@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildHomePersonaOverride,
   buildSystemPrompt,
   buildTurnContextPrompt,
   buildUserTurnContent,
+  DEFAULT_PERSONA,
+  PERSONA_NAMES,
+  PERSONAS,
   sectionHowYouWork,
   sectionOwnerRelationship,
   sectionPersonas,
@@ -227,6 +231,11 @@ describe('section extractors', () => {
     expect(section).toContain('LAST resort');
   });
 
+  it('sectionPersonas keeps Sym (the bare home, no override) as the default voice', () => {
+    // The prose section bakes in Sym; the home override lives outside it.
+    expect(sectionPersonas().join('\n')).not.toContain('Active persona (deployment default)');
+  });
+
   it('all section lines appear verbatim in buildSystemPrompt', () => {
     const prompt = buildSystemPrompt();
     const sections = [
@@ -240,6 +249,46 @@ describe('section extractors', () => {
       for (const line of section) {
         expect(prompt, `line "${line.slice(0, 60)}…" should appear in prompt`).toContain(line);
       }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Persona registry + home-persona override
+// ---------------------------------------------------------------------------
+
+describe('persona registry + home-persona override', () => {
+  it('PERSONA_NAMES lists the six voices, with Sym as the default', () => {
+    expect(PERSONA_NAMES).toEqual(['sym', 'operator', 'sensei', 'concierge', 'hype', 'goblin']);
+    expect(DEFAULT_PERSONA).toBe('sym');
+  });
+
+  it('every registry label appears verbatim in the prose persona section (no drift)', () => {
+    const prose = sectionPersonas().join('\n');
+    for (const name of PERSONA_NAMES) {
+      expect(PERSONAS[name].label.length).toBeGreaterThan(0);
+      expect(prose).toContain(PERSONAS[name].label);
+    }
+  });
+
+  it('buildHomePersonaOverride returns "" for the default persona (base prompt stays byte-stable)', () => {
+    expect(buildHomePersonaOverride('sym')).toBe('');
+  });
+
+  it('buildHomePersonaOverride redirects the home voice for a non-default persona', () => {
+    const block = buildHomePersonaOverride('concierge');
+    expect(block).toContain('## Active persona (deployment default)');
+    expect(block).toContain('Concierge');
+    expect(block).toContain('HOME voice');
+    // The override changes only the home voice — selection rules + overrides hold.
+    expect(block).toContain('still apply');
+  });
+
+  it('every non-default persona yields a non-empty override naming its label', () => {
+    for (const name of PERSONA_NAMES.filter((n) => n !== DEFAULT_PERSONA)) {
+      const block = buildHomePersonaOverride(name);
+      expect(block.length).toBeGreaterThan(0);
+      expect(block).toContain(PERSONAS[name].label);
     }
   });
 });

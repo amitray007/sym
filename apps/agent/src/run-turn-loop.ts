@@ -97,6 +97,7 @@ export async function runTurnLoop(
           slackClient: deps.slackClient,
           thinkingLevel,
           ...(deps.behavior.cliConfirm === true ? { cliConfirm: true } : {}),
+          ...(deps.behavior.persona !== undefined ? { persona: deps.behavior.persona } : {}),
           ...(onDelta !== undefined ? { onDelta } : {}),
           ...(onStatus !== undefined ? { onStatus } : {}),
           ...(onToolStart !== undefined ? { onToolStart } : {}),

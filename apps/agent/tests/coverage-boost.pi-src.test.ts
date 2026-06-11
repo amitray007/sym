@@ -672,6 +672,20 @@ describe('buildAgentSystemPrompt', () => {
     const result = buildAgentSystemPrompt([], new Set([]), []);
     expect(result).toContain('BASE_SYSTEM_PROMPT');
   });
+
+  it('injects a home-persona override block for a non-default persona', () => {
+    const result = buildAgentSystemPrompt([], new Set([]), [], 'concierge');
+    expect(result).toContain('BASE_SYSTEM_PROMPT');
+    expect(result).toContain('Active persona (deployment default)');
+    expect(result).toContain('Concierge');
+  });
+
+  it('adds no override for the default persona (identical to the no-persona call)', () => {
+    const withDefault = buildAgentSystemPrompt([], new Set([]), [], 'sym');
+    const without = buildAgentSystemPrompt([], new Set([]), []);
+    expect(withDefault).toBe(without);
+    expect(withDefault).not.toContain('Active persona');
+  });
 });
 
 // ---------------------------------------------------------------------------

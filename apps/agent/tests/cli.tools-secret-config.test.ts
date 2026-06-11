@@ -532,6 +532,29 @@ describe('loadAgentConfig', () => {
     expect(cfg.slackUserToken).toBe('xoxp-owner');
   });
 
+  it('defaults the persona to sym when SYM_PERSONA is unset', () => {
+    setRequiredEnv();
+    delete process.env['SYM_PERSONA'];
+
+    expect(loadAgentConfig().behavior.persona).toBe('sym');
+  });
+
+  it('reads SYM_PERSONA case-insensitively, trims it, and falls back to sym on unknown/empty', () => {
+    setRequiredEnv();
+
+    process.env['SYM_PERSONA'] = 'Concierge';
+    expect(loadAgentConfig().behavior.persona).toBe('concierge');
+
+    process.env['SYM_PERSONA'] = '  OPERATOR  ';
+    expect(loadAgentConfig().behavior.persona).toBe('operator');
+
+    process.env['SYM_PERSONA'] = 'wizard';
+    expect(loadAgentConfig().behavior.persona).toBe('sym');
+
+    process.env['SYM_PERSONA'] = '';
+    expect(loadAgentConfig().behavior.persona).toBe('sym');
+  });
+
   it('throws when SLACK_SIGNING_SECRET is missing', () => {
     setRequiredEnv();
     delete process.env['SLACK_SIGNING_SECRET'];

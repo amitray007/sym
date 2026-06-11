@@ -30,7 +30,7 @@ import type { ThinkingLevel } from './think-router.js';
 import type { Model } from '@earendil-works/pi-ai';
 import type { SlackClient } from '@sym/adapter-slack';
 import type { ChatMessage, Reply, ToolRuntimeContext, Turn } from '@sym/contracts';
-import type { OwnerIdentity, ToolRegistry } from '@sym/kernel';
+import type { OwnerIdentity, PersonaName, ToolRegistry } from '@sym/kernel';
 
 // Re-export the decomposed helpers so `pi/loop` stays the module's public
 // surface (tests + callers import toAgentMessages / extractUsage / friendlyVerb
@@ -53,6 +53,12 @@ export interface PiModelCfg {
 export interface PiLoopOptions {
   /** Conversation history prior to this turn (Sym's `ChatMessage[]` shape). */
   history: ChatMessage[];
+  /**
+   * Home / default persona voice for this deployment (from `SYM_PERSONA` via
+   * `BehaviorConfig.persona`). Redirects only the home/fallback voice; Sym still
+   * auto-selects a voice per reply. Omitted → default `'sym'` (no override).
+   */
+  persona?: PersonaName;
   /** Called with each text delta for live streaming to Slack. */
   onDelta?: (delta: string) => void | Promise<void>;
   /**
@@ -180,7 +186,7 @@ export async function runLoopPi(
     cliCaps,
   );
 
-  const systemPrompt = buildAgentSystemPrompt(mcpDescriptors, cliAllowlist, cliCaps);
+  const systemPrompt = buildAgentSystemPrompt(mcpDescriptors, cliAllowlist, cliCaps, opts.persona);
 
   // Accumulators shared between the subscriber and the post-run collection.
   const draftParts: string[] = [];

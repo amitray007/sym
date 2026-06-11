@@ -6,8 +6,10 @@
 
 import { z } from 'zod';
 
+import { DEFAULT_PERSONA, PERSONA_NAMES } from '@sym/kernel';
 import { loadConnectorConfigs } from '@sym/mcp-runtime';
 
+import type { PersonaName } from '@sym/kernel';
 import type { ConnectorConfig, ConfigSource } from '@sym/mcp-runtime';
 /** Runtime behavior knobs — all optional, all have safe defaults. */
 export interface BehaviorConfig {
@@ -57,6 +59,13 @@ export interface BehaviorConfig {
    * Optional so existing callers that don't set it yet use the default.
    */
   threadHistoryLimit?: number;
+  /**
+   * Home / default persona voice for this deployment (`SYM_PERSONA`). Sym still
+   * auto-selects a voice per reply; this only changes the home/fallback voice
+   * the others defer to (e.g. an enterprise deploy homes to `concierge`).
+   * Default: `'sym'`. Optional so existing callers that don't set it use the default.
+   */
+  persona?: PersonaName;
 }
 
 export interface AgentConfig {
@@ -134,6 +143,14 @@ const behaviorEnvSchema = z.object({
     .int()
     .nonnegative()
     .catch(DEFAULT_THREAD_HISTORY_LIMIT),
+  // Home/default persona. Case-insensitive; an unknown/missing value falls back
+  // to the default voice (`sym`) rather than crashing boot.
+  SYM_PERSONA: z
+    .preprocess(
+      (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v),
+      z.enum(PERSONA_NAMES as [PersonaName, ...PersonaName[]]),
+    )
+    .catch(DEFAULT_PERSONA),
 });
 
 export function loadAgentConfig(): AgentConfig {
@@ -159,6 +176,7 @@ export function loadAgentConfig(): AgentConfig {
       cliConfirm: behavior.SYM_CLI_CONFIRM,
       turnDeadlineMs: behavior.SYM_TURN_DEADLINE_MS,
       threadHistoryLimit: behavior.SYM_THREAD_HISTORY_LIMIT,
+      persona: behavior.SYM_PERSONA,
     },
     mcpServers: connectors.mcpServers,
     mcpConfigSource: connectors.source,

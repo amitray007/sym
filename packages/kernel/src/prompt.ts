@@ -279,6 +279,60 @@ export function sectionWhenYouMessUp(): string[] {
   return _extractSection('## When you mess up');
 }
 
+// ---------------------------------------------------------------------------
+// Persona registry + home-persona override
+//
+// The six voices are DEFINED in prose inside `## Your personas` (that is what
+// the model reads). This registry is the STRUCTURED mirror — a stable id +
+// label per voice — so config (`SYM_PERSONA`) and a future `sym persona` CLI
+// share one source of truth, and so the home/default voice can be overridden
+// per deployment WITHOUT editing the cached base prompt.
+// ---------------------------------------------------------------------------
+
+/** The structured persona roster (id → label). Insertion order is display order
+ *  (home first). Labels MUST match the names used in the `## Your personas`
+ *  prose — a test asserts each label appears there, so the mirror can't drift. */
+export const PERSONAS = {
+  sym: { label: 'Sym' },
+  operator: { label: 'Operator' },
+  sensei: { label: 'Sensei' },
+  concierge: { label: 'Concierge' },
+  hype: { label: 'Hype' },
+  goblin: { label: 'Goblin' },
+} as const;
+
+/** A valid persona id (`'sym' | 'operator' | …`). */
+export type PersonaName = keyof typeof PERSONAS;
+
+/** All persona ids in display order. */
+export const PERSONA_NAMES = Object.keys(PERSONAS) as PersonaName[];
+
+/** The default / home voice when none is configured. */
+export const DEFAULT_PERSONA: PersonaName = 'sym';
+
+/**
+ * Build the per-deployment "home persona" override block.
+ *
+ * The prose persona section bakes in Sym as the home/fallback voice. When a
+ * deployment configures a different home (`SYM_PERSONA=concierge`), this block
+ * is appended to the system prompt to redirect the default — WITHOUT editing the
+ * cached base prompt. Returns `''` for the default persona (no override needed),
+ * so `sym` deployments keep the exact byte-stable base prompt.
+ *
+ * The block is boot-constant (persona never changes per turn), so it belongs in
+ * the cached prefix, ahead of the per-turn connector/CLI catalogs.
+ */
+export function buildHomePersonaOverride(persona: PersonaName): string {
+  if (persona === DEFAULT_PERSONA) return '';
+  const { label } = PERSONAS[persona];
+  return [
+    '## Active persona (deployment default)',
+    `- This deployment’s HOME voice is ${label}, not Sym. Wherever the persona rules say to default or fall back to Sym, default to ${label} instead.`,
+    '- The hard overrides and the shared-channel guard that name Sym or Operator as the safe, plain voice for stressed, venting, or public moments stay exactly as written — those are deliberate safety floors, not the home default.',
+    `- All six voices, the selection rules, and every hard override still apply unchanged — only the home/fallback voice changes. Drift to another voice when the moment calls for it, then settle back to ${label}.`,
+  ].join('\n');
+}
+
 /**
  * Per-turn volatile metadata, rendered as ONE terse line. `buildUserTurnContent`
  * wraps it in a clearly-labeled "context only" frame so the model never mistakes
