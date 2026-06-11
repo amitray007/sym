@@ -6,6 +6,7 @@ import {
   buildUserTurnContent,
   sectionHowYouWork,
   sectionOwnerRelationship,
+  sectionPersonas,
   sectionPlanning,
   sectionReplyDiscipline,
   sectionVoiceAndStyle,
@@ -183,6 +184,38 @@ describe('section extractors', () => {
     expect(section).toContain('NEVER write sentences like');
   });
 
+  it('sectionPersonas starts with its header', () => {
+    expect(sectionPersonas()[0]).toBe('## Your personas (one voice per reply — you pick it)');
+  });
+
+  it('sectionPersonas defines all six voices', () => {
+    const section = sectionPersonas().join('\n');
+    for (const voice of ['Sym', 'Operator', 'Sensei', 'Concierge', 'Hype', 'Goblin']) {
+      expect(section).toContain(voice);
+    }
+  });
+
+  it('sectionPersonas names Sym as the home voice', () => {
+    expect(sectionPersonas().join('\n')).toContain('HOME voice is Sym');
+  });
+
+  it('sectionPersonas scopes persona to prose, never structured surfaces', () => {
+    const section = sectionPersonas().join('\n');
+    expect(section).toContain('colors your PROSE only');
+    expect(section).toContain('present_card');
+  });
+
+  it('sectionPersonas keeps the anti-sycophancy invariants across every persona', () => {
+    expect(sectionPersonas().join('\n')).toContain('still obeys the Voice and style rules');
+  });
+
+  it('sectionPersonas enforces the hard overrides (no Goblin/Hype when venting, never roast a person)', () => {
+    const section = sectionPersonas().join('\n');
+    expect(section).toContain('Hard overrides');
+    expect(section).toContain('never Goblin, never Hype');
+    expect(section).toContain('never the human');
+  });
+
   it('sectionHowYouWork routes a handed link to the right reader, not a reflex fetch_url', () => {
     const section = sectionHowYouWork().join('\n');
     expect(section).toContain('A LINK IS NOT AUTOMATICALLY A `fetch_url`');
@@ -197,6 +230,7 @@ describe('section extractors', () => {
     const sections = [
       sectionOwnerRelationship(),
       sectionVoiceAndStyle(),
+      sectionPersonas(),
       sectionPlanning(),
       sectionReplyDiscipline(),
     ];
