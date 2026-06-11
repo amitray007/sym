@@ -119,7 +119,9 @@ export async function personaCommand(args: string[], json: boolean): Promise<num
     return 0;
   }
 
-  console.log('Personas — Sym auto-selects one per reply; home is the default/fallback voice.');
+  console.log(
+    'Personas — one active voice per turn: the channel/deployment home, or an explicit ask.',
+  );
   console.log(
     `Home: ${PERSONAS[home].label}   (set via SYM_PERSONA; default ${PERSONAS[DEFAULT_PERSONA].label})\n`,
   );

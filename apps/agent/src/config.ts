@@ -60,9 +60,9 @@ export interface BehaviorConfig {
    */
   threadHistoryLimit?: number;
   /**
-   * Home / default persona voice for this deployment (`SYM_PERSONA`). Sym still
-   * auto-selects a voice per reply; this only changes the home/fallback voice
-   * the others defer to (e.g. an enterprise deploy homes to `concierge`).
+   * Home / default persona voice for this deployment (`SYM_PERSONA`). This is the
+   * turn's active voice unless a per-channel override or an explicit ask changes
+   * it (e.g. an enterprise deploy homes to `concierge`).
    * Default: `'sym'`. Optional so existing callers that don't set it use the default.
    */
   persona?: PersonaName;

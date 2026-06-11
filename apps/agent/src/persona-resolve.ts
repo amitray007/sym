@@ -2,8 +2,9 @@
  * Resolve the effective HOME persona for a turn.
  *
  * Precedence: a valid per-channel override (set via `sym persona set`) wins over
- * the deployment-global home (`SYM_PERSONA`). The model still auto-selects a
- * voice per reply — this only changes the home/fallback the others defer to.
+ * the deployment-global home (`SYM_PERSONA`). The result is THE active voice for
+ * the turn — its full spec is injected and the model speaks as it, switching only
+ * on an explicit per-reply request (handled in the prompt, not here).
  *
  * The channel lookup is fail-open: a settings-store read must never break a
  * turn, so any error falls through to the global home.

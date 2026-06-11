@@ -673,18 +673,17 @@ describe('buildAgentSystemPrompt', () => {
     expect(result).toContain('BASE_SYSTEM_PROMPT');
   });
 
-  it('injects a home-persona override block for a non-default persona', () => {
+  it('injects the active persona spec for a non-default persona', () => {
     const result = buildAgentSystemPrompt([], new Set([]), [], 'concierge');
     expect(result).toContain('BASE_SYSTEM_PROMPT');
-    expect(result).toContain('Active persona (deployment default)');
-    expect(result).toContain('Concierge');
+    expect(result).toContain('## Active persona — Concierge');
   });
 
-  it('adds no override for the default persona (identical to the no-persona call)', () => {
+  it('injects the active persona spec for the default persona too (and stays stable)', () => {
     const withDefault = buildAgentSystemPrompt([], new Set([]), [], 'sym');
     const without = buildAgentSystemPrompt([], new Set([]), []);
-    expect(withDefault).toBe(without);
-    expect(withDefault).not.toContain('Active persona');
+    expect(withDefault).toBe(without); // omitting the arg defaults to 'sym'
+    expect(withDefault).toContain('## Active persona — Sym');
   });
 });
 

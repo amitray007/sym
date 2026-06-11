@@ -4,7 +4,7 @@
  * composed system prompt (static base + live connector/CLI catalogs).
  */
 
-import { buildSystemPrompt, buildHomePersonaOverride, DEFAULT_PERSONA } from '@sym/kernel';
+import { buildSystemPrompt, buildActivePersonaPrompt, DEFAULT_PERSONA } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
 import { logCtx } from '../log.js';
@@ -126,17 +126,18 @@ export function buildAgentSystemPrompt(
   persona: PersonaName = DEFAULT_PERSONA,
 ): string {
   const baseSystemPrompt = buildSystemPrompt();
-  // Per-deployment home-persona override (empty for the default 'sym'): redirects
-  // the home/fallback voice without editing the cached base prompt. Boot-constant,
-  // so it sits in the cached prefix ahead of the per-turn catalogs.
-  const homePersona = buildHomePersonaOverride(persona);
+  // The turn's ACTIVE persona — its full situation-by-situation spec, injected as
+  // the "## Active persona" block. `persona` is resolved per turn (per-channel
+  // override else the SYM_PERSONA home); for a given persona+spec the block is
+  // constant, so it sits in the cached prefix ahead of the per-turn catalogs.
+  const activePersona = buildActivePersonaPrompt(persona);
   // Append live capability catalogs so the model knows what's reachable THIS turn:
   // MCP connectors (via find_tools/call_tool) + CLIs (via run_cli, with what each
   // is for). Both are per-turn snapshots; the static prompt tells the model to
   // introspect (`sym status`/`sym tools`/`find_tools`) rather than trust a cached list.
   const catalog = buildConnectorCatalog(mcpDescriptors);
   const cliCatalog = buildCliCatalog(cliAllowlist, cliCaps);
-  return [baseSystemPrompt, homePersona, catalog, cliCatalog]
+  return [baseSystemPrompt, activePersona, catalog, cliCatalog]
     .filter((s) => s.length > 0)
     .join('\n\n');
 }

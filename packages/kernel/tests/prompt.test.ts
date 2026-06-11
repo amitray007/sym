@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { buildActivePersonaPrompt, PERSONA_SPECS } from '../src/persona-specs.js';
 import {
-  buildHomePersonaOverride,
   buildSystemPrompt,
   buildTurnContextPrompt,
   buildUserTurnContent,
@@ -191,7 +191,7 @@ describe('section extractors', () => {
   });
 
   it('sectionPersonas starts with its header', () => {
-    expect(sectionPersonas()[0]).toBe('## Your personas (one voice per reply — you pick it)');
+    expect(sectionPersonas()[0]).toBe('## Your personas (one active voice per turn)');
   });
 
   it('sectionPersonas defines every voice (each pinned to its own bullet)', () => {
@@ -203,8 +203,10 @@ describe('section extractors', () => {
     }
   });
 
-  it('sectionPersonas names Sym as the home voice', () => {
-    expect(sectionPersonas().join('\n')).toContain('HOME voice is Sym');
+  it('sectionPersonas names Sym as the default voice', () => {
+    const section = sectionPersonas().join('\n');
+    expect(section).toMatch(/•\s+Sym\b/);
+    expect(section).toContain('the default');
   });
 
   it('sectionPersonas scopes persona to prose, never structured surfaces', () => {
@@ -217,10 +219,10 @@ describe('section extractors', () => {
     expect(sectionPersonas().join('\n')).toContain('still obeys the Voice and style rules');
   });
 
-  it('sectionPersonas enforces the hard overrides (no Goblin/Hype when venting, never roast a person)', () => {
+  it('sectionPersonas keeps the hard safety floor (no bit when venting, never roast a person)', () => {
     const section = sectionPersonas().join('\n');
     expect(section).toContain('Hard overrides');
-    expect(section).toContain('never Goblin, never Hype');
+    expect(section).toContain('No Goblin snark');
     expect(section).toContain('never the human');
   });
 
@@ -233,9 +235,10 @@ describe('section extractors', () => {
     expect(section).toContain('LAST resort');
   });
 
-  it('sectionPersonas keeps Sym (the bare home, no override) as the default voice', () => {
-    // The prose section bakes in Sym; the home override lives outside it.
-    expect(sectionPersonas().join('\n')).not.toContain('Active persona (deployment default)');
+  it('sectionPersonas references the Active persona block but does not embed a full spec', () => {
+    const section = sectionPersonas().join('\n');
+    expect(section).toContain('Active persona'); // references the injected block by name
+    expect(section).not.toContain('You are Sym in'); // the rich spec is injected separately
   });
 
   it('all section lines appear verbatim in buildSystemPrompt', () => {
@@ -256,10 +259,10 @@ describe('section extractors', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Persona registry + home-persona override
+// Persona registry + specs + active-persona prompt
 // ---------------------------------------------------------------------------
 
-describe('persona registry + home-persona override', () => {
+describe('persona registry + specs', () => {
   it('PERSONA_NAMES lists every voice in display order, with Sym as the default', () => {
     expect(PERSONA_NAMES).toEqual([
       'sym',
@@ -281,27 +284,37 @@ describe('persona registry + home-persona override', () => {
     }
   });
 
-  it('buildHomePersonaOverride returns "" for the default persona (base prompt stays byte-stable)', () => {
-    expect(buildHomePersonaOverride('sym')).toBe('');
-  });
-
-  it('buildHomePersonaOverride redirects the home voice for a non-default persona', () => {
-    const block = buildHomePersonaOverride('concierge');
-    expect(block).toContain('## Active persona (deployment default)');
-    expect(block).toContain('Concierge');
-    expect(block).toContain('HOME voice');
-    // The override changes only the home voice — selection rules + overrides hold.
-    expect(block).toContain('still apply');
-    // Must not hardcode a roster count (it drifts when a voice is added/removed).
-    expect(block).not.toMatch(/\b(?:six|seven|\d+)\s+voices?\b/i);
-  });
-
-  it('every non-default persona yields a non-empty override naming its label', () => {
-    for (const name of PERSONA_NAMES.filter((n) => n !== DEFAULT_PERSONA)) {
-      const block = buildHomePersonaOverride(name);
-      expect(block.length).toBeGreaterThan(0);
-      expect(block).toContain(PERSONAS[name].label);
+  it('PERSONA_SPECS has a rich, situation-aware spec for every voice', () => {
+    for (const name of PERSONA_NAMES) {
+      const spec = PERSONA_SPECS[name];
+      expect(spec.length).toBeGreaterThan(200); // rich, not a one-liner
+      expect(spec).toContain('Per situation'); // covers behaviour across situations
     }
+  });
+
+  it('playful voices restate their safety guardrail in-spec (belt-and-suspenders with the base floor)', () => {
+    expect(PERSONA_SPECS.goblin).toMatch(/never roast a real person/i);
+    expect(PERSONA_SPECS.goblin).toMatch(/drop the bit/i);
+    expect(PERSONA_SPECS.noir).toMatch(/never roast a real person/i);
+  });
+
+  it('buildActivePersonaPrompt wraps the active voice in an Active persona block', () => {
+    const block = buildActivePersonaPrompt('concierge');
+    expect(block).toContain('## Active persona — Concierge');
+    expect(block).toContain(PERSONA_SPECS['concierge'].trim());
+  });
+
+  it('buildActivePersonaPrompt injects a spec for the default persona too (no empty case)', () => {
+    const block = buildActivePersonaPrompt('sym');
+    expect(block).toContain('## Active persona — Sym');
+    expect(block.length).toBeGreaterThan(200);
+  });
+
+  it('buildActivePersonaPrompt accepts an override spec in place of the default', () => {
+    const block = buildActivePersonaPrompt('goblin', 'CUSTOM GOBLIN SPEC');
+    expect(block).toContain('## Active persona — Goblin');
+    expect(block).toContain('CUSTOM GOBLIN SPEC');
+    expect(block).not.toContain(PERSONA_SPECS['goblin']);
   });
 
   it('isPersonaName guards valid ids', () => {

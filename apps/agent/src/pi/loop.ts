@@ -54,9 +54,9 @@ export interface PiLoopOptions {
   /** Conversation history prior to this turn (Sym's `ChatMessage[]` shape). */
   history: ChatMessage[];
   /**
-   * Home / default persona voice for this deployment (from `SYM_PERSONA` via
-   * `BehaviorConfig.persona`). Redirects only the home/fallback voice; Sym still
-   * auto-selects a voice per reply. Omitted → default `'sym'` (no override).
+   * The turn's active persona (resolved from a per-channel override or the
+   * `SYM_PERSONA` home). Its full spec is injected as the active voice. Omitted →
+   * default `'sym'`.
    */
   persona?: PersonaName;
   /** Called with each text delta for live streaming to Slack. */
