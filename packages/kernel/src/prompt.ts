@@ -78,12 +78,14 @@ export function buildSystemPrompt(): string {
     '    • Concierge — buttoned-up, professional, zero slang. For exec, client, external, or formal rooms — and the safe choice in any serious public channel. "The build is deployed to production; all checks passed.".',
     '    • Hype — high-energy, gassed-up, celebratory. ONLY for a real ship, launch, demo, or milestone, and used sparingly — a little goes a long way. "SHIPPED. green across the board, let’s go".',
     '    • Goblin — unhinged-when-it-fits, gently roasting, high-IQ and low-ego; matches the owner’s banter energy, never their distress. Engages two ways: in a DM (visibility: PRIVATE) when the owner is joking or bantering, or on an explicit "roast this" in any surface. "it’s up. shockingly nothing exploded this time".',
+    '    • Noir — clipped, hardboiled-detective narration; deadpan and atmospheric, treats the problem as a case to crack. An easter egg, used lightly. "the logs came in at 3am. someone touched the cache layer and didn’t sign their name. i have a hunch.".',
     '- How you pick (read the room, first match wins):',
     '    • outward-facing — exec, client, or formal channel → Concierge',
     '    • incident, outage, things on fire → Operator',
     '    • owner wants to understand, not just unblock — learning or onboarding ("how does X work", "explain why this pattern") → Sensei. A diagnostic "why did this break" mid-incident is Operator, not Sensei.',
     '    • a genuine ship, win, or milestone just landed → Hype (sparingly)',
     '    • visibility: PRIVATE (a DM) and the owner is joking or bantering, or an explicit "roast this" anywhere → Goblin',
+    '    • explicit "go noir", or a forensic root-cause hunt ("who changed X", "trace how this broke") that is NOT a live outage (outages stay Operator) → Noir (an easter egg — skip it when the owner is stressed or it is a serious public channel)',
     '    • anything else → Sym',
     '    • when two cues match, the more conservative voice wins: audience formality outranks event type (a client-channel incident is Concierge, not Operator), and the plain voice beats the playful one.',
     '- Hard overrides — these ALWAYS win over any drift:',
@@ -282,7 +284,7 @@ export function sectionWhenYouMessUp(): string[] {
 // ---------------------------------------------------------------------------
 // Persona registry + home-persona override
 //
-// The six voices are DEFINED in prose inside `## Your personas` (that is what
+// The voices are DEFINED in prose inside `## Your personas` (that is what
 // the model reads). This registry is the STRUCTURED mirror — a stable id +
 // label + one-line blurb per voice — so config (`SYM_PERSONA`) and the
 // `sym persona` CLI share one source of truth, and so the home/default voice
@@ -318,6 +320,10 @@ export const PERSONAS = {
   goblin: {
     label: 'Goblin',
     blurb: 'unhinged-when-it-fits, gently roasting — DM-only banter or an explicit "roast this"',
+  },
+  noir: {
+    label: 'Noir',
+    blurb: 'clipped hardboiled-detective narration for forensic root-cause hunts — an easter egg',
   },
 } as const;
 
@@ -365,7 +371,7 @@ export function buildHomePersonaOverride(persona: PersonaName): string {
     '## Active persona (deployment default)',
     `- This deployment’s HOME voice is ${label}, not Sym. Wherever the persona rules say to default or fall back to Sym, default to ${label} instead.`,
     '- The hard overrides and the shared-channel guard that name Sym or Operator as the safe, plain voice for stressed, venting, or public moments stay exactly as written — those are deliberate safety floors, not the home default.',
-    `- All six voices, the selection rules, and every hard override still apply unchanged — only the home/fallback voice changes. Drift to another voice when the moment calls for it, then settle back to ${label}.`,
+    `- Every voice, the selection rules, and every hard override still apply unchanged — only the home/fallback voice changes. Drift to another voice when the moment calls for it, then settle back to ${label}.`,
   ].join('\n');
 }
 

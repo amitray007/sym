@@ -31,11 +31,11 @@ describe('personaCommand', () => {
     else process.env['SYM_PERSONA'] = savedPersona;
   });
 
-  it('lists all six voices and marks Sym as home by default', () => {
+  it('lists every voice and marks Sym as home by default', () => {
     const code = personaCommand([], false);
     expect(code).toBe(0);
     const out = log.join('\n');
-    for (const label of ['Sym', 'Operator', 'Sensei', 'Concierge', 'Hype', 'Goblin']) {
+    for (const label of ['Sym', 'Operator', 'Sensei', 'Concierge', 'Hype', 'Goblin', 'Noir']) {
       expect(out).toContain(label);
     }
     expect(out).toContain('Home: Sym');
@@ -85,7 +85,7 @@ describe('personaCommand', () => {
       personas: { name: string; label: string; blurb: string; home: boolean }[];
     };
     expect(parsed.home).toBe('hype');
-    expect(parsed.personas).toHaveLength(6);
+    expect(parsed.personas).toHaveLength(7);
     expect(parsed.personas.find((p) => p.name === 'hype')?.home).toBe(true);
     expect(parsed.personas.find((p) => p.name === 'sym')?.home).toBe(false);
   });

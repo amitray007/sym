@@ -194,9 +194,9 @@ describe('section extractors', () => {
     expect(sectionPersonas()[0]).toBe('## Your personas (one voice per reply — you pick it)');
   });
 
-  it('sectionPersonas defines all six voices (each pinned to its own bullet)', () => {
+  it('sectionPersonas defines every voice (each pinned to its own bullet)', () => {
     const section = sectionPersonas().join('\n');
-    for (const voice of ['Sym', 'Operator', 'Sensei', 'Concierge', 'Hype', 'Goblin']) {
+    for (const voice of ['Sym', 'Operator', 'Sensei', 'Concierge', 'Hype', 'Goblin', 'Noir']) {
       // Match the voice's definition bullet ("• <Name>"), not just any mention —
       // otherwise "Sym" passes trivially since it appears throughout the section.
       expect(section).toMatch(new RegExp(`•\\s+${voice}\\b`));
@@ -260,8 +260,16 @@ describe('section extractors', () => {
 // ---------------------------------------------------------------------------
 
 describe('persona registry + home-persona override', () => {
-  it('PERSONA_NAMES lists the six voices, with Sym as the default', () => {
-    expect(PERSONA_NAMES).toEqual(['sym', 'operator', 'sensei', 'concierge', 'hype', 'goblin']);
+  it('PERSONA_NAMES lists every voice in display order, with Sym as the default', () => {
+    expect(PERSONA_NAMES).toEqual([
+      'sym',
+      'operator',
+      'sensei',
+      'concierge',
+      'hype',
+      'goblin',
+      'noir',
+    ]);
     expect(DEFAULT_PERSONA).toBe('sym');
   });
 
@@ -284,6 +292,8 @@ describe('persona registry + home-persona override', () => {
     expect(block).toContain('HOME voice');
     // The override changes only the home voice — selection rules + overrides hold.
     expect(block).toContain('still apply');
+    // Must not hardcode a roster count (it drifts when a voice is added/removed).
+    expect(block).not.toMatch(/\b(?:six|seven|\d+)\s+voices?\b/i);
   });
 
   it('every non-default persona yields a non-empty override naming its label', () => {
