@@ -201,6 +201,14 @@ Copy `.env.example` to `.env`. Every variable has a comment in that file.
 | `SYM_TURN_DEADLINE_MS`     | `1800000` | Per-turn deadline (ms, 30 min); a stuck model is aborted and returns a partial reply; `0` disables |
 | `SYM_THREAD_HISTORY_LIMIT` | `80`      | Max thread history messages per turn; keeps the most-recent N (tail-slice); `0` disables cap       |
 
+### Personas (optional)
+
+| Variable               | Default            | Description                                                                       |
+| ---------------------- | ------------------ | --------------------------------------------------------------------------------- |
+| `SYM_PERSONA`          | `sym`              | Home/default voice (`sym`/`operator`/`sensei`/`concierge`/`hype`/`goblin`/`noir`) |
+| `SYM_SETTINGS_DB_PATH` | `.sym/settings.db` | Unencrypted SQLite store for per-channel home overrides; put on `/data` in prod   |
+| `SYM_PERSONAS_DIR`     | `.sym/personas`    | Directory of editable `<voice>.md` spec overrides; put on `/data` in prod         |
+
 The full reference with one-line descriptions on every variable is also in
 [docs/reference/env-vars.md](docs/reference/env-vars.md).
 
@@ -295,22 +303,27 @@ All inspect commands support `--json` for machine-readable output.
 | `sym connector show <name>` | One connector in full detail                            |
 | `sym tools [name]`          | Every tool — MCP tools and CLI connectors               |
 | `sym secret ls`             | Stored secret names only (values are never shown)       |
+| `sym persona`               | Voices Sym speaks in + the deployment's home voice      |
+| `sym persona show <name>`   | One persona: its effective spec + home/customized state |
+| `sym persona channels`      | Per-channel home overrides                              |
 
 #### Manage commands
 
-| Command                                        | Description                                             |
-| ---------------------------------------------- | ------------------------------------------------------- |
-| `sym connector add --name N --command C`       | Add an MCP connector (stdio); repeat `--arg` per arg    |
-| `sym connector add --name N --url U [--trust]` | Add an MCP connector (HTTP)                             |
-| `sym connector add --spec '<ConnectorConfig>'` | Add an MCP connector (full generic JSON shape)          |
-| `sym connector add --cli <bin> --desc "…"`     | Add a CLI connector (allow + describe it for `run_cli`) |
-| `sym connector rm <name>`                      | Remove a connector (MCP or CLI)                         |
-| `sym connector trust <name> \| --all`          | Skip confirmation gate for this connector's tools       |
-| `sym connector untrust <name> \| --all`        | Re-enable confirmation gate                             |
-| `sym connector reconnect <name>`               | Re-connect one MCP connector against the live pool      |
-| `sym apply`                                    | Reconcile the running agent to the config file          |
-| `sym secret set <connector> <field>`           | Store a secret (value read from stdin)                  |
-| `sym secret rm <connector> <field>`            | Remove a stored secret                                  |
+| Command                                        | Description                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------ |
+| `sym connector add --name N --command C`       | Add an MCP connector (stdio); repeat `--arg` per arg         |
+| `sym connector add --name N --url U [--trust]` | Add an MCP connector (HTTP)                                  |
+| `sym connector add --spec '<ConnectorConfig>'` | Add an MCP connector (full generic JSON shape)               |
+| `sym connector add --cli <bin> --desc "…"`     | Add a CLI connector (allow + describe it for `run_cli`)      |
+| `sym connector rm <name>`                      | Remove a connector (MCP or CLI)                              |
+| `sym connector trust <name> \| --all`          | Skip confirmation gate for this connector's tools            |
+| `sym connector untrust <name> \| --all`        | Re-enable confirmation gate                                  |
+| `sym connector reconnect <name>`               | Re-connect one MCP connector against the live pool           |
+| `sym apply`                                    | Reconcile the running agent to the config file               |
+| `sym secret set <connector> <field>`           | Store a secret (value read from stdin)                       |
+| `sym secret rm <connector> <field>`            | Remove a stored secret                                       |
+| `sym persona edit <name> \| reset <name>`      | Customize a voice's spec (`.sym/personas/<id>.md`) or revert |
+| `sym persona set <ch> <name> \| unset <ch>`    | Home a channel to a voice (overrides `SYM_PERSONA` there)    |
 
 **Secret values are always read from stdin** — never accepted as arguments —
 to prevent exposure via the process table:

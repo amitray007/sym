@@ -33,19 +33,64 @@ export function isPersonaCustomized(persona: PersonaName): boolean {
 }
 
 /**
+ * Warn at most once per (persona, reason): loadPersonaSpec runs on the per-turn
+ * hot path, so a persistent misconfiguration must be visible in the server logs
+ * without spamming a line every turn. Server logs use console.warn, never
+ * console.log (see ARCHITECTURE I-7).
+ */
+const _warned = new Set<string>();
+function warnOnce(key: string, message: string, err?: unknown): void {
+  if (_warned.has(key)) return;
+  _warned.add(key);
+  if (err !== undefined) console.warn(message, err);
+  else console.warn(message);
+}
+
+/**
  * The effective spec for a persona: the `<id>.md` override if present and
  * non-empty, else the shipped default. Fail-open — any read error → default.
+ *
+ * A MISSING override (ENOENT) is the normal case and stays silent. A present
+ * but oversize or unreadable override is a real misconfiguration the operator
+ * THINKS is applied but isn't — so it warns once before falling back, rather
+ * than silently dropping the edit.
  */
 export function loadPersonaSpec(persona: PersonaName): string {
+  const path = personaSpecPath(persona);
+  let size: number;
   try {
-    const path = personaSpecPath(persona);
-    // Oversize overrides (a mistake or abuse) fall back rather than bloating every
-    // prompt; ~32 KB is ~10× the largest shipped spec. statSync first avoids
-    // reading a pathological file into memory.
-    if (statSync(path).size > 32_000) return PERSONA_SPECS[persona];
+    // statSync first avoids reading a pathological file into memory.
+    size = statSync(path).size;
+  } catch (err) {
+    // ENOENT = no override file, the normal case → silent default. Anything else
+    // (e.g. EACCES on the personas dir) is a real misconfig → surface it once.
+    if ((err as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') {
+      warnOnce(
+        `stat:${persona}`,
+        `[persona] could not read the ${persona} override at ${path}; using the shipped default:`,
+        err,
+      );
+    }
+    return PERSONA_SPECS[persona];
+  }
+  // Oversize overrides (a mistake or abuse) fall back rather than bloating every
+  // prompt; ~32 KB is ~10× the largest shipped spec.
+  if (size > 32_000) {
+    warnOnce(
+      `size:${persona}`,
+      `[persona] the ${persona} override at ${path} is ${size} bytes (> 32 KB cap); ignoring it and using the shipped default.`,
+    );
+    return PERSONA_SPECS[persona];
+  }
+  try {
     const raw = readFileSync(path, 'utf8').trim();
     return raw.length > 0 ? raw : PERSONA_SPECS[persona];
-  } catch {
+  } catch (err) {
+    warnOnce(
+      `read:${persona}`,
+      `[persona] the ${persona} override at ${path} exists but could not be read; using the shipped default:`,
+      err,
+    );
     return PERSONA_SPECS[persona];
   }
 }

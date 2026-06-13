@@ -13,11 +13,26 @@
 import { isPersonaName, type PersonaName } from '@sym/kernel';
 import { getChannelPersonaStore } from '@sym/mcp-runtime';
 
-/** Read a channel's stored override, swallowing any store error (fail-open). */
+/** Warn at most once: a persistently broken settings store would otherwise log a
+ *  line every turn. Server logs use console.warn, never console.log (ARCHITECTURE I-7). */
+let _warnedStore = false;
+
+/**
+ * Read a channel's stored override, swallowing any store error (fail-open).
+ * A broken/unwritable settings store disables ALL per-channel overrides, which is
+ * easy to miss — so it warns once before falling through to the global home.
+ */
 function readChannelPersona(channelId: string): string | undefined {
   try {
     return getChannelPersonaStore().get(channelId);
-  } catch {
+  } catch (err) {
+    if (!_warnedStore) {
+      _warnedStore = true;
+      console.warn(
+        '[persona] channel persona store is unreadable; per-channel home overrides are disabled this run, falling back to the global home (SYM_PERSONA):',
+        err,
+      );
+    }
     return undefined;
   }
 }

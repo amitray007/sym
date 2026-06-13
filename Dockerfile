@@ -99,10 +99,16 @@ WORKDIR /repo/apps/agent
 ENV HOME=/data/home
 # Persistent, node-writable defaults on the /data volume. Both the agent and the
 # `sym` CLI (run via `docker exec`, which inherits these) resolve here — so the
-# connector config + secret store survive redeploys and `sym` never falls back to
-# a cwd-relative `.sym/` (which fails when run from `/`).
+# connector config, secret store, and persona settings survive redeploys and
+# `sym` never falls back to a cwd-relative `.sym/` (which both fails when run
+# from `/` AND would diverge from the agent if the CLI's cwd differs).
 ENV SYM_DB_PATH=/data/credentials.db
 ENV SYM_CONFIG_PATH=/data/sym/config.json
+# Persona engine: the per-channel home store + the editable spec overrides. MUST
+# be absolute on /data so the docker-exec CLI writes the SAME file the agent
+# reads, and so per-channel homes + edited specs survive a redeploy.
+ENV SYM_SETTINGS_DB_PATH=/data/settings.db
+ENV SYM_PERSONAS_DIR=/data/sym/personas
 # AGENT_PORT (default 3001) — the HTTP server Slack + the OAuth callback reach.
 EXPOSE 3001
 # Health check: GET /health returns {"ok":true}. curl is installed in the apt

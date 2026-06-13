@@ -40,6 +40,11 @@ architecture — not "removed":
   (`apps/agent/.sym/credentials.db`, AES-256-GCM via `mcp/store.ts`) for MCP
   OAuth tokens and static secrets.
 
+- **Persona engine** — seven editable voices, one active per turn
+  (`packages/kernel` specs + `apps/agent/src/persona-*`), replacing the old
+  `packages/soul` cascade. Home voice via `SYM_PERSONA` or per channel
+  (`settings.db`); specs retunable at runtime via `.sym/personas/<id>.md`.
+
 So "no database / no dashboard" precisely means **no message database and no
 _web_ dashboard** — the Slack thread remains the conversational memory. The
 operator CLI and the credential store are a deliberate **local-state control

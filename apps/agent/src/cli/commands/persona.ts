@@ -39,15 +39,23 @@ export async function personaCommand(args: string[], json: boolean): Promise<num
   // --- channel overrides (touch the settings store; lazy-load node:sqlite) ---
 
   if (verb === 'set') {
-    const channelId = a;
+    const channelId = a?.trim();
     const persona = b?.trim().toLowerCase();
-    if (channelId === undefined || persona === undefined) {
+    if (channelId === undefined || channelId.length === 0 || persona === undefined) {
       console.error('usage: sym persona set <channel-id> <persona>');
       return 1;
     }
     if (!isPersonaName(persona)) {
       console.error(`unknown persona '${b}' — try one of: ${PERSONA_NAMES.join(', ')}`);
       return 1;
+    }
+    // Stored verbatim and matched by EXACT equality against the channel id Sym
+    // sees at runtime — a malformed id silently never fires. We can't know the
+    // real id here, so warn (never block) when it doesn't look like a Slack id.
+    if (!/^[CDG][A-Z0-9]{6,}$/.test(channelId)) {
+      console.warn(
+        `warning: '${channelId}' doesn't look like a Slack channel/DM id (e.g. C0A1B2C3D4) — storing it anyway, but the override only applies if it exactly matches the id Sym sees at runtime.`,
+      );
     }
     const { getChannelPersonaStore } = await import('@sym/mcp-runtime');
     getChannelPersonaStore().set(channelId, persona);
@@ -56,8 +64,8 @@ export async function personaCommand(args: string[], json: boolean): Promise<num
   }
 
   if (verb === 'unset') {
-    const channelId = a;
-    if (channelId === undefined) {
+    const channelId = a?.trim();
+    if (channelId === undefined || channelId.length === 0) {
       console.error('usage: sym persona unset <channel-id>');
       return 1;
     }
