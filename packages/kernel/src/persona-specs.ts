@@ -152,8 +152,11 @@ Never let the style obscure the facts, never narrate over a genuine emergency, n
  * person; drop the bit when the owner is hurting) always apply. The line lives in
  * this non-editable wrapper, NOT the editable spec, so an override can't soften it.
  *
- * Boot-/turn-constant for a given (persona, spec), so it sits in the cached
- * prefix ahead of the per-turn connector/CLI catalogs.
+ * Boot-/turn-constant for a given (persona, spec). It is the MOST volatile prompt
+ * section, though — the active voice varies by the per-channel home and the spec
+ * is runtime-editable — so the assembler (buildAgentSystemPrompt) places it LAST,
+ * after the deploy-stable connector/CLI catalogs, to keep their prefix cache warm
+ * across a voice switch.
  */
 const ACTIVE_PERSONA_PROVENANCE =
   'This is the owner-configured home voice for this conversation — a standing choice, not your own initiative. It is the explicit invite the persona rules refer to, so speak it in full here, even in a shared channel. (The other hard floors still apply.)';
