@@ -143,14 +143,15 @@ Never let the style obscure the facts, never narrate over a genuine emergency, n
  * the system prompt for the turn. `spec` defaults to the shipped default for
  * `persona`; the agent passes a `.sym/personas/<id>.md` override when one exists.
  *
- * The block opens with a NON-editable provenance line: the active voice is always
- * the owner-configured home (resolved before injection), never one the model
- * drifted into. That standing choice is the "explicit invite" the base prompt's
- * DM-only floor refers to — so a playful home (Goblin/Hype) is sanctioned even in
- * a shared channel, while the floor still blocks the model from reaching for a
- * playful voice on its own initiative. The other hard floors (never roast a real
- * person; drop the bit when the owner is hurting) always apply. The line lives in
- * this non-editable wrapper, NOT the editable spec, so an override can't soften it.
+ * ONLY the playful voices (Goblin, edgy Hype) open with a NON-editable provenance
+ * line: those two carry a DM-only / own-initiative floor in the base prompt, and
+ * the line says the active voice is the owner-configured home — the "explicit
+ * invite" that lets a playful home speak in a shared channel (while the floor
+ * still blocks the model from reaching for a playful voice on its own). Every
+ * other voice has NO such floor, so it gets a CLEAN block: prepending that
+ * meta-preamble to e.g. the default Sym only adds noise and risks priming an
+ * over-formal register. The line lives in this non-editable wrapper, NOT the
+ * editable spec; the other hard floors always apply regardless of voice.
  *
  * Boot-/turn-constant for a given (persona, spec). It is the MOST volatile prompt
  * section, though — the active voice varies by the per-channel home and the spec
@@ -161,9 +162,17 @@ Never let the style obscure the facts, never narrate over a genuine emergency, n
 const ACTIVE_PERSONA_PROVENANCE =
   'This is the owner-configured home voice for this conversation — a standing choice, not your own initiative. It is the explicit invite the persona rules refer to, so speak it in full here, even in a shared channel. (The other hard floors still apply.)';
 
+/** Voices with a DM-only / own-initiative floor (per the base prompt) that the
+ *  home = invite provenance reconciles. Every other voice skips the preamble. */
+const PLAYFUL_VOICES: ReadonlySet<PersonaName> = new Set<PersonaName>(['goblin', 'hype']);
+
 export function buildActivePersonaPrompt(
   persona: PersonaName,
   spec: string = PERSONA_SPECS[persona],
 ): string {
-  return `## Active persona — ${PERSONAS[persona].label}\n\n${ACTIVE_PERSONA_PROVENANCE}\n\n${spec.trim()}`;
+  const header = `## Active persona — ${PERSONAS[persona].label}`;
+  const body = spec.trim();
+  return PLAYFUL_VOICES.has(persona)
+    ? `${header}\n\n${ACTIVE_PERSONA_PROVENANCE}\n\n${body}`
+    : `${header}\n\n${body}`;
 }

@@ -336,6 +336,17 @@ describe('persona registry + specs', () => {
     expect(block).toContain('CUSTOM GOBLIN SPEC');
   });
 
+  it('the invite provenance is scoped to the playful voices only (clean block for the rest)', () => {
+    // Goblin/Hype carry a DM-only floor the provenance reconciles…
+    expect(buildActivePersonaPrompt('goblin')).toContain('owner-configured home voice');
+    expect(buildActivePersonaPrompt('hype')).toContain('owner-configured home voice');
+    // …the rest have no such floor, so no meta-preamble — it would only risk priming
+    // an over-formal register, especially on the default Sym voice.
+    expect(buildActivePersonaPrompt('sym')).not.toContain('owner-configured home voice');
+    expect(buildActivePersonaPrompt('concierge')).not.toContain('owner-configured home voice');
+    expect(buildActivePersonaPrompt('operator')).not.toContain('owner-configured home voice');
+  });
+
   it('the SHARED-channel floor reconciles a playful HOME voice as the invite (homing = invite)', () => {
     const section = sectionPersonas().join('\n');
     // A playful voice that is the configured home is sanctioned in a shared channel…
