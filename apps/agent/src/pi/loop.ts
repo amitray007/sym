@@ -190,13 +190,10 @@ export async function runLoopPi(
   // Resolve the active persona + its spec (a .sym/personas/<id>.md override, else
   // the default) here at the turn boundary, alongside the other per-turn inputs.
   const activePersona = opts.persona ?? DEFAULT_PERSONA;
-  const systemPrompt = buildAgentSystemPrompt(
-    mcpDescriptors,
-    cliAllowlist,
-    cliCaps,
-    activePersona,
-    loadPersonaSpec(activePersona),
-  );
+  const systemPrompt = buildAgentSystemPrompt(mcpDescriptors, cliAllowlist, cliCaps, {
+    name: activePersona,
+    spec: loadPersonaSpec(activePersona),
+  });
 
   // Accumulators shared between the subscriber and the post-run collection.
   const draftParts: string[] = [];

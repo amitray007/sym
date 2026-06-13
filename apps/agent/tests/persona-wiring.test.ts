@@ -33,7 +33,10 @@ function assembleForTurn(
   lookup: (channelId: string) => string | undefined,
 ): string {
   const persona = effectiveHomePersona(channelId, globalHome, lookup) ?? 'sym';
-  return buildAgentSystemPrompt([], new Set([]), [], persona, loadPersonaSpec(persona));
+  return buildAgentSystemPrompt([], new Set([]), [], {
+    name: persona,
+    spec: loadPersonaSpec(persona),
+  });
 }
 
 describe('persona turn-boundary wiring', () => {

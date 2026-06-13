@@ -129,8 +129,7 @@ export function buildAgentSystemPrompt(
   mcpDescriptors: ToolDescriptor[],
   cliAllowlist: ReturnType<typeof resolveAllowlist>,
   cliCaps: ReturnType<typeof resolveCliCapabilities>,
-  persona: PersonaName = DEFAULT_PERSONA,
-  personaSpec?: string,
+  persona: { name?: PersonaName; spec?: string } = {},
 ): string {
   const baseSystemPrompt = buildSystemPrompt();
   // Live capability catalogs so the model knows what's reachable THIS turn: MCP
@@ -144,7 +143,7 @@ export function buildAgentSystemPrompt(
   // the turn boundary (pi/loop): the id from the per-channel override or the
   // SYM_PERSONA home, the spec from a `.sym/personas/<id>.md` override or (when
   // omitted) the shipped default. Most volatile, so it goes LAST (see above).
-  const activePersona = buildActivePersonaPrompt(persona, personaSpec);
+  const activePersona = buildActivePersonaPrompt(persona.name ?? DEFAULT_PERSONA, persona.spec);
   return [baseSystemPrompt, catalog, cliCatalog, activePersona]
     .filter((s) => s.length > 0)
     .join('\n\n');
