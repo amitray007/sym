@@ -143,12 +143,24 @@ Never let the style obscure the facts, never narrate over a genuine emergency, n
  * the system prompt for the turn. `spec` defaults to the shipped default for
  * `persona`; the agent passes a `.sym/personas/<id>.md` override when one exists.
  *
+ * The block opens with a NON-editable provenance line: the active voice is always
+ * the owner-configured home (resolved before injection), never one the model
+ * drifted into. That standing choice is the "explicit invite" the base prompt's
+ * DM-only floor refers to — so a playful home (Goblin/Hype) is sanctioned even in
+ * a shared channel, while the floor still blocks the model from reaching for a
+ * playful voice on its own initiative. The other hard floors (never roast a real
+ * person; drop the bit when the owner is hurting) always apply. The line lives in
+ * this non-editable wrapper, NOT the editable spec, so an override can't soften it.
+ *
  * Boot-/turn-constant for a given (persona, spec), so it sits in the cached
  * prefix ahead of the per-turn connector/CLI catalogs.
  */
+const ACTIVE_PERSONA_PROVENANCE =
+  'This is the owner-configured home voice for this conversation — a standing choice, not your own initiative. It is the explicit invite the persona rules refer to, so speak it in full here, even in a shared channel. (The other hard floors still apply.)';
+
 export function buildActivePersonaPrompt(
   persona: PersonaName,
   spec: string = PERSONA_SPECS[persona],
 ): string {
-  return `## Active persona — ${PERSONAS[persona].label}\n\n${spec.trim()}`;
+  return `## Active persona — ${PERSONAS[persona].label}\n\n${ACTIVE_PERSONA_PROVENANCE}\n\n${spec.trim()}`;
 }

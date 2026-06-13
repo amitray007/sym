@@ -317,6 +317,23 @@ describe('persona registry + specs', () => {
     expect(block).not.toContain(PERSONA_SPECS['goblin']);
   });
 
+  it('buildActivePersonaPrompt frames the voice as the owner-configured home (the "explicit invite")', () => {
+    // The non-editable provenance line is present even under a custom override, so
+    // a playful home reads as owner-sanctioned, not the model's own initiative.
+    const block = buildActivePersonaPrompt('goblin', 'CUSTOM GOBLIN SPEC');
+    expect(block).toContain('owner-configured home voice');
+    expect(block).toContain('explicit invite');
+    expect(block).toContain('CUSTOM GOBLIN SPEC');
+  });
+
+  it('the SHARED-channel floor reconciles a playful HOME voice as the invite (homing = invite)', () => {
+    const section = sectionPersonas().join('\n');
+    // A playful voice that is the configured home is sanctioned in a shared channel…
+    expect(section).toContain('owner-configured home for this channel/deployment');
+    // …but reaching for a playful voice on the model's own initiative is still blocked.
+    expect(section).toMatch(/never REACH for Goblin/);
+  });
+
   it('isPersonaName guards valid ids', () => {
     expect(isPersonaName('operator')).toBe(true);
     expect(isPersonaName('wizard')).toBe(false);
