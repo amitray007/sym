@@ -42,12 +42,10 @@ export async function personaCommand(args: string[], json: boolean): Promise<num
     const channelId = a?.trim();
     const persona = b?.trim().toLowerCase();
     if (channelId === undefined || channelId.length === 0 || persona === undefined) {
-      console.error('usage: sym persona set <channel-id> <persona>');
-      return 1;
+      throw new Error('persona set requires <channel-id> <persona>');
     }
     if (!isPersonaName(persona)) {
-      console.error(`unknown persona '${b}' — try one of: ${PERSONA_NAMES.join(', ')}`);
-      return 1;
+      throw new Error(`unknown persona '${b}' — try one of: ${PERSONA_NAMES.join(', ')}`);
     }
     // Stored verbatim and matched by EXACT equality against the channel id Sym
     // sees at runtime — a malformed id silently never fires. We can't know the
@@ -59,6 +57,10 @@ export async function personaCommand(args: string[], json: boolean): Promise<num
     }
     const { getChannelPersonaStore } = await import('@sym/mcp-runtime');
     getChannelPersonaStore().set(channelId, persona);
+    if (json) {
+      console.log(JSON.stringify({ channelId, persona, label: PERSONAS[persona].label }));
+      return 0;
+    }
     console.log(`${channelId} → ${PERSONAS[persona].label}`);
     return 0;
   }
@@ -66,11 +68,14 @@ export async function personaCommand(args: string[], json: boolean): Promise<num
   if (verb === 'unset') {
     const channelId = a?.trim();
     if (channelId === undefined || channelId.length === 0) {
-      console.error('usage: sym persona unset <channel-id>');
-      return 1;
+      throw new Error('persona unset requires <channel-id>');
     }
     const { getChannelPersonaStore } = await import('@sym/mcp-runtime');
     const removed = getChannelPersonaStore().remove(channelId);
+    if (json) {
+      console.log(JSON.stringify({ channelId, removed }));
+      return 0;
+    }
     console.log(removed ? `unset ${channelId}` : `no override for ${channelId}`);
     return 0;
   }
@@ -107,12 +112,15 @@ export async function personaCommand(args: string[], json: boolean): Promise<num
   if (verb === 'edit' || verb === 'reset') {
     const name = a?.trim().toLowerCase();
     if (name === undefined || !isPersonaName(name)) {
-      console.error(`usage: sym persona ${verb} <${PERSONA_NAMES.join('|')}>`);
-      return 1;
+      throw new Error(`persona ${verb} requires a voice: ${PERSONA_NAMES.join(', ')}`);
     }
 
     if (verb === 'reset') {
       const removed = resetPersonaSpec(name);
+      if (json) {
+        console.log(JSON.stringify({ persona: name, label: PERSONAS[name].label, reset: removed }));
+        return 0;
+      }
       console.log(
         removed
           ? `reset ${PERSONAS[name].label} to its default spec`
@@ -146,8 +154,7 @@ export async function personaCommand(args: string[], json: boolean): Promise<num
   if (verb === 'show') {
     const target = a !== undefined ? a.trim().toLowerCase() : home;
     if (!isPersonaName(target)) {
-      console.error(`unknown persona '${a}' — try one of: ${PERSONA_NAMES.join(', ')}`);
-      return 1;
+      throw new Error(`unknown persona '${a}' — try one of: ${PERSONA_NAMES.join(', ')}`);
     }
     const customized = isPersonaCustomized(target);
     if (json) {
@@ -177,11 +184,10 @@ export async function personaCommand(args: string[], json: boolean): Promise<num
   }
 
   if (verb !== undefined && verb !== 'ls' && verb !== 'list') {
-    console.error(
-      `unknown 'sym persona ${verb}' — use: sym persona [ls] | show <name> | edit <name> | ` +
+    throw new Error(
+      `unknown 'persona' verb '${verb}' — use: sym persona [ls] | show <name> | edit <name> | ` +
         `reset <name> | channels | set <ch> <name> | unset <ch>`,
     );
-    return 1;
   }
 
   // --- the roster (default) ---

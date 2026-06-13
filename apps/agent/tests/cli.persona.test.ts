@@ -97,14 +97,14 @@ describe('personaCommand', () => {
     expect(out).toContain('(home)');
   });
 
-  it('show with an unknown persona errors and returns 1', async () => {
-    expect(await personaCommand(['show', 'wizard'], false)).toBe(1);
-    expect(err.join('\n')).toContain("unknown persona 'wizard'");
+  it('show with an unknown persona throws (sym: prefix + exit 1 via the top-level handler)', async () => {
+    await expect(personaCommand(['show', 'wizard'], false)).rejects.toThrow(
+      "unknown persona 'wizard'",
+    );
   });
 
-  it('rejects an unknown subcommand', async () => {
-    expect(await personaCommand(['frobnicate'], false)).toBe(1);
-    expect(err.join('\n')).toContain('unknown');
+  it('rejects an unknown subcommand (throws)', async () => {
+    await expect(personaCommand(['frobnicate'], false)).rejects.toThrow(/unknown 'persona' verb/);
   });
 
   it('--json emits the full roster with the home flag set', async () => {
@@ -153,19 +153,35 @@ describe('personaCommand', () => {
     expect(log.join('\n')).toContain('No per-channel overrides');
   });
 
-  it('set rejects an unknown persona', async () => {
-    expect(await personaCommand(['set', 'C_eng', 'wizard'], false)).toBe(1);
-    expect(err.join('\n')).toContain("unknown persona 'wizard'");
+  it('set rejects an unknown persona (throws)', async () => {
+    await expect(personaCommand(['set', 'C_eng', 'wizard'], false)).rejects.toThrow(
+      "unknown persona 'wizard'",
+    );
   });
 
-  it('set with missing args errors', async () => {
-    expect(await personaCommand(['set', 'C_eng'], false)).toBe(1);
-    expect(err.join('\n')).toContain('usage');
+  it('set with missing args throws', async () => {
+    await expect(personaCommand(['set', 'C_eng'], false)).rejects.toThrow(/persona set requires/);
+  });
+
+  it('set --json emits the stored override', async () => {
+    expect(await personaCommand(['set', 'C0EXEC1234', 'concierge'], true)).toBe(0);
+    expect(JSON.parse(log.join(''))).toEqual({
+      channelId: 'C0EXEC1234',
+      persona: 'concierge',
+      label: 'Concierge',
+    });
   });
 
   it('unset on an unknown channel reports no override', async () => {
     expect(await personaCommand(['unset', 'C_nope'], false)).toBe(0);
     expect(log.join('\n')).toContain('no override for C_nope');
+  });
+
+  it('unset --json emits the removed flag', async () => {
+    await personaCommand(['set', 'C0ENG5678', 'goblin'], false);
+    log.length = 0;
+    expect(await personaCommand(['unset', 'C0ENG5678'], true)).toBe(0);
+    expect(JSON.parse(log.join(''))).toEqual({ channelId: 'C0ENG5678', removed: true });
   });
 
   it('channels --json emits the overrides', async () => {
@@ -195,6 +211,11 @@ describe('personaCommand', () => {
     expect(log.join('\n')).toContain('already uses the default spec');
   });
 
+  it('reset --json emits the reset flag', async () => {
+    expect(await personaCommand(['reset', 'goblin'], true)).toBe(0);
+    expect(JSON.parse(log.join(''))).toEqual({ persona: 'goblin', label: 'Goblin', reset: false });
+  });
+
   it('edit needs a terminal and writes nothing off-TTY (just points at the path)', async () => {
     expect(await personaCommand(['edit', 'goblin'], false)).toBe(1); // non-TTY guard
     expect(err.join('\n')).toContain('goblin.md');
@@ -216,9 +237,12 @@ describe('personaCommand', () => {
     expect(existsSync(join(personasDir, 'hype.md'))).toBe(false);
   });
 
-  it('rejects edit/reset for an unknown persona', async () => {
-    expect(await personaCommand(['edit', 'wizard'], false)).toBe(1);
-    expect(await personaCommand(['reset', 'wizard'], false)).toBe(1);
-    expect(err.join('\n')).toContain('usage');
+  it('rejects edit/reset for an unknown persona (throws)', async () => {
+    await expect(personaCommand(['edit', 'wizard'], false)).rejects.toThrow(
+      /persona edit requires/,
+    );
+    await expect(personaCommand(['reset', 'wizard'], false)).rejects.toThrow(
+      /persona reset requires/,
+    );
   });
 });
