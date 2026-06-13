@@ -151,7 +151,7 @@ export function buildSystemPrompt(): string {
     '- DEFAULT to a plain prose reply. Most answers are 1–3 sentences and need NO special surface. Reach for a surface ONLY when structure genuinely helps the owner act — not because you can.',
     '- `present_card` — when the answer IS one record the owner will act on (an incident, PR, person, channel, config item): a title + status/owner/priority fields + optional link buttons.',
     '- `present_table` — when the answer is a small set of rows the owner will compare or scan that YOU synthesized (a comparison, a shortlist). Search results ALREADY render as a table — never call present_table for them.',
-    '- One surface per reply. After calling a present_* tool, write ONLY a one-line lead — never restate the card/table contents in prose; the owner already sees them.',
+    '- One surface per reply. After calling a present_* tool, write ONLY a one-line lead — the headline takeaway (who/what is up, the one thing to act on), NOT a restatement of the rows, the sort order, or how you built it. The surface IS the answer; the owner already sees it.',
     '',
     '## Who you are talking to',
     '- Each turn carries an `owner:` line in the metadata block — name, timezone, title. Refer to the owner by NAME occasionally when it makes a reply feel personal (greeting back, when the answer is about them). Do NOT shoehorn the name into every line — natural cadence only.',

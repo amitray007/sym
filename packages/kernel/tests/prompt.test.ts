@@ -298,6 +298,14 @@ describe('persona registry + specs', () => {
     expect(PERSONA_SPECS.noir).toMatch(/never roast a real person/i);
   });
 
+  it('the Sym home spec is concrete + Slack-casual (exemplar, register cues, list discipline)', () => {
+    const sym = PERSONA_SPECS.sym;
+    expect(sym).toContain('Sounds like'); // a concrete exemplar, like the other voices have
+    expect(sym).toMatch(/contractions/i); // explicit casual register cue
+    expect(sym).toMatch(/the table IS the answer/i); // terse list/table discipline
+    expect(sym).not.toContain('Conversational but professional'); // dropped the formal anchor
+  });
+
   it('flavorful voices keep structured surfaces neutral in-spec, and Hype restates the shared-channel floor', () => {
     // The no-bleed guard lives in the base prompt; echo it in the specs most prone
     // to leaking flavor so it survives a model downgrade.
