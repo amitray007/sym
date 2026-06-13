@@ -298,6 +298,16 @@ describe('persona registry + specs', () => {
     expect(PERSONA_SPECS.noir).toMatch(/never roast a real person/i);
   });
 
+  it('flavorful voices keep structured surfaces neutral in-spec, and Hype restates the shared-channel floor', () => {
+    // The no-bleed guard lives in the base prompt; echo it in the specs most prone
+    // to leaking flavor so it survives a model downgrade.
+    for (const name of ['goblin', 'hype', 'noir'] as const) {
+      expect(PERSONA_SPECS[name]).toMatch(/PROSE only/);
+    }
+    // Hype carries the DM-only-on-own-initiative floor (with the invited/homed carve-out).
+    expect(PERSONA_SPECS.hype).toMatch(/DM-only on your own initiative/);
+  });
+
   it('buildActivePersonaPrompt wraps the active voice in an Active persona block', () => {
     const block = buildActivePersonaPrompt('concierge');
     expect(block).toContain('## Active persona — Concierge');
