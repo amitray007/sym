@@ -672,6 +672,19 @@ describe('buildAgentSystemPrompt', () => {
     const result = buildAgentSystemPrompt([], new Set([]), []);
     expect(result).toContain('BASE_SYSTEM_PROMPT');
   });
+
+  it('injects the active persona spec for a non-default persona', () => {
+    const result = buildAgentSystemPrompt([], new Set([]), [], { name: 'concierge' });
+    expect(result).toContain('BASE_SYSTEM_PROMPT');
+    expect(result).toContain('## Active persona — Concierge');
+  });
+
+  it('injects the active persona spec for the default persona too (and stays stable)', () => {
+    const withDefault = buildAgentSystemPrompt([], new Set([]), [], { name: 'sym' });
+    const without = buildAgentSystemPrompt([], new Set([]), []);
+    expect(withDefault).toBe(without); // omitting the arg defaults to 'sym'
+    expect(withDefault).toContain('## Active persona — Sym');
+  });
 });
 
 // ---------------------------------------------------------------------------

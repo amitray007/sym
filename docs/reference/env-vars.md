@@ -53,6 +53,14 @@ variable. This page is the canonical reference, grouped by concern.
 | `SYM_TURN_DEADLINE_MS`     | `1800000` | Per-turn deadline (ms, 30 min); a stuck model is aborted and returns a partial reply. `0` disables |
 | `SYM_THREAD_HISTORY_LIMIT` | `80`      | Max threaded history messages per turn; keeps the most-recent N (tail-slice). `0` disables cap     |
 
+## Personas (optional)
+
+| Variable               | Default            | Description                                                                                                                   |
+| ---------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `SYM_PERSONA`          | `sym`              | Home/default voice: `sym`, `operator`, `sensei`, `concierge`, `hype`, `goblin`, `noir` (case-insensitive; unknown → `sym`)    |
+| `SYM_SETTINGS_DB_PATH` | `.sym/settings.db` | Unencrypted SQLite store for per-channel home overrides (`sym persona set`). Put on `/data` in production (survives redeploy) |
+| `SYM_PERSONAS_DIR`     | `.sym/personas`    | Directory of editable `<voice>.md` spec overrides. Put on `/data` in production                                               |
+
 ## Observability (optional)
 
 Sym instruments its model calls with OpenTelemetry (`@opentelemetry/api`, the

@@ -4,7 +4,7 @@
  * composed system prompt (static base + live connector/CLI catalogs).
  */
 
-import { buildSystemPrompt } from '@sym/kernel';
+import { buildSystemPrompt, buildActivePersonaPrompt, DEFAULT_PERSONA } from '@sym/kernel';
 
 import { requestConfirmation } from '../confirmations.js';
 import { logCtx } from '../log.js';
@@ -23,7 +23,7 @@ import type {
   ToolRuntimeContext,
   Turn,
 } from '@sym/contracts';
-import type { ToolRegistry } from '@sym/kernel';
+import type { PersonaName, ToolRegistry } from '@sym/kernel';
 
 /** Context objects threaded into the per-turn helper builders. */
 export interface TurnHelperCtx {
@@ -115,21 +115,36 @@ export function buildAgentTools(
 }
 
 /**
- * Compose the full system prompt for one turn: static base + connector catalog
- * + CLI catalog. Static sections are cache-stable across turns when the
- * connector set and allowlist don't change.
+ * Compose the full system prompt for one turn, ordered by VOLATILITY for provider
+ * prefix-caching — most-stable first, most-volatile last, so a change late in the
+ * prompt never invalidates the cached prefix before it:
+ *   1. static base — byte-identical every turn
+ *   2. connector catalog + 3. CLI catalog — rebuilt each turn but byte-stable
+ *      ACROSS turns unless the connector set / allowlist changes (a rare reconcile)
+ *   4. active-persona block — the MOST volatile section (it varies by the
+ *      per-channel home and is re-read from an editable spec), so it trails the
+ *      catalogs; a voice switch then re-bills only this block, not the catalogs.
  */
 export function buildAgentSystemPrompt(
   mcpDescriptors: ToolDescriptor[],
   cliAllowlist: ReturnType<typeof resolveAllowlist>,
   cliCaps: ReturnType<typeof resolveCliCapabilities>,
+  persona: { name?: PersonaName; spec?: string } = {},
 ): string {
   const baseSystemPrompt = buildSystemPrompt();
-  // Append live capability catalogs so the model knows what's reachable THIS turn:
-  // MCP connectors (via find_tools/call_tool) + CLIs (via run_cli, with what each
-  // is for). Both are per-turn snapshots; the static prompt tells the model to
-  // introspect (`sym status`/`sym tools`/`find_tools`) rather than trust a cached list.
+  // Live capability catalogs so the model knows what's reachable THIS turn: MCP
+  // connectors (via find_tools/call_tool) + CLIs (via run_cli, with what each is
+  // for). Rebuilt per turn but stable across turns while the connector set /
+  // allowlist hold; the static prompt still tells the model to introspect
+  // (`sym status`/`sym tools`/`find_tools`) rather than trust a cached list.
   const catalog = buildConnectorCatalog(mcpDescriptors);
   const cliCatalog = buildCliCatalog(cliAllowlist, cliCaps);
-  return [baseSystemPrompt, catalog, cliCatalog].filter((s) => s.length > 0).join('\n\n');
+  // The turn's ACTIVE persona — its full situation-by-situation spec, resolved at
+  // the turn boundary (pi/loop): the id from the per-channel override or the
+  // SYM_PERSONA home, the spec from a `.sym/personas/<id>.md` override or (when
+  // omitted) the shipped default. Most volatile, so it goes LAST (see above).
+  const activePersona = buildActivePersonaPrompt(persona.name ?? DEFAULT_PERSONA, persona.spec);
+  return [baseSystemPrompt, catalog, cliCatalog, activePersona]
+    .filter((s) => s.length > 0)
+    .join('\n\n');
 }

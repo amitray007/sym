@@ -17,9 +17,10 @@
 
 import { Agent } from '@earendil-works/pi-agent-core';
 
-import { buildReceipt, buildUserTurnContent } from '@sym/kernel';
+import { buildReceipt, buildUserTurnContent, DEFAULT_PERSONA } from '@sym/kernel';
 
 import { logCtx } from '../log.js';
+import { loadPersonaSpec } from '../persona-spec-loader.js';
 import { resolveAllowlist, resolveCliCapabilities } from '../run-cli.js';
 import { extractUsage, toAgentMessages } from './agent-messages.js';
 import { buildAgentSystemPrompt, buildAgentTools, type TurnHelperCtx } from './agent-setup.js';
@@ -30,7 +31,7 @@ import type { ThinkingLevel } from './think-router.js';
 import type { Model } from '@earendil-works/pi-ai';
 import type { SlackClient } from '@sym/adapter-slack';
 import type { ChatMessage, Reply, ToolRuntimeContext, Turn } from '@sym/contracts';
-import type { OwnerIdentity, ToolRegistry } from '@sym/kernel';
+import type { OwnerIdentity, PersonaName, ToolRegistry } from '@sym/kernel';
 
 // Re-export the decomposed helpers so `pi/loop` stays the module's public
 // surface (tests + callers import toAgentMessages / extractUsage / friendlyVerb
@@ -53,6 +54,12 @@ export interface PiModelCfg {
 export interface PiLoopOptions {
   /** Conversation history prior to this turn (Sym's `ChatMessage[]` shape). */
   history: ChatMessage[];
+  /**
+   * The turn's active persona (resolved from a per-channel override or the
+   * `SYM_PERSONA` home). Its full spec is injected as the active voice. Omitted →
+   * default `'sym'`.
+   */
+  persona?: PersonaName;
   /** Called with each text delta for live streaming to Slack. */
   onDelta?: (delta: string) => void | Promise<void>;
   /**
@@ -180,7 +187,13 @@ export async function runLoopPi(
     cliCaps,
   );
 
-  const systemPrompt = buildAgentSystemPrompt(mcpDescriptors, cliAllowlist, cliCaps);
+  // Resolve the active persona + its spec (a .sym/personas/<id>.md override, else
+  // the default) here at the turn boundary, alongside the other per-turn inputs.
+  const activePersona = opts.persona ?? DEFAULT_PERSONA;
+  const systemPrompt = buildAgentSystemPrompt(mcpDescriptors, cliAllowlist, cliCaps, {
+    name: activePersona,
+    spec: loadPersonaSpec(activePersona),
+  });
 
   // Accumulators shared between the subscriber and the post-run collection.
   const draftParts: string[] = [];

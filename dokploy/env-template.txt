@@ -49,6 +49,12 @@ SYM_ENCRYPTION_KEY=<base64-32-bytes>
 # Path to the encrypted SQLite credential DB on the persistent volume.
 SYM_DB_PATH=/data/credentials.db
 
+# Persona engine on the persistent volume: per-channel home store + editable specs.
+# Pin both to /data so they survive redeploys and the `sym` CLI shares them.
+SYM_SETTINGS_DB_PATH=/data/settings.db
+SYM_PERSONAS_DIR=/data/sym/personas
+# SYM_PERSONA=concierge   # optional home/default voice (default: sym)
+
 # ── Operator / CLI ────────────────────────────────────────────────────────────
 # Optional. See .env.example for full details.
 

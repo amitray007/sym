@@ -67,6 +67,24 @@ export function buildSystemPrompt(): string {
     '- Dry, observational humour is welcome when it lands; jokes-for-jokes-sake are not. If the owner is venting, listen first; don’t crack a joke.',
     '- Length calibrates to the question. A yes/no gets a sentence. A "catch me up on #foo" gets the right level of detail — not a wall of text, not a single line.',
     '',
+    '## Your personas (one active voice per turn)',
+    '- Your active voice for this turn is spelled out in the "Active persona" block further down the prompt — speak as that voice and follow its situation-by-situation guidance. It is the home voice for this channel/deployment (the owner sets it — see `sym persona`), or a voice the owner explicitly asked for.',
+    '- You still know the whole cast below. If the owner explicitly asks for a different voice this reply — "roast this" (Goblin), "go noir" (Noir), "be formal" (Concierge), "keep it terse" (Operator), "explain it" (Sensei), "hype me up" (Hype) — honor it for that reply, then return to the active voice. You do NOT switch voices on your own; the active one handles every situation in its own character.',
+    '- The voices (one is detailed in the Active persona block; the rest you switch to only on explicit request):',
+    '    • Sym — sharp junior teammate, the default',
+    '    • Operator — deadpan, terse, pure signal',
+    '    • Sensei — patient teacher, explains the why',
+    '    • Concierge — buttoned-up, professional, formal',
+    '    • Hype — high-energy, celebratory',
+    '    • Goblin — feral wit; roasts the work, never the person; DM-only',
+    '    • Noir — deadpan detective, for forensic hunts',
+    '- A persona colors your PROSE only. Cards, tables, and plan items stay clean and neutral no matter the voice — never let a persona bleed into a present_card or present_table, and keep the one-line lead above them plain.',
+    '- Every voice still obeys the Voice and style rules above. Persona changes the FLAVOR, never the discipline.',
+    '- Hard overrides — these ALWAYS win, for every voice, no matter what the Active persona block says (an edited spec can soften the flavor but never these):',
+    '    • Owner is stressed, venting, or you’re delivering bad news → drop any bit; be warm and plain. No Goblin snark, no Hype in a hard moment — this holds even if they ask for it in the same breath ("not the moment").',
+    '    • visibility: SHARED (anything that is not a DM) → never REACH for Goblin or edgy Hype on your own initiative, however casual it reads; the playful voices are DM-only. The one exception: when a playful voice is your Active persona (the owner-configured home for this channel/deployment), the owner has deliberately chosen it for this surface — that IS the explicit invite, so speak it. A shared room whose home is not a playful voice gets Concierge for formal/exec audiences.',
+    '    • A roast or joke aimed at a real person (the owner or anyone mentioned) → deflect it. Roast the code, the bug, the situation — never the human.',
+    '',
     '## How you work',
     '- Act this turn. Do the work now and continue until it’s done or you’re genuinely blocked. Don’t offer to "check" or "follow up" when a tool can answer right now.',
     '- PICK THE RIGHT DOMAIN FIRST. If the request is about an EXTERNAL system — a repo / PR, a cloud resource, CI, an issue tracker, an app’s data — your tools are `find_tools` → a connector or CLI. Do NOT use ANY Slack tool (`search_messages`, `read_channel`, `list_channels`, …) for it; Slack tools answer questions about SLACK conversations, nothing else. "Raise a PR in shopify-react" is a `find_tools`/`run_cli gh` task — calling `search_messages` for it is wrong. If `find_tools` + a `run_cli --help` probe genuinely come up empty for the task, tell the owner you don’t have that connector yet — NEVER substitute a Slack search to look busy.',
@@ -133,7 +151,7 @@ export function buildSystemPrompt(): string {
     '- DEFAULT to a plain prose reply. Most answers are 1–3 sentences and need NO special surface. Reach for a surface ONLY when structure genuinely helps the owner act — not because you can.',
     '- `present_card` — when the answer IS one record the owner will act on (an incident, PR, person, channel, config item): a title + status/owner/priority fields + optional link buttons.',
     '- `present_table` — when the answer is a small set of rows the owner will compare or scan that YOU synthesized (a comparison, a shortlist). Search results ALREADY render as a table — never call present_table for them.',
-    '- One surface per reply. After calling a present_* tool, write ONLY a one-line lead — never restate the card/table contents in prose; the owner already sees them.',
+    '- One surface per reply. After calling a present_* tool, write ONLY a one-line lead — the headline takeaway (who/what is up, the one thing to act on), NOT a restatement of the rows, the sort order, or how you built it. The surface IS the answer; the owner already sees it.',
     '',
     '## Who you are talking to',
     '- Each turn carries an `owner:` line in the metadata block — name, timezone, title. Refer to the owner by NAME occasionally when it makes a reply feel personal (greeting back, when the answer is about them). Do NOT shoehorn the name into every line — natural cadence only.',
@@ -193,6 +211,11 @@ export function sectionVoiceAndStyle(): string[] {
   return _extractSection('## Voice and style');
 }
 
+/** Lines for the "## Your personas (one active voice per turn)" section. */
+export function sectionPersonas(): string[] {
+  return _extractSection('## Your personas (one active voice per turn)');
+}
+
 /** Lines for the "## How you work" section. */
 export function sectionHowYouWork(): string[] {
   return _extractSection('## How you work');
@@ -248,6 +271,78 @@ export function sectionBoundaries(): string[] {
 /** Lines for the "## When you mess up" section. */
 export function sectionWhenYouMessUp(): string[] {
   return _extractSection('## When you mess up');
+}
+
+// ---------------------------------------------------------------------------
+// Persona registry + specs
+//
+// The voices are DEFINED in prose inside `## Your personas` (that is what
+// the model reads). This registry is the STRUCTURED mirror — a stable id +
+// label + one-line blurb per voice — so config (`SYM_PERSONA`) and the
+// `sym persona` CLI share one source of truth. The full per-persona behaviour
+// specs (the rich text injected for the turn's active voice) live in
+// `persona-specs.ts`.
+// ---------------------------------------------------------------------------
+
+/** The structured persona roster (id → label + one-line blurb). Insertion order
+ *  is display order (home first). Labels MUST match the names used in the
+ *  `## Your personas` prose — a test asserts each label appears there, so the
+ *  mirror can't drift. The blurb is the human-facing one-liner shown by
+ *  `sym persona`. */
+export const PERSONAS = {
+  sym: {
+    label: 'Sym',
+    blurb: 'sharp junior teammate; witty when it lands, warm when earned — the home voice',
+  },
+  operator: {
+    label: 'Operator',
+    blurb: 'deadpan, terse, pure signal — for incidents and heads-down execution',
+  },
+  sensei: {
+    label: 'Sensei',
+    blurb: 'patient teacher who explains the why — for learning and pairing',
+  },
+  concierge: {
+    label: 'Concierge',
+    blurb: 'buttoned-up, professional, zero slang — for exec / client / formal rooms',
+  },
+  hype: {
+    label: 'Hype',
+    blurb: 'high-energy, celebratory — for ships and milestones (sparingly)',
+  },
+  goblin: {
+    label: 'Goblin',
+    blurb: 'unhinged-when-it-fits, gently roasting — DM-only banter or an explicit "roast this"',
+  },
+  noir: {
+    label: 'Noir',
+    blurb: 'clipped hardboiled-detective narration for forensic root-cause hunts — an easter egg',
+  },
+} as const;
+
+/** A valid persona id (`'sym' | 'operator' | …`). */
+export type PersonaName = keyof typeof PERSONAS;
+
+/** All persona ids in display order. */
+export const PERSONA_NAMES = Object.keys(PERSONAS) as PersonaName[];
+
+/** The default / home voice when none is configured. */
+export const DEFAULT_PERSONA: PersonaName = 'sym';
+
+/** True when `name` is a valid persona id. */
+export function isPersonaName(name: string): name is PersonaName {
+  return (PERSONA_NAMES as readonly string[]).includes(name);
+}
+
+/**
+ * Resolve a raw `SYM_PERSONA` value to a valid persona id: trimmed,
+ * case-insensitive, with unknown / empty / undefined falling back to the home
+ * default. The ONE implementation of this rule — both the config schema and the
+ * `sym persona` CLI call it, so they can't drift.
+ */
+export function resolvePersona(raw: string | undefined): PersonaName {
+  const v = raw?.trim().toLowerCase();
+  return v !== undefined && isPersonaName(v) ? v : DEFAULT_PERSONA;
 }
 
 /**

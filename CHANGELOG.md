@@ -11,6 +11,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Persona engine** — Sym speaks in one of seven voices (`sym`, `operator`,
+  `sensei`, `concierge`, `hype`, `goblin`, `noir`), one active per turn. The home
+  voice is set per deployment (`SYM_PERSONA`) or per channel (`sym persona set`,
+  stored in an unencrypted `settings.db`); each voice's spec is editable at
+  runtime via `.sym/personas/<id>.md`. Inspect and manage with the `sym persona`
+  CLI.
+
 - **MCP connector client** — Sym now ships a full MCP client (`mcp/pool.ts`,
   `mcp/reconcile.ts`, `mcp/introspect.ts`). Any stdio or remote HTTP+SSE MCP
   server can be wired in via `sym add` or the `SYM_MCP_SERVERS` env var. Tools

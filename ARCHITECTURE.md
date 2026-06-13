@@ -88,10 +88,16 @@ in-process state is the short-lived dedup window (a `Map` keyed on event ID,
 cleared per-entry on ACK). A complete restart drops nothing a user would miss.
 
 **I-2 — The control tier has intentional local state.**
-The operator CLI and the AES-256-GCM SQLite credential store are
-first-class architecture. They exist because MCP connectors have OAuth tokens
-that must survive restarts. "No database" in Sym means no _message_ database.
-The credential store is not a concession; it is required.
+The operator CLI and two local SQLite stores are first-class architecture: the
+AES-256-GCM-encrypted credential store (`credentials.db`) for MCP OAuth tokens
+and static secrets, and a small UNENCRYPTED settings store (`settings.db`) for
+per-channel persona home overrides (a non-secret channel→voice map, so it needs
+no encryption key). They exist because connector credentials and per-channel
+config must survive restarts. "No database" in Sym means no _message_ database.
+These stores are not a concession; they are required. Both default to a
+cwd-relative `.sym/` and MUST be relocated to the persistent volume in production
+— the Dockerfile pins `/data` paths (`SYM_DB_PATH`, `SYM_SETTINGS_DB_PATH`,
+`SYM_PERSONAS_DIR`) for exactly this reason.
 
 **I-3 — `handle-turn` is the sole Pi loop entry point.**
 Nothing else calls into the Pi agent loop. The server ACKs Slack immediately,

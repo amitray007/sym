@@ -55,6 +55,14 @@ export {
 export { SqliteCredentialStore, parseEncryptionKey, _resetStoreForTesting } from './store.js';
 export type { SecretRef, CredentialStore } from './store.js';
 
+// channel-persona-store — unencrypted per-channel home-voice overrides
+export {
+  ChannelPersonaStore,
+  getChannelPersonaStore,
+  _resetChannelPersonaStoreForTesting,
+} from './channel-persona-store.js';
+export type { ChannelPersona } from './channel-persona-store.js';
+
 // providers — credential providers
 export { makeProvider, NotImplementedError } from './providers/provider.js';
 export { StaticProvider } from './providers/static.js';
