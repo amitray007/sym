@@ -4,6 +4,12 @@ packages:
   - 'packages/adapter/*'
 
 catalog:
-  vitest: ^4.1.8
-  '@vitest/coverage-v8': ^4.1.8
+  vitest: ^4.1.9
+  '@vitest/coverage-v8': ^4.1.9
   zod: ^4.4.3
+
+# Force transitive hono (pulled in by @modelcontextprotocol/sdk via its own
+# @hono/node-server@1.x) up to the patched range. Addresses GHSA-88fw-hqm2-52qc
+# (CORS) and related advisories affecting hono <4.12.25.
+overrides:
+  hono: ^4.12.25
