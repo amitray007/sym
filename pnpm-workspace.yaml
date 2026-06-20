@@ -4,6 +4,15 @@ packages:
   - 'packages/adapter/*'
 
 catalog:
-  vitest: ^4.1.8
-  '@vitest/coverage-v8': ^4.1.8
+  vitest: ^4.1.9
+  '@vitest/coverage-v8': ^4.1.9
   zod: ^4.4.3
+
+# Force vulnerable transitive deps up to their patched ranges.
+# - hono (via @modelcontextprotocol/sdk's @hono/node-server@1.x): GHSA-88fw-hqm2-52qc
+#   (CORS) and related advisories affecting hono <4.12.25.
+# - protobufjs (via @earendil-works/pi-ai > @google/genai): GHSA-f38q-mgvj-vph7
+#   (schema-derived names can shadow runtime-significant properties), <=7.6.2.
+overrides:
+  hono: ^4.12.25
+  protobufjs: ^7.6.3
