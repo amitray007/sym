@@ -7,7 +7,7 @@
 #
 # Env vars used:
 #   SLACK_PUBLIC_BASE_URL  Public HTTPS base for redirect + events
-#                          (e.g. https://snowdrop-….ngrok-free.dev in dev,
+#                          (e.g. https://your-tunnel.ngrok-free.dev in dev,
 #                          your prod URL in prod).
 
 display_information:

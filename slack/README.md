@@ -9,7 +9,7 @@ The template uses `${SLACK_PUBLIC_BASE_URL}` for the public HTTPS base
 (redirect URL + events endpoint). Render it with:
 
 ```sh
-SLACK_PUBLIC_BASE_URL=https://snowdrop-....ngrok-free.dev pnpm manifest:render
+SLACK_PUBLIC_BASE_URL=https://your-tunnel.ngrok-free.dev pnpm manifest:render
 # writes slack/manifest.yml
 ```
 
