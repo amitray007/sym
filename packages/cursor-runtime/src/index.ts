@@ -15,6 +15,22 @@ export {
 } from './client.js';
 
 export {
+  CloudRunStore,
+  isTerminalStatus,
+  type CloudRunStoreOptions,
+  type CloudRunIntent,
+  type CloudRunStatusPatch,
+} from './store.js';
+
+export {
+  CloudRunReconciler,
+  type CloudRunReconcilerOptions,
+  type CloudRunPoller,
+} from './reconciler.js';
+
+export { resolveRepo } from './allowlist.js';
+
+export {
   cloudDispatchInputSchema,
   cloudRunStatusSchema,
   repoAllowlistSchema,
