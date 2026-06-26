@@ -30,6 +30,7 @@ import type { BehaviorConfig } from './config.js';
 import type { NameResolver } from './name-resolver.js';
 import type { SlackBlock, SlackClient } from '@sym/adapter-slack';
 import type { ChatMessage, SlackChannelId, SlackThreadTs, SlackUserId, Turn } from '@sym/contracts';
+import type { CloudRunStore, CursorCloudClient, RepoAllowlist } from '@sym/cursor-runtime';
 import type { OwnerIdentity } from '@sym/kernel';
 import type { ConnectorConfig } from '@sym/mcp-runtime';
 
@@ -91,6 +92,16 @@ export interface HandleTurnDeps {
      */
     receiptText: string;
   }) => Promise<void>;
+  /**
+   * Cursor cloud-agent singletons (boot-constructed). Present only when the
+   * feature is configured; threaded into the builtin dispatcher with this turn's
+   * channel/thread so `dispatch_cloud_agent` becomes available in-thread.
+   */
+  cursor?: {
+    client: CursorCloudClient;
+    store: CloudRunStore;
+    allowlist: RepoAllowlist;
+  };
 }
 
 function capitalize(s: string): string {
@@ -220,6 +231,24 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
   // state holder (no card exists) but the tool calls still succeed cleanly.
   const planController = new PlanController();
 
+  // Cloud-agent tool is registered only when the feature is configured AND this
+  // turn has a postable thread (the run's result is delivered back in-thread).
+  // A top-level mention threads under its own message ts.
+  const cloudThreadTs = turn.threadTs ?? turn.ts;
+  const cursorToolDeps =
+    deps.cursor !== undefined && turn.channelId !== undefined && cloudThreadTs !== undefined
+      ? {
+          cursor: {
+            client: deps.cursor.client,
+            store: deps.cursor.store,
+            allowlist: deps.cursor.allowlist,
+            channel: turn.channelId,
+            threadTs: cloudThreadTs,
+            confirm: deps.behavior.cloudAgentConfirm ?? true,
+          },
+        }
+      : {};
+
   const builtin = createBuiltinDispatcher({
     slackClient: deps.slackClient,
     botUserId: deps.botUserId,
@@ -227,6 +256,7 @@ export async function handleTurn(turn: Turn, deps: HandleTurnDeps): Promise<void
     ownerPostMarker: deps.behavior.ownerPostMarker,
     planController,
     nameResolver: deps.nameResolver,
+    ...cursorToolDeps,
   });
 
   // MCP tool layer — lazy-connects stdio servers on first use. When no MCP

@@ -52,6 +52,7 @@ function buildTurnDeps(
     // No mcpConfigs here: handleTurn reads the LIVE active set (getActiveConfigs),
     // which POST /admin/reload reconciles out-of-band. Passing the boot-frozen
     // ctx.mcpServers would pin every turn to the startup config and defeat reload.
+    ...(ctx.cursor !== undefined ? { cursor: ctx.cursor } : {}),
   };
 }
 

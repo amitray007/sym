@@ -30,6 +30,7 @@
     "@opentelemetry/api": "^1.9.1",
     "@sym/adapter-slack": "workspace:*",
     "@sym/contracts": "workspace:*",
+    "@sym/cursor-runtime": "workspace:*",
     "@sym/kernel": "workspace:*",
     "@sym/mcp-runtime": "workspace:*",
     "dotenv": "^17.4.2",

@@ -108,6 +108,9 @@ importers:
       '@sym/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@sym/cursor-runtime':
+        specifier: workspace:*
+        version: link:../../packages/cursor-runtime
       '@sym/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel

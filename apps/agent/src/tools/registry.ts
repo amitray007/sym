@@ -10,6 +10,7 @@
  */
 
 import { NameResolver } from '../name-resolver.js';
+import { DISPATCH_CLOUD_AGENT_DESCRIPTOR, handleDispatchCloudAgent } from './cloud-agent.js';
 import {
   handleSetPlan,
   handleUpdateTask,
@@ -60,6 +61,8 @@ import {
 import type { PlanController } from '../plan-controller.js';
 import type { SlackClient } from '@sym/adapter-slack';
 import type {
+  SlackChannelId,
+  SlackThreadTs,
   SlackUserId,
   ToolCall,
   ToolDescriptor,
@@ -67,6 +70,7 @@ import type {
   ToolResult,
   ToolRuntimeContext,
 } from '@sym/contracts';
+import type { CloudRunStore, CursorCloudClient, RepoAllowlist } from '@sym/cursor-runtime';
 
 /**
  * Dependencies required by the built-in dispatcher.
@@ -102,6 +106,22 @@ export interface BuiltinToolDeps {
    * When absent, tool returns include raw ids — degraded but functional.
    */
   nameResolver?: NameResolver;
+  /**
+   * Cursor cloud-agent deps for THIS turn. Present only when the feature is
+   * configured (CURSOR_API_KEY) AND the turn has a postable thread. Its presence
+   * is what conditionally registers `dispatch_cloud_agent` below — the static
+   * descriptor list cannot vary by config, so gating lives on the per-instance
+   * dispatcher. `confirm` drives the descriptor's `destructiveHint` so the
+   * confirmation gate can be opted out via SYM_CLOUD_AGENT_CONFIRM=false.
+   */
+  cursor?: {
+    client: CursorCloudClient;
+    store: CloudRunStore;
+    allowlist: RepoAllowlist;
+    channel: SlackChannelId;
+    threadTs: SlackThreadTs;
+    confirm: boolean;
+  };
 }
 
 /** Ordered list of all built-in tool descriptors. */
@@ -217,13 +237,40 @@ export function createBuiltinDispatcher(deps: BuiltinToolDeps): ToolDispatcher {
     ['present_table', (call) => Promise.resolve(handlePresentTable(call))],
   ]);
 
+  // Conditional registration: `dispatch_cloud_agent` exists only when this turn
+  // carries cursor deps. The descriptor list + lookup map are built PER INSTANCE
+  // (not from the module-level const, which cannot vary by config). `confirm`
+  // drives `destructiveHint` so SYM_CLOUD_AGENT_CONFIRM=false skips the gate.
+  const cursor = deps.cursor;
+  const descriptors = cursor
+    ? [
+        ...ALL_BUILTIN_DESCRIPTORS,
+        { ...DISPATCH_CLOUD_AGENT_DESCRIPTOR, destructiveHint: cursor.confirm },
+      ]
+    : ALL_BUILTIN_DESCRIPTORS;
+  const descriptorsByName = cursor
+    ? new Map<string, ToolDescriptor>(descriptors.map((d) => [d.name, d]))
+    : DESCRIPTORS_BY_NAME;
+  if (cursor) {
+    handlers.set('dispatch_cloud_agent', (call) =>
+      handleDispatchCloudAgent(call, {
+        client: cursor.client,
+        store: cursor.store,
+        allowlist: cursor.allowlist,
+        slackClient: deps.slackClient,
+        channel: cursor.channel,
+        threadTs: cursor.threadTs,
+      }),
+    );
+  }
+
   return {
     list(): ToolDescriptor[] {
-      return ALL_BUILTIN_DESCRIPTORS;
+      return descriptors;
     },
 
     async dispatch(call: ToolCall, _ctx: ToolRuntimeContext): Promise<ToolResult> {
-      const descriptor = DESCRIPTORS_BY_NAME.get(call.name);
+      const descriptor = descriptorsByName.get(call.name);
       const pick = descriptor
         ? pickClient(descriptor, deps)
         : { client: deps.slackClient, usedActor: 'bot' as const };

@@ -74,6 +74,10 @@ const HIGH_RISK_KEYS = [
   'status_emoji',
   'emoji',
   'name',
+  // dispatch_cloud_agent: the repo (where) and the full task (what) must never
+  // be truncated — they ARE the thing the owner is approving.
+  'repo',
+  'task',
 ];
 
 /** Per-field cap for non-targeting values (targeting fields are short and never cut). */

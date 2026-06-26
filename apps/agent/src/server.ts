@@ -11,6 +11,7 @@ import { getConnInfo } from '@hono/node-server/conninfo';
 import { Hono } from 'hono';
 
 import { verifySlackSignature } from '@sym/adapter-slack';
+import { CloudRunReconciler } from '@sym/cursor-runtime';
 import {
   completeOAuth,
   getActiveConfigs,
@@ -39,10 +40,22 @@ import { healthCheckTokens, loadWorkspaceContext } from './workspace-context.js'
 
 import type { AgentConfig } from './config.js';
 import type { RawSlackEvent } from '@sym/adapter-slack';
-import type { SlackUserId } from '@sym/contracts';
+import type { SlackChannelId, SlackThreadTs, SlackUserId } from '@sym/contracts';
+import type { CloudRunRecord } from '@sym/cursor-runtime';
 
 export interface ServerDeps {
   config: AgentConfig;
+}
+
+/** Slack message for a terminal cloud run — PR link on success, else the status. */
+function cloudRunTransitionText(record: CloudRunRecord): string {
+  if (record.prUrl !== undefined) {
+    return `✅ Cloud agent finished — PR: ${record.prUrl}`;
+  }
+  const detail = record.statusText !== undefined ? ` — ${record.statusText}` : '';
+  if (record.status === 'error') return `❌ Cloud agent failed${detail}`;
+  if (record.status === 'cancelled') return `⚠️ Cloud agent was cancelled${detail}`;
+  return `Cloud agent finished${detail}`;
 }
 
 /**
@@ -64,6 +77,35 @@ export function createServer(deps: ServerDeps): Hono {
   // misconfiguration (wrong workspace, revoked token, missing user OAuth)
   // in the logs at boot without blocking server start.
   void healthCheckTokens(ctx);
+
+  // Cloud-agent reconciler — polls tracked runs and posts the PR (or error) back
+  // into the originating thread when a run finishes. Started once at boot; only
+  // when the feature is configured. The timer is unref'd so it never holds the
+  // process open. Resumes any non-terminal rows from the store (R7).
+  if (ctx.cursor !== undefined) {
+    const cursorCtx = ctx.cursor;
+    const reconciler = new CloudRunReconciler({
+      client: cursorCtx.client,
+      store: cursorCtx.store,
+      ...(config.cursor?.pollIntervalMs !== undefined
+        ? { intervalMs: config.cursor.pollIntervalMs }
+        : {}),
+      onTransition: async (record: CloudRunRecord) => {
+        await ctx.slackClient.chatPostMessage({
+          channel: record.channel as SlackChannelId,
+          thread_ts: record.threadTs as SlackThreadTs,
+          text: cloudRunTransitionText(record),
+        });
+      },
+      setIntervalFn: (fn, ms) => {
+        const t = setInterval(fn, ms);
+        t.unref();
+        return t;
+      },
+    });
+    reconciler.start();
+    console.info('[agent] cloud-agent reconciler started');
+  }
 
   /**
    * THE single owner gate. Every Slack ingress (DM, mention, slash command,

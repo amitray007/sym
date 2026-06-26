@@ -4,11 +4,15 @@
  * one owner, one model provider. No secrets are logged.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { z } from 'zod';
 
+import { repoAllowlistSchema } from '@sym/cursor-runtime';
 import { resolvePersona } from '@sym/kernel';
 import { loadConnectorConfigs } from '@sym/mcp-runtime';
 
+import type { RepoAllowlist } from '@sym/cursor-runtime';
 import type { PersonaName } from '@sym/kernel';
 import type { ConnectorConfig, ConfigSource } from '@sym/mcp-runtime';
 /** Runtime behavior knobs — all optional, all have safe defaults. */
@@ -66,6 +70,23 @@ export interface BehaviorConfig {
    * Default: `'sym'`. Optional so existing callers that don't set it use the default.
    */
   persona?: PersonaName;
+  /**
+   * When true (default), `dispatch_cloud_agent` is confirmation-gated — the
+   * owner previews the repo + task in Slack before the cloud run fires. Set
+   * `SYM_CLOUD_AGENT_CONFIRM=false` to dispatch without the prompt. Defaults to
+   * true: the task text is model-generated and may follow content read during
+   * the turn, so the preview is the owner's review of what gets dispatched.
+   */
+  cloudAgentConfirm?: boolean;
+}
+
+/** Cursor cloud-agent config — present only when CURSOR_API_KEY is set (opt-in). */
+export interface CursorConfig {
+  apiKey: string;
+  model: string;
+  repoAllowlist: RepoAllowlist;
+  pollIntervalMs?: number;
+  dbPath?: string;
 }
 
 export interface AgentConfig {
@@ -103,6 +124,12 @@ export interface AgentConfig {
   mcpServers: ConnectorConfig[];
   /** Where `mcpServers` was loaded from — for boot-log diagnostics. */
   mcpConfigSource: ConfigSource;
+  /**
+   * Cursor cloud-agent config — set only when a non-empty `CURSOR_API_KEY` is
+   * configured. Undefined disables the feature entirely (the tool isn't
+   * registered and no reconciler starts) — zero behavior change.
+   */
+  cursor?: CursorConfig;
 }
 
 const DEFAULT_FIREWORKS_BASE_URL = 'https://api.fireworks.ai/inference/v1';
@@ -116,6 +143,36 @@ function required(name: string): string {
     throw new Error(`${name} is required`);
   }
   return value;
+}
+
+/**
+ * Load the cloud-agent repo allowlist from the same `.sym/config.json` the MCP
+ * connectors use (top-level `cursorRepos` array). Fail-open like the connector
+ * loader: a missing file, bad JSON, or a malformed array yields an empty list
+ * (no dispatchable repos) rather than crashing boot.
+ */
+function loadRepoAllowlist(): RepoAllowlist {
+  const path = process.env['SYM_CONFIG_PATH']?.trim() || '.sym/config.json';
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { cursorRepos?: unknown };
+    const result = repoAllowlistSchema.safeParse(parsed.cursorRepos ?? []);
+    return result.success ? result.data : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Build the optional Cursor config — only when a non-empty CURSOR_API_KEY is set. */
+function loadCursorConfig(): CursorConfig | undefined {
+  const apiKey = process.env['CURSOR_API_KEY']?.trim();
+  if (apiKey === undefined || apiKey.length === 0) return undefined;
+  const dbPath = process.env['SYM_CLOUD_DB_PATH']?.trim();
+  return {
+    apiKey,
+    model: process.env['CURSOR_MODEL']?.trim() || 'composer-2.5',
+    repoAllowlist: loadRepoAllowlist(),
+    ...(dbPath !== undefined && dbPath.length > 0 ? { dbPath } : {}),
+  };
 }
 
 /**
@@ -137,6 +194,12 @@ const behaviorEnvSchema = z.object({
     .string()
     .optional()
     .transform((v) => /^(1|true|yes|on)$/i.test(v ?? '')),
+  // Cloud-agent dispatch confirmation. Defaults to TRUE (safe): only an explicit
+  // off value disables the preview gate.
+  SYM_CLOUD_AGENT_CONFIRM: z
+    .string()
+    .optional()
+    .transform((v) => v === undefined || !/^(0|false|no|off)$/i.test(v)),
   SYM_TURN_DEADLINE_MS: z.coerce.number().int().nonnegative().catch(DEFAULT_TURN_DEADLINE_MS),
   SYM_THREAD_HISTORY_LIMIT: z.coerce
     .number()
@@ -151,6 +214,7 @@ const behaviorEnvSchema = z.object({
 export function loadAgentConfig(): AgentConfig {
   const connectors = loadConnectorConfigs();
   const behavior = behaviorEnvSchema.parse(process.env);
+  const cursor = loadCursorConfig();
   return {
     port: Number(process.env['AGENT_PORT'] ?? '3001'),
     slackSigningSecret: required('SLACK_SIGNING_SECRET'),
@@ -172,8 +236,10 @@ export function loadAgentConfig(): AgentConfig {
       turnDeadlineMs: behavior.SYM_TURN_DEADLINE_MS,
       threadHistoryLimit: behavior.SYM_THREAD_HISTORY_LIMIT,
       persona: behavior.SYM_PERSONA,
+      cloudAgentConfirm: behavior.SYM_CLOUD_AGENT_CONFIRM,
     },
     mcpServers: connectors.mcpServers,
     mcpConfigSource: connectors.source,
+    ...(cursor !== undefined ? { cursor } : {}),
   };
 }

@@ -8,12 +8,14 @@
  */
 
 import { WebApiSlackClient } from '@sym/adapter-slack';
+import { CloudRunStore, CursorCloudClient } from '@sym/cursor-runtime';
 
 import { NameResolver } from './name-resolver.js';
 
 import type { AgentConfig } from './config.js';
 import type { SlackClient } from '@sym/adapter-slack';
 import type { SlackUserId, WorkspaceId } from '@sym/contracts';
+import type { RepoAllowlist } from '@sym/cursor-runtime';
 import type { OwnerIdentity } from '@sym/kernel';
 import type { ConnectorConfig } from '@sym/mcp-runtime';
 
@@ -59,6 +61,17 @@ export interface WorkspaceContext {
    * Passed through to `HandleTurnDeps.mcpConfigs`.
    */
   mcpServers: ConnectorConfig[];
+  /**
+   * Cursor cloud-agent singletons — constructed once at boot when the feature
+   * is configured (`config.cursor`). The store + client are shared across turns
+   * (the store is a persistent SQLite handle); the reconciler is started
+   * separately in `createServer`. Absent when the feature is off.
+   */
+  cursor?: {
+    client: CursorCloudClient;
+    store: CloudRunStore;
+    allowlist: RepoAllowlist;
+  };
 }
 
 /**
@@ -83,6 +96,15 @@ export function loadWorkspaceContext(config: AgentConfig): WorkspaceContext {
   };
   if (config.slackUserToken !== undefined) {
     ctx.userSlackClient = new WebApiSlackClient(config.slackUserToken);
+  }
+  if (config.cursor !== undefined) {
+    ctx.cursor = {
+      client: new CursorCloudClient({ apiKey: config.cursor.apiKey, model: config.cursor.model }),
+      store: new CloudRunStore(
+        config.cursor.dbPath !== undefined ? { dbPath: config.cursor.dbPath } : {},
+      ),
+      allowlist: config.cursor.repoAllowlist,
+    };
   }
   return ctx;
 }
