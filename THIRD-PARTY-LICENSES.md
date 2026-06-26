@@ -1,7 +1,8 @@
 # Third-party licenses
 
-Sym is distributed under the [MIT License](LICENSE). It depends on third-party
-open-source packages, all under permissive licenses compatible with MIT.
+Sym itself is distributed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+It depends on third-party open-source packages, all under permissive licenses
+(MIT, Apache-2.0, BSD, ISC, and similar).
 
 ## Runtime dependency licenses
 
@@ -42,4 +43,4 @@ the audit gated in CI.
 ## SBOM
 
 A full CycloneDX/SPDX software bill of materials is deferred to the first tagged
-open-source release.
+release.

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Sym shared types and contracts — domain models, tool interfaces, render primitives.",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "author": "Amit Ray",
   "repository": {
     "type": "git",

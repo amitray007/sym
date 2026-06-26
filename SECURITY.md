@@ -8,7 +8,7 @@ Use GitHub's [Private Vulnerability Reporting](https://github.com/amitray007/sym
 to report confidentially. You will receive an acknowledgement within 48 hours.
 
 If Private Vulnerability Reporting does not work for you, email
-**amitray.private@gmail.com** directly with "Sym security" in the subject line.
+**hey@amitray.dev** directly with "Sym security" in the subject line.
 
 ---
 

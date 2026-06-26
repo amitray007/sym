@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Sym kernel — Slack workspace context, prompt building, and receipt formatting.",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "author": "Amit Ray",
   "repository": {
     "type": "git",
