@@ -74,11 +74,13 @@ export async function handleDispatchCloudAgent(
   deps: CloudAgentToolDeps,
 ): Promise<ToolResult> {
   const args = call.arguments;
-  const branch = args['branch'];
+  const branch = typeof args['branch'] === 'string' ? args['branch'].trim() : '';
   const parsed = cloudDispatchInputSchema.safeParse({
     repoQuery: args['repo'],
     task: args['task'],
-    ...(typeof branch === 'string' ? { startingRef: branch } : {}),
+    // An empty/whitespace branch means "use the repo default" — treat as absent
+    // rather than letting it fail the (min-length) startingRef validation.
+    ...(branch.length > 0 ? { startingRef: branch } : {}),
   });
   if (!parsed.success) {
     return argError(
@@ -112,7 +114,25 @@ export async function handleDispatchCloudAgent(
     return execError(call, `Cloud dispatch failed: ${errMsg(err)}`);
   }
 
-  deps.store.patchDispatched(dispatchId, { runId: result.runId, agentId: result.agentId });
+  const patched = deps.store.patchDispatched(dispatchId, {
+    runId: result.runId,
+    agentId: result.agentId,
+  });
+
+  if (!patched) {
+    // The dispatch outran the reconciler's grace window: the intent row was
+    // already failed + delivered, so the patch no-ops and this run is now
+    // orphaned (running in Cursor but no longer tracked). Don't post a
+    // contradictory "started" message; report honestly.
+    console.warn(
+      `[cursor] dispatch raced the grace timeout; run ${result.runId} may be orphaned (untracked)`,
+    );
+    return {
+      callId: call.id,
+      ok: true,
+      content: `The cloud agent started on ${repo.name}, but tracking timed out before it was confirmed, so I can't post the PR back automatically — check Cursor for run ${result.runId}.`,
+    };
+  }
 
   try {
     await deps.slackClient.chatPostMessage({

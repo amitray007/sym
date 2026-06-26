@@ -92,8 +92,75 @@ describe('handleDispatchCloudAgent', () => {
     expect(run?.status).toBe('running');
     expect(run?.agentId).toBe('agent-9');
     expect(run?.channel).toBe('C1');
+    // The reconciler routes its post-back from the STORED threadTs — assert it
+    // was persisted, not just passed to the initial post.
+    expect(run?.threadTs).toBe('T1');
     expect(posts).toHaveLength(1);
     expect(posts[0]?.thread_ts).toBe('T1');
+  });
+
+  it('treats an empty branch as absent (does not fail validation)', async () => {
+    const dispatch = vi.fn(async () => ({ agentId: 'a', runId: 'r' }));
+    const { deps } = makeDeps({ dispatch });
+
+    const res = await handleDispatchCloudAgent(
+      makeCall({ repo: 'sym', task: 'do x', branch: '   ' }),
+      deps,
+    );
+
+    expect(res.ok).toBe(true);
+    expect(dispatch).toHaveBeenCalledWith({ repoUrl: 'https://github.com/o/sym', task: 'do x' });
+  });
+
+  it('still returns ok when the initial Slack post throws (non-fatal)', async () => {
+    const store = new CloudRunStore({ dbPath: ':memory:' });
+    const slackClient = {
+      async chatPostMessage(): Promise<never> {
+        throw new Error('slack down');
+      },
+    } as unknown as SlackClient;
+    const deps: CloudAgentToolDeps = {
+      client: {
+        dispatch: async () => ({ agentId: 'a', runId: 'r' }),
+      } as unknown as CursorCloudClient,
+      store,
+      allowlist: ALLOWLIST,
+      slackClient,
+      channel: 'C1' as SlackChannelId,
+      threadTs: 'T1' as SlackThreadTs,
+    };
+
+    const res = await handleDispatchCloudAgent(makeCall({ repo: 'sym', task: 'do x' }), deps);
+    expect(res.ok).toBe(true);
+    expect(store.getByRunId('r')?.status).toBe('running');
+  });
+
+  it('reports honestly and skips the started-post when the dispatch races the grace timeout', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    // A store whose patchDispatched no-ops (the reconciler already failed the row).
+    const store = {
+      insertIntent: () => undefined,
+      patchDispatched: () => false,
+      markStatus: () => undefined,
+    } as unknown as CloudRunStore;
+    const slack = makeSlack();
+    const deps: CloudAgentToolDeps = {
+      client: {
+        dispatch: async () => ({ agentId: 'a', runId: 'run-x' }),
+      } as unknown as CursorCloudClient,
+      store,
+      allowlist: ALLOWLIST,
+      slackClient: slack.client,
+      channel: 'C1' as SlackChannelId,
+      threadTs: 'T1' as SlackThreadTs,
+    };
+
+    const res = await handleDispatchCloudAgent(makeCall({ repo: 'sym', task: 'do x' }), deps);
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(String(res.content)).toMatch(/tracking timed out|check Cursor/i);
+    expect(slack.posts).toHaveLength(0); // no contradictory "started" message
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it('marks the intent row error and returns a failure when dispatch throws (no orphan)', async () => {

@@ -98,13 +98,32 @@ export function loadWorkspaceContext(config: AgentConfig): WorkspaceContext {
     ctx.userSlackClient = new WebApiSlackClient(config.slackUserToken);
   }
   if (config.cursor !== undefined) {
-    ctx.cursor = {
-      client: new CursorCloudClient({ apiKey: config.cursor.apiKey, model: config.cursor.model }),
-      store: new CloudRunStore(
-        config.cursor.dbPath !== undefined ? { dbPath: config.cursor.dbPath } : {},
-      ),
-      allowlist: config.cursor.repoAllowlist,
-    };
+    // Opt-in feature must never crash the agent. CloudRunStore opens SQLite
+    // eagerly; a bad SYM_CLOUD_DB_PATH (e.g. an unmounted volume in prod) would
+    // otherwise throw past boot and take the whole bot down. Fail open: log and
+    // leave the feature off, exactly like the allowlist load.
+    try {
+      ctx.cursor = {
+        client: new CursorCloudClient({
+          apiKey: config.cursor.apiKey,
+          model: config.cursor.model,
+        }),
+        store: new CloudRunStore(
+          config.cursor.dbPath !== undefined ? { dbPath: config.cursor.dbPath } : {},
+        ),
+        allowlist: config.cursor.repoAllowlist,
+      };
+      if (config.cursor.repoAllowlist.length === 0) {
+        console.warn(
+          '[cursor] cloud-agent enabled but no repos are allowlisted ' +
+            '(set cursorRepos in .sym/config.json); all dispatches will be rejected',
+        );
+      }
+    } catch (err) {
+      console.error(
+        `[cursor] cloud-agent feature disabled: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
   return ctx;
 }

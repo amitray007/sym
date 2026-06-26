@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadAgentConfig } from '../src/config.js';
@@ -17,7 +21,17 @@ const CURSOR_KEYS = [
   'CURSOR_MODEL',
   'SYM_CLOUD_DB_PATH',
   'SYM_CLOUD_AGENT_CONFIRM',
+  'SYM_CONFIG_PATH',
 ];
+
+/** Write a throwaway `.sym/config.json` and point SYM_CONFIG_PATH at it. */
+function withConfigFile(contents: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'sym-cfg-'));
+  const path = join(dir, 'config.json');
+  writeFileSync(path, contents);
+  process.env['SYM_CONFIG_PATH'] = path;
+  return dir;
+}
 
 let saved: NodeJS.ProcessEnv;
 
@@ -61,5 +75,31 @@ describe('loadAgentConfig — cursor gating', () => {
     expect(loadAgentConfig().behavior.cloudAgentConfirm).toBe(true);
     process.env['SYM_CLOUD_AGENT_CONFIRM'] = 'false';
     expect(loadAgentConfig().behavior.cloudAgentConfirm).toBe(false);
+  });
+
+  it('parses a valid cursorRepos allowlist from the config file', () => {
+    process.env['CURSOR_API_KEY'] = 'crsr-abc';
+    const dir = withConfigFile(
+      JSON.stringify({ cursorRepos: [{ name: 'sym', url: 'https://github.com/o/sym' }] }),
+    );
+    try {
+      expect(loadAgentConfig().cursor?.repoAllowlist).toEqual([
+        { name: 'sym', url: 'https://github.com/o/sym' },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls open to an empty allowlist when cursorRepos is malformed (no crash)', () => {
+    process.env['CURSOR_API_KEY'] = 'crsr-abc';
+    const dir = withConfigFile(JSON.stringify({ cursorRepos: [{ name: 123, url: 'not-a-url' }] }));
+    try {
+      const cursor = loadAgentConfig().cursor;
+      expect(cursor).toBeDefined();
+      expect(cursor?.repoAllowlist).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
