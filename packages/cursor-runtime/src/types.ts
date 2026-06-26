@@ -9,16 +9,18 @@
 
 import { z } from 'zod';
 
+import type { RunStatus } from '@cursor/sdk';
+
 /**
  * Lifecycle of a tracked cloud run.
  *
  * - `dispatching` — local intent row written BEFORE `client.dispatch`, so a
  *   crash in the dispatch window leaves a recoverable row (KTD7).
- * - `running` — Cursor confirmed the run and it is executing.
- * - `finished` | `error` | `cancelled` — terminal. `cancelled` is a first-class
- *   SDK terminal state (`RunStatus`); omitting it would leak runs forever.
+ * - `RunStatus` — the SDK's own states: `running` (executing) and the terminal
+ *   `finished` | `error` | `cancelled`. Derived from the SDK type so a new
+ *   terminal state can't silently drift out of sync.
  */
-export type CloudRunStatus = 'dispatching' | 'running' | 'finished' | 'error' | 'cancelled';
+export type CloudRunStatus = 'dispatching' | RunStatus;
 
 /** Terminal statuses — a run in one of these is done and never polled again. */
 export const CLOUD_RUN_TERMINAL_STATUSES = ['finished', 'error', 'cancelled'] as const;
@@ -46,18 +48,15 @@ export const cloudDispatchInputSchema = z.object({
 });
 export type CloudDispatchInput = z.infer<typeof cloudDispatchInputSchema>;
 
-/** A resolved, allowlisted repository the cloud agent may operate on. */
-export interface RepoRef {
-  name: string;
-  url: string;
-}
-
 export const repoAllowlistEntrySchema = z.object({
   name: z.string().min(1),
   url: z.string().url(),
 });
 export const repoAllowlistSchema = z.array(repoAllowlistEntrySchema);
-export type RepoAllowlist = RepoRef[];
+
+/** A resolved, allowlisted repository — derived from the schema to prevent drift. */
+export type RepoRef = z.infer<typeof repoAllowlistEntrySchema>;
+export type RepoAllowlist = z.infer<typeof repoAllowlistSchema>;
 
 /**
  * Client-level dispatch request — the tool resolves `repoQuery` → `RepoRef`
@@ -83,7 +82,7 @@ export interface CloudDispatchResult {
  * link.
  */
 export interface CloudRunView {
-  status: 'running' | 'finished' | 'error' | 'cancelled';
+  status: RunStatus;
   prUrl?: string;
   summary?: string;
   pendingPr: boolean;

@@ -8,11 +8,10 @@
 
 export {
   CursorCloudClient,
-  defaultCursorSdkPort,
+  CursorClientError,
   type CursorCloudClientOptions,
+  type CursorErrorCode,
   type CursorSdkPort,
-  type CursorAgentLike,
-  type CursorRunLike,
 } from './client.js';
 
 export {

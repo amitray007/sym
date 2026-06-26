@@ -30,6 +30,7 @@ export default {
         'kernel',
         'agent',
         'mcp',
+        'cursor',
         // Operator control tier (kept — see docs/FUTURE.md)
         'cli',
         'tui',
