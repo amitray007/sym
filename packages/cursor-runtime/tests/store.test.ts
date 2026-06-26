@@ -78,6 +78,63 @@ describe('CloudRunStore', () => {
     s.close();
   });
 
+  it('preserves a prior prUrl across a later markStatus without one (COALESCE)', () => {
+    const s = makeStore();
+    s.insertIntent({ dispatchId: 'd1', channel: 'C', threadTs: 'T' });
+    s.markStatus('d1', 'finished', { prUrl: 'https://pr/1' });
+    s.markStatus('d1', 'finished', { statusText: 'update only' });
+    const rec = s.get('d1');
+    expect(rec?.prUrl).toBe('https://pr/1');
+    expect(rec?.statusText).toBe('update only');
+    s.close();
+  });
+
+  it('returns active rows oldest-first without the caller sorting', () => {
+    let t = 0;
+    const s = new CloudRunStore({ dbPath: ':memory:', now: () => t });
+    t = 300;
+    s.insertIntent({ dispatchId: 'late', channel: 'C', threadTs: 'T' });
+    t = 100;
+    s.insertIntent({ dispatchId: 'early', channel: 'C', threadTs: 'T' });
+    expect(s.listActive().map((r) => r.dispatchId)).toEqual(['early', 'late']);
+    s.close();
+  });
+
+  it('markStatus on an unknown dispatchId is a silent no-op', () => {
+    const s = makeStore();
+    expect(() => s.markStatus('nope', 'finished')).not.toThrow();
+    expect(s.get('nope')).toBeUndefined();
+    s.close();
+  });
+
+  it('getByRunId returns undefined for a dispatching row (null run_id)', () => {
+    const s = makeStore();
+    s.insertIntent({ dispatchId: 'd1', channel: 'C', threadTs: 'T' });
+    expect(s.getByRunId('d1')).toBeUndefined();
+    s.close();
+  });
+
+  it('patchDispatched will not resurrect a row that already left dispatching', () => {
+    const s = makeStore();
+    s.insertIntent({ dispatchId: 'd1', channel: 'C', threadTs: 'T' });
+    s.markStatus('d1', 'error', { statusText: 'dispatch never confirmed' }); // grace fired
+    const patched = s.patchDispatched('d1', { runId: 'r1', agentId: 'a1' });
+    expect(patched).toBe(false);
+    expect(s.get('d1')?.status).toBe('error');
+    expect(s.get('d1')?.runId).toBeUndefined();
+    s.close();
+  });
+
+  it('markPendingSince anchors once and is idempotent', () => {
+    const s = makeStore();
+    s.insertIntent({ dispatchId: 'd1', channel: 'C', threadTs: 'T' });
+    s.markPendingSince('d1', 1500);
+    expect(s.get('d1')?.pendingSince).toBe(1500);
+    s.markPendingSince('d1', 9999);
+    expect(s.get('d1')?.pendingSince).toBe(1500);
+    s.close();
+  });
+
   it('persists active rows across store instances (R7 resume)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cloudrun-'));
     const dbPath = join(dir, 'cloud.db');

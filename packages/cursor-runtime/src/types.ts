@@ -25,6 +25,11 @@ export type CloudRunStatus = 'dispatching' | RunStatus;
 /** Terminal statuses — a run in one of these is done and never polled again. */
 export const CLOUD_RUN_TERMINAL_STATUSES = ['finished', 'error', 'cancelled'] as const;
 
+/** True when a status is terminal (no further polling). */
+export function isTerminalStatus(status: CloudRunStatus): boolean {
+  return (CLOUD_RUN_TERMINAL_STATUSES as readonly string[]).includes(status);
+}
+
 export const cloudRunStatusSchema: z.ZodType<CloudRunStatus> = z.enum([
   'dispatching',
   'running',
@@ -102,6 +107,8 @@ export interface CloudRunRecord {
   status: CloudRunStatus;
   statusText?: string;
   prUrl?: string;
+  /** unix epoch ms when the run was first observed finished-without-PR (PR-wait anchor). */
+  pendingSince?: number;
   /** unix epoch ms once the terminal result was delivered to Slack. */
   deliveredAt?: number;
   createdAt: number;

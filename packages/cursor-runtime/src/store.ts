@@ -19,7 +19,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { CLOUD_RUN_TERMINAL_STATUSES, type CloudRunRecord, type CloudRunStatus } from './types.js';
+import type { CloudRunRecord, CloudRunStatus } from './types.js';
 
 const DEFAULT_DIR = `${process.cwd()}/.sym`;
 const DEFAULT_FILE = 'cloud.db';
@@ -33,6 +33,7 @@ interface Row {
   status: string;
   status_text: string | null;
   pr_url: string | null;
+  pending_since: number | null;
   delivered_at: number | null;
   created_at: number;
   updated_at: number;
@@ -99,17 +100,18 @@ export class CloudRunStore {
   #migrate(): void {
     this.#db.exec(`
       CREATE TABLE IF NOT EXISTS cloud_runs (
-        dispatch_id  TEXT PRIMARY KEY,
-        run_id       TEXT,
-        agent_id     TEXT,
-        channel      TEXT NOT NULL,
-        thread_ts    TEXT NOT NULL,
-        status       TEXT NOT NULL,
-        status_text  TEXT,
-        pr_url       TEXT,
-        delivered_at INTEGER,
-        created_at   INTEGER NOT NULL,
-        updated_at   INTEGER NOT NULL
+        dispatch_id   TEXT PRIMARY KEY,
+        run_id        TEXT,
+        agent_id      TEXT,
+        channel       TEXT NOT NULL,
+        thread_ts     TEXT NOT NULL,
+        status        TEXT NOT NULL,
+        status_text   TEXT,
+        pr_url        TEXT,
+        pending_since INTEGER,
+        delivered_at  INTEGER,
+        created_at    INTEGER NOT NULL,
+        updated_at    INTEGER NOT NULL
       )
     `);
   }
@@ -125,15 +127,21 @@ export class CloudRunStore {
       .run(intent.dispatchId, intent.channel, intent.threadTs, ts, ts);
   }
 
-  /** Patch in the Cursor identifiers once dispatch is confirmed; flips to `running`. */
-  patchDispatched(dispatchId: string, ids: { runId: string; agentId: string }): void {
-    this.#db
+  /**
+   * Patch in the Cursor identifiers once dispatch is confirmed; flips to `running`.
+   * Guarded on `status = 'dispatching'` so a late confirmation can't resurrect a
+   * row the reconciler already failed (and delivered) for exceeding the grace.
+   * Returns true when the row was actually patched.
+   */
+  patchDispatched(dispatchId: string, ids: { runId: string; agentId: string }): boolean {
+    const res = this.#db
       .prepare(
         `UPDATE cloud_runs
          SET run_id = ?, agent_id = ?, status = 'running', updated_at = ?
-         WHERE dispatch_id = ?`,
+         WHERE dispatch_id = ? AND status = 'dispatching'`,
       )
       .run(ids.runId, ids.agentId, this.#now(), dispatchId);
+    return Number(res.changes) > 0;
   }
 
   /** Update the run's status (+ optional short status text / PR url). */
@@ -150,6 +158,16 @@ export class CloudRunStore {
       .run(status, patch.statusText ?? null, patch.prUrl ?? null, this.#now(), dispatchId);
   }
 
+  /** Anchor the PR-wait clock the first time a run is seen finished-without-PR (idempotent). */
+  markPendingSince(dispatchId: string, at: number): void {
+    this.#db
+      .prepare(
+        `UPDATE cloud_runs SET pending_since = ?, updated_at = ?
+         WHERE dispatch_id = ? AND pending_since IS NULL`,
+      )
+      .run(at, this.#now(), dispatchId);
+  }
+
   /** Mark the terminal result delivered to Slack (idempotency guard for the post). */
   markDelivered(dispatchId: string): void {
     const ts = this.#now();
@@ -159,25 +177,22 @@ export class CloudRunStore {
   }
 
   get(dispatchId: string): CloudRunRecord | undefined {
-    const row = this.#db
-      .prepare('SELECT * FROM cloud_runs WHERE dispatch_id = ?')
-      .get(dispatchId) as Row | undefined;
-    return row ? rowToRecord(row) : undefined;
+    return this.#queryOne('SELECT * FROM cloud_runs WHERE dispatch_id = ?', dispatchId);
   }
 
   getByRunId(runId: string): CloudRunRecord | undefined {
-    const row = this.#db.prepare('SELECT * FROM cloud_runs WHERE run_id = ?').get(runId) as
-      | Row
-      | undefined;
-    return row ? rowToRecord(row) : undefined;
+    return this.#queryOne('SELECT * FROM cloud_runs WHERE run_id = ?', runId);
   }
 
   /**
    * Rows the reconciler must act on: everything not yet terminally delivered.
    * `delivered_at IS NULL` covers `dispatching`, `running`, and any terminal row
-   * still awaiting Slack delivery; terminal+delivered rows are excluded.
+   * still awaiting Slack delivery; terminal+delivered rows are excluded. Oldest
+   * first, so the reconciler processes runs in dispatch order.
    */
   listActive(): CloudRunRecord[] {
+    // node:sqlite types `.all()` as `Record<string, SQLOutputValue>[]`; the
+    // intermediate `unknown` is the single escape hatch to our `Row` shape.
     const rows = this.#db
       .prepare('SELECT * FROM cloud_runs WHERE delivered_at IS NULL ORDER BY created_at ASC')
       .all() as unknown as Row[];
@@ -187,26 +202,26 @@ export class CloudRunStore {
   close(): void {
     this.#db.close();
   }
+
+  #queryOne(sql: string, param: string): CloudRunRecord | undefined {
+    const row = this.#db.prepare(sql).get(param) as unknown as Row | undefined;
+    return row ? rowToRecord(row) : undefined;
+  }
 }
 
 function rowToRecord(row: Row): CloudRunRecord {
-  const status = row.status as CloudRunStatus;
   return {
     dispatchId: row.dispatch_id,
     ...(row.run_id !== null ? { runId: row.run_id } : {}),
     ...(row.agent_id !== null ? { agentId: row.agent_id } : {}),
     channel: row.channel,
     threadTs: row.thread_ts,
-    status,
+    status: row.status as CloudRunStatus,
     ...(row.status_text !== null ? { statusText: row.status_text } : {}),
     ...(row.pr_url !== null ? { prUrl: row.pr_url } : {}),
+    ...(row.pending_since !== null ? { pendingSince: row.pending_since } : {}),
     ...(row.delivered_at !== null ? { deliveredAt: row.delivered_at } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-}
-
-/** True when a status is terminal (no further polling). */
-export function isTerminalStatus(status: CloudRunStatus): boolean {
-  return (CLOUD_RUN_TERMINAL_STATUSES as readonly string[]).includes(status);
 }

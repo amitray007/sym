@@ -328,4 +328,9 @@ describe('CursorCloudClient.getRun', () => {
       pendingPr: false,
     });
   });
+
+  it('normalizes an unrecognized SDK status to running (keep polling)', async () => {
+    const run = { status: 'queued' } as unknown as CursorRunLike;
+    expect(await clientFor(run).getRun('a', 'r')).toEqual({ status: 'running', pendingPr: false });
+  });
 });

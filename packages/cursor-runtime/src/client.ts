@@ -83,6 +83,18 @@ function classifySdkError(err: unknown): { code: CursorErrorCode; retryable: boo
   }
 }
 
+const KNOWN_RUN_STATUSES: ReadonlySet<string> = new Set([
+  'running',
+  'finished',
+  'error',
+  'cancelled',
+]);
+
+/** Coerce an SDK run status to a known value; unrecognized → `running` (keep polling). */
+function normalizeRunStatus(status: string): CloudRunView['status'] {
+  return KNOWN_RUN_STATUSES.has(status) ? (status as CloudRunView['status']) : 'running';
+}
+
 /** Real `@cursor/sdk`-backed port. Lazy-imports so unit tests with a fake never load the SDK. */
 export function defaultCursorSdkPort(apiKey: string): CursorSdkPort {
   return {
@@ -162,12 +174,16 @@ export class CursorCloudClient {
   async getRun(agentId: string, runId: string): Promise<CloudRunView> {
     try {
       const run = await this.#sdk.getCloudRun(runId, agentId);
+      // Defensive: an unrecognized status (SDK drift) is treated as still-running
+      // so a live run is never wrongly terminated; the reconciler's max-run
+      // deadline backstops a genuinely stuck run.
+      const status = normalizeRunStatus(run.status);
       const prUrl = run.git?.branches.find((b) => b.prUrl)?.prUrl;
       return {
-        status: run.status,
+        status,
         ...(prUrl ? { prUrl } : {}),
         ...(run.result !== undefined ? { summary: run.result } : {}),
-        pendingPr: run.status === 'finished' && !prUrl,
+        pendingPr: status === 'finished' && !prUrl,
       };
     } catch (err) {
       throw this.#wrapSdkError(err);

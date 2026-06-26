@@ -11,10 +11,11 @@ import type { RepoAllowlist, RepoRef } from './types.js';
 export function resolveRepo(query: string, allowlist: RepoAllowlist): RepoRef | null {
   const trimmed = query.trim();
   if (trimmed.length === 0) return null;
+  // URL match takes precedence across ALL entries before any name match, so a
+  // pasted URL can never resolve to a different repo whose name happens to
+  // collide with it.
+  const byUrl = allowlist.find((entry) => entry.url === trimmed);
+  if (byUrl !== undefined) return byUrl;
   const lower = trimmed.toLowerCase();
-  for (const entry of allowlist) {
-    if (entry.url === trimmed) return entry;
-    if (entry.name.toLowerCase() === lower) return entry;
-  }
-  return null;
+  return allowlist.find((entry) => entry.name.toLowerCase() === lower) ?? null;
 }

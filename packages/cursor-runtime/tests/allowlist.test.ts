@@ -39,4 +39,14 @@ describe('resolveRepo', () => {
     expect(resolveRepo('', allowlist)).toBeNull();
     expect(resolveRepo('sym', [])).toBeNull();
   });
+
+  it('prefers a url match over an earlier entry whose name collides with that url', () => {
+    const collision: RepoAllowlist = [
+      { name: 'https://github.com/o/a', url: 'https://github.com/o/decoy' },
+      { name: 'real', url: 'https://github.com/o/a' },
+    ];
+    // The query is a URL; it must resolve to the entry whose URL matches, not the
+    // earlier entry that merely has a matching name.
+    expect(resolveRepo('https://github.com/o/a', collision)?.url).toBe('https://github.com/o/a');
+  });
 });

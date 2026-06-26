@@ -16,7 +16,6 @@ export {
 
 export {
   CloudRunStore,
-  isTerminalStatus,
   type CloudRunStoreOptions,
   type CloudRunIntent,
   type CloudRunStatusPatch,
@@ -36,6 +35,7 @@ export {
   repoAllowlistSchema,
   repoAllowlistEntrySchema,
   CLOUD_RUN_TERMINAL_STATUSES,
+  isTerminalStatus,
   type CloudRunStatus,
   type CloudDispatchInput,
   type CloudDispatchRequest,
