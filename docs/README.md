@@ -27,8 +27,3 @@ distinct job, so you can find what you need by the question you're asking.
   (I-1…I-7), and a turn's lifecycle.
 - **[FUTURE.md](./FUTURE.md)** — parked ideas and the rationale for keeping the
   local-state control tier.
-
----
-
-For contributors: `docs/refactor/` holds the OSS-readiness audit and the
-dependency-ordered chunk backlog that drove this restructure.

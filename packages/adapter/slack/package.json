@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Sym Slack adapter — Block Kit rendering, event normalisation, Web API client wrappers.",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "author": "Amit Ray",
   "repository": {
     "type": "git",

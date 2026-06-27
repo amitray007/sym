@@ -1,9 +1,9 @@
 # Sym
 
-**An open-source AI teammate that lives in your Slack workspace.**
+**A source-available AI teammate that lives in your Slack workspace.**
 
 [![CI](https://github.com/amitray007/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/amitray007/sym/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
 [![Node >=24](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org)
 
 Sym is a single-tenant, single-deployable Slack bot. DM it, @mention it, or use `/sym <prompt>` from any channel. It replies inline in threads using rich Slack Block Kit formatting, with a live task card that tracks tool calls as they happen. Its primary extension surface is the [Model Context Protocol (MCP)](https://modelcontextprotocol.io): wire in any MCP server via the `sym` CLI and its tools are immediately available to the agent in every conversation.
@@ -527,7 +527,12 @@ For bugs, use the [Bug Report issue template](https://github.com/amitray007/sym/
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+You may use, run, study, and modify Sym for any **noncommercial** purpose.
+**Commercial use, selling, or commercial redistribution requires a separate
+license** — contact Amit Ray at hey@amitray.dev.
+
+This is _not_ an OSI-approved open-source license.
 
 ---
 

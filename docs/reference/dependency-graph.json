@@ -6348,7 +6348,7 @@
     "totalCruised": 155,
     "totalDependenciesCruised": 329,
     "optionsUsed": {
-      "baseDir": "/Users/maverick/code/projects/sym",
+      "baseDir": ".",
       "combinedDependencies": true,
       "detectJSDocImports": false,
       "detectProcessBuiltinModuleCalls": false,
@@ -6374,7 +6374,7 @@
           "collapsePattern": "^(node_modules|packages/[^/]+/src|apps/[^/]+/src)/.*"
         }
       },
-      "rulesFile": "/Users/maverick/code/projects/sym/.dependency-cruiser.cjs",
+      "rulesFile": ".dependency-cruiser.cjs",
       "skipAnalysisNotInRules": false,
       "tsConfig": {
         "fileName": "tsconfig.base.json"

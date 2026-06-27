@@ -22,7 +22,6 @@ data
 dev/
 tmp/
 .claude/
-docs/refactor/
 
 # Editor / OS noise
 .vscode

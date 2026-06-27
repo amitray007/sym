@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Sym MCP connector runtime — pool, reconcile, OAuth, encrypted credential store, config schema.",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "author": "Amit Ray",
   "repository": {
     "type": "git",
