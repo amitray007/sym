@@ -19,6 +19,6 @@ gracefully, and focus on what is best for the community.
 ## Enforcement
 
 Report unacceptable behavior to the project maintainer at
-**amitray.private@gmail.com**. All reports are reviewed promptly and
+**hey@amitray.dev**. All reports are reviewed promptly and
 confidentially, and the maintainer will respect the privacy and security of any
 reporter.

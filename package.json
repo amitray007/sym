@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Sym — an AI teammate that lives in a Slack workspace.",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "packageManager": "pnpm@10.33.2",
   "engines": {
