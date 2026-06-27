@@ -5,6 +5,14 @@
 [![CI](https://github.com/amitray007/sym/actions/workflows/ci.yml/badge.svg)](https://github.com/amitray007/sym/actions/workflows/ci.yml)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
 [![Node >=24](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-orange.svg)](#status)
+
+> [!WARNING]
+> **Early research & development — experimental.** Sym is an early-stage
+> research project shared for experimentation, learning, and feedback. It is
+> **not** production-ready: expect breaking changes, rough edges, incomplete
+> features, and no stability or security guarantees. Run it at your own risk,
+> and don't point it at anything you can't afford to break. See [Status](#status).
 
 Sym is a single-tenant, single-deployable Slack bot. DM it, @mention it, or use `/sym <prompt>` from any channel. It replies inline in threads using rich Slack Block Kit formatting, with a live task card that tracks tool calls as they happen. Its primary extension surface is the [Model Context Protocol (MCP)](https://modelcontextprotocol.io): wire in any MCP server via the `sym` CLI and its tools are immediately available to the agent in every conversation.
 
@@ -12,6 +20,7 @@ Sym is a single-tenant, single-deployable Slack bot. DM it, @mention it, or use 
 
 ## Table of contents
 
+- [Status](#status)
 - [Key features](#key-features)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
@@ -25,6 +34,24 @@ Sym is a single-tenant, single-deployable Slack bot. DM it, @mention it, or use 
 - [Contributing](#contributing)
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
+
+---
+
+## Status
+
+**Sym is in early research and development.** It is an experimental project,
+published to explore the design of a Slack-native, MCP-first AI teammate and to
+gather feedback. Treat it accordingly:
+
+- **Not production-ready.** Interfaces, configuration, and behavior can change
+  without notice or migration paths.
+- **No guarantees.** No stability, support, or security guarantees are implied;
+  the software is provided "as is" (see [LICENSE](LICENSE)).
+- **For experimentation.** Best suited to personal labs, learning, and
+  evaluation — not for handling sensitive data or critical workflows.
+
+Issues and ideas are welcome via [GitHub Discussions](https://github.com/amitray007/sym/discussions)
+and the issue tracker.
 
 ---
 
