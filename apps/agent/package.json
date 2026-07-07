@@ -22,7 +22,7 @@
     "qa:delete": "tsc -p tsconfig.json && node scripts/qa-delete.mjs"
   },
   "dependencies": {
-    "@clack/prompts": "^1.5.1",
+    "@clack/prompts": "^1.7.0",
     "@earendil-works/pi-agent-core": "0.79.4",
     "@earendil-works/pi-ai": "0.79.4",
     "@hono/node-server": "^2.0.5",
