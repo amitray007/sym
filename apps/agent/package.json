@@ -33,7 +33,7 @@
     "@sym/kernel": "workspace:*",
     "@sym/mcp-runtime": "workspace:*",
     "dotenv": "^17.4.2",
-    "hono": "^4.12.25",
+    "hono": "^4.12.32",
     "yaml": "^2.9.0",
     "zod": "catalog:"
   },
