@@ -62,6 +62,7 @@ vi.mock('@earendil-works/pi-ai/compat', () => {
   };
   return {
     getModel: (_provider: string, modelId: string) => knownModels[modelId] ?? null,
+    streamSimple: vi.fn(),
   };
 });
 
