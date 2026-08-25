@@ -85,8 +85,7 @@ describe('receiptToContextBlock', () => {
   it('formats each field as "_label:_ value"', () => {
     const block = receiptToContextBlock(makeReceipt());
     const modelEl = block.elements.find((el) => (el as { text: string }).text.includes('model')) as
-      | { text: string }
-      | undefined;
+      { text: string } | undefined;
     expect(modelEl).toBeDefined();
     expect(modelEl!.text).toMatch(/^_model:_ /);
   });

@@ -37,8 +37,7 @@ export interface PlanItem {
 
 /** Events emitted to subscribers (currently just `TaskCardManager.bindPlan`). */
 export type PlanEvent =
-  | { type: 'set_plan'; items: PlanItem[] }
-  | { type: 'update_task'; item: PlanItem };
+  { type: 'set_plan'; items: PlanItem[] } | { type: 'update_task'; item: PlanItem };
 
 type Listener = (event: PlanEvent) => void | Promise<void>;
 

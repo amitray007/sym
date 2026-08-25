@@ -42,10 +42,10 @@ vi.mock('@earendil-works/pi-agent-core', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Mock @earendil-works/pi-ai — getModel for pi/model.ts
+// Mock @earendil-works/pi-ai/compat — getModel for pi/model.ts
 // ---------------------------------------------------------------------------
 
-vi.mock('@earendil-works/pi-ai', () => {
+vi.mock('@earendil-works/pi-ai/compat', () => {
   const knownModels: Record<string, { id: string; api: string; name: string; provider: string }> = {
     'accounts/fireworks/models/gpt-oss-120b': {
       id: 'accounts/fireworks/models/gpt-oss-120b',
@@ -62,6 +62,7 @@ vi.mock('@earendil-works/pi-ai', () => {
   };
   return {
     getModel: (_provider: string, modelId: string) => knownModels[modelId] ?? null,
+    streamSimple: vi.fn(),
   };
 });
 

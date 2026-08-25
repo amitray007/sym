@@ -292,14 +292,12 @@ export class TaskCardManager {
       const stuck = this.boundPlan
         .snapshot()
         .filter((item) => item.status === 'pending' || item.status === 'in_progress')
-        .map(
-          (item): TaskUpdateChunk => ({
-            type: 'task_update',
-            id: item.id,
-            title: item.title,
-            status: 'complete',
-          }),
-        );
+        .map((item): TaskUpdateChunk => ({
+          type: 'task_update',
+          id: item.id,
+          title: item.title,
+          status: 'complete',
+        }));
       if (stuck.length > 0) {
         await this.sendChunks(stuck).catch((err) =>
           console.warn('[agent] plan auto-complete on finish failed (continuing):', err),

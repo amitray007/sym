@@ -4,8 +4,8 @@ packages:
   - 'packages/adapter/*'
 
 catalog:
-  vitest: ^4.1.9
-  '@vitest/coverage-v8': ^4.1.9
+  vitest: ^4.1.10
+  '@vitest/coverage-v8': ^4.1.10
   zod: ^4.4.3
 
 # Force vulnerable transitive deps up to their patched ranges.
@@ -13,6 +13,14 @@ catalog:
 #   (CORS) and related advisories affecting hono <4.12.25.
 # - protobufjs (via @earendil-works/pi-ai > @google/genai): GHSA-f38q-mgvj-vph7
 #   (schema-derived names can shadow runtime-significant properties), <=7.6.2.
+# - brace-expansion (via minimatch): ReDoS in 1.1.15, patched in 1.1.18.
+# - fast-uri (via @modelcontextprotocol/sdk > ajv): GHSA-v2hh-gcrm-f6hx,
+#   GHSA-7p8r-x3mc-p8w7, GHSA-4c8g-83qw-93j6 — host-confusion issues, patched in 3.1.5.
+# - ip-address (via @modelcontextprotocol/sdk > express-rate-limit): GHSA-mwp4-54f8-5fhr
+#   (leading-zero octet SSRF), patched in 10.3.1.
 overrides:
-  hono: ^4.12.25
+  hono: ^4.12.34
   protobufjs: ^7.6.3
+  brace-expansion@1: ^1.1.18
+  fast-uri: ^3.1.5
+  ip-address: ^10.3.1

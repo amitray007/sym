@@ -7,8 +7,7 @@ export interface SlackHeaders {
 }
 
 export type VerifyResult =
-  | { ok: true }
-  | { ok: false; reason: 'invalid_signature' | 'stale_timestamp' };
+  { ok: true } | { ok: false; reason: 'invalid_signature' | 'stale_timestamp' };
 
 const FIVE_MINUTES_S = 5 * 60;
 
