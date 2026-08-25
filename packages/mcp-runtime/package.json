@@ -30,7 +30,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@sym/contracts": "workspace:*",
     "zod": "catalog:"
   }
