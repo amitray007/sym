@@ -10,7 +10,7 @@
  * and phantom tool-call frames into `delta.content`.
  */
 
-import { getModel, type Model } from '@earendil-works/pi-ai';
+import { getModel, type Model } from '@earendil-works/pi-ai/compat';
 
 export interface FireworksModelCfg {
   /** Fireworks base URL, e.g. `https://api.fireworks.ai/inference`. */

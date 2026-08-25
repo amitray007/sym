@@ -20,6 +20,7 @@
 import { Agent } from '@earendil-works/pi-agent-core';
 
 import { buildFireworksModel } from './pi/model.js';
+import { piStreamFn } from './pi/stream.js';
 
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
 
@@ -118,6 +119,7 @@ export async function cleanupReply(draft: string, deps: ReplyCleanupDeps): Promi
         messages: [],
         thinkingLevel: 'low',
       },
+      streamFn: piStreamFn,
       getApiKey: (_provider: string) => deps.fireworks.apiKey,
     });
 

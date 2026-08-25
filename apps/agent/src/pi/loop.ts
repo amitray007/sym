@@ -26,6 +26,7 @@ import { extractUsage, toAgentMessages } from './agent-messages.js';
 import { buildAgentSystemPrompt, buildAgentTools, type TurnHelperCtx } from './agent-setup.js';
 import { makeBeforeToolCall, makeSubscriber } from './loop-callbacks.js';
 import { partitionDescriptors } from './meta-tools.js';
+import { piStreamFn } from './stream.js';
 
 import type { ThinkingLevel } from './think-router.js';
 import type { Model } from '@earendil-works/pi-ai';
@@ -216,6 +217,7 @@ export async function runLoopPi(
       messages: historyMessages,
       thinkingLevel: opts.thinkingLevel ?? 'low',
     },
+    streamFn: piStreamFn,
     getApiKey: (_provider: string) => modelCfg.apiKey,
     beforeToolCall: makeBeforeToolCall(hctx, descriptorMap),
   });
