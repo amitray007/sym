@@ -8,19 +8,19 @@
 
 ## 1. What Sym actually needs (enumerated from code)
 
-| #   | Requirement                                                                                                                                                              | File                                                                                       |
+| # | Requirement | File |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------- | ------------------------------------------------------------------ |
-| R1  | Streaming text deltas fed to `onDelta` in real time                                                                                                                      | `loop-callbacks.ts:makeSubscriber`                                                         |
-| R2  | Multi-step tool-call loop (model → tools → model → …)                                                                                                                    | `loop.ts:agent.prompt()`                                                                   |
-| R3  | Per-tool `onToolStart(toolCallId, label)` + `onToolEnd(toolCallId, errored)` events, with a stable `toolCallId` that matches start↔end                                   | `loop-callbacks.ts:makeSubscriber`                                                         |
-| R4  | **`beforeToolCall` gate: synchronous blocking hook** that runs an async function before each tool executes and can `{ block: true }` mid-loop, without ending the stream | `loop.ts:Agent({ beforeToolCall })`, `loop-callbacks.ts:makeBeforeToolCall`                |
-| R5  | Forced `reasoning_effort` ≥ low for gpt-oss-120b on Fireworks (`'off'` → 400 from Fireworks)                                                                             | `loop.ts` comment + `think-router.ts`                                                      |
-| R6  | `thinkingLevel: 'low'                                                                                                                                                    | 'medium'                                                                                   | 'high'` mapped to Fireworks reasoning_effort | `think-router.ts`, `loop.ts:Agent({initialState:{thinkingLevel}})` |
-| R7  | AbortSignal cancellation (via `agent.abort()` today; a proper signal on prompt is noted as future Pi work)                                                               | `loop.ts:agent.abort()`                                                                    |
-| R8  | Per-turn token usage extraction (input + output + total) for receipt + OTel span                                                                                         | `agent-messages.ts:extractUsage`                                                           |
-| R9  | Thinking deltas filtered out — reasoning text MUST NOT reach `onDelta` or Slack                                                                                          | `loop-callbacks.ts` comment; the Harmony demux on the anthropic-messages surface does this |
-| R10 | Plain single-step LLM call for `cleanupReply` and `judgeSlackToolUse` (no tools, just text out)                                                                          | `reply-cleanup.ts`, `slack-guard.ts`                                                       |
-| R11 | `Anthropic-Messages` API surface (not OpenAI completions) so Fireworks's Harmony channels demux `thinking_delta` cleanly                                                 | `model.ts:buildFireworksModel` comment                                                     |
+| R1 | Streaming text deltas fed to `onDelta` in real time | `loop-callbacks.ts:makeSubscriber` |
+| R2 | Multi-step tool-call loop (model → tools → model → …) | `loop.ts:agent.prompt()` |
+| R3 | Per-tool `onToolStart(toolCallId, label)` + `onToolEnd(toolCallId, errored)` events, with a stable `toolCallId` that matches start↔end | `loop-callbacks.ts:makeSubscriber` |
+| R4 | **`beforeToolCall` gate: synchronous blocking hook** that runs an async function before each tool executes and can `{ block: true }` mid-loop, without ending the stream | `loop.ts:Agent({ beforeToolCall })`, `loop-callbacks.ts:makeBeforeToolCall` |
+| R5 | Forced `reasoning_effort` ≥ low for gpt-oss-120b on Fireworks (`'off'` → 400 from Fireworks) | `loop.ts` comment + `think-router.ts` |
+| R6 | `thinkingLevel: 'low'                                                                                                                                                    | 'medium'                                                                                   | 'high'` mapped to Fireworks reasoning_effort | `think-router.ts`, `loop.ts:Agent({initialState:{thinkingLevel}})` |
+| R7 | AbortSignal cancellation (via `agent.abort()` today; a proper signal on prompt is noted as future Pi work) | `loop.ts:agent.abort()` |
+| R8 | Per-turn token usage extraction (input + output + total) for receipt + OTel span | `agent-messages.ts:extractUsage` |
+| R9 | Thinking deltas filtered out — reasoning text MUST NOT reach `onDelta` or Slack | `loop-callbacks.ts` comment; the Harmony demux on the anthropic-messages surface does this |
+| R10 | Plain single-step LLM call for `cleanupReply` and `judgeSlackToolUse` (no tools, just text out) | `reply-cleanup.ts`, `slack-guard.ts` |
+| R11 | `Anthropic-Messages` API surface (not OpenAI completions) so Fireworks's Harmony channels demux `thinking_delta` cleanly | `model.ts:buildFireworksModel` comment |
 
 ---
 

@@ -126,13 +126,11 @@ describe('find_tools', () => {
 
 describe('call_tool', () => {
   it('confirms then dispatches a destructive tool by exact name', async () => {
-    const dispatch = vi.fn(
-      async (call: ToolCall): Promise<ToolResult> => ({
-        callId: call.id,
-        ok: true,
-        content: `ran ${call.name}`,
-      }),
-    );
+    const dispatch = vi.fn(async (call: ToolCall): Promise<ToolResult> => ({
+      callId: call.id,
+      ok: true,
+      content: `ran ${call.name}`,
+    }));
     const confirm = vi.fn(async () => true);
     const tool = makeCallTool({
       mcp: [sentryList],
@@ -179,9 +177,11 @@ describe('call_tool', () => {
 
   it('does NOT confirm a non-destructive tool', async () => {
     const readOnly = desc('sentry__list_issues', 'list', false);
-    const dispatch = vi.fn(
-      async (call: ToolCall): Promise<ToolResult> => ({ callId: call.id, ok: true, content: 'ok' }),
-    );
+    const dispatch = vi.fn(async (call: ToolCall): Promise<ToolResult> => ({
+      callId: call.id,
+      ok: true,
+      content: 'ok',
+    }));
     const confirm = vi.fn(async () => true);
     const tool = makeCallTool({ mcp: [readOnly], registry: registryWith(dispatch), ctx, confirm });
     await tool.execute('cid', { name: 'sentry__list_issues', arguments: {} });
@@ -190,13 +190,11 @@ describe('call_tool', () => {
   });
 
   it('surfaces a dispatch failure as a thrown error', async () => {
-    const dispatch = vi.fn(
-      async (call: ToolCall): Promise<ToolResult> => ({
-        callId: call.id,
-        ok: false,
-        error: { code: 'execution_failed', message: 'boom' },
-      }),
-    );
+    const dispatch = vi.fn(async (call: ToolCall): Promise<ToolResult> => ({
+      callId: call.id,
+      ok: false,
+      error: { code: 'execution_failed', message: 'boom' },
+    }));
     const tool = makeCallTool({
       mcp: [sentryList],
       registry: registryWith(dispatch),
