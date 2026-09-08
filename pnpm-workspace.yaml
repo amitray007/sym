@@ -6,7 +6,7 @@ packages:
 catalog:
   vitest: ^4.1.10
   '@vitest/coverage-v8': ^4.1.10
-  zod: ^4.4.3
+  zod: ^4.5.4
 
 # Force vulnerable transitive deps up to their patched ranges.
 # - hono (via @modelcontextprotocol/sdk's @hono/node-server@1.x): GHSA-88fw-hqm2-52qc
