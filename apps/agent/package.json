@@ -38,7 +38,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.13",
     "vitest": "catalog:"
   }
 }
