@@ -34,7 +34,7 @@
     "@sym/mcp-runtime": "workspace:*",
     "dotenv": "^17.4.2",
     "hono": "^4.12.34",
-    "yaml": "^2.9.0",
+    "yaml": "^2.9.1",
     "zod": "catalog:"
   },
   "devDependencies": {
