@@ -4,9 +4,9 @@ packages:
   - 'packages/adapter/*'
 
 catalog:
-  vitest: ^4.1.10
-  '@vitest/coverage-v8': ^4.1.10
-  zod: ^4.4.3
+  vitest: ^5.0.1
+  '@vitest/coverage-v8': ^5.0.1
+  zod: ^4.6.5
 
 # Force vulnerable transitive deps up to their patched ranges.
 # - hono (via @modelcontextprotocol/sdk's @hono/node-server@1.x): GHSA-88fw-hqm2-52qc
@@ -19,7 +19,7 @@ catalog:
 # - ip-address (via @modelcontextprotocol/sdk > express-rate-limit): GHSA-mwp4-54f8-5fhr
 #   (leading-zero octet SSRF), patched in 10.3.1.
 overrides:
-  hono: ^4.12.34
+  hono: ^4.13.8
   protobufjs: ^7.6.3
   brace-expansion@1: ^1.1.18
   fast-uri: ^3.1.5
