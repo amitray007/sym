@@ -7,14 +7,17 @@ worker. No production deployment and no adopter pack beyond a test pack.
 
 1. **Scaffold.** Done: Eve app with `eve init`, Eve pinned to 0.81.0, pnpm, Biome, Vitest, Knip,
    CI, and Postgres 18 in Docker for local work (decision 014).
-2. **Worker connection.** The T3 adapter in `lib/workers/t3/` with its own MCP client
-   (decision 015). `pnpm t3:login` signs in with T3's consent flow. `pnpm t3:check` lists
-   projects and capabilities over the private network.
+2. **Worker connection.** Done over loopback (2026-10-19): the T3 adapter in `lib/workers/t3/`
+   with its own MCP client (decision 015). `pnpm t3:login` signs in with T3's consent flow, and
+   `pnpm t3:check` lists projects and providers. Still to do: the same check over the tailnet
+   with HTTPS, which the deployment needs.
 3. **Ledger.** Done: `jobs` and `outbox` tables with migrations in `lib/ledger/` (decision 016),
    and a fake worker adapter in `test/fakes/worker.ts`.
 4. **`t3_job` task tool.** Code done (decision 017): the watch loop, `yield` to the status line,
    the callback URL with a timer fallback, and the duplicate-launch guard by title, tested with
-   the fake worker. Still to do: a live launch in a test repository.
+   the fake worker. Live (2026-10-19): `pnpm t3:job-smoke` ran the job steps against a test
+   repository. The worker committed the change, called back, and the job ended `done` with the
+   output contract block. Still to do: the same run through Eve, which needs the brain model.
 5. **Slack.** `agent/channels/slack.ts` with an owner allow-list (`SYM_SLACK_USERS`). Test app
    from the manifest through a tunnel. Status line, job card with
    `chat.update`, `ctx.ask` buttons, and "what's the update?".

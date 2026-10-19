@@ -53,6 +53,8 @@ Node 24 and pnpm, pinned in `mise.toml`. Run tools through mise, for example
 - `pnpm db:migrate` applies pending ledger migrations (`lib/ledger/migrations.ts`).
 - `pnpm t3:login <mcp-url>` signs Sym in to a T3 worker and saves the token to `.env.local`. The
   owner approves in the browser. `pnpm t3:check` lists the worker's projects and providers.
+- `pnpm t3:job-smoke <project>` runs the job steps live without Eve. It launches a real worker
+  thread, so use a throwaway project.
 
 Local secrets go in `.env.local` (gitignored). `.env.example` lists the variables. Agents never
 read `.env.local`.

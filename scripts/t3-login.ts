@@ -61,12 +61,15 @@ try {
   const error = params.get("error");
   if (error) throw new Error(`T3 refused the sign-in: ${error}`);
   const code = params.get("code");
+  const issuer = params.get("iss");
   if (!code) throw new Error("The sign-in redirect had no authorization code.");
 
   const tokens = await exchangeAuthorization(authorizationServerUrl, {
     ...(metadata ? { metadata } : {}),
     clientInformation,
     authorizationCode: code,
+    // T3 sends its issuer on the redirect (RFC 9207). The SDK checks it against the metadata.
+    ...(issuer ? { iss: issuer } : {}),
     codeVerifier,
     redirectUri: redirectUrl,
     resource: mcpUrl,

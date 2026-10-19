@@ -1,5 +1,5 @@
 import { connect, type Sql } from "./db.ts";
-import type { JobDeps } from "./jobs/run.ts";
+import { type JobDeps, parseWorkerModel } from "./jobs/run.ts";
 import { t3Adapter } from "./workers/t3/adapter.ts";
 import { connectT3 } from "./workers/t3/client.ts";
 
@@ -24,7 +24,12 @@ export async function withJobDeps<T>(fn: (deps: JobDeps) => Promise<T>): Promise
   }
   const connection = await connectT3({ url, getToken: async () => token });
   try {
-    return await fn({ sql: ledger(), worker: t3Adapter(connection.call) });
+    const workerModel = parseWorkerModel(process.env.SYM_WORKER_MODEL);
+    return await fn({
+      sql: ledger(),
+      worker: t3Adapter(connection.call),
+      ...(workerModel ? { workerModel } : {}),
+    });
   } finally {
     await connection.close();
   }

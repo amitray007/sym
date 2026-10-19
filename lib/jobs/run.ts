@@ -6,9 +6,17 @@ import { Brief, workerMessage } from "./brief.ts";
 // The worker job steps that `t3_job` runs (docs/architecture.md, flows 1 and 3). They read and
 // write the ledger, so a re-run step or a new session continues from the job row.
 
+export interface WorkerModel {
+  providerId: string;
+  model: string;
+}
+
 export interface JobDeps {
   sql: Sql;
   worker: WorkerAdapter;
+  // The model worker threads run. Without it the worker project's default applies, and T3
+  // refuses a launch in a project that has none.
+  workerModel?: WorkerModel;
 }
 
 // The Slack status line shows at most 50 characters (docs/slack.md).
@@ -21,9 +29,20 @@ const LAUNCH_LOCK = 4_242_002;
 
 const TERMINAL: readonly JobStatus[] = ["done", "failed", "cancelled"];
 
-// A brief that names a project the worker does not know. Retrying cannot fix it.
-export class UnknownProjectError extends Error {
-  override name = "UnknownProjectError";
+// A launch that retrying cannot fix: an unknown project or a model the worker does not offer.
+export class JobSetupError extends Error {
+  override name = "JobSetupError";
+}
+
+// Parses `<provider>/<model>`, for example `codex/gpt-6-luna`.
+export function parseWorkerModel(value: string | undefined): WorkerModel | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  const slash = text.indexOf("/");
+  if (slash <= 0 || slash === text.length - 1) {
+    throw new JobSetupError(`SYM_WORKER_MODEL must look like <provider>/<model>, not "${text}".`);
+  }
+  return { providerId: text.slice(0, slash), model: text.slice(slash + 1) };
 }
 
 export function threadTitle(job: Pick<Job, "id" | "title">): string {
@@ -42,6 +61,7 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
 
     const brief = Brief.parse(job.brief);
     const projectId = await resolveProject(deps.worker, brief.project);
+    if (deps.workerModel) await checkModel(deps.worker, deps.workerModel);
     const existing = await deps.worker.findByTitle(projectId, `[${jobRef(job.id)}]`);
     const thread =
       existing ??
@@ -50,6 +70,7 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
         title: threadTitle(job),
         message: workerMessage(brief, jobRef(job.id), callbackUrl),
         baseRef: brief.baseRef,
+        ...(deps.workerModel ? { model: deps.workerModel } : {}),
       }));
 
     return await updateJob(deps.sql, job.id, {
@@ -182,8 +203,19 @@ async function resolveProject(worker: WorkerAdapter, project: string): Promise<s
   const match =
     projects.find((p) => p.id === project) ??
     projects.find((p) => p.title.toLowerCase() === wanted);
-  if (!match) throw new UnknownProjectError(`The worker has no project "${project}".`);
+  if (!match) throw new JobSetupError(`The worker has no project "${project}".`);
   return match.id;
+}
+
+// The worker reports its providers and models before each launch (docs/workers.md).
+async function checkModel(worker: WorkerAdapter, choice: WorkerModel): Promise<void> {
+  const { providers } = await worker.capabilities();
+  const provider = providers.find((p) => p.id === choice.providerId);
+  if (!provider?.available || !provider.models.includes(choice.model)) {
+    throw new JobSetupError(
+      `The worker does not offer ${choice.providerId}/${choice.model}. Run pnpm t3:check.`,
+    );
+  }
 }
 
 async function mustGetJob(sql: Sql, jobId: number): Promise<Job> {

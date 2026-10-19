@@ -5,6 +5,7 @@ import {
   checkJob,
   failJob,
   launchOrAdopt,
+  parseWorkerModel,
   STATUS_LINE_MAX,
   statusLine,
 } from "../lib/jobs/run.ts";
@@ -51,6 +52,24 @@ describe("statusLine", () => {
     const line = statusLine("J-7", "Writing code in many files across the whole repository");
     expect(line).toHaveLength(STATUS_LINE_MAX);
     expect(line.endsWith("…")).toBe(true);
+  });
+});
+
+describe("parseWorkerModel", () => {
+  it("splits the provider from the model", () => {
+    expect(parseWorkerModel("codex/gpt-6-luna")).toEqual({
+      providerId: "codex",
+      model: "gpt-6-luna",
+    });
+  });
+
+  it("returns nothing when unset", () => {
+    expect(parseWorkerModel(undefined)).toBeUndefined();
+    expect(parseWorkerModel("  ")).toBeUndefined();
+  });
+
+  it.each(["codex", "/gpt-6-luna", "codex/"])("rejects %s", (value) => {
+    expect(() => parseWorkerModel(value)).toThrow("must look like <provider>/<model>");
   });
 });
 
@@ -117,6 +136,27 @@ describe.skipIf(!hasDatabase)("worker job steps", () => {
 
       expect(worker.launches).toBe(1);
       expect(a.workerThreadId).toBe(b.workerThreadId);
+    });
+
+    it("launches with the configured worker model after checking the worker offers it", async () => {
+      const worker = new FakeWorker();
+      const job = await newJob("model");
+      const workerModel = { providerId: "fake", model: "fake-model" };
+
+      const launched = await launchOrAdopt({ ...deps(worker), workerModel }, job.id, CALLBACK);
+
+      expect(worker.threads.get(launched.workerThreadId ?? "")?.request.model).toEqual(workerModel);
+    });
+
+    it("refuses a model the worker does not offer", async () => {
+      const worker = new FakeWorker();
+      const job = await newJob("bad-model");
+      const workerModel = { providerId: "fake", model: "missing-model" };
+
+      await expect(
+        launchOrAdopt({ ...deps(worker), workerModel }, job.id, CALLBACK),
+      ).rejects.toThrow("The worker does not offer fake/missing-model.");
+      expect(worker.launches).toBe(0);
     });
 
     it("refuses a project the worker does not know", async () => {

@@ -23,3 +23,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [015](015-adapter-mcp-client.md) | Worker adapters call the worker from code |
 | [016](016-ledger-migrations.md) | Ledger migrations live in code |
 | [017](017-t3-job-task.md) | `t3_job` is a task with ledger-backed steps |
+| [018](018-gateway-model.md) | The brain model goes through the AI Gateway |

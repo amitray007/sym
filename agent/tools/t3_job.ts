@@ -100,8 +100,8 @@ async function launch(jobId: number, callbackUrl: string): Promise<string> {
     if (!job.workerThreadId) throw new Error(`${jobRef(jobId)} has no worker thread`);
     return job.workerThreadId;
   } catch (error) {
-    // A brief that names an unknown project cannot succeed on retry.
-    if (error instanceof Error && error.name === "UnknownProjectError") {
+    // An unknown project or worker model cannot succeed on retry.
+    if (error instanceof Error && error.name === "JobSetupError") {
       throw new FatalError(error.message);
     }
     throw error;

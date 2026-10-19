@@ -75,7 +75,12 @@ and attachments (10 MiB images, 50 MiB files) for passing Slack files into a thr
 ### Connection and sign-in
 
 - Transport: Streamable HTTP at `<origin>/mcp`. The T3 server listens on port 3773 by default.
-  Over a tailnet, `http://<worker>.<tailnet>.ts.net:3773/mcp` works without `tailscale serve`.
+- Use HTTPS off the worker host: enable Tailscale HTTPS in T3 (Settings, Connections) or run
+  `t3 serve --tailscale-serve`, then use `https://<worker>.<tailnet>.ts.net/mcp`. The MCP client
+  refuses to send a token request over plain HTTP except to loopback, so
+  `http://<worker>.<tailnet>.ts.net:3773/mcp` answers but cannot complete the sign-in.
+- T3 derives its OAuth issuer and endpoints from the request origin, and sends `iss` on the
+  sign-in redirect (RFC 9207). Sign in through the same URL Sym uses later.
 - Sign-in: OAuth 2.1 with discovery, dynamic client registration, and PKCE. Every client is
   public. Loopback redirect URIs match on everything but the port. The `resource` parameter must
   equal the MCP URL.
@@ -83,6 +88,8 @@ and attachments (10 MiB images, 50 MiB files) for passing Slack files into a thr
   pairing code, and picks the access level there.
 - `t3 auth session issue --subject mcp-client` mints a token without OAuth, but its ceiling is at
   most Supervised. Sym needs the consent flow for Auto (decision 009).
+- An outside client must pass `modelSelection` when the project has no default model. Sym
+  passes `SYM_WORKER_MODEL` and first checks that `orchestrator_capabilities` offers it.
 - Sym calls T3 from code through `lib/workers/t3/` (decision 015). Milestone 1 signs in with
   `pnpm t3:login <mcp-url>`, which saves the token to `.env.local`.
 
