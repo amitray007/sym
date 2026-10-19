@@ -103,6 +103,8 @@ describe("milestone 1", () => {
     const ref = `J-${job.id}`;
     await c.click(approval, "Start");
     const thread = await until(() => threadsOf(h, ref)[0], { label: `${ref} worker thread` });
+    // The card posts just after the launch. Wait for it, so it does not count as a new message.
+    await until(() => c.botMessages().find(isCard), { label: `${ref} job card` });
     const before = c.botMessages().map((m) => m.ts);
 
     await workerAdvance(h, thread, [
