@@ -16,5 +16,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["agent", "lib", "scripts", "test"]
+  "include": ["agent", "evals", "lib", "scripts", "test"]
 }
