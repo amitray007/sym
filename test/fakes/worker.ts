@@ -2,10 +2,13 @@ import type {
   Activity,
   ActivityItem,
   LaunchRequest,
+  SendMode,
   WaitResult,
   WorkerAdapter,
+  WorkerAnswers,
   WorkerCapabilities,
   WorkerProject,
+  WorkerQuestion,
   WorkerStatus,
   WorkerThread,
 } from "../../lib/workers/types.ts";
@@ -15,6 +18,8 @@ export interface FakeStep {
   status: WorkerStatus;
   items?: string[];
   pendingRequests?: number;
+  // Questions the worker waits on in this step. They also count as pending requests.
+  questions?: WorkerQuestion[];
 }
 
 interface FakeThread {
@@ -24,6 +29,7 @@ interface FakeThread {
   items: ActivityItem[];
   steps: FakeStep[];
   pendingRequests: number;
+  questions: WorkerQuestion[];
 }
 
 export interface FakeWorkerOptions {
@@ -41,6 +47,8 @@ let nextThread = 1;
 export class FakeWorker implements WorkerAdapter {
   readonly threads = new Map<string, FakeThread>();
   readonly interrupts: { threadId: string; requestId: string }[] = [];
+  readonly answers: { threadId: string; requestId: string; answers: WorkerAnswers }[] = [];
+  readonly sends: { threadId: string; text: string; mode: SendMode; requestId: string }[] = [];
   launches = 0;
   private loseNextLaunchResponse: boolean;
   private readonly options: FakeWorkerOptions;
@@ -81,6 +89,7 @@ export class FakeWorker implements WorkerAdapter {
       items: [],
       steps: [...(this.options.script ?? [{ status: "completed", items: ["Done"] }])],
       pendingRequests: 0,
+      questions: [],
     });
     if (this.loseNextLaunchResponse) {
       this.loseNextLaunchResponse = false;
@@ -94,7 +103,8 @@ export class FakeWorker implements WorkerAdapter {
     const step = fake.steps.shift();
     if (!step) return { status: fake.thread.status, timedOut: false };
     fake.thread.status = step.status;
-    fake.pendingRequests = step.pendingRequests ?? 0;
+    fake.questions = [...(step.questions ?? [])];
+    fake.pendingRequests = step.pendingRequests ?? fake.questions.length;
     for (const text of step.items ?? []) {
       fake.items.push({ position: fake.items.length, type: "assistant_message", text });
     }
@@ -121,6 +131,25 @@ export class FakeWorker implements WorkerAdapter {
     if (fake.thread.status === "running" || fake.thread.status === "waiting") {
       fake.thread.status = "interrupted";
     }
+  }
+
+  async pendingQuestions(threadId: string): Promise<WorkerQuestion[]> {
+    return structuredClone(this.get(threadId).questions);
+  }
+
+  async answer(threadId: string, requestId: string, answers: WorkerAnswers): Promise<void> {
+    const fake = this.get(threadId);
+    const index = fake.questions.findIndex((question) => question.requestId === requestId);
+    // Like T3, a request that is gone (answered already) fails.
+    if (index < 0) throw new Error(`fake: no pending request ${requestId}`);
+    fake.questions.splice(index, 1);
+    fake.pendingRequests = Math.max(0, fake.pendingRequests - 1);
+    this.answers.push({ threadId, requestId, answers });
+  }
+
+  async send(threadId: string, text: string, mode: SendMode, requestId: string): Promise<void> {
+    this.get(threadId);
+    this.sends.push({ threadId, text, mode, requestId });
   }
 
   private get(threadId: string): FakeThread {

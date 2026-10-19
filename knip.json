@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["agent/**/*.ts", "scripts/*.ts"],
+  "entry": ["agent/**/*.ts", "scripts/*.ts", "test/**/*.test.ts", "test/e2e/**/*.e2e.ts"],
   "project": ["agent/**/*.ts", "lib/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
   "ignoreExportsUsedInFile": true,
   "ignoreDependencies": ["workflow"]

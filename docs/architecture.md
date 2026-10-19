@@ -55,15 +55,17 @@ Example: "@sym add retry with backoff to the billing sync in sync-service, open 
 2. The model loads the `task-brief` playbook and writes a brief: project, goal, constraints, a
    done-when list, and an output contract. The contract is a final JSON block with `summary`,
    `pr_url`, `tests`, `files_changed`, and `open_questions`.
-3. Code changes need approval. Sym posts the brief with Start, Edit, and Cancel buttons.
-4. After Start, `t3_job` runs as an Eve task, so the conversation stays open:
-   - It writes a `jobs` row with status `launching`.
+3. The model calls `t3_job`, an Eve task, so the conversation stays open. It writes a `jobs` row
+   with status `launching`, keyed on the tool call ID, and takes the Slack thread of the session.
+4. Code changes need approval. Sym posts the brief with Start and Cancel buttons; typed text
+   means "edit" and goes back to the model for a new brief (decision 021). After Start:
    - It looks for a worker thread whose title holds the job ID. If one exists, it adopts it. This
      stops a re-run step from launching twice.
    - It launches the thread: title `[J-142] Billing sync retry`, a new worktree, the model the
      worker reports, runtime mode `auto`. The message is the brief, the output contract, and the
      callback URL.
-   - It saves the thread ID and posts the job card when the display rule picks level 3.
+   - It saves the thread ID and posts the job card when the display rule picks level 3, or one
+     start line otherwise (decision 020).
 5. The watch loop runs until the thread ends.
 6. Sym checks the result and posts the outcome in the thread.
 
@@ -92,8 +94,8 @@ loop:
   worker.wait(threadId, 60 s)            -> status, timedOut
   worker.readActivity(threadId, cursor)  -> new items, next cursor
   if status == waiting:
-      worker.pendingQuestion() -> question? -> ctx.ask in Slack -> worker.answer()
-                               -> none?     -> permission prompt -> tell the owner to approve on the worker
+      worker.pendingQuestions() -> questions? -> ctx.ask in Slack -> worker.answer()
+                                -> none?      -> permission prompt -> DM the owner once
   update the job card (chat.update), yield a short status line
   if material change:            post (through chooseDisplay)
   if no new activity for 20 min: mark the card "quiet"; post once
@@ -137,7 +139,7 @@ update?" cheap and lets a new session continue the job.
 | Job needs you | watch loop | Post in the job thread at once. Permission blocks go to the owner's DM |
 | Job quiet 20 min | watch loop | One post, then at most hourly |
 | Worker unreachable | reconcile | Mark jobs `worker_offline`, post once, retry on a timer, post "back" |
-| Session died mid-job | reconcile | Start a recovery session in the job thread and re-attach to the worker thread |
+| Session died mid-job | reconcile | The watcher lease runs out; reconcile checks the job in code until it ends (decision 022) |
 | Worker sign-in expires in 5 days | reconcile | DM the owner the re-approve step |
 | PR wake | reconcile | Post the CI failure or review in the job thread |
 | Daily digest | digest schedule | Finished, failed, waiting, and what Sym learned today |

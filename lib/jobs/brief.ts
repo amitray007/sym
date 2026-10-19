@@ -10,6 +10,13 @@ export const Brief = z.object({
   doneWhen: z.array(z.string()).min(1).describe("Checks that prove the job is done."),
   baseRef: z.string().default("main").describe("Branch the new worktree starts from."),
   openPullRequest: z.boolean().default(false).describe("Push the branch and open a draft PR."),
+  estimatedMinutes: z
+    .number()
+    .int()
+    .min(1)
+    .max(24 * 60)
+    .default(15)
+    .describe("Expected minutes of worker time. Long jobs get a live card in Slack."),
 });
 
 export type Brief = z.infer<typeof Brief>;

@@ -17,9 +17,9 @@ Every adapter implements the same operations. The `t3_job` tool and reconcile ca
 | `wait(threadId, timeout)` | Block until a status change or timeout | Keep timeouts short so HTTP calls do not time out |
 | `readActivity(threadId, cursor)` | New activity since the cursor | The cursor lives on the ledger row |
 | `readMessages(threadId)` | Final messages, for the output contract | |
-| `pendingQuestion(threadId)` | A question the worker agent asked | Returns nothing for permission prompts |
-| `answer(threadId, requestId, answer)` | Reply to that question | |
-| `send(threadId, text, mode, requestId)` | Steer, queue, or restart | Idempotent with `requestId` |
+| `pendingQuestions(threadId)` | Questions the worker agent asked | Never lists permission prompts |
+| `answer(threadId, requestId, answers)` | Reply to a question | No retry key on T3; check `pendingQuestions` first |
+| `send(threadId, text, mode, requestId)` | Steer or queue | Idempotent with `requestId` |
 | `interrupt(threadId)` | Stop the thread | Safe to retry |
 | `watchPullRequest(threadId, url)` | Let the worker react to CI and reviews | Optional |
 | `settle(threadId)` | Tidy a finished thread | Optional |
@@ -63,7 +63,7 @@ waits until a person approves it in the T3 app. Sym can only tell the owner.
 | `launch` | `t3_thread_launch` with `workspaceStrategy: worktree` | Supervised+ |
 | `wait` | `t3_thread_wait` (default 10 min, max 60 min; Sym uses 60 s, and the MCP request gets 15 s more) | Read |
 | `readActivity`, `readMessages` | `t3_thread_read` (`view: activity` or `messages`, `afterPosition`) | Read |
-| `pendingQuestion`, `answer` | `t3_pending_request_list`, `t3_pending_request_respond` | Read / Supervised+ |
+| `pendingQuestions`, `answer` | `t3_pending_request_list`, `t3_pending_request_read`, `t3_pending_request_respond` | Read / Supervised+ |
 | `send` | `t3_thread_send` (`mode: auto/queue/steer/restart`, `clientRequestId`) | Supervised+ |
 | `interrupt` | `t3_thread_interrupt`, `t3_workflow_stop` | Supervised+ |
 | `watchPullRequest` | `link_pull_request`, `watch_pull_request` | Supervised+ |

@@ -219,3 +219,114 @@ describe("t3Adapter.interrupt", () => {
     });
   });
 });
+
+describe("t3Adapter.pendingQuestions", () => {
+  it("reads each pending request and maps its questions", async () => {
+    const { call, calls } = fakeT3({
+      t3_pending_request_list: () => ({ requestIds: ["req-1", "req-2"] }),
+      t3_pending_request_read: (args) =>
+        args.requestId === "req-1"
+          ? {
+              requestId: "req-1",
+              questions: [
+                {
+                  id: "q-env",
+                  header: "Target",
+                  question: "Which environment?",
+                  options: [
+                    { label: "staging", description: "Safe", value: "s" },
+                    { label: "production", description: "" },
+                  ],
+                  multiSelect: true,
+                  allowCustomAnswer: true,
+                },
+              ],
+            }
+          : {
+              requestId: "req-2",
+              questions: [{ id: "q-name", header: "", question: "Name?", options: [] }],
+            },
+    });
+
+    expect(await t3Adapter(call).pendingQuestions("t-1")).toEqual([
+      {
+        requestId: "req-1",
+        questions: [
+          {
+            id: "q-env",
+            header: "Target",
+            prompt: "Which environment?",
+            options: [{ label: "staging", description: "Safe" }, { label: "production" }],
+            multiSelect: true,
+          },
+        ],
+      },
+      {
+        requestId: "req-2",
+        questions: [{ id: "q-name", prompt: "Name?", options: [], multiSelect: false }],
+      },
+    ]);
+    expect(calls.map((c) => [c.name, c.args])).toEqual([
+      ["t3_pending_request_list", { threadId: "t-1" }],
+      ["t3_pending_request_read", { threadId: "t-1", requestId: "req-1" }],
+      ["t3_pending_request_read", { threadId: "t-1", requestId: "req-2" }],
+    ]);
+  });
+
+  it("skips a request that resolved between the list and the read", async () => {
+    const { call } = fakeT3({
+      t3_pending_request_list: () => ({ requestIds: ["gone", "req-3"] }),
+      t3_pending_request_read: (args) => {
+        if (args.requestId === "gone") throw new Error("request not found");
+        return { requestId: "req-3", questions: [{ id: "q", question: "Go?", options: [] }] };
+      },
+    });
+
+    expect(await t3Adapter(call).pendingQuestions("t-1")).toEqual([
+      {
+        requestId: "req-3",
+        questions: [{ id: "q", prompt: "Go?", options: [], multiSelect: false }],
+      },
+    ]);
+  });
+
+  it("returns nothing when no request waits", async () => {
+    const { call, calls } = fakeT3({ t3_pending_request_list: () => ({ requestIds: [] }) });
+    expect(await t3Adapter(call).pendingQuestions("t-1")).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("t3Adapter.answer", () => {
+  it("responds with answers keyed by question ID", async () => {
+    const { call, calls } = fakeT3({ t3_pending_request_respond: () => ({ sequence: 5 }) });
+
+    await t3Adapter(call).answer("t-1", "req-1", { "q-env": ["staging"], "q-name": "Ada" });
+
+    expect(calls[0]).toMatchObject({
+      name: "t3_pending_request_respond",
+      args: {
+        threadId: "t-1",
+        requestId: "req-1",
+        answers: { "q-env": ["staging"], "q-name": "Ada" },
+      },
+    });
+  });
+});
+
+describe("t3Adapter.send", () => {
+  it("sends the message with its mode and retry key", async () => {
+    const { call, calls } = fakeT3({
+      t3_thread_send: () => ({ threadId: "t-1", delivery: "steered" }),
+    });
+
+    await t3Adapter(call).send("t-1", "Use the retry helper", "steer", "send-J-1-2");
+
+    expect(calls[0]?.args).toEqual({
+      threadId: "t-1",
+      message: "Use the retry helper",
+      mode: "steer",
+      clientRequestId: "send-J-1-2",
+    });
+  });
+});

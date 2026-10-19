@@ -17,29 +17,34 @@ worker. No production deployment and no adopter pack beyond a test pack.
    the callback URL with a timer fallback, and the duplicate-launch guard by title, tested with
    the fake worker. Live (2026-10-19): `pnpm t3:job-smoke` ran the job steps against a test
    repository. The worker committed the change, called back, and the job ended `done` with the
-   output contract block. Still to do: the same run through Eve, which needs the brain model.
-5. **Slack.** `agent/channels/slack.ts` with an owner allow-list (`SYM_SLACK_USERS`). Test app
-   from the manifest through a tunnel. Status line, job card with
-   `chat.update`, `ctx.ask` buttons, and "what's the update?".
-6. **Display rule.** Done: `lib/display.ts` with unit tests for each step and modifier. Still to
-   do: route every post through it.
-7. **Recovery.** Kill the Eve process mid-job and restart it. Reconcile re-attaches the job and
-   the card keeps updating.
+   output contract block. Through Eve: done locally with the fixture brain (decision 023).
+5. **Slack.** Done locally against a fake Slack API (decision 023): the owner allow-list
+   (`SYM_SLACK_USERS`), the brief with Start, Edit, and Cancel (decision 021), the job card with
+   `chat.update` (decision 020), worker questions as buttons, the permission DM, and "what's the
+   update?". Still to do: the same flow with the test Slack app.
+6. **Display rule.** Done: `lib/display.ts`, and every post Sym makes goes through it and the
+   outbox (`lib/jobs/present.ts`). Eve's own replies and prompts are Eve's.
+7. **Recovery.** Done locally: kill `eve dev` mid-job, restart, and reconcile finishes the job
+   with its card and result message (decision 022, `test/e2e/recovery.e2e.ts`).
 8. **Worker environment.** Inside a T3 thread, check that the repository's own agent settings and
    folder environment apply.
 
 ## Open checks
 
 - Does a thread started by a handler or schedule get Eve's task card?
-- `plan` block status values (`completed` or `complete`) and `chat.update` rate limits.
-- A `taskCard` renderer that hides Eve's card for `t3_job` only.
-- Does `createWebhook` return the public host or the private host?
+- ~~`plan` block status values and `chat.update` rate limits.~~ `complete`, and Tier 3 (docs/slack.md).
+- ~~A `taskCard` renderer that hides Eve's card for `t3_job` only.~~ Done in `agent/channels/slack.ts`.
+- ~~Does `createWebhook` return the public host or the private host?~~ Neither: off Vercel it
+  returns `localhost:3000`. Sym rebases it on `SYM_CALLBACK_URL` (decision 028).
 - Does `ctx.send` work from `onSlashCommand`?
 - ~~Does Eve accept the T3 OAuth flow through `defineInteractiveAuthorization`?~~ Not used: it is
   user-scoped, and reconcile runs without a user (decision 015).
 - Does the build-time pack overlay compile pack playbooks (see [adopting.md](adopting.md))?
 
 ## Exit criteria
+
+`pnpm test:e2e` checks criteria 1 to 5 against fakes, and CI runs it on every push. A live run
+with the test Slack app and a real worker is still to do.
 
 1. A Slack mention produces a brief with Start, Edit, and Cancel. Start launches exactly one T3
    thread, even when the launch step re-runs.

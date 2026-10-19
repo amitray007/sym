@@ -1,6 +1,9 @@
 // Ledger migrations, applied in order by `migrate`. Never edit a migration after it ships. Add a
 // new one. The SQL lives in TypeScript so the Eve build bundles it.
 
+import { memoryMigration } from "../memory/migration.ts";
+import { schedulesMigration } from "../schedules/migration.ts";
+
 export interface Migration {
   version: string;
   sql: string;
@@ -70,4 +73,40 @@ export const migrations: Migration[] = [
       create index outbox_pending on outbox (created_at) where status = 'pending';
     `,
   },
+  {
+    version: "002_threads_cards_leases",
+    sql: `
+      -- The Slack thread each Eve session talks in. The Slack renderer records it, because tools
+      -- and schedules cannot read the channel's own session state.
+      create table session_threads (
+        session_id text primary key,
+        team_id text,
+        channel_id text not null,
+        thread_ts text,
+        user_id text,
+        updated_at timestamptz not null default now()
+      );
+
+      -- The job card is Sym's own message. The row holds the card Sym wants to show, and the
+      -- version Slack shows, so any process can bring Slack up to date.
+      alter table jobs add column card jsonb;
+      alter table jobs add column card_version int not null default 0;
+      alter table jobs add column card_sent_version int not null default 0;
+      alter table jobs add column pr_url text;
+      alter table jobs add column started_at timestamptz;
+      alter table jobs add column last_activity_at timestamptz;
+      alter table jobs add column quiet_noticed_at timestamptz;
+      -- The watcher lease. A t3_job task renews it on each check. Reconcile takes over a job
+      -- whose lease ran out, for example after the session died.
+      alter table jobs add column watch_until timestamptz;
+
+      alter table outbox add column purpose text not null default 'message'
+        check (purpose in ('message', 'card'));
+      -- A sender claims a post before it calls Slack, so two senders do not send it twice.
+      alter table outbox add column claimed_until timestamptz;
+    `,
+  },
+  // Later migrations live next to the code that owns their tables.
+  schedulesMigration,
+  memoryMigration,
 ];

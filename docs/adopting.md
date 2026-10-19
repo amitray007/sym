@@ -46,18 +46,31 @@ workers:
 projects:
   - name: sync-service
     worker: laptop
+    workerProject: sync-service    # the worker's project ID or title; defaults to name
     allowedPaths: ["src/**", "test/**"]
-    prPolicy: draft
+    defaultBaseBranch: main
+    prPolicy: draft                # none (default) or draft
     productionData: read-only
+instructions: [instructions/tone.md]
+playbooks: [playbooks/release-steps.md]
 ```
+
+Rules (decision 026):
+
+- Unknown fields fail, and so does any field named like a secret (token, key, password, secret,
+  credential). `mcpUrl` carries no credentials.
+- `prPolicy` is `none` or `draft`. `productionData` is `read-only`. A pack narrows Sym's rules and
+  never widens them.
+- The owner is always allowed; `allowList` adds people.
+- Instruction and playbook files are listed by path and stay inside the pack folder.
 
 ## How Sym loads a pack
 
 - **Build time:** the image build copies `instructions/` and `playbooks/` into the Eve agent
   folder before `eve build`, so Eve compiles them like built-in files. Pack files with the same
   name as a built-in file replace it.
-- **Start:** Sym reads `sym.config.yaml` from `SYM_PACK_DIR`, checks it against a schema, and
-  seeds `schedules.yaml` rows that do not exist yet.
+- **Start:** Sym reads `sym.config.yaml` from `SYM_PACK_DIR`, validates it, and refuses to start
+  on an error that names the file and the field. Seeding `schedules.yaml` rows comes later.
 - **Session start:** `defineDynamic` adds approved learning-layer-2 rows from Postgres on top.
 
 Milestone 1 confirms this split. Until then, treat it as the plan.
