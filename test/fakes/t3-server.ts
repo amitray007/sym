@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
@@ -73,6 +74,26 @@ export interface FakeT3Options {
   script?: FakeT3Step[];
   // Projects and threads per page, so tests can force cursor paging.
   pageSize?: number;
+  // Seconds an OAuth token lasts. T3 gives 30 days.
+  oauthTokenSeconds?: number;
+}
+
+// The OAuth sign-in as T3 runs it (decision 036): discovery, stateless registration, an
+// authorization endpoint, and a token endpoint. The fake approves at once, as if the owner
+// clicked Approve on the consent page, and redirects with `code`, `state`, and `iss`.
+export interface FakeT3OAuth {
+  // The OAuth issuer: the server origin.
+  issuer: string;
+  // Registered clients, by client ID.
+  clients: Map<string, { redirectUris: string[] }>;
+  // Tokens the token endpoint issued. The MCP endpoint accepts them like `token`.
+  issued: string[];
+  // MCP requests that carried an issued token.
+  oauthCalls: number;
+  // The next authorization redirect carries `error=access_denied`, like a refused consent.
+  denyNext(): void;
+  // The next authorization redirect carries this issuer instead of the real one.
+  wrongIssuerNext(issuer: string): void;
 }
 
 export interface FakeT3 {
@@ -83,6 +104,7 @@ export interface FakeT3 {
   calls: { name: string; args: Record<string, unknown> }[];
   // Requests the server refused for a missing or wrong token.
   unauthorized: number;
+  oauth: FakeT3OAuth;
   setScript(script: FakeT3Step[]): void;
   // Adds the item T3 shows when a watched pull request wakes the worker: a `notification` item
   // whose text is the summary (orchestration-v2/pullRequestWatch.ts), for example
@@ -111,12 +133,32 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
   const drops: string[] = [];
   const watchFailures: string[] = [];
   const threads = new Map<string, FakeT3Thread>();
+  const oauthTokenSeconds = options.oauthTokenSeconds ?? 30 * 86_400;
+  let denyNext = false;
+  let wrongIssuer: string | undefined;
+  // Pending codes: one use each, like T3.
+  const codes = new Map<
+    string,
+    { clientId: string; redirectUri: string; challenge: string; resource: string }
+  >();
   const state: FakeT3 = {
     url: "",
     token,
     threads,
     calls: [],
     unauthorized: 0,
+    oauth: {
+      issuer: "",
+      clients: new Map(),
+      issued: [],
+      oauthCalls: 0,
+      denyNext: () => {
+        denyNext = true;
+      },
+      wrongIssuerNext: (issuer) => {
+        wrongIssuer = issuer;
+      },
+    },
     setScript: (next) => {
       script = next;
     },
@@ -478,7 +520,11 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
   });
 
   async function serve(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (req.headers.authorization !== `Bearer ${token}`) {
+    if (await serveOAuth(req, res)) return;
+    const bearer = req.headers.authorization;
+    const issuedToken = state.oauth.issued.some((issued) => bearer === `Bearer ${issued}`);
+    if (issuedToken) state.oauth.oauthCalls++;
+    if (bearer !== `Bearer ${token}` && !issuedToken) {
       state.unauthorized++;
       res.writeHead(401, { "content-type": "application/json", "www-authenticate": "Bearer" });
       res.end(JSON.stringify({ error: "unauthorized" }));
@@ -522,6 +568,123 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
     res.end();
   }
 
+  // The OAuth endpoints. Returns false for any other path.
+  async function serveOAuth(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+    const url = new URL(req.url ?? "/", state.oauth.issuer || "http://127.0.0.1");
+    const send = (status: number, body: unknown) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    const issuer = state.oauth.issuer;
+    switch (`${req.method} ${url.pathname}`) {
+      case "GET /.well-known/oauth-protected-resource/mcp":
+      case "GET /.well-known/oauth-protected-resource":
+        send(200, {
+          resource: state.url,
+          authorization_servers: [issuer],
+          scopes_supported: ["orchestration:read", "orchestration:operate"],
+        });
+        return true;
+      case "GET /.well-known/oauth-authorization-server":
+        send(200, {
+          issuer,
+          authorization_endpoint: `${issuer}/oauth/authorize`,
+          token_endpoint: `${issuer}/oauth/token`,
+          registration_endpoint: `${issuer}/oauth/register`,
+          response_types_supported: ["code"],
+          grant_types_supported: ["authorization_code"],
+          code_challenge_methods_supported: ["S256"],
+          token_endpoint_auth_methods_supported: ["none"],
+          authorization_response_iss_parameter_supported: true,
+        });
+        return true;
+      case "POST /oauth/register": {
+        const body = JSON.parse((await readBody(req)) || "{}") as { redirect_uris?: string[] };
+        const redirectUris = body.redirect_uris ?? [];
+        const allowed = redirectUris.every((uri) => {
+          const target = new URL(uri);
+          return target.protocol === "https:" || target.hostname === "127.0.0.1";
+        });
+        if (redirectUris.length === 0 || !allowed) {
+          send(400, { error: "invalid_redirect_uri" });
+          return true;
+        }
+        const clientId = `client-${randomBytes(6).toString("hex")}`;
+        state.oauth.clients.set(clientId, { redirectUris });
+        send(201, {
+          ...body,
+          client_id: clientId,
+          client_id_issued_at: Math.floor(Date.now() / 1000),
+          token_endpoint_auth_method: "none",
+        });
+        return true;
+      }
+      case "GET /oauth/authorize": {
+        const q = url.searchParams;
+        const client = state.oauth.clients.get(q.get("client_id") ?? "");
+        const redirectUri = q.get("redirect_uri") ?? "";
+        if (
+          !client?.redirectUris.includes(redirectUri) ||
+          q.get("response_type") !== "code" ||
+          q.get("code_challenge_method") !== "S256" ||
+          q.get("resource") !== state.url
+        ) {
+          send(400, { error: "invalid_request" });
+          return true;
+        }
+        const target = new URL(redirectUri);
+        target.searchParams.set("state", q.get("state") ?? "");
+        target.searchParams.set("iss", wrongIssuer ?? issuer);
+        wrongIssuer = undefined;
+        if (denyNext) {
+          denyNext = false;
+          target.searchParams.set("error", "access_denied");
+        } else {
+          const code = `code-${randomBytes(8).toString("hex")}`;
+          codes.set(code, {
+            clientId: q.get("client_id") ?? "",
+            redirectUri,
+            challenge: q.get("code_challenge") ?? "",
+            resource: q.get("resource") ?? "",
+          });
+          target.searchParams.set("code", code);
+        }
+        res.writeHead(302, { location: target.toString() });
+        res.end();
+        return true;
+      }
+      case "POST /oauth/token": {
+        const form = new URLSearchParams(await readBody(req));
+        const code = codes.get(form.get("code") ?? "");
+        codes.delete(form.get("code") ?? "");
+        const verifier = form.get("code_verifier") ?? "";
+        const challenge = createHash("sha256").update(verifier).digest("base64url");
+        if (
+          form.get("grant_type") !== "authorization_code" ||
+          !code ||
+          code.clientId !== form.get("client_id") ||
+          code.redirectUri !== form.get("redirect_uri") ||
+          code.resource !== form.get("resource") ||
+          code.challenge !== challenge
+        ) {
+          send(400, { error: "invalid_grant" });
+          return true;
+        }
+        const accessToken = `t3-oauth-${randomBytes(12).toString("hex")}`;
+        state.oauth.issued.push(accessToken);
+        send(200, {
+          access_token: accessToken,
+          token_type: "Bearer",
+          expires_in: oauthTokenSeconds,
+          scope: "orchestration:read orchestration:operate",
+        });
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
   // The tool a JSON-RPC `tools/call` request names.
   function toolCalled(body: Buffer): string | undefined {
     try {
@@ -538,10 +701,17 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
   await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
   const { port } = http.address() as AddressInfo;
   state.url = `http://127.0.0.1:${port}/mcp`;
+  state.oauth.issuer = `http://127.0.0.1:${port}`;
   state.close = async () => {
     http.closeAllConnections();
     await new Promise<void>((resolve) => http.close(() => resolve()));
     await handler.close();
   };
   return state;
+}
+
+async function readBody(req: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf8");
 }

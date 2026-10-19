@@ -2,6 +2,7 @@ import type { Sql } from "../db.ts";
 import { chooseDisplay } from "../display.ts";
 import { recentJobs } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
+import type { Pack } from "../pack/load.ts";
 import { runsSince } from "../schedules/rows.ts";
 import { digestMessage } from "./format.ts";
 
@@ -46,4 +47,13 @@ export async function queueDigest(sql: Sql, channel: string, now: Date): Promise
     display: dm ? { ...display, target: "dm" } : display,
   });
   return true;
+}
+
+// Where the digest and learn proposals go: the pack's digest channel, else SYM_DIGEST_CHANNEL
+// (a channel ID, or the owner's user ID for a DM). Nothing means both stay off.
+export function digestChannel(
+  pack: Pack | undefined,
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
+  return pack?.config.channels?.digest ?? (env.SYM_DIGEST_CHANNEL?.trim() || undefined);
 }

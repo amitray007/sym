@@ -6,6 +6,7 @@ import {
   getJob,
   jobRef,
   type NewJob,
+  StaleJobError,
   updateJob,
 } from "../lib/ledger/jobs.ts";
 import { migrate } from "../lib/ledger/migrate.ts";
@@ -106,6 +107,17 @@ describe.skipIf(!hasDatabase)("ledger", () => {
 
       expect(stale).toMatchObject({ status: "done", lastSummary: "late" });
       expect(stale.finishedAt).toEqual(done.finishedAt);
+    });
+
+    it("refuses a conditional update after another check moved the cursor", async () => {
+      const sql = ledger.sql();
+      const job = await createJob(sql, newJob("Cursor race"));
+      await updateJob(sql, job.id, { cursor: "5" }, { cursor: null });
+
+      await expect(
+        updateJob(sql, job.id, { cursor: "3", lastSummary: "older" }, { cursor: null }),
+      ).rejects.toThrow(StaleJobError);
+      expect((await getJob(sql, job.id))?.cursor).toBe("5");
     });
 
     it("lists only jobs that still need watching", async () => {

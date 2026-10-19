@@ -1,6 +1,7 @@
 # Sym documentation
 
-Sym is in design, before the first spike. These documents are the source of truth for its design.
+These documents are the source of truth for Sym's design. Milestone 1 runs end to end on one
+machine against fakes; [milestone-1.md](milestone-1.md) tracks what is built and what is left.
 Read them in this order.
 
 | Document | Covers |

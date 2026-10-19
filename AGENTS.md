@@ -33,10 +33,10 @@ planning or building anything.
 
 Milestone 1 is in progress (`docs/milestone-1.md`). Every exit criterion passes locally against
 fakes (`pnpm test:e2e`). Still to do: the live run with the test Slack app, the tailnet route,
-the worker environment check, and the deployment. Built beyond milestone 1: schedules with silent
-clean checks and the digest, memory, the pack (overlay, jobs, allow-list), result checks and the
-verifier subagent, quiet mode, `/sym`, card buttons, feedback and learned playbook rows, steering,
-PR wakes, the sign-in expiry notice, and the worker MCP channel.
+the worker environment check, and the deployment. Built beyond milestone 1: in-app worker sign-in,
+schedules with silent clean checks and the digest, memory, the pack (overlay, jobs, allow-list),
+result checks and the verifier subagent, quiet mode, `/sym`, card buttons, feedback and learned
+playbook rows, steering, PR wakes, the sign-in expiry notice, and the worker MCP channel.
 
 ## Commands
 

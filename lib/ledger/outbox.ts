@@ -120,6 +120,30 @@ export async function markPostSent(sql: Sql, id: number, slackTs: string): Promi
   `;
 }
 
+// Completes a card post and saves the card's Slack ts and shown version on the job in ONE
+// statement. A crash cannot leave a sent card whose ts is unknown, so nobody can edit it.
+// `version` is the card version the post showed. The shown version never moves back.
+export async function markCardPostSent(
+  sql: Sql,
+  id: number,
+  slackTs: string,
+  version: number | undefined,
+): Promise<void> {
+  await sql`
+    with sent as (
+      update outbox set status = 'sent', slack_ts = ${slackTs}, sent_at = now(),
+        attempts = attempts + 1
+      where id = ${id}
+      returning job_id
+    )
+    update jobs set
+      card_ts = ${slackTs},
+      card_sent_version = greatest(card_sent_version, ${version ?? 0}),
+      updated_at = now()
+    from sent where jobs.id = sent.job_id
+  `;
+}
+
 // Records a failed send. The post stays pending until it reaches MAX_ATTEMPTS.
 export async function markPostFailed(sql: Sql, id: number, error: string): Promise<void> {
   await sql`

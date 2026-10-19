@@ -1,7 +1,13 @@
 import { defineSchedule } from "eve/schedules";
 import { ledger } from "../../lib/runtime.ts";
 import { dispatchMessage } from "../../lib/schedules/format.ts";
-import { claimDueSchedules, completeClaim, recordRun } from "../../lib/schedules/rows.ts";
+import {
+  attachSession,
+  claimDueSchedules,
+  completeClaim,
+  finishRun,
+  reserveRun,
+} from "../../lib/schedules/rows.ts";
 import slack from "../channels/slack.ts";
 
 // Dynamic scheduling (docs/architecture.md, flow 2; decision 008; Eve's dynamic scheduling
@@ -17,20 +23,27 @@ export default defineSchedule({
         const sql = ledger();
         const now = new Date();
         for (const schedule of await claimDueSchedules(sql, now, LEASE_MS)) {
-          try {
-            // No root message: a scheduled run posts only when something needs attention, and
-            // its first post opens the thread (decision 031).
-            const session = await to(slack, { channelId: schedule.channel }).send(
-              dispatchMessage(schedule),
-              { auth: appAuth },
-            );
-            await recordRun(sql, {
-              scheduleId: schedule.id,
-              firedAt: now,
-              sessionId: session.id,
-            });
-          } catch {
-            await recordRun(sql, { scheduleId: schedule.id, firedAt: now, outcome: "failed" });
+          // Persist the fire identity before the send. A crash after the send leaves the row,
+          // so the next dispatcher skips the send and only completes the claim.
+          const run = schedule.nextFireAt
+            ? await reserveRun(sql, {
+                scheduleId: schedule.id,
+                dueAt: schedule.nextFireAt,
+                firedAt: now,
+              })
+            : undefined;
+          if (run) {
+            try {
+              // No root message: a scheduled run posts only when something needs attention, and
+              // its first post opens the thread (decision 031).
+              const session = await to(slack, { channelId: schedule.channel }).send(
+                dispatchMessage(schedule),
+                { auth: appAuth },
+              );
+              await attachSession(sql, run.id, session.id);
+            } catch {
+              await finishRun(sql, run.id, "failed");
+            }
           }
           // Skip the missed fire on failure. A retry could double a fire that half worked.
           await completeClaim(sql, schedule, now);

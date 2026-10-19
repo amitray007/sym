@@ -36,7 +36,8 @@ worker. No production deployment and no adopter pack beyond a test pack.
 - ~~A `taskCard` renderer that hides Eve's card for `t3_job` only.~~ Done in `agent/channels/slack.ts`.
 - ~~Does `createWebhook` return the public host or the private host?~~ Neither: off Vercel it
   returns `localhost:3000`. Sym rebases it on `SYM_CALLBACK_URL` (decision 028).
-- Does `ctx.send` work from `onSlashCommand`?
+- ~~Does `ctx.send` work from `onSlashCommand`?~~ Not needed: `/sym` answers ephemerally with
+  `ctx.slack.request("chat.postEphemeral")` and starts no session.
 - ~~Does Eve accept the T3 OAuth flow through `defineInteractiveAuthorization`?~~ Not used: it is
   user-scoped, and reconcile runs without a user (decision 015).
 - ~~Does the build-time pack overlay compile pack playbooks?~~ Yes, instructions and playbooks

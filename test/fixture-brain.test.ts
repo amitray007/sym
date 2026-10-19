@@ -61,6 +61,12 @@ describe("respondAsFixture", () => {
     });
   });
 
+  it("calls worker_sign_in when asked to sign in to the worker", () => {
+    expect(respondAsFixture(request("Please sign in to the worker"))).toEqual({
+      toolCalls: [{ name: "worker_sign_in", input: {} }],
+    });
+  });
+
   it("does not match update or status inside another word", () => {
     expect(respondAsFixture(request("statuses and updated"))).toBe(
       "Fixture brain heard: statuses and updated",

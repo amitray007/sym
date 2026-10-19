@@ -90,7 +90,8 @@ export interface WorkerHealth {
   reachable: boolean;
   // The worker accepted Sym's sign-in. False after a 401.
   signedIn: boolean;
-  // When the sign-in stops working, if the deployment knows it (`T3_TOKEN_EXPIRES_AT`).
+  // When the sign-in stops working, if Sym knows it: from the stored sign-in, else
+  // `T3_TOKEN_EXPIRES_AT`.
   signInExpiresAt: Date | null;
 }
 

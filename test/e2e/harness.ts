@@ -47,6 +47,8 @@ const BOT_TOKEN = "xoxb-e2e-fake";
 export interface HarnessOptions {
   // The database the run creates and drops.
   database: string;
+  // Extra environment for `eve dev`, applied last.
+  env?: Record<string, string>;
 }
 
 export interface Harness {
@@ -119,7 +121,12 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
         {
           cwd: appDir,
           // The worker calls back on the address it can reach, here the server itself.
-          env: { ...env, PORT: String(port), SYM_CALLBACK_URL: `http://127.0.0.1:${port}` },
+          env: {
+            ...env,
+            PORT: String(port),
+            SYM_CALLBACK_URL: `http://127.0.0.1:${port}`,
+            ...options.env,
+          },
           detached: true,
           stdio: ["ignore", out, out],
         },

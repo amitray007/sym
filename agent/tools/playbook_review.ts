@@ -5,7 +5,8 @@ import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { playbookLine } from "../../lib/learning/format.ts";
 import { approvePlaybook, getPlaybook, playbookRef } from "../../lib/learning/rows.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
-import { ledger } from "../../lib/runtime.ts";
+import { mayDecideAsOwner, OWNER_ONLY, slackUserOfPrincipal } from "../../lib/owner.ts";
+import { ledger, pack } from "../../lib/runtime.ts";
 
 // Approves a proposed row. The approval prompt can read only the tool input, so the input
 // repeats the body, and execute refuses when it differs from the stored row. The owner
@@ -31,6 +32,8 @@ export default defineTool({
   label: { start: ({ id }) => `Review ${playbookRef(id)}` },
   async execute(input, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
+    const caller = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    if (!mayDecideAsOwner(caller, pack())) return OWNER_ONLY;
     const sql = ledger();
     const thread = await getSessionThread(sql, ctx.session.id);
     if (!thread?.userId) return "Sym cannot tell who approves this. Ask in Slack.";

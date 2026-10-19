@@ -118,7 +118,19 @@ export async function getJob(sql: Sql, id: number): Promise<Job | undefined> {
 }
 
 // A finished job keeps its status: a stale check cannot move it back to running.
-export async function updateJob(sql: Sql, id: number, update: JobUpdate): Promise<Job> {
+// Thrown when an update expected the job's cursor to be unchanged and another check moved it.
+export class StaleJobError extends Error {
+  override name = "StaleJobError";
+}
+
+// `expect.cursor` makes the update conditional: it applies only while the job's cursor is still
+// the one the caller read, so a slow check cannot overwrite a newer one.
+export async function updateJob(
+  sql: Sql,
+  id: number,
+  update: JobUpdate,
+  expect?: { cursor: string | null },
+): Promise<Job> {
   const { status, ...rest } = update;
   if (status === undefined && Object.keys(rest).length === 0) {
     throw new Error("updateJob needs at least one field");
@@ -142,8 +154,10 @@ export async function updateJob(sql: Sql, id: number, update: JobUpdate): Promis
           : sql`finished_at`
       }
     where id = ${id}
+      ${expect ? sql`and cursor is not distinct from ${expect.cursor}` : sql``}
     returning *
   `;
+  if (!row && expect) throw new StaleJobError(`${jobRef(id)} changed during the check`);
   if (!row) throw new Error(`no job ${jobRef(id)}`);
   return normalize(row);
 }

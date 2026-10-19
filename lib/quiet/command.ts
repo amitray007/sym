@@ -2,11 +2,16 @@ import { parseQuietArg, type QuietArg } from "./quiet.ts";
 
 // The text after `/sym` (docs/slack.md). Pure, so tests cover it without Slack.
 
-export type SymCommand = { type: "status" } | { type: "quiet"; arg: QuietArg } | { type: "usage" };
+export type SymCommand =
+  | { type: "status" }
+  | { type: "schedules" }
+  | { type: "quiet"; arg: QuietArg }
+  | { type: "usage" };
 
 export const USAGE = [
   "Usage:",
   "`/sym status` or `/sym jobs`: what Sym is working on",
+  "`/sym schedules`: the recurring checks and when they run next",
   "`/sym quiet [minutes|2h]`: stay silent except for questions and failures (default 60 minutes)",
   "`/sym quiet off`: end quiet mode",
 ].join("\n");
@@ -17,6 +22,9 @@ export function parseSymCommand(text: string): SymCommand {
     case "status":
     case "jobs":
       return rest.length === 0 ? { type: "status" } : { type: "usage" };
+    case "schedule":
+    case "schedules":
+      return rest.length === 0 ? { type: "schedules" } : { type: "usage" };
     case "quiet": {
       const arg = parseQuietArg(rest.join(" "));
       return arg ? { type: "quiet", arg } : { type: "usage" };

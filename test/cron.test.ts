@@ -29,6 +29,14 @@ describe("nextFire", () => {
     ["0 12 31 * *", "2026-10-31T12:00:00Z", "2026-12-31T12:00:00.000Z"],
     // Both day fields set: either may match. Sunday 2026-11-01 comes before the 15th.
     ["0 0 15 * 0", "2026-10-26T00:00:00Z", "2026-11-01T00:00:00.000Z"],
+    // A stepped wildcard in a day field is still a wildcard (cronie): only Mondays match.
+    // 2026-10-20 is a Tuesday, so the next Monday is the 26th, not the 21st.
+    ["0 9 */1 * 1", "2026-10-20T00:00:00Z", "2026-10-26T09:00:00.000Z"],
+    ["0 9 * * 1", "2026-10-20T00:00:00Z", "2026-10-26T09:00:00.000Z"],
+    // Day 21 only (Wednesday); a stepped day-of-week wildcard must not add other days.
+    ["0 9 21 * */1", "2026-10-20T00:00:00Z", "2026-10-21T09:00:00.000Z"],
+    ["0 9 22 * */1", "2026-10-20T00:00:00Z", "2026-10-22T09:00:00.000Z"],
+    ["0 9 */1 * */1", "2026-10-20T10:00:00Z", "2026-10-21T09:00:00.000Z"],
   ])("%s after %s fires at %s", (cron, after, expected) => {
     expect(next(cron, after)).toBe(expected);
   });
@@ -46,6 +54,17 @@ describe("parseCron", () => {
     expect([...cron.daysOfWeek]).toEqual([1, 2, 3]);
     expect(cron.dowRestricted).toBe(true);
     expect(cron.domRestricted).toBe(false);
+  });
+
+  it.each([
+    ["* * * * *", false, false],
+    ["* * */2 * */3", false, false],
+    ["* * 1 * 1", true, true],
+    ["* * 1-5/2 * *", true, false],
+    ["* * * * 1,3", false, true],
+  ])("%s: day fields restricted dom=%s dow=%s", (cron, dom, dow) => {
+    const parsed = parseCron(cron);
+    expect([parsed.domRestricted, parsed.dowRestricted]).toEqual([dom, dow]);
   });
 
   it.each([

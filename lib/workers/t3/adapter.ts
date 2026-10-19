@@ -126,7 +126,7 @@ const toThread = (thread: z.infer<typeof Thread>): WorkerThread => ({
 });
 
 export interface T3AdapterOptions {
-  // When the sign-in stops working. From `T3_TOKEN_EXPIRES_AT`, which `pnpm t3:login` writes.
+  // When the sign-in stops working: the stored sign-in, else `T3_TOKEN_EXPIRES_AT` (decision 036).
   signInExpiresAt?: Date | null;
 }
 

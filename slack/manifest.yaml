@@ -10,19 +10,22 @@ features:
     display_name: sym
     always_online: true
   app_home:
-    home_tab_enabled: true
+    # The Home tab comes with team use (docs/slack.md).
+    home_tab_enabled: false
     messages_tab_enabled: true
     messages_tab_read_only_enabled: false
   slash_commands:
     - command: /sym
       url: https://sym.example.com/eve/v1/slack
       description: Status, quiet mode, and schedules
-      usage_hint: status | jobs | quiet | schedule
+      usage_hint: status | jobs | schedules | quiet [minutes|off]
       should_escape: false
 oauth_config:
   scopes:
     bot:
       - app_mentions:read
+      # The thread status line (assistant.threads.setStatus).
+      - assistant:write
       - chat:write
       - commands
       - channels:history
@@ -40,7 +43,6 @@ settings:
     request_url: https://sym.example.com/eve/v1/slack
     bot_events:
       - app_mention
-      - app_home_opened
       - message.channels
       - message.groups
       - message.im
