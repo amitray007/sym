@@ -84,13 +84,14 @@ export function groupFeedback(rows: Row[], min = PATTERN_MIN): Pattern[] {
   return patterns;
 }
 
-// Feedback from the week before `now`, joined to the kind of its job.
+// Feedback from the week before `now`, joined to the kind of its job. No upper bound: the
+// database clock can run ahead of this process's clock, and feedback is never in the future.
 export async function recentFeedback(sql: Sql, now: Date): Promise<Row[]> {
   const since = new Date(now.getTime() - WEEK_MS);
   const rows = await sql<Row[]>`
     select f.id, f.kind, f.value, j.kind as job_kind
     from feedback f left join jobs j on j.id = f.job_id
-    where f.created_at >= ${since} and f.created_at < ${now}
+    where f.created_at >= ${since}
     order by f.id
   `;
   return rows.map((row) => ({ ...row, id: Number(row.id) }));
