@@ -4,7 +4,7 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "lib": ["es2024"],
-    "types": ["node"],
+    "types": ["node", "eve/workflow-modules"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -16,5 +16,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["agent", "lib", "test"]
+  "include": ["agent", "lib", "scripts", "test"]
 }

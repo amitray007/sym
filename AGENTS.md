@@ -31,8 +31,10 @@ planning or building anything.
 
 ## Status
 
-Milestone 1 is in progress (`docs/milestone-1.md`). Done: the Eve scaffold, tooling, CI, and
-`chooseDisplay` with unit tests. Next: the T3 connection, the ledger, and the `t3_job` tool.
+Milestone 1 is in progress (`docs/milestone-1.md`). Done: the Eve scaffold, tooling, CI, local
+Postgres, the ledger, and `chooseDisplay` with unit tests. Code done, live check pending: the T3
+adapter, the `t3_job` tool, and the Slack channel. Next: the live checks, then the job card and
+worker questions.
 
 ## Commands
 
@@ -46,19 +48,28 @@ Node 24 and pnpm, pinned in `mise.toml`. Run tools through mise, for example
 - `pnpm dev` starts `eve dev` with the terminal UI. Agents use `pnpm exec eve dev --no-ui` in a
   background process, then stop it after the check.
 - `pnpm eval` runs `eve eval`.
+- `pnpm db:up` starts Postgres 18 from `compose.yaml` on `127.0.0.1:55432`. `pnpm db:down` stops
+  it. Ledger tests need it and `DATABASE_URL=postgres://sym:sym@localhost:55432/sym`.
+- `pnpm db:migrate` applies pending ledger migrations (`lib/ledger/migrations.ts`).
+- `pnpm t3:login <mcp-url>` signs Sym in to a T3 worker and saves the token to `.env.local`. The
+  owner approves in the browser. `pnpm t3:check` lists the worker's projects and providers.
+- `pnpm t3:job-smoke <project>` runs the job steps live without Eve. It launches a real worker
+  thread, so use a throwaway project.
 
 Local secrets go in `.env.local` (gitignored). `.env.example` lists the variables. Agents never
 read `.env.local`.
 
-Tests use fakes and never call a real worker, the real Slack API, or a paid model.
+Tests use fakes and never call a real worker, the real Slack API, or a paid model. Ledger tests
+use a real Postgres (decision 014).
 
 ## Code layout
 
 | Folder | Owns |
 |---|---|
 | `agent/` | The Eve agent: `agent.ts`, instructions, channels, tools, schedules, hooks, skills |
-| `lib/` | Sym modules the agent imports: the display rule, and later the ledger and worker adapters |
-| `test/` | Vitest unit tests |
+| `lib/` | Sym modules the agent imports: the display rule, the database client, worker adapters, and the ledger |
+| `scripts/` | Operator scripts run with `node`, such as the T3 sign-in and check |
+| `test/` | Vitest tests. `test/fakes/` holds the fake worker. `test/helpers/` gives each ledger test file its own schema |
 | `slack/` | Slack app manifest |
 | `docs/` | Design documents, decisions, and mockups |
 

@@ -6,13 +6,20 @@ worker. No production deployment and no adopter pack beyond a test pack.
 ## Build order
 
 1. **Scaffold.** Done: Eve app with `eve init`, Eve pinned to 0.81.0, pnpm, Biome, Vitest, Knip,
-   and CI. Still to add: Postgres in Docker for local work.
-2. **Worker connection.** Eve locally (`eve dev`) with a manual T3 token through `getToken`,
-   against T3 over the private network. List projects and capabilities.
-3. **Ledger.** `jobs` and `outbox` tables with migrations. A fake worker adapter for tests.
-4. **`t3_job` task tool.** Launch in a test repository, the watch loop, `yield` to the status
-   line, and the callback URL with a timer fallback. Duplicate-launch guard by title.
-5. **Slack.** Test app from the manifest through a tunnel. Status line, job card with
+   CI, and Postgres 18 in Docker for local work (decision 014).
+2. **Worker connection.** Done over loopback (2026-10-19): the T3 adapter in `lib/workers/t3/`
+   with its own MCP client (decision 015). `pnpm t3:login` signs in with T3's consent flow, and
+   `pnpm t3:check` lists projects and providers. Still to do: the same check over the tailnet
+   with HTTPS, which the deployment needs.
+3. **Ledger.** Done: `jobs` and `outbox` tables with migrations in `lib/ledger/` (decision 016),
+   and a fake worker adapter in `test/fakes/worker.ts`.
+4. **`t3_job` task tool.** Code done (decision 017): the watch loop, `yield` to the status line,
+   the callback URL with a timer fallback, and the duplicate-launch guard by title, tested with
+   the fake worker. Live (2026-10-19): `pnpm t3:job-smoke` ran the job steps against a test
+   repository. The worker committed the change, called back, and the job ended `done` with the
+   output contract block. Still to do: the same run through Eve, which needs the brain model.
+5. **Slack.** `agent/channels/slack.ts` with an owner allow-list (`SYM_SLACK_USERS`). Test app
+   from the manifest through a tunnel. Status line, job card with
    `chat.update`, `ctx.ask` buttons, and "what's the update?".
 6. **Display rule.** Done: `lib/display.ts` with unit tests for each step and modifier. Still to
    do: route every post through it.
@@ -28,7 +35,8 @@ worker. No production deployment and no adopter pack beyond a test pack.
 - A `taskCard` renderer that hides Eve's card for `t3_job` only.
 - Does `createWebhook` return the public host or the private host?
 - Does `ctx.send` work from `onSlashCommand`?
-- Does Eve accept the T3 OAuth flow through `defineInteractiveAuthorization`?
+- ~~Does Eve accept the T3 OAuth flow through `defineInteractiveAuthorization`?~~ Not used: it is
+  user-scoped, and reconcile runs without a user (decision 015).
 - Does the build-time pack overlay compile pack playbooks (see [adopting.md](adopting.md))?
 
 ## Exit criteria

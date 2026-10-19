@@ -26,7 +26,9 @@ Tailscale Funnel limited to the Slack path also works.
 |---|---|
 | `SLACK_BOT_TOKEN` | Slack app, Bot User OAuth Token |
 | `SLACK_SIGNING_SECRET` | Slack app, Basic Information |
-| `ANTHROPIC_API_KEY` | Model provider |
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway, for the brain model |
+| `SYM_MODEL` | Gateway model ID, for example `anthropic/claude-sonnet-5.5`. Optional |
+| `SYM_WORKER_MODEL` | Worker thread model as `<provider>/<model>`, for example `codex/gpt-6-luna`. Needed when a worker project has no default model |
 | `DATABASE_URL` | Postgres |
 | `SYM_PACK_DIR` | Path to the mounted pack |
 | `SYM_MCP_TOKEN` | Bearer for workers calling Sym's MCP channel |
@@ -39,7 +41,7 @@ them in the pack.
 
 ## Deploy
 
-1. Build with `eve build`. Run with `eve start`, which also runs the scheduler.
+1. Build with `eve build`. Run `pnpm db:migrate`, then `eve start`, which also runs the scheduler.
 2. Run exactly one replica. Schedules and leases assume one scheduler.
 3. Mount a volume at `.eve/.workflow-data`.
 4. Point the proxy at the service. Pass `/eve/` and `/.well-known/workflow/` unrewritten.
@@ -50,7 +52,11 @@ them in the pack.
 ## Worker host (T3 Code)
 
 1. Run the T3 server reachable on the private network, for example
-   `t3 serve --tailscale-serve`.
+   `t3 serve --tailscale-serve`, or enable Tailscale HTTPS in the T3 app (Settings, Connections).
+   Sym needs HTTPS for the sign-in: its MCP client sends tokens over plain HTTP only to loopback.
+   If the worker host also serves Sym's public Slack route through Tailscale Funnel, put the
+   Funnel on its own port (8443 or 10000). Funnel exposes a whole HTTPS port, so a Funnel on 443
+   would also expose T3.
 2. Copy the MCP URL from T3 Settings, Connections, into the pack's `workers` entry.
 3. Start Sym. It registers as an OAuth client and posts a private sign-in prompt to the owner.
 4. Approve the sign-in on the T3 page and pick the access level (Auto by default, decision 009).

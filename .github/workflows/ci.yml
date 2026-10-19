@@ -17,6 +17,23 @@ jobs:
     name: lint · types · knip · test · build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      # Same image as compose.yaml. Tests that need the ledger database use it.
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: sym
+          POSTGRES_PASSWORD: sym
+          POSTGRES_DB: sym
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sym -d sym"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgres://sym:sym@localhost:5432/sym
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

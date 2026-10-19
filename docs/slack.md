@@ -82,4 +82,7 @@ Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reac
 `app_home_opened`. Interactivity and the slash command use the same request URL,
 `/eve/v1/slack`.
 
-Milestone 1 allow-list: the owner's Slack user ID only.
+Milestone 1 allow-list: the owner's Slack user ID only, in `SYM_SLACK_USERS`. Every inbound
+handler checks it and fails closed, including answers to buttons. Thread context still includes
+messages from other people in the thread. The instructions treat that text as data, and job
+launches need approval.

@@ -13,7 +13,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Feature | API | Decision | How Sym uses it | Limits |
 |---|---|---|---|---|
 | Agent definition | `agent/agent.ts` `defineAgent` | Use | Model, limits, compaction | Self-hosted upgrades strand running sessions |
-| Model | `anthropic()` from `eve/models/anthropic` | Use | Chat, briefs, triage, summaries. Workers do heavy work | String model IDs need AI Gateway |
+| Model | Gateway model ID from `SYM_MODEL`, set at `session.started` (decision 018) | Use | Chat, briefs, triage, summaries. Workers do heavy work | Needs `AI_GATEWAY_API_KEY` off Vercel. The model is fixed per session |
 | Dynamic model | `defineDynamic` on `turn.started` | Later | Cheap model for status, stronger model for planning | Switching mid-session loses the prompt cache |
 | Spend limits | `limits.maxTokenCostUsdPerSession`, `sessionTimeoutMs` | Use | Cap brain spend per thread | Cost tracking needs reported cost |
 | Instructions | `agent/instructions.md`, `instructions/` | Use | Persona, trust ladder, Slack style | TS instructions evaluate at build time |

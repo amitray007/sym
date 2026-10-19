@@ -35,7 +35,8 @@ host. Its server exposes a remote MCP endpoint at `/mcp` with OAuth. Sym connect
 OAuth client. Outside clients get the orchestration, worktree, and pull request tools. They never
 get preview or device tools, or tools that act as the calling thread.
 
-Facts below come from T3 Code at commit `42da166d`. Recheck them when you upgrade T3.
+Facts below come from T3 Code at commit `42da166d`, rechecked at `771fd93f` (2026-10-19). Recheck
+them when you upgrade T3.
 
 ### Access levels
 
@@ -58,9 +59,9 @@ waits until a person approves it in the T3 app. Sym can only tell the owner.
 |---|---|---|
 | `capabilities` | `orchestrator_capabilities` | Read |
 | `projects` | `t3_project_list`, `t3_project_read` | Read |
-| `findByTitle` | `t3_thread_list(titleContains)` | Read |
+| `findByTitle` | `t3_thread_list(titleContains)`, then a prefix match on `[J-<id>]` | Read |
 | `launch` | `t3_thread_launch` with `workspaceStrategy: worktree` | Supervised+ |
-| `wait` | `t3_thread_wait` (default 10 min, max 60 min; Sym uses 1 to 5 min) | Read |
+| `wait` | `t3_thread_wait` (default 10 min, max 60 min; Sym uses 60 s, and the MCP request gets 15 s more) | Read |
 | `readActivity`, `readMessages` | `t3_thread_read` (`view: activity` or `messages`, `afterPosition`) | Read |
 | `pendingQuestion`, `answer` | `t3_pending_request_list`, `t3_pending_request_respond` | Read / Supervised+ |
 | `send` | `t3_thread_send` (`mode: auto/queue/steer/restart`, `clientRequestId`) | Supervised+ |
@@ -70,6 +71,27 @@ waits until a person approves it in the T3 app. Sym can only tell the owner.
 
 Also available: queue tools, thread fork and merge-back, `t3_worktree_list`, T3-side schedules,
 and attachments (10 MiB images, 50 MiB files) for passing Slack files into a thread.
+
+### Connection and sign-in
+
+- Transport: Streamable HTTP at `<origin>/mcp`. The T3 server listens on port 3773 by default.
+- Use HTTPS off the worker host: enable Tailscale HTTPS in T3 (Settings, Connections) or run
+  `t3 serve --tailscale-serve`, then use `https://<worker>.<tailnet>.ts.net/mcp`. The MCP client
+  refuses to send a token request over plain HTTP except to loopback, so
+  `http://<worker>.<tailnet>.ts.net:3773/mcp` answers but cannot complete the sign-in.
+- T3 derives its OAuth issuer and endpoints from the request origin, and sends `iss` on the
+  sign-in redirect (RFC 9207). Sign in through the same URL Sym uses later.
+- Sign-in: OAuth 2.1 with discovery, dynamic client registration, and PKCE. Every client is
+  public. Loopback redirect URIs match on everything but the port. The `resource` parameter must
+  equal the MCP URL.
+- The owner approves on T3's consent page (`/connect-agent`) with a signed-in browser or a
+  pairing code, and picks the access level there.
+- `t3 auth session issue --subject mcp-client` mints a token without OAuth, but its ceiling is at
+  most Supervised. Sym needs the consent flow for Auto (decision 009).
+- An outside client must pass `modelSelection` when the project has no default model. Sym
+  passes `SYM_WORKER_MODEL` and first checks that `orchestrator_capabilities` offers it.
+- Sym calls T3 from code through `lib/workers/t3/` (decision 015). Milestone 1 signs in with
+  `pnpm t3:login <mcp-url>`, which saves the token to `.env.local`.
 
 ### Limits
 

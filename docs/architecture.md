@@ -39,7 +39,7 @@ strands running sessions, so every job keeps enough state to continue in a new s
 |---|---|
 | `jobs` | ID, kind, Slack channel and thread, brief, worker and thread ID, status, cursor, last summary, job card `ts`, display choice |
 | `schedules` | Cron (UTC), stored brief, approval state, trust level, lease |
-| `outbox` | Pending Slack posts with an idempotency key |
+| `outbox` | Pending Slack posts with an idempotency key and the `chooseDisplay` result. Refuses level 0 and missing choices |
 | `feedback` | Buttons, reactions, "Fix" replies, brief edits, linked to a job |
 | `memory` | Facts and preferences (learning layer 1) |
 | `playbooks` | Approved playbooks and rules with version history (learning layer 2) |
