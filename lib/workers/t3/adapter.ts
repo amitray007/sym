@@ -2,11 +2,13 @@ import { z } from "zod";
 import type {
   Activity,
   LaunchRequest,
+  PullRequestWatch,
   SendMode,
   WaitResult,
   WorkerAdapter,
   WorkerAnswers,
   WorkerCapabilities,
+  WorkerHealth,
   WorkerProject,
   WorkerQuestion,
   WorkerStatus,
@@ -84,6 +86,10 @@ const PendingRequest = z.object({
   ),
 });
 
+// `watch_pull_request` links the pull request first when needed (T3 PullRequestsToolkit.
+// setWatching), so Sym needs no separate `link_pull_request` call.
+const Watched = z.object({ watching: z.boolean(), wasWatching: z.boolean() });
+
 // Stops a cursor loop if the worker keeps returning a cursor.
 const MAX_PROJECT_PAGES = 50;
 
@@ -119,7 +125,12 @@ const toThread = (thread: z.infer<typeof Thread>): WorkerThread => ({
   status: toWorkerStatus(thread.status),
 });
 
-export function t3Adapter(call: CallTool): WorkerAdapter {
+export interface T3AdapterOptions {
+  // When the sign-in stops working. From `T3_TOKEN_EXPIRES_AT`, which `pnpm t3:login` writes.
+  signInExpiresAt?: Date | null;
+}
+
+export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): WorkerAdapter {
   return {
     async capabilities(): Promise<WorkerCapabilities> {
       const result = Capabilities.parse(await call("orchestrator_capabilities", {}));
@@ -270,6 +281,28 @@ export function t3Adapter(call: CallTool): WorkerAdapter {
         mode,
         clientRequestId: requestId,
       });
+    },
+
+    async watchPullRequest(threadId, prUrl): Promise<PullRequestWatch> {
+      // T3 refuses a read-only client, a merged pull request, and a subagent thread. The error
+      // text reaches the caller.
+      const result = Watched.parse(await call("watch_pull_request", { threadId, url: prUrl }));
+      return { watching: result.watching, alreadyWatching: result.wasWatching };
+    },
+
+    async health(): Promise<WorkerHealth> {
+      const signInExpiresAt = options.signInExpiresAt ?? null;
+      try {
+        await call("orchestrator_capabilities", {});
+        return { reachable: true, signedIn: true, signInExpiresAt };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        // A 401 means the worker answered and refused the token.
+        if (/\b401\b|unauthori[sz]ed/i.test(message)) {
+          return { reachable: true, signedIn: false, signInExpiresAt };
+        }
+        return { reachable: false, signedIn: false, signInExpiresAt };
+      }
     },
   };
 }

@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { OutputContract } from "./contract.ts";
 
 // Deterministic result checks (docs/architecture.md, flow 4), run before any model review. They
@@ -63,4 +64,113 @@ export function matchesGlob(path: string, pattern: string): boolean {
     }
   }
   return new RegExp(`^${source}$`).test(clean);
+}
+
+// The model check (docs/architecture.md, flow 4, decision 032). The `verifier` subagent returns
+// this shape. t3_job passes it as the turn's outputSchema, and finishJob parses it again, so a
+// malformed reply counts as an unavailable check instead of a broken result.
+export const VerifierOutput = z.object({
+  verdict: z.enum(["pass", "concerns"]),
+  concerns: z.array(z.string()),
+  confidence: z.number().min(0).max(1),
+});
+export type VerifierOutput = z.infer<typeof VerifierOutput>;
+
+// What the model check gave the job: a verdict, or nothing because it failed or timed out.
+// Jobs that skip the model check (reconcile, scheduled checks, a cancel) pass no ModelCheck.
+export type ModelCheck =
+  | { status: "checked"; output: VerifierOutput }
+  | { status: "unavailable"; reason: string };
+
+// A model concern can repeat worker text, so the list and each line stay short.
+const MAX_MODEL_CONCERNS = 8;
+const MAX_CONCERN_LENGTH = 300;
+
+// The deterministic concerns first, then the model's, without repeats. Two concerns repeat when
+// they match after case, spacing, and a final period are ignored.
+export function mergeConcerns(deterministic: string[], model: string[] = []): string[] {
+  const key = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim().replace(/\.$/, "");
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  const add = (text: string) => {
+    const k = key(text);
+    if (k === "" || seen.has(k)) return;
+    seen.add(k);
+    merged.push(text.trim());
+  };
+  for (const concern of deterministic) add(concern);
+  for (const concern of model.slice(0, MAX_MODEL_CONCERNS)) {
+    const flat = concern.replace(/\s+/g, " ").trim();
+    add(flat.length > MAX_CONCERN_LENGTH ? `${flat.slice(0, MAX_CONCERN_LENGTH - 1)}…` : flat);
+  }
+  return merged;
+}
+
+// The model check's concerns, or none when it gave no verdict.
+export function modelConcerns(check: ModelCheck | undefined): string[] {
+  return check?.status === "checked" ? check.output.concerns : [];
+}
+
+// The one-line verdict in the result message. Only a job that tried the model check gets one.
+export function verdictLine(check: ModelCheck | undefined, concerns: string[]): string | null {
+  if (!check) return null;
+  if (check.status === "unavailable") {
+    return "Model check unavailable. Only the rule checks ran.";
+  }
+  const confidence = `${Math.round(check.output.confidence * 100)}% confidence`;
+  const pass = check.output.verdict === "pass" && concerns.length === 0;
+  return pass
+    ? `Verdict: the result matches the brief (${confidence}).`
+    : `Verdict: check the concerns below (${confidence}).`;
+}
+
+export interface VerifierRequest {
+  goal: string;
+  doneWhen: string[];
+  constraints: string[];
+  contract: OutputContract;
+  // The deterministic concerns, from checkResult and resultConcerns.
+  concerns: string[];
+  // The worker's final message. Untrusted.
+  workerMessage: string | null;
+}
+
+const MAX_WORKER_MESSAGE = 6_000;
+
+// JSON that cannot close the tag around it: `<` becomes <.
+function data(value: unknown): string {
+  return JSON.stringify(value, null, 2).replace(/</g, "\\u003c");
+}
+
+// The message for the `verifier` subagent. The brief and the rule checks come from Sym. The
+// result block and the final message come from the worker, so they sit in a tag marked as
+// untrusted data.
+export function verifierMessage(request: VerifierRequest): string {
+  const message = request.workerMessage ?? "";
+  return [
+    "Check this worker result against its brief. Reply with your verdict.",
+    `<brief>\n${data({ goal: request.goal, done_when: request.doneWhen, constraints: request.constraints })}\n</brief>`,
+    `<rule_check_concerns>\n${data(request.concerns)}\n</rule_check_concerns>`,
+    `<worker_result untrusted="true">\n${data({
+      summary: request.contract.summary,
+      pr_url: request.contract.prUrl,
+      tests: request.contract.tests,
+      files_changed: request.contract.filesChanged,
+      open_questions: request.contract.openQuestions,
+      final_message:
+        message.length > MAX_WORKER_MESSAGE ? `${message.slice(0, MAX_WORKER_MESSAGE)}…` : message,
+    })}\n</worker_result>`,
+  ].join("\n\n");
+}
+
+// Reads the rule-check concerns back out of a verifier message. The fixture verifier uses it.
+export function ruleConcernsIn(message: string): string[] {
+  const block = /<rule_check_concerns>\s*([\s\S]*?)\s*<\/rule_check_concerns>/.exec(message)?.[1];
+  if (!block) return [];
+  try {
+    const value: unknown = JSON.parse(block);
+    return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }

@@ -66,14 +66,22 @@ Rules (decision 026):
 
 ## How Sym loads a pack
 
-- **Build time:** the image build copies `instructions/` and `playbooks/` into the Eve agent
-  folder before `eve build`, so Eve compiles them like built-in files. Pack files with the same
-  name as a built-in file replace it.
+- **Build time:** `node scripts/pack-overlay.ts <pack-dir> <app-dir>` validates the pack, then
+  copies each instruction file to `agent/instructions/<name>.md` and each playbook to
+  `agent/skills/<name>.md` before `eve build`, so Eve compiles them like built-in files.
+  Instructions are added after `agent/instructions.md`, in alphabetical order; the overlay never
+  overwrites an instruction file. A playbook with the same name as a built-in skill replaces it.
+  A playbook without `description` frontmatter gets one from its first line, but write your own
+  so the model can route on intent. File names use ASCII letters, digits, `_`, and `-`.
+  In Docker, pass the pack as a build context: `docker build --build-context pack=./my-pack -t sym .`.
+  Without it, the image builds with no pack. Mount the pack at `SYM_PACK_DIR` at runtime too,
+  because the runtime reads `sym.config.yaml` from there.
 - **Start:** Sym reads `sym.config.yaml` from `SYM_PACK_DIR`, validates it, and refuses to start
   on an error that names the file and the field. Seeding `schedules.yaml` rows comes later.
 - **Session start:** `defineDynamic` adds approved learning-layer-2 rows from Postgres on top.
 
-Milestone 1 confirms this split. Until then, treat it as the plan.
+Milestone 1 checked this split: Eve 0.81.0 compiles pack instructions and playbooks from the
+overlay, in `eve build` and in `docker build`.
 
 ## Secrets
 

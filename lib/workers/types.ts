@@ -85,6 +85,21 @@ export interface WorkerQuestion {
 // Answers keyed by question ID. Each answer is the chosen option labels or free text.
 export type WorkerAnswers = Record<string, string | string[]>;
 
+export interface WorkerHealth {
+  // The worker answered a call.
+  reachable: boolean;
+  // The worker accepted Sym's sign-in. False after a 401.
+  signedIn: boolean;
+  // When the sign-in stops working, if the deployment knows it (`T3_TOKEN_EXPIRES_AT`).
+  signInExpiresAt: Date | null;
+}
+
+export interface PullRequestWatch {
+  // The worker now watches the pull request.
+  watching: boolean;
+  alreadyWatching: boolean;
+}
+
 export type SendMode = "auto" | "queue" | "steer";
 
 export interface WorkerAdapter {
@@ -104,4 +119,10 @@ export interface WorkerAdapter {
   answer(threadId: string, requestId: string, answers: WorkerAnswers): Promise<void>;
   // Steers or queues a message to the thread. `requestId` makes a retry safe.
   send(threadId: string, text: string, mode: SendMode, requestId: string): Promise<void>;
+  // Optional: a worker without pull request wakes leaves it out. Links the pull request to the
+  // thread and asks the worker to watch it, so the worker agent wakes on CI failures and review
+  // comments. A repeat call is safe on T3. `requestId` is for adapters that need a retry key.
+  watchPullRequest?(threadId: string, prUrl: string, requestId: string): Promise<PullRequestWatch>;
+  // Optional: reachability and sign-in state, for the sign-in expiry notice.
+  health?(): Promise<WorkerHealth>;
 }

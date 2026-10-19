@@ -37,3 +37,7 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [029](029-quiet-buttons-feedback.md) | Quiet mode, the slash command, card buttons, and feedback |
 | [030](030-pack-enforcement-and-checks.md) | The pack shapes each launch, and results get rule checks |
 | [031](031-silent-scheduled-checks.md) | A clean scheduled check posts nothing |
+| [032](032-verifier.md) | A verifier subagent checks code results before they post |
+| [033](033-playbook-rows.md) | Approved playbook rows load as instructions at session start |
+| [034](034-follow-prs-and-sign-in.md) | Reconcile follows pull requests and the worker sign-in |
+| [035](035-pack-overlay.md) | The pack overlay copies instructions and playbooks before the build |

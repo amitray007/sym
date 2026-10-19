@@ -9,6 +9,10 @@ ENV CI=true
 RUN corepack enable
 WORKDIR /app
 
+# Optional pack. `docker build --build-context pack=<pack-dir> .` applies the pack overlay (instructions
+# and playbooks) before the Eve build. Without the flag this stage is empty and the build adds nothing.
+FROM scratch AS pack
+
 # Build stage: all dependencies, then the Eve build. Sym sets defaultTools: false and uses no
 # sandbox, so the build skips the sandbox image prewarm.
 FROM base AS build
@@ -16,6 +20,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY . .
+RUN --mount=type=bind,from=pack,target=/pack \
+    if [ -f /pack/sym.config.yaml ]; then node scripts/pack-overlay.ts /pack /app; fi
 RUN pnpm build:compile
 
 # Dependency stage: production dependencies only.
@@ -32,7 +38,8 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/.output ./.output
 COPY --from=build /app/.eve ./.eve
 COPY package.json tsconfig.json ./
-COPY agent ./agent
+# From the build stage, so the pack overlay files come along.
+COPY --from=build /app/agent ./agent
 COPY lib ./lib
 COPY scripts/migrate.ts ./scripts/migrate.ts
 # Workflow state lives in .eve/.workflow-data. Mount a persistent volume there.

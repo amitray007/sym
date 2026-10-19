@@ -24,6 +24,7 @@ import type {
 import { Brief, workerMessage } from "./brief.ts";
 import { parseOutputContract } from "./contract.ts";
 import {
+  endConcerns,
   presentBrief,
   presentEnd,
   presentProgress,
@@ -31,6 +32,7 @@ import {
   SCHEDULED_CHECK,
 } from "./present.ts";
 import { detectEvents } from "./progress.ts";
+import { type ModelCheck, VerifierOutput, verifierMessage } from "./verify.ts";
 
 // The worker job steps that `t3_job` and reconcile run (docs/architecture.md, flows 1 and 3).
 // They read and write the ledger, so a re-run step or a new session continues from the job row.
@@ -162,6 +164,8 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
 }
 
 export interface JobCheck {
+  // `checking` means the worker finished and the result waits for the model check. The caller
+  // runs the `verifier` subagent and then calls finishJob.
   status: JobStatus;
   summary: string;
   terminal: boolean;
@@ -171,12 +175,24 @@ export interface JobCheck {
   questions: WorkerQuestion[];
 }
 
+export interface CheckOptions {
+  // A finished code job moves to `checking` instead of `done`, so the caller can run the model
+  // check (flow 4, decision 032). A scheduled check never does: it stays cheap and silent.
+  verify?: boolean;
+}
+
 // Waits briefly for the worker, reads new activity from the job's cursor, records it, and
 // presents it in Slack.
-export async function checkJob(deps: JobDeps, jobId: number, waitMs: number): Promise<JobCheck> {
+export async function checkJob(
+  deps: JobDeps,
+  jobId: number,
+  waitMs: number,
+  options: CheckOptions = {},
+): Promise<JobCheck> {
   const job = await mustGetJob(deps.sql, jobId);
   if (!job.workerThreadId) throw new Error(`${jobRef(job.id)} has no worker thread`);
-  if (TERMINAL.includes(job.status)) return toCheck(job, []);
+  // A job in `checking` has nothing more to read from the worker.
+  if (TERMINAL.includes(job.status) || job.status === "checking") return toCheck(job, []);
 
   await deps.worker.wait(job.workerThreadId, waitMs);
   const activity = await readNewActivity(deps.worker, job.workerThreadId, job.cursor);
@@ -185,7 +201,9 @@ export async function checkJob(deps: JobDeps, jobId: number, waitMs: number): Pr
     activity.status === "waiting"
       ? await deps.worker.pendingQuestions(job.workerThreadId).catch(() => [])
       : [];
-  const status = toJobStatus(activity.status, questions.length > 0, job.status);
+  const worked = toJobStatus(activity.status, questions.length > 0, job.status);
+  const verify = options.verify === true && job.kind !== SCHEDULED_CHECK;
+  const status: JobStatus = worked === "done" && verify ? "checking" : worked;
   const at = now(deps);
   const progress = detectEvents(
     {
@@ -235,6 +253,59 @@ export async function checkJob(deps: JobDeps, jobId: number, waitMs: number): Pr
   return toCheck(updated, status === "waiting_input" ? questions : []);
 }
 
+// The input for the `verifier` subagent, or nothing when the job is not waiting on a model
+// check or the worker sent no result block to check.
+export async function verifierRequest(deps: LedgerDeps, jobId: number): Promise<string | null> {
+  const job = await mustGetJob(deps.sql, jobId);
+  if (job.status !== "checking") return null;
+  const contract = parseOutputContract(job.lastMessage);
+  if (!contract) return null;
+  const brief = Brief.parse(job.brief);
+  return verifierMessage({
+    goal: brief.goal,
+    doneWhen: brief.doneWhen,
+    constraints: brief.constraints,
+    contract,
+    concerns: endConcerns(job, contract, deps.pack),
+    workerMessage: job.lastMessage,
+  });
+}
+
+export interface FinishedJob extends JobCheck {
+  // Every concern the result message lists. The schedule run outcome uses the same list.
+  concerns: string[];
+}
+
+// Ends a job in `checking` as done and posts its one result message with the model check's
+// verdict merged in (flow 4, decision 032). `check` is the verifier's reply, an unavailable
+// check, or nothing for the rule checks alone. A job that already ended posts nothing again.
+export async function finishJob(
+  deps: LedgerDeps,
+  jobId: number,
+  check?: ModelCheck,
+): Promise<FinishedJob> {
+  const job = await mustGetJob(deps.sql, jobId);
+  const contract = parseOutputContract(job.lastMessage);
+  const model = parseModelCheck(check);
+  if (job.status !== "checking") {
+    return { ...toCheck(job, []), concerns: endConcerns(job, contract, deps.pack, model) };
+  }
+  const ended = await updateJob(deps.sql, job.id, { status: "done" });
+  await presentEnd(deps.sql, ended, contract, now(deps), deps.pack, model);
+  await deliverNow(deps);
+  return { ...toCheck(ended, []), concerns: endConcerns(ended, contract, deps.pack, model) };
+}
+
+// The reply crossed the workflow boundary, so check its shape again. A malformed reply counts
+// as an unavailable check.
+function parseModelCheck(check: ModelCheck | undefined): ModelCheck | undefined {
+  if (check?.status !== "checked") return check;
+  const output = VerifierOutput.safeParse(check.output);
+  return output.success
+    ? { status: "checked", output: output.data }
+    : { status: "unavailable", reason: "The verifier reply had the wrong shape." };
+}
+
 // Sends a person's answer to the worker agent's question.
 export async function answerQuestion(
   deps: JobDeps,
@@ -254,19 +325,28 @@ export async function answerQuestion(
   });
 }
 
-// Stops the worker thread and records the job as cancelled.
+// Stops the worker thread and records the job as cancelled. A job in `checking` already has its
+// result, so it ends as done with the rule checks alone.
 export async function cancelJob(deps: JobDeps, jobId: number): Promise<JobCheck> {
   const job = await mustGetJob(deps.sql, jobId);
+  if (job.status === "checking") {
+    const { concerns: _concerns, ...check } = await finishJob(deps, jobId);
+    return check;
+  }
   if (job.workerThreadId && !TERMINAL.includes(job.status)) {
     await deps.worker.interrupt(job.workerThreadId, "Cancelled in Sym", `cancel-${jobRef(job.id)}`);
   }
   return endWithoutWorker(deps, job, "cancelled", "Cancelled");
 }
 
-// Records a job whose task failed, so the ledger does not show it as still running.
-export async function failJob(deps: LedgerDeps, jobId: number, reason: string): Promise<void> {
+// Records a job whose task failed, so the ledger does not show it as still running. A job in
+// `checking` already has its result, so it ends as done without the model check.
+export async function failJob(deps: LedgerDeps, jobId: number, reason: string): Promise<JobStatus> {
   const job = await mustGetJob(deps.sql, jobId);
-  await endWithoutWorker(deps, job, "failed", reason);
+  if (job.status === "checking") {
+    return (await finishJob(deps, jobId, { status: "unavailable", reason })).status;
+  }
+  return (await endWithoutWorker(deps, job, "failed", reason)).status;
 }
 
 // Marks a pre-approved scheduled run, which posts only when something needs attention.
@@ -320,7 +400,7 @@ function toCheck(job: Job, questions: WorkerQuestion[]): JobCheck {
     status: job.status,
     summary: job.lastSummary ?? "",
     terminal,
-    lastMessage: terminal ? job.lastMessage : null,
+    lastMessage: terminal || job.status === "checking" ? job.lastMessage : null,
     questions,
   };
 }

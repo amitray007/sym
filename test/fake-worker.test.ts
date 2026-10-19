@@ -65,4 +65,40 @@ describe("FakeWorker", () => {
       { threadId: thread.id, text: "Also add tests", mode: "queue", requestId: "send-1" },
     ]);
   });
+
+  it("records pull request watches and reports a repeat", async () => {
+    const worker = new FakeWorker();
+    const thread = await worker.launch({
+      projectId: "project-1",
+      title: "[J-1] x",
+      message: "m",
+      baseRef: "main",
+    });
+    const url = "https://github.com/o/r/pull/1";
+
+    expect(await worker.watchPullRequest(thread.id, url, "k1")).toEqual({
+      watching: true,
+      alreadyWatching: false,
+    });
+    expect(await worker.watchPullRequest(thread.id, url, "k2")).toMatchObject({
+      alreadyWatching: true,
+    });
+    worker.watchError = "merged";
+    await expect(worker.watchPullRequest(thread.id, url, "k3")).rejects.toThrow("merged");
+  });
+
+  it("adds a wake as a notification item", async () => {
+    const worker = new FakeWorker();
+    const thread = await worker.launch({
+      projectId: "project-1",
+      title: "[J-1] x",
+      message: "m",
+      baseRef: "main",
+    });
+    worker.addWake(thread.id, "#1: checks failed");
+    const activity = await worker.readActivity(thread.id, null);
+    expect(activity.items).toEqual([
+      { position: 0, type: "notification", text: "#1: checks failed" },
+    ]);
+  });
 });

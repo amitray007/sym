@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { deliver } from "../lib/delivery/deliver.ts";
 import type { Brief } from "../lib/jobs/brief.ts";
 import { reconcileJobs } from "../lib/jobs/reconcile.ts";
-import { type JobDeps, launchOrAdopt, startJob } from "../lib/jobs/run.ts";
+import { checkJob, type JobDeps, launchOrAdopt, startJob } from "../lib/jobs/run.ts";
 import { getJob } from "../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import type { SlackApi } from "../lib/slack/api.ts";
@@ -135,6 +135,27 @@ describe.skipIf(!hasDatabase)("reconcileJobs", () => {
     const results = s.newPosts().filter((p) => String(p.text).includes(SUMMARY));
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });
+  });
+
+  it("finishes a job left in checking with the rule checks alone", async () => {
+    const s = await setup([{ status: "completed", items: [FINAL] }]);
+    // The task moved the job to checking, then stopped before the model check finished.
+    expect((await checkJob(s.deps, s.job.id, 1000, { verify: true })).status).toBe("checking");
+    await s.send();
+    expect(s.newPosts()).toEqual([]);
+    await expireLease(s.job);
+
+    const report = await reconcileJobs(s.deps);
+    await reconcileJobs(s.deps);
+    await s.send();
+
+    expect(report).toEqual({ checked: 1, finished: 1, offline: 0 });
+    expect((await getJob(s.sql, s.job.id))?.status).toBe("done");
+    const posts = textsOf(s.newPosts());
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toContain(SUMMARY);
+    expect(posts[0]).not.toContain("Verdict");
+    expect(posts[0]).not.toContain("Model check");
   });
 
   it("does not touch a job with a live lease", async () => {

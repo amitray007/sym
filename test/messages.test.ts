@@ -68,6 +68,18 @@ describe("resultMessage", () => {
     expect(text).toContain("<https://x.test/pull/1evil|PR #1>");
   });
 
+  it("puts the verdict line above the concerns", () => {
+    const text = resultMessage(
+      job,
+      { ...contract, openQuestions: [] },
+      ["No test covers <the> limit."],
+      "Verdict: check the concerns below (70% confidence).",
+    );
+    expect(text).toContain(
+      "Verdict: check the concerns below (70% confidence).\nCheck before you merge:\n• No test covers &lt;the&gt; limit.",
+    );
+  });
+
   it("explains a missing contract", () => {
     const text = resultMessage(job, null);
     expect(text).toContain("no result summary");

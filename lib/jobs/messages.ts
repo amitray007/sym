@@ -36,17 +36,20 @@ function lines(parts: (string | null | false | undefined)[]): string {
   return parts.filter((part): part is string => typeof part === "string" && part !== "").join("\n");
 }
 
-// `concerns` come from the deterministic result checks (lib/jobs/verify.ts).
+// `concerns` come from the result checks (lib/jobs/verify.ts): the rule checks, then the model
+// check. `verdict` is the model check's one line, when the job tried one.
 export function resultMessage(
   job: JobFacts,
   contract: OutputContract | null,
   concerns: string[] = [],
+  verdict: string | null = null,
 ): string {
   const head = `*${job.ref} done${took(job)}:* ${escapeMrkdwn(job.title)}`;
   if (!contract) {
     return lines([
       head,
       "The worker sent no result summary. Open the worker thread to read the result.",
+      verdict,
       threadLine(job),
     ]);
   }
@@ -64,6 +67,7 @@ export function resultMessage(
         "Open questions:",
         ...contract.openQuestions.map((question) => `• ${escapeMrkdwn(question)}`),
       ]),
+    verdict,
     concerns.length > 0 &&
       lines(["Check before you merge:", ...concerns.map((c) => `• ${escapeMrkdwn(c)}`)]),
     threadLine(job),

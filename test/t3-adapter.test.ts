@@ -330,3 +330,69 @@ describe("t3Adapter.send", () => {
     });
   });
 });
+
+describe("t3Adapter.watchPullRequest", () => {
+  it("calls watch_pull_request with the thread and URL, and maps the result", async () => {
+    const { call, calls } = fakeT3({
+      watch_pull_request: () => ({
+        host: "github.com",
+        repository: "o/r",
+        number: 7,
+        url: "https://github.com/o/r/pull/7",
+        watching: true,
+        wasWatching: false,
+      }),
+    });
+
+    const result = await t3Adapter(call).watchPullRequest?.(
+      "t-1",
+      "https://github.com/o/r/pull/7",
+      "J-1:watch",
+    );
+
+    expect(result).toEqual({ watching: true, alreadyWatching: false });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      name: "watch_pull_request",
+      args: { threadId: "t-1", url: "https://github.com/o/r/pull/7" },
+    });
+  });
+
+  it("passes a T3 refusal to the caller", async () => {
+    const call: CallTool = async () => {
+      throw new Error("The pull request is merged, so there is nothing to watch.");
+    };
+    await expect(t3Adapter(call).watchPullRequest?.("t-1", "u", "k")).rejects.toThrow(/merged/);
+  });
+});
+
+describe("t3Adapter.health", () => {
+  const expiry = new Date("2026-11-01T00:00:00Z");
+
+  it("reports a reachable, signed-in worker with the configured expiry", async () => {
+    const { call } = fakeT3({ orchestrator_capabilities: () => ({ providers: [] }) });
+    expect(await t3Adapter(call, { signInExpiresAt: expiry }).health?.()).toEqual({
+      reachable: true,
+      signedIn: true,
+      signInExpiresAt: expiry,
+    });
+  });
+
+  it("reports a refused token as reachable but not signed in", async () => {
+    const call: CallTool = async () => {
+      throw new Error("Streamable HTTP error: Error POSTing to endpoint (HTTP 401): unauthorized");
+    };
+    expect(await t3Adapter(call).health?.()).toEqual({
+      reachable: true,
+      signedIn: false,
+      signInExpiresAt: null,
+    });
+  });
+
+  it("reports an unreachable worker", async () => {
+    const call: CallTool = async () => {
+      throw new Error("fetch failed");
+    };
+    expect(await t3Adapter(call).health?.()).toMatchObject({ reachable: false, signedIn: false });
+  });
+});

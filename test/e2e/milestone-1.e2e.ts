@@ -2,10 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { FakeSlackMessage } from "../fakes/slack-server.ts";
 import {
   BOT,
+  briefMention,
   type Conversation,
+  contractMessage,
   finishedSteps,
   type Harness,
   isCard,
+  jobInThread,
   launchesOf,
   messageText,
   newConversation,
@@ -86,6 +89,35 @@ describe("milestone 1", () => {
     expect(result.text).toContain(SAMPLE_CONTRACT.pr_url);
     expect(done.prUrl).toBe(SAMPLE_CONTRACT.pr_url);
     expect(done.lastMessage).toContain(SAMPLE_CONTRACT.summary);
+    // The verifier subagent checked the result before it posted (flow 4, decision 032).
+    expect(result.text).toContain("Verdict: the result matches the brief (90% confidence).");
+    expect(result.text).not.toContain("Check before you merge");
+  });
+
+  it("the verifier's verdict joins a rule-check concern in the one result message", async () => {
+    const c = newConversation(h);
+    // The brief allows no pull request, and the worker opens one anyway.
+    await c.mention(briefMention("No PR job", { openPullRequest: false }));
+    const approval = await c.waitForControls(/Start J-\d+:/);
+    const job = await jobInThread(h.sql, c.channel, c.rootTs);
+    const ref = `J-${job.id}`;
+    await c.click(approval, "Start");
+    const thread = await until(() => threadsOf(h, ref)[0], { label: `${ref} worker thread` });
+    const before = c.botMessages().map((m) => m.ts);
+
+    await workerAdvance(h, thread, [
+      { status: "completed", items: [contractMessage(SAMPLE_CONTRACT)] },
+    ]);
+    await waitForJobStatus(h.sql, job.id, "done");
+    const result = await resultMessage(c, ref);
+    await settle(h);
+
+    expect(newSince(c, before).map((m) => m.ts)).toEqual([result.ts]);
+    const concern = "The worker opened a pull request the job did not allow.";
+    expect(result.text).toContain("Verdict: check the concerns below (60% confidence).");
+    expect(result.text).toContain(`Check before you merge:\n• ${concern}`);
+    // The fixture verifier repeats the rule-check concern; the message lists it once.
+    expect(result.text?.split(concern)).toHaveLength(2);
   });
 
   it("a lost launch response does not start a second worker thread", async () => {

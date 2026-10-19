@@ -2,11 +2,13 @@ import type {
   Activity,
   ActivityItem,
   LaunchRequest,
+  PullRequestWatch,
   SendMode,
   WaitResult,
   WorkerAdapter,
   WorkerAnswers,
   WorkerCapabilities,
+  WorkerHealth,
   WorkerProject,
   WorkerQuestion,
   WorkerStatus,
@@ -38,6 +40,8 @@ export interface FakeWorkerOptions {
   script?: FakeStep[];
   // The next launch creates the thread but throws, like a lost launch response.
   loseNextLaunchResponse?: boolean;
+  // What `health` reports. Defaults: reachable, signed in, no known expiry.
+  health?: WorkerHealth;
 }
 
 // Thread IDs stay unique across fake workers, like real worker thread IDs.
@@ -49,6 +53,9 @@ export class FakeWorker implements WorkerAdapter {
   readonly interrupts: { threadId: string; requestId: string }[] = [];
   readonly answers: { threadId: string; requestId: string; answers: WorkerAnswers }[] = [];
   readonly sends: { threadId: string; text: string; mode: SendMode; requestId: string }[] = [];
+  readonly watches: { threadId: string; prUrl: string; requestId: string }[] = [];
+  // Set to make `watchPullRequest` fail, like T3 refusing to watch a merged pull request.
+  watchError: string | undefined;
   launches = 0;
   private loseNextLaunchResponse: boolean;
   private readonly options: FakeWorkerOptions;
@@ -150,6 +157,33 @@ export class FakeWorker implements WorkerAdapter {
   async send(threadId: string, text: string, mode: SendMode, requestId: string): Promise<void> {
     this.get(threadId);
     this.sends.push({ threadId, text, mode, requestId });
+  }
+
+  async watchPullRequest(
+    threadId: string,
+    prUrl: string,
+    requestId: string,
+  ): Promise<PullRequestWatch> {
+    this.get(threadId);
+    if (this.watchError) throw new Error(this.watchError);
+    const alreadyWatching = this.watches.some(
+      (watch) => watch.threadId === threadId && watch.prUrl === prUrl,
+    );
+    this.watches.push({ threadId, prUrl, requestId });
+    return { watching: true, alreadyWatching };
+  }
+
+  async health(): Promise<WorkerHealth> {
+    return this.options.health ?? { reachable: true, signedIn: true, signInExpiresAt: null };
+  }
+
+  // Adds the item T3 puts in a thread when a watched pull request wakes the worker: a
+  // `notification` whose text is the wake summary, for example `#12: checks failed`.
+  addWake(threadId: string, summary: string): ActivityItem {
+    const fake = this.get(threadId);
+    const item: ActivityItem = { position: fake.items.length, type: "notification", text: summary };
+    fake.items.push(item);
+    return item;
   }
 
   private get(threadId: string): FakeThread {

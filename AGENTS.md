@@ -34,8 +34,9 @@ planning or building anything.
 Milestone 1 is in progress (`docs/milestone-1.md`). Every exit criterion passes locally against
 fakes (`pnpm test:e2e`). Still to do: the live run with the test Slack app, the tailnet route,
 the worker environment check, and the deployment. Built beyond milestone 1: schedules with silent
-clean checks and the digest, memory, the pack (wired into jobs and the allow-list), result rule
-checks, quiet mode, `/sym`, card buttons, feedback capture, steering, and the worker MCP channel.
+clean checks and the digest, memory, the pack (overlay, jobs, allow-list), result checks and the
+verifier subagent, quiet mode, `/sym`, card buttons, feedback and learned playbook rows, steering,
+PR wakes, the sign-in expiry notice, and the worker MCP channel.
 
 ## Commands
 
@@ -71,8 +72,8 @@ use a real Postgres (decision 014). Modules that a `"use workflow"` body reaches
 
 | Folder | Owns |
 |---|---|
-| `agent/` | The Eve agent: `agent.ts`, instructions, channels, tools, schedules, hooks, skills |
-| `lib/` | Sym modules the agent imports: the display rule, the database client, worker adapters, the ledger, job steps (`jobs/`), Slack delivery (`slack/`, `delivery/`), and the fixture brain (`brain/`) |
+| `agent/` | The Eve agent: `agent.ts`, instructions, channels, tools, schedules, subagents, memory |
+| `lib/` | Sym modules the agent imports: the display rule, the database client, the ledger, worker adapters (`workers/`), job steps (`jobs/`), Slack delivery (`slack/`, `delivery/`), schedules and the digest, memory, learning rows, quiet mode and feedback, the pack, and the fixture brains (`brain/`) |
 | `scripts/` | Operator scripts run with `node`, such as the T3 sign-in and check |
 | `test/` | Vitest tests. `test/fakes/` holds the fake worker, a fake T3 MCP server, and a fake Slack API. `test/helpers/` gives each ledger test file its own schema and signs Slack events. `test/e2e/` runs the whole agent |
 | `slack/` | Slack app manifest |
