@@ -13,8 +13,8 @@ Sym runs as one Docker service with Postgres. Any Docker host works. The referen
 | Worker MCP (T3 `/mcp`) | Private network only | Sym calls the worker |
 
 - Allow only the public paths at the proxy. Block everything else from the internet.
-- The callback URL that a worker POSTs to must resolve from the worker host. Milestone 1 checks
-  whether `createWebhook` returns the public or the private host.
+- The callback URL that a worker POSTs to must resolve from the worker host. Off Vercel, Eve
+  builds webhook URLs as `localhost:3000`, so set `SYM_CALLBACK_URL` (decision 028).
 - The Eve container joins the private network through a sidecar, so it can reach the worker.
 
 Reference choice: Dokploy's public Traefik domain with a path allow-list (decision 006).

@@ -46,6 +46,9 @@ export interface Job {
   lastActivityAt: Date | null;
   quietNoticedAt: Date | null;
   watchUntil: Date | null;
+  revision: number;
+  verdict: unknown;
+  endPresentedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   finishedAt: Date | null;
@@ -81,6 +84,8 @@ export type JobUpdate = Partial<
     | "lastActivityAt"
     | "quietNoticedAt"
     | "watchUntil"
+    | "verdict"
+    | "endPresentedAt"
   >
 >;
 
@@ -123,13 +128,14 @@ export class StaleJobError extends Error {
   override name = "StaleJobError";
 }
 
-// `expect.cursor` makes the update conditional: it applies only while the job's cursor is still
-// the one the caller read, so a slow check cannot overwrite a newer one.
+// `expect.revision` makes the update conditional: it applies only while the job is still at the
+// revision the caller read, so a slow check cannot overwrite a newer state. Every update bumps the
+// revision.
 export async function updateJob(
   sql: Sql,
   id: number,
   update: JobUpdate,
-  expect?: { cursor: string | null },
+  expect?: { revision: number },
 ): Promise<Job> {
   const { status, ...rest } = update;
   if (status === undefined && Object.keys(rest).length === 0) {
@@ -140,6 +146,9 @@ export async function updateJob(
   if (update.display !== undefined) {
     fields.display = update.display === null ? null : json(sql, update.display);
   }
+  if (update.verdict !== undefined) {
+    fields.verdict = update.verdict === null ? null : json(sql, update.verdict);
+  }
   const finished = status !== undefined && TERMINAL.includes(status);
   const [row] = await sql<Job[]>`
     update jobs set ${sql(fields)},
@@ -148,13 +157,14 @@ export async function updateJob(
           ? sql`status`
           : sql`case when status in ${sql(TERMINAL)} then status else ${status} end`
       },
+      revision = revision + 1,
       finished_at = ${
         finished
           ? sql`case when status in ${sql(TERMINAL)} then finished_at else now() end`
           : sql`finished_at`
       }
     where id = ${id}
-      ${expect ? sql`and cursor is not distinct from ${expect.cursor}` : sql``}
+      ${expect ? sql`and revision = ${expect.revision}` : sql``}
     returning *
   `;
   if (!row && expect) throw new StaleJobError(`${jobRef(id)} changed during the check`);

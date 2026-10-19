@@ -6,6 +6,7 @@ import {
   isApprovalAction,
   mayDecideAsOwner,
   OWNER_ONLY,
+  ownerResponse,
   ownerUserId,
   slackUserOfPrincipal,
 } from "../lib/owner.ts";
@@ -66,5 +67,32 @@ describe("playbook tools refuse a non-owner", () => {
     );
     expect(await run(playbookReview, { id: 1, body: "y" }, other)).toBe(OWNER_ONLY);
     expect(await run(playbookRetire, { id: 1 }, other)).toBe(OWNER_ONLY);
+  });
+});
+
+describe("ownerResponse", () => {
+  const owned = () =>
+    ({ config: { owner: { slackUserId: "UOWNER" } } }) as unknown as Parameters<
+      typeof ownerResponse
+    >[0] extends () => infer P
+      ? P
+      : never;
+  const answer = (decision: string, principalId: string) =>
+    ownerResponse(owned)({ response: { decision, principal: { principalId } } });
+
+  it("lets the owner approve", () => {
+    expect(answer("approve", "slack:T1:UOWNER")).toEqual({ status: "allowed" });
+  });
+
+  it("refuses an approval from anyone else, typed or clicked", () => {
+    expect(answer("approve", "slack:T1:UOTHER")).toEqual({
+      status: "rejected",
+      reason: "Only the owner can decide this.",
+    });
+    expect(answer("approve", "sym-worker").status).toBe("rejected");
+  });
+
+  it("lets anyone allowed cancel", () => {
+    expect(answer("cancel", "slack:T1:UOTHER")).toEqual({ status: "allowed" });
   });
 });

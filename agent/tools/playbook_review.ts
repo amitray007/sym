@@ -5,7 +5,12 @@ import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { playbookLine } from "../../lib/learning/format.ts";
 import { approvePlaybook, getPlaybook, playbookRef } from "../../lib/learning/rows.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
-import { mayDecideAsOwner, OWNER_ONLY, slackUserOfPrincipal } from "../../lib/owner.ts";
+import {
+  mayDecideAsOwner,
+  OWNER_ONLY,
+  ownerResponse,
+  slackUserOfPrincipal,
+} from "../../lib/owner.ts";
 import { ledger, pack } from "../../lib/runtime.ts";
 
 // Approves a proposed row. The approval prompt can read only the tool input, so the input
@@ -22,6 +27,7 @@ export default defineTool({
   }),
   approval: {
     request: always(),
+    response: ownerResponse(pack),
     prompt: ({ input }) =>
       [
         `Approve ${playbookRef(input.id)}?`,

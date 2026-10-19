@@ -35,3 +35,18 @@ const APPROVAL_ACTION = /^eve_input:(?:route:[^:]+:[^:]+:)?tool-approval:/;
 export function isApprovalAction(actionId: string): boolean {
   return APPROVAL_ACTION.test(actionId);
 }
+
+interface ApprovalResponseArgs {
+  response: { decision: string; principal: { principalId: string } };
+}
+
+// An Eve approval response policy for owner decisions (docs/eve.md, human in the loop). It runs
+// for every way a person can answer, buttons and typed replies alike. Anyone allowed may cancel;
+// only the owner may approve.
+export function ownerResponse(pack: () => Pack | undefined) {
+  return ({ response }: ApprovalResponseArgs) =>
+    response.decision !== "approve" ||
+    mayDecideAsOwner(slackUserOfPrincipal(response.principal.principalId), pack())
+      ? { status: "allowed" as const }
+      : { status: "rejected" as const, reason: OWNER_ONLY };
+}

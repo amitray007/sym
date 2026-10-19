@@ -2,13 +2,14 @@ import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { ledger } from "../../lib/runtime.ts";
+import { ownerResponse } from "../../lib/owner.ts";
+import { ledger, pack } from "../../lib/runtime.ts";
 import { deleteSchedule, parseScheduleRef } from "../../lib/schedules/rows.ts";
 
 export default defineTool({
   description: "Delete a schedule. It never runs again.",
   inputSchema: z.object({ schedule: z.string().describe("A schedule reference such as S-3.") }),
-  approval: always(),
+  approval: { request: always(), response: ownerResponse(pack) },
   label: { start: ({ schedule }) => `Delete ${schedule}` },
   async execute({ schedule: ref }, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;

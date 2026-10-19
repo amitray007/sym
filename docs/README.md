@@ -16,6 +16,7 @@ Read them in this order.
 | [adopting.md](adopting.md) | Packs: where an adopter keeps playbooks, schedules, and repository rules |
 | [self-hosting.md](self-hosting.md) | Network, credentials, and deployment, with Dokploy as the reference |
 | [milestone-1.md](milestone-1.md) | Milestone 1: the spike, in build order, with exit criteria |
+| [first-run.md](first-run.md) | The checklist for the first run with real Slack and a real worker |
 | [decisions/](decisions/README.md) | One record per accepted decision |
 | [mockups/index.html](mockups/index.html) | Slack mockups and flow diagrams for every surface |
 

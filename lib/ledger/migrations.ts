@@ -119,4 +119,16 @@ export const migrations: Migration[] = [
   workerMigration,
   credentialsMigration,
   scheduleRunsMigration,
+  {
+    version: "010_job_revision_verdict",
+    sql: `
+      -- Every update bumps the revision, so a slow check that read an older revision cannot
+      -- overwrite a newer state, status-only changes included (decision 037).
+      alter table jobs add column revision int not null default 0;
+      -- The model check's outcome, kept before the job is marked done, so recovery keeps it.
+      alter table jobs add column verdict jsonb;
+      -- Set when the job's end was presented, silent or not. Reconcile recovers the rest.
+      alter table jobs add column end_presented_at timestamptz;
+    `,
+  },
 ];
