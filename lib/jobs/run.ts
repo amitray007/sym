@@ -1,10 +1,31 @@
 import type { Sql } from "../db.ts";
-import { getJob, type Job, type JobStatus, jobRef, updateJob } from "../ledger/jobs.ts";
-import type { Activity, ActivityItem, WorkerAdapter, WorkerStatus } from "../workers/types.ts";
+import { deliver } from "../delivery/deliver.ts";
+import {
+  createJob,
+  getJob,
+  type Job,
+  type JobStatus,
+  jobRef,
+  renewWatch,
+  updateJob,
+} from "../ledger/jobs.ts";
+import { getSessionThread } from "../ledger/threads.ts";
+import type { SlackApi } from "../slack/api.ts";
+import type {
+  Activity,
+  ActivityItem,
+  WorkerAdapter,
+  WorkerAnswers,
+  WorkerQuestion,
+  WorkerStatus,
+} from "../workers/types.ts";
 import { Brief, workerMessage } from "./brief.ts";
+import { parseOutputContract } from "./contract.ts";
+import { presentBrief, presentEnd, presentProgress, presentStart } from "./present.ts";
+import { detectEvents } from "./progress.ts";
 
-// The worker job steps that `t3_job` runs (docs/architecture.md, flows 1 and 3). They read and
-// write the ledger, so a re-run step or a new session continues from the job row.
+// The worker job steps that `t3_job` and reconcile run (docs/architecture.md, flows 1 and 3).
+// They read and write the ledger, so a re-run step or a new session continues from the job row.
 
 export interface WorkerModel {
   providerId: string;
@@ -17,7 +38,14 @@ export interface JobDeps {
   // The model worker threads run. Without it the worker project's default applies, and T3
   // refuses a launch in a project that has none.
   workerModel?: WorkerModel;
+  // Sends Sym's own posts right after a step enqueues them. Without it, posts wait for the
+  // delivery schedule.
+  slack?: SlackApi;
+  now?: () => Date;
 }
+
+// The ledger and Slack part of JobDeps, for steps that do not call the worker.
+export type LedgerDeps = Pick<JobDeps, "sql" | "slack" | "now">;
 
 // The Slack status line shows at most 50 characters (docs/slack.md).
 export const STATUS_LINE_MAX = 50;
@@ -26,6 +54,9 @@ const SUMMARY_MAX = 200;
 const MAX_ACTIVITY_PAGES = 10;
 // With the job ID, the key of the advisory lock that serializes launches of one job.
 const LAUNCH_LOCK = 4_242_002;
+// A watcher holds a job this long after each check. Reconcile takes over when it runs out. It
+// is longer than the t3_job poll interval, so a healthy task keeps its job.
+export const WATCH_LEASE_MS = 10 * 60_000;
 
 const TERMINAL: readonly JobStatus[] = ["done", "failed", "cancelled"];
 
@@ -49,11 +80,41 @@ export function threadTitle(job: Pick<Job, "id" | "title">): string {
   return `[${jobRef(job.id)}] ${job.title}`;
 }
 
+export interface StartJobInput {
+  // Stays the same when the step re-runs, such as the Eve tool call ID.
+  requestKey: string;
+  sessionId?: string;
+  kind?: string;
+  brief: Brief;
+}
+
+// Records a job, or returns the one an earlier run of the same call recorded. The job takes the
+// Slack thread its session talks in, so its posts go there even after the session ends.
+export async function startJob(sql: Sql, input: StartJobInput): Promise<Job> {
+  const thread = input.sessionId ? await getSessionThread(sql, input.sessionId) : undefined;
+  return createJob(sql, {
+    requestKey: input.requestKey,
+    kind: input.kind ?? "code-change",
+    title: input.brief.title,
+    brief: input.brief,
+    worker: "t3",
+    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+    ...(thread
+      ? {
+          slackChannel: thread.channelId,
+          ...(thread.threadTs ? { slackThreadTs: thread.threadTs } : {}),
+          ...(thread.userId ? { owner: thread.userId } : {}),
+        }
+      : {}),
+  });
+}
+
 // Starts the worker thread for a job, or adopts the one an earlier attempt started. T3 has no
 // retry key for a launch, so the title starts with the job reference and a lookup runs first.
 // Eve can run two copies of one call, so a lock per job lets only one of them launch.
 export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: string) {
   const lock = await deps.sql.reserve();
+  let launched: Job;
   try {
     await lock`select pg_advisory_lock(${LAUNCH_LOCK}, ${jobId})`;
     const job = await mustGetJob(deps.sql, jobId);
@@ -73,15 +134,21 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
         ...(deps.workerModel ? { model: deps.workerModel } : {}),
       }));
 
-    return await updateJob(deps.sql, job.id, {
+    launched = await updateJob(deps.sql, job.id, {
       status: "running",
       workerProjectId: projectId,
       workerThreadId: thread.id,
+      startedAt: job.startedAt ?? now(deps),
     });
   } finally {
     await lock`select pg_advisory_unlock(${LAUNCH_LOCK}, ${jobId})`.catch(() => {});
     lock.release();
   }
+
+  await renewWatch(deps.sql, launched.id, WATCH_LEASE_MS);
+  const presented = await presentStart(deps.sql, launched, now(deps));
+  await deliverNow(deps);
+  return presented;
 }
 
 export interface JobCheck {
@@ -90,23 +157,43 @@ export interface JobCheck {
   terminal: boolean;
   // The newest worker message, when the job ends. It holds the output contract block.
   lastMessage: string | null;
+  // Questions the worker agent waits on. The caller asks a person and calls answerQuestion.
+  questions: WorkerQuestion[];
 }
 
-// Waits briefly for the worker, reads new activity from the job's cursor, and records it.
+// Waits briefly for the worker, reads new activity from the job's cursor, records it, and
+// presents it in Slack.
 export async function checkJob(deps: JobDeps, jobId: number, waitMs: number): Promise<JobCheck> {
   const job = await mustGetJob(deps.sql, jobId);
   if (!job.workerThreadId) throw new Error(`${jobRef(job.id)} has no worker thread`);
-  if (TERMINAL.includes(job.status)) return toCheck(job);
+  if (TERMINAL.includes(job.status)) return toCheck(job, []);
 
   await deps.worker.wait(job.workerThreadId, waitMs);
   const activity = await readNewActivity(deps.worker, job.workerThreadId, job.cursor);
-  const status = toJobStatus(activity.status, job.status);
+  // A waiting worker asks a question or waits on a permission prompt. Only questions are listed.
+  const questions =
+    activity.status === "waiting"
+      ? await deps.worker.pendingQuestions(job.workerThreadId).catch(() => [])
+      : [];
+  const status = toJobStatus(activity.status, questions.length > 0, job.status);
+  const at = now(deps);
+  const progress = detectEvents(
+    {
+      status: job.status,
+      prUrl: job.prUrl,
+      quietSince: (job.lastActivityAt ?? job.startedAt ?? job.createdAt).getTime(),
+      ...(job.quietNoticedAt ? { lastQuietPostAt: job.quietNoticedAt.getTime() } : {}),
+    },
+    { status, newItems: activity.items, now: at.getTime() },
+  );
   const latest = latestText(activity.items);
   const message = latestAssistant(activity.items);
   const summary =
     status === "failed" && activity.status === "interrupted"
       ? "Worker thread interrupted"
-      : (firstLine(latest) ?? job.lastSummary ?? "Working");
+      : status === "waiting_permission"
+        ? "Waiting for a permission prompt on the worker"
+        : (firstLine(latest) ?? job.lastSummary ?? "Working");
 
   const updated = await updateJob(deps.sql, job.id, {
     status,
@@ -114,8 +201,40 @@ export async function checkJob(deps: JobDeps, jobId: number, waitMs: number): Pr
     lastSummary: summary.slice(0, SUMMARY_MAX),
     // Kept on the row: the final message can arrive in an earlier check than the final status.
     ...(message ? { lastMessage: message } : {}),
+    ...(progress.state.prUrl ? { prUrl: progress.state.prUrl } : {}),
+    ...(activity.items.length > 0 ? { lastActivityAt: at } : {}),
+    ...(progress.state.lastQuietPostAt
+      ? { quietNoticedAt: new Date(progress.state.lastQuietPostAt) }
+      : {}),
   });
-  return toCheck(updated);
+
+  await presentProgress(deps.sql, updated, progress.events, `${activity.cursor}-${status}`, at);
+  if (TERMINAL.includes(updated.status)) {
+    await presentEnd(deps.sql, updated, parseOutputContract(updated.lastMessage), at);
+  } else {
+    await renewWatch(deps.sql, updated.id, WATCH_LEASE_MS);
+  }
+  await deliverNow(deps);
+  return toCheck(updated, status === "waiting_input" ? questions : []);
+}
+
+// Sends a person's answer to the worker agent's question.
+export async function answerQuestion(
+  deps: JobDeps,
+  jobId: number,
+  requestId: string,
+  answers: WorkerAnswers,
+): Promise<void> {
+  const job = await mustGetJob(deps.sql, jobId);
+  if (!job.workerThreadId) throw new Error(`${jobRef(job.id)} has no worker thread`);
+  // T3 has no retry key for an answer. A re-run step finds the question gone and stops.
+  const pending = await deps.worker.pendingQuestions(job.workerThreadId);
+  if (!pending.some((question) => question.requestId === requestId)) return;
+  await deps.worker.answer(job.workerThreadId, requestId, answers);
+  await updateJob(deps.sql, job.id, {
+    status: "running",
+    lastSummary: "Answer sent to the worker",
+  });
 }
 
 // Stops the worker thread and records the job as cancelled.
@@ -124,14 +243,48 @@ export async function cancelJob(deps: JobDeps, jobId: number): Promise<JobCheck>
   if (job.workerThreadId && !TERMINAL.includes(job.status)) {
     await deps.worker.interrupt(job.workerThreadId, "Cancelled in Sym", `cancel-${jobRef(job.id)}`);
   }
-  return toCheck(
-    await updateJob(deps.sql, job.id, { status: "cancelled", lastSummary: "Cancelled" }),
-  );
+  return endWithoutWorker(deps, job, "cancelled", "Cancelled");
 }
 
 // Records a job whose task failed, so the ledger does not show it as still running.
-export async function failJob(sql: Sql, jobId: number, reason: string): Promise<void> {
-  await updateJob(sql, jobId, { status: "failed", lastSummary: reason.slice(0, SUMMARY_MAX) });
+export async function failJob(deps: LedgerDeps, jobId: number, reason: string): Promise<void> {
+  const job = await mustGetJob(deps.sql, jobId);
+  await endWithoutWorker(deps, job, "failed", reason);
+}
+
+// Shows the owner the full brief in the job thread before the Start prompt.
+export async function showBrief(deps: LedgerDeps, jobId: number): Promise<void> {
+  const job = await mustGetJob(deps.sql, jobId);
+  await presentBrief(deps.sql, job);
+  await deliverNow(deps);
+}
+
+// Ends a job before it launched, for example when the owner cancels or edits the brief.
+export async function closeUnlaunched(deps: LedgerDeps, jobId: number, reason: string) {
+  const job = await mustGetJob(deps.sql, jobId);
+  // Nothing posted for this job yet, so ending it posts nothing either.
+  return updateJob(deps.sql, job.id, {
+    status: "cancelled",
+    lastSummary: reason.slice(0, SUMMARY_MAX),
+  });
+}
+
+async function endWithoutWorker(
+  deps: LedgerDeps,
+  job: Job,
+  status: "failed" | "cancelled",
+  reason: string,
+): Promise<JobCheck> {
+  const wasRunning = !TERMINAL.includes(job.status);
+  const ended = await updateJob(deps.sql, job.id, {
+    status,
+    lastSummary: reason.slice(0, SUMMARY_MAX),
+  });
+  if (wasRunning && ended.workerThreadId) {
+    await presentEnd(deps.sql, ended, null, now(deps));
+    await deliverNow(deps);
+  }
+  return toCheck(ended, []);
 }
 
 export function statusLine(ref: string, summary: string): string {
@@ -139,14 +292,25 @@ export function statusLine(ref: string, summary: string): string {
   return line.length <= STATUS_LINE_MAX ? line : `${line.slice(0, STATUS_LINE_MAX - 1)}…`;
 }
 
-function toCheck(job: Job): JobCheck {
+function toCheck(job: Job, questions: WorkerQuestion[]): JobCheck {
   const terminal = TERMINAL.includes(job.status);
   return {
     status: job.status,
     summary: job.lastSummary ?? "",
     terminal,
     lastMessage: terminal ? job.lastMessage : null,
+    questions,
   };
+}
+
+// Delivery failures never fail a job step. The delivery schedule sends what is left.
+async function deliverNow(deps: LedgerDeps): Promise<void> {
+  if (!deps.slack) return;
+  await deliver(deps.sql, deps.slack).catch(() => {});
+}
+
+function now(deps: LedgerDeps): Date {
+  return deps.now?.() ?? new Date();
 }
 
 // Reads every new item since the cursor, up to a page limit, and keeps the newest state.
@@ -166,13 +330,12 @@ async function readNewActivity(
 
 // Worker states to job states. `unknown` keeps the current state, so a brief gap in the worker's
 // answer does not end a job.
-function toJobStatus(worker: WorkerStatus, current: JobStatus): JobStatus {
+function toJobStatus(worker: WorkerStatus, hasQuestion: boolean, current: JobStatus): JobStatus {
   switch (worker) {
     case "running":
       return "running";
-    // Step 5 splits a question (waiting_input) from a permission prompt (waiting_permission).
     case "waiting":
-      return "waiting_input";
+      return hasQuestion ? "waiting_input" : "waiting_permission";
     case "completed":
       return "done";
     case "failed":

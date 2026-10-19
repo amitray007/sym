@@ -31,7 +31,10 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_WORKER_MODEL` | Worker thread model as `<provider>/<model>`, for example `codex/gpt-6-luna`. Needed when a worker project has no default model |
 | `DATABASE_URL` | Postgres |
 | `SYM_PACK_DIR` | Path to the mounted pack |
-| `SYM_MCP_TOKEN` | Bearer for workers calling Sym's MCP channel |
+| `SYM_MCP_TOKEN` | Bearer for worker threads calling `/eve/v1/mcp`. Unset means the channel rejects every request. Keep it on the private network (decision 027) |
+| `SYM_API_TOKEN` | Bearer for scripts, CI, and operators calling `/eve/v1/session`. Unset means production rejects them (decision 019) |
+| `SYM_SLACK_USERS` | Slack user IDs allowed to use Sym, comma-separated |
+| `SYM_CALLBACK_URL` | Base URL a worker uses to call Sym back, such as Sym's private-network address. Without it, jobs wait for the 4-minute poll (decision 028) |
 
 The worker sign-in token is not an environment variable. Sym stores it in Postgres after the owner
 approves the OAuth sign-in. A T3 sign-in lasts 30 days, and Sym warns 5 days before it ends.
@@ -41,9 +44,11 @@ them in the pack.
 
 ## Deploy
 
-1. Build with `eve build`. Run `pnpm db:migrate`, then `eve start`, which also runs the scheduler.
+1. Build the image with `docker build -t sym .` (decision 019). Its start command applies ledger
+   migrations, then runs `eve start`, which also runs the scheduler. The container listens on
+   port 3000.
 2. Run exactly one replica. Schedules and leases assume one scheduler.
-3. Mount a volume at `.eve/.workflow-data`.
+3. Mount a volume at `/app/.eve/.workflow-data`.
 4. Point the proxy at the service. Pass `/eve/` and `/.well-known/workflow/` unrewritten.
 5. Use a Postgres with backups.
 6. Pin the Eve version. Upgrade only when no jobs run, because an upgrade strands running

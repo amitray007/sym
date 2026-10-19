@@ -1,0 +1,34 @@
+# Example pack for tests. Generic names only.
+owner:
+  slackUserId: U0OWNER01
+allowList:
+  - U0OWNER01
+  - U0SAM0001
+timeZone: Europe/Berlin
+quietHours:
+  from: "22:00"
+  to: "09:00"
+channels:
+  default: C0EXAMPLE
+  digest: C0DIGEST1
+workers:
+  - name: laptop
+    kind: t3
+    mcpUrl: https://laptop.example.ts.net/mcp
+projects:
+  - name: sync-service
+    worker: laptop
+    workerProject: sync-service-main
+    allowedPaths:
+      - src/**
+      - test/**
+    defaultBaseBranch: develop
+    prPolicy: draft
+  - name: docs-site
+    worker: laptop
+    allowedPaths:
+      - docs/**
+instructions:
+  - instructions/tone.md
+playbooks:
+  - playbooks/release-steps.md

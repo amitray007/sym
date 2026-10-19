@@ -2,10 +2,13 @@ import { z } from "zod";
 import type {
   Activity,
   LaunchRequest,
+  SendMode,
   WaitResult,
   WorkerAdapter,
+  WorkerAnswers,
   WorkerCapabilities,
   WorkerProject,
+  WorkerQuestion,
   WorkerStatus,
   WorkerThread,
 } from "../types.ts";
@@ -62,6 +65,23 @@ const ThreadRead = z.object({
   ),
   nextPosition: z.number().int().nullable(),
   hasMore: z.boolean().default(false),
+});
+
+// `t3_pending_request_list` returns IDs only and leaves out approval requests. The questions come
+// from `t3_pending_request_read`.
+const PendingIds = z.object({ requestIds: z.array(z.string()) });
+
+const PendingRequest = z.object({
+  requestId: z.string(),
+  questions: z.array(
+    z.object({
+      id: z.string(),
+      header: z.string().optional(),
+      question: z.string(),
+      options: z.array(z.object({ label: z.string(), description: z.string().optional() })),
+      multiSelect: z.boolean().default(false),
+    }),
+  ),
 });
 
 // Stops a cursor loop if the worker keeps returning a cursor.
@@ -208,6 +228,48 @@ export function t3Adapter(call: CallTool): WorkerAdapter {
 
     async interrupt(threadId, reason, requestId) {
       await call("t3_thread_interrupt", { threadId, reason, clientRequestId: requestId });
+    },
+
+    async pendingQuestions(threadId): Promise<WorkerQuestion[]> {
+      const { requestIds } = PendingIds.parse(await call("t3_pending_request_list", { threadId }));
+      const found: WorkerQuestion[] = [];
+      for (const requestId of requestIds) {
+        // A request can resolve between the list and the read. T3 then fails the read; skip it,
+        // because it is no longer a question.
+        const read = await call("t3_pending_request_read", { threadId, requestId }).catch(
+          () => undefined,
+        );
+        if (read === undefined) continue;
+        const request = PendingRequest.parse(read);
+        found.push({
+          requestId: request.requestId,
+          questions: request.questions.map((question) => ({
+            id: question.id,
+            ...(question.header ? { header: question.header } : {}),
+            prompt: question.question,
+            options: question.options.map((option) => ({
+              label: option.label,
+              ...(option.description ? { description: option.description } : {}),
+            })),
+            multiSelect: question.multiSelect,
+          })),
+        });
+      }
+      return found;
+    },
+
+    async answer(threadId, requestId, answers: WorkerAnswers) {
+      // T3 has no retry key here. A second answer to the same request fails with "not found".
+      await call("t3_pending_request_respond", { threadId, requestId, answers });
+    },
+
+    async send(threadId, text, mode: SendMode, requestId) {
+      await call("t3_thread_send", {
+        threadId,
+        message: text,
+        mode,
+        clientRequestId: requestId,
+      });
     },
   };
 }

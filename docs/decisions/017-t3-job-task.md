@@ -12,10 +12,11 @@ key for a launch.
 ## Decision
 
 `agent/tools/t3_job.ts` is a `defineWorkflowTool` with a `task` entry, so the conversation stays
-open while the worker runs. It needs approval (`always()`) until the owner promotes the job
-class. Its steps call plain functions in `lib/jobs/run.ts`:
+open while the worker runs. The owner starts each job from the brief (decision 021). Its steps
+call plain functions in `lib/jobs/run.ts`:
 
-- `recordJob` inserts the job row keyed on the replay-stable tool call ID, so a re-run returns the
+- `recordJob` inserts the job row keyed on the session ID and the replay-stable tool call ID (a
+  call ID is unique only inside its session), so a re-run returns the
   same row.
 - `launchOrAdopt` returns the stored thread, or finds one whose title holds `[J-<id>]`, and
   launches only when neither exists.

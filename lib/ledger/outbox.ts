@@ -7,6 +7,8 @@ import { json } from "./jobs.ts";
 // without one (AGENTS.md invariant). A database check backs up this rule.
 
 export type OutboxMethod = "chat.postMessage" | "chat.update";
+// A `card` post is a job card. Its Slack ts is saved on the job row, so later edits find it.
+export type OutboxPurpose = "message" | "card";
 export type OutboxStatus = "pending" | "sent" | "failed";
 
 export interface OutboxPost {
@@ -16,6 +18,7 @@ export interface OutboxPost {
   method: OutboxMethod;
   payload: unknown;
   display: DisplayChoice;
+  purpose: OutboxPurpose;
   status: OutboxStatus;
   attempts: number;
   lastError: string | null;
@@ -30,6 +33,7 @@ export interface NewPost {
   method: OutboxMethod;
   payload: unknown;
   display: DisplayChoice | undefined;
+  purpose?: OutboxPurpose;
 }
 
 // After this many failed sends a post stops retrying and waits for a person.
@@ -43,10 +47,10 @@ export async function enqueuePost(sql: Sql, post: NewPost): Promise<OutboxPost> 
   }
 
   const [inserted] = await sql<OutboxPost[]>`
-    insert into outbox (idempotency_key, job_id, method, payload, display)
+    insert into outbox (idempotency_key, job_id, method, payload, display, purpose)
     values (
       ${post.idempotencyKey}, ${post.jobId ?? null}, ${post.method}, ${json(sql, post.payload)},
-      ${json(sql, display)}
+      ${json(sql, display)}, ${post.purpose ?? "message"}
     )
     on conflict (idempotency_key) do nothing
     returning *
@@ -68,6 +72,46 @@ export async function pendingPosts(sql: Sql, limit = 20): Promise<OutboxPost[]> 
   return rows.map(normalize);
 }
 
+// Claims pending posts for one sender. A claim runs out after `leaseMs`, so a crashed sender's
+// posts go to the next one. Slack posts are at-least-once: a crash after Slack answered and
+// before markPostSent sends the post again.
+export async function claimPosts(sql: Sql, limit: number, leaseMs: number): Promise<OutboxPost[]> {
+  const rows = await sql<OutboxPost[]>`
+    update outbox set claimed_until = now() + ${`${leaseMs} milliseconds`}::interval
+    where id in (
+      select id from outbox
+      where status = 'pending' and (claimed_until is null or claimed_until < now())
+      order by created_at, id
+      limit ${limit}
+      for update skip locked
+    )
+    returning *
+  `;
+  return rows.map(normalize).sort((a, b) => a.id - b.id);
+}
+
+// The newest post of a job whose idempotency key starts with `prefix`.
+export async function latestPost(
+  sql: Sql,
+  jobId: number,
+  prefix: string,
+): Promise<OutboxPost | undefined> {
+  const [row] = await sql<OutboxPost[]>`
+    select * from outbox
+    where job_id = ${jobId} and starts_with(idempotency_key, ${prefix})
+    order by id desc limit 1
+  `;
+  return row && normalize(row);
+}
+
+// Stops a pending post that no longer matters, for example an outage notice after the outage.
+export async function dropPost(sql: Sql, id: number, reason: string): Promise<void> {
+  await sql`
+    update outbox set status = 'failed', last_error = ${reason}
+    where id = ${id} and status = 'pending'
+  `;
+}
+
 export async function markPostSent(sql: Sql, id: number, slackTs: string): Promise<void> {
   await sql`
     update outbox set status = 'sent', slack_ts = ${slackTs}, sent_at = now(),
@@ -79,7 +123,7 @@ export async function markPostSent(sql: Sql, id: number, slackTs: string): Promi
 // Records a failed send. The post stays pending until it reaches MAX_ATTEMPTS.
 export async function markPostFailed(sql: Sql, id: number, error: string): Promise<void> {
   await sql`
-    update outbox set attempts = attempts + 1, last_error = ${error},
+    update outbox set attempts = attempts + 1, last_error = ${error}, claimed_until = null,
       status = case when attempts + 1 >= ${MAX_ATTEMPTS} then 'failed' else status end
     where id = ${id} and status = 'pending'
   `;

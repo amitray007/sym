@@ -24,3 +24,13 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [016](016-ledger-migrations.md) | Ledger migrations live in code |
 | [017](017-t3-job-task.md) | `t3_job` is a task with ledger-backed steps |
 | [018](018-gateway-model.md) | The brain model goes through the AI Gateway |
+| [019](019-container-image.md) | Container image and API token |
+| [020](020-job-presentation.md) | The ledger holds the job card, and delivery syncs it |
+| [021](021-brief-approval-in-task.md) | The owner starts each job from the brief |
+| [022](022-reconcile-drives-orphans.md) | Reconcile drives orphaned jobs in code |
+| [023](023-local-end-to-end.md) | Local end-to-end runs use fakes and a fixture brain |
+| [024](024-schedule-rows.md) | Schedules are approved rows behind one dispatcher |
+| [025](025-postgres-memory.md) | Memory lives in Postgres, per person |
+| [026](026-pack-format.md) | The pack manifest is validated YAML without secrets |
+| [027](027-worker-mcp-channel.md) | Worker threads call Sym through the MCP channel, and tools check the caller |
+| [028](028-callback-base-url.md) | The worker callback uses a configured base URL |

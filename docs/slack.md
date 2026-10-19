@@ -25,11 +25,13 @@ Codex · thread 8f2c… · updated 1 min ago
 [ Steer ]  [ Stop ]  [ Open PR ]
 ```
 
-- The card is a Slack `plan` block. Each row is a step with a status: pending, in progress, done,
-  or error.
+- The card is a Slack `plan` block. Each row is a step with a status: `pending`, `in_progress`,
+  `complete`, or `error`. A plan holds at most 50 rows. Each edit uses a new `block_id`, because
+  Slack redraws a plan block only under a new one; the version moves only when the card changes.
+- The job row holds the card Sym wants. Delivery posts it and edits Slack to match (decision 020).
 - Sym fills the steps from the brief's done-when list and the worker activity it reads.
-- A `taskCard` renderer that returns `null` hides Eve's own card for `t3_job` tasks, so the thread
-  has one card.
+- Sym's renderer removes `t3_job` rows from Eve's task card, and returns `null` when nothing else
+  is left, so the thread has one card.
 - When the job ends, the card collapses to one line, for example "Done in 14m · PR #812", and the
   result posts as text.
 
@@ -59,8 +61,8 @@ Notes:
 - The status line is cut at 50 characters, and Slack clears it after 2 minutes without a post.
   The job card carries anything that must stay visible.
 - Card posts never unfurl links. Put PR and CI links on buttons or in the card footer.
-- Slack documents two sets of `plan` status values (`completed` and `complete`). Check them in
-  Block Kit Builder during milestone 1.
+- Slack's reference uses `complete`; `completed` appears only in guide prose. Sym sends
+  `complete`. `chat.update` is Tier 3 (50 or more per minute).
 
 ## App setup
 

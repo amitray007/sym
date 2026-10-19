@@ -54,7 +54,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Shortcuts | `onShortcut` | Later | "Send to Sym" on any message | `trigger_id` valid about 3 s |
 | Proactive posts | `to(slack, { channelId, threadTs? })` | Use | Schedule threads, recovery sessions, digests | Each fire is a new session unless `threadTs` is set |
 | Plain posts | `callSlackApi`, `ctx.slack.request` | Use | Outbox, job card edits, reactions | |
-| MCP channel | `channels/mcp.ts`, `tools: true` | Use | Worker threads call `sym_post_progress`, `sym_ask_owner` | HTTPS unless loopback. Approval tools return `approval_required` |
+| MCP channel | `channels/mcp.ts`, `tools: true` | Use | Worker threads call `sym_post_progress`, `sym_ask_owner` with `SYM_MCP_TOKEN` | HTTPS unless loopback. No tool allow-list: every plain tool is published, so tools check the caller (decision 027). Workflow tools are never published. Approval tools return `approval_required` |
 | HTTP channel | `/eve/v1/session` | Use | Scripts and CI start a session | Use `operationId` for create-once |
 | GitHub channel | `githubChannel` | Later | CI and PR events instead of polling | Needs a GitHub App |
 | Custom channel | `defineChannel` | Later | Error tracker or ticket webhooks | Verify signatures. Dedupe |
@@ -68,7 +68,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Markdown schedules | `.md` with `cron` | Skip | | Output discarded. Approvals fail the session |
 | Dynamic scheduling | dispatcher + rows + CRUD tools | Use | Owner schedules as rows | At-least-once. Lease each row |
 | Durable notifications | outbox + schedule + `callSlackApi` | Use | Posts that retry | At-least-once. Idempotency key per post |
-| Memory | `defineMemory`, `defineMemoryProvider` | Use | Learning layer 1 | `fileMemory` needs Vercel Blob off Vercel, so Sym uses a Postgres provider. `byPrincipal` gives schedule turns no memory |
+| Memory | `defineMemory`, `defineMemoryProvider` | Use | Learning layer 1 | `fileMemory` needs Vercel Blob off Vercel, so Sym uses its own Postgres provider (`lib/memory/provider.ts`) in the `owner` slot. `byPrincipal` scopes it per person and gives schedule turns no memory |
 | Session state | `defineState` | Use lightly | Per-thread scratch | Lost with the session |
 | Hooks | `agent/hooks/*.ts` `defineHook` | Use | Write turns, tool calls, and results to Postgres | Observe-only, at-least-once |
 | Dynamic capabilities | `defineDynamic` | Use | Load approved playbooks and rules at session start (learning layer 2) | Resolvers may re-run. Load only approved rows |

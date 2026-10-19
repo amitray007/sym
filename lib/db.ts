@@ -26,8 +26,9 @@ export function connect(options: ConnectOptions = {}): Sql {
     // One replica runs Sym (docs/self-hosting.md), so a small pool is enough.
     max: 5,
     onnotice: () => {},
-    // snake_case columns in SQL, camelCase fields in TypeScript.
-    transform: postgres.camel,
+    // snake_case columns in SQL, camelCase fields in TypeScript. Column names only: the value
+    // transform would also rename keys inside JSON values, such as a Slack payload's thread_ts.
+    transform: { column: postgres.camel.column },
     ...(options.schema ? { connection: { search_path: options.schema } } : {}),
   });
 }

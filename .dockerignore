@@ -1,0 +1,17 @@
+.git
+.github
+node_modules
+.output
+.eve
+dist
+coverage
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+docs
+test
+slack
+Dockerfile
+.dockerignore

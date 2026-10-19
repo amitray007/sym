@@ -19,4 +19,4 @@ the full build pulls Eve's sandbox image.
 ## Consequences
 
 CI does not depend on a private shared workflow, so it keeps working when the repository becomes
-public. Deploy images must run the full `eve build`.
+public. Deploy images also build with `--skip-sandbox-prewarm` (decision 019).

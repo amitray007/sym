@@ -1,4 +1,11 @@
-import { defaultSlackAuth, type SlackMessage, slackChannel } from "eve/channels/slack";
+import {
+  defaultSlackAuth,
+  defineSlackRenderer,
+  type SlackMessage,
+  slackChannel,
+} from "eve/channels/slack";
+import { recordSessionThread } from "../../lib/ledger/threads.ts";
+import { ledger } from "../../lib/runtime.ts";
 
 // The Slack channel (docs/slack.md). It reads SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET from the
 // environment. A valid signature proves Slack sent the event, not that the sender may use Sym,
@@ -21,7 +28,41 @@ function isAllowed(userId: string | undefined): boolean {
 const fromAllowedHuman = (message: SlackMessage) =>
   !message.author?.isBot && isAllowed(message.author?.userId);
 
+// Sym's own job card replaces Eve's task card for worker jobs (docs/slack.md), so a job
+// thread shows one card. Each turn also records its Slack thread, because tools and schedules
+// cannot read the channel's session state and a job posts to the thread it was asked in.
+const symRenderer = defineSlackRenderer({
+  events: {
+    async "turn.started"(event, channel, ctx, next) {
+      const { channelId, threadTs, teamId, triggeringUserId } = channel.state;
+      if (channelId) {
+        await recordSessionThread(ledger(), {
+          sessionId: ctx.session.id,
+          teamId: teamId ?? null,
+          channelId,
+          threadTs: threadTs ?? null,
+          userId: triggeringUserId ?? null,
+        }).catch((error: unknown) => {
+          console.warn("Sym could not record the Slack thread of a session.", String(error));
+        });
+      }
+      await next(event);
+    },
+  },
+  taskCard(view, next) {
+    const tasks = view.tasks.filter((task) => task.name !== "t3_job");
+    if (tasks.length === view.tasks.length) return next(view);
+    if (tasks.length === 0) return null;
+    return next({ ...view, tasks });
+  },
+});
+
 export default slackChannel({
+  renderers: [symRenderer],
+  // Undefined keeps Slack's own host. Tests and the local e2e point it at a fake Slack server.
+  ...(process.env.SLACK_API_BASE_URL
+    ? { api: { apiBaseUrl: process.env.SLACK_API_BASE_URL } }
+    : {}),
   // Sym reads the whole job thread (docs/eve.md).
   threadContext: { since: "thread-root" },
   onAppMention(ctx, message) {

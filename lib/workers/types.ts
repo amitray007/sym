@@ -1,6 +1,5 @@
 // The worker adapter contract (docs/workers.md). The `t3_job` tool and reconcile call only these
 // operations, so another worker can replace T3 Code without changes to the ledger or the loop.
-// Later steps add questions, steering, and interrupts.
 
 // Every adapter maps its worker's states to these.
 export type WorkerStatus =
@@ -71,6 +70,23 @@ export interface Activity {
   hasMore: boolean;
 }
 
+// A question the worker agent asked and waits on. One worker request can hold several questions.
+export interface WorkerQuestion {
+  requestId: string;
+  questions: {
+    id: string;
+    header?: string;
+    prompt: string;
+    options: { label: string; description?: string }[];
+    multiSelect: boolean;
+  }[];
+}
+
+// Answers keyed by question ID. Each answer is the chosen option labels or free text.
+export type WorkerAnswers = Record<string, string | string[]>;
+
+export type SendMode = "auto" | "queue" | "steer";
+
 export interface WorkerAdapter {
   capabilities(): Promise<WorkerCapabilities>;
   projects(): Promise<WorkerProject[]>;
@@ -83,4 +99,9 @@ export interface WorkerAdapter {
   readActivity(threadId: string, cursor: string | null): Promise<Activity>;
   // Stops the thread's running turn. `requestId` makes a retry safe.
   interrupt(threadId: string, reason: string, requestId: string): Promise<void>;
+  // Questions the worker agent asked. Permission prompts are not questions and never appear here.
+  pendingQuestions(threadId: string): Promise<WorkerQuestion[]>;
+  answer(threadId: string, requestId: string, answers: WorkerAnswers): Promise<void>;
+  // Steers or queues a message to the thread. `requestId` makes a retry safe.
+  send(threadId: string, text: string, mode: SendMode, requestId: string): Promise<void>;
 }

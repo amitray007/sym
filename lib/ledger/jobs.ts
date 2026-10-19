@@ -36,7 +36,16 @@ export interface Job {
   lastSummary: string | null;
   lastMessage: string | null;
   cardTs: string | null;
+  // The card Sym wants Slack to show, and the versions wanted and shown.
+  card: SlackCard | null;
+  cardVersion: number;
+  cardSentVersion: number;
   display: DisplayChoice | null;
+  prUrl: string | null;
+  startedAt: Date | null;
+  lastActivityAt: Date | null;
+  quietNoticedAt: Date | null;
+  watchUntil: Date | null;
   createdAt: Date;
   updatedAt: Date;
   finishedAt: Date | null;
@@ -67,8 +76,18 @@ export type JobUpdate = Partial<
     | "lastMessage"
     | "cardTs"
     | "display"
+    | "prUrl"
+    | "startedAt"
+    | "lastActivityAt"
+    | "quietNoticedAt"
+    | "watchUntil"
   >
 >;
+
+export interface SlackCard {
+  blocks: unknown[];
+  text: string;
+}
 
 // The reference people and worker thread titles use, for example `J-142`.
 export function jobRef(id: number): string {
@@ -127,6 +146,75 @@ export async function updateJob(sql: Sql, id: number, update: JobUpdate): Promis
   `;
   if (!row) throw new Error(`no job ${jobRef(id)}`);
   return normalize(row);
+}
+
+// Records the card Sym wants Slack to show. The version goes up only when the card changes, so
+// an unchanged card causes no Slack edit.
+export async function setJobCard(sql: Sql, id: number, card: SlackCard): Promise<Job> {
+  const value = json(sql, card);
+  const [row] = await sql<Job[]>`
+    update jobs set
+      card = ${value},
+      card_version = case when card is distinct from ${value}::jsonb
+        then card_version + 1 else card_version end
+    where id = ${id}
+    returning *
+  `;
+  if (!row) throw new Error(`no job ${jobRef(id)}`);
+  return normalize(row);
+}
+
+// Jobs whose card in Slack is older than the card Sym wants. Only posted cards can be edited.
+export async function jobsWithStaleCards(sql: Sql, limit = 20): Promise<Job[]> {
+  const rows = await sql<Job[]>`
+    select * from jobs
+    where card_ts is not null and card is not null and card_version > card_sent_version
+    order by updated_at limit ${limit}
+  `;
+  return rows.map(normalize);
+}
+
+// Marks a card version as shown. A slower sender cannot move the shown version back.
+export async function markCardSent(sql: Sql, id: number, version: number): Promise<void> {
+  await sql`
+    update jobs set card_sent_version = ${version}
+    where id = ${id} and card_sent_version < ${version}
+  `;
+}
+
+// Renews the watcher lease of a running job.
+export async function renewWatch(sql: Sql, id: number, leaseMs: number): Promise<void> {
+  await sql`
+    update jobs set watch_until = now() + ${`${leaseMs} milliseconds`}::interval where id = ${id}
+  `;
+}
+
+// Active jobs nobody watches: their lease ran out or was never set. Reconcile takes these over.
+export async function orphanedJobs(sql: Sql): Promise<Job[]> {
+  const rows = await sql<Job[]>`
+    select * from jobs
+    where status not in ${sql(TERMINAL)} and worker_thread_id is not null
+      and (watch_until is null or watch_until < now())
+    order by id
+  `;
+  return rows.map(normalize);
+}
+
+// Active jobs plus the jobs that finished since `since`, newest first, for status answers.
+export async function recentJobs(sql: Sql, since: Date, limit = 20): Promise<Job[]> {
+  const rows = await sql<Job[]>`
+    select * from jobs
+    where status not in ${sql(TERMINAL)} or finished_at >= ${since}
+    order by id desc limit ${limit}
+  `;
+  return rows.map(normalize);
+}
+
+// Finds a job by its reference, such as `J-142` or `142`.
+export async function getJobByRef(sql: Sql, ref: string): Promise<Job | undefined> {
+  const match = /^(?:J-)?(\d+)$/i.exec(ref.trim());
+  if (!match?.[1]) return undefined;
+  return getJob(sql, Number(match[1]));
 }
 
 // Jobs that still need watching: everything not done, failed, or cancelled.

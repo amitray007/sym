@@ -14,8 +14,11 @@ decides what to keep.
 1. **Signals.** 👍/👎 buttons, reactions, "Fix: ..." replies, edits to a brief before Start, and
    repeated instructions.
 2. **Capture.** Hooks write every signal to the `feedback` table, linked to its job.
-3. **Memory.** Sym saves short facts at once (layer 1). Milestone 1 uses one fixed owner scope,
-   because Eve's `byPrincipal` scope gives schedule turns no memory.
+3. **Memory.** Sym saves short facts at once (layer 1). The `owner` slot (`agent/memory/owner.ts`)
+   scopes memory to the person with Eve's `byPrincipal`, so each Slack person gets their own
+   facts. Facts live in the ledger table `memory_facts` (migration 004), and the model saves,
+   updates, searches, and forgets them with `owner__*` tools. Recall loads the newest 40 facts
+   each turn. Schedule turns run as the app principal and get no memory.
 4. **Promotion.** A weekly `learn` schedule groups feedback. A pattern seen 3 times becomes a
    proposal. Text-only changes are layer 2: Sym shows the new playbook or rule with Approve and
    Reject buttons. Changes that need code are layer 3.

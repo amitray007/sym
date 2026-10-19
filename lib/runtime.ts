@@ -1,15 +1,28 @@
 import { connect, type Sql } from "./db.ts";
-import { type JobDeps, parseWorkerModel } from "./jobs/run.ts";
+import { type JobDeps, type LedgerDeps, parseWorkerModel } from "./jobs/run.ts";
+import type { SlackApi } from "./slack/api.ts";
+import { slackApiFromEnv } from "./slack/eve-api.ts";
 import { t3Adapter } from "./workers/t3/adapter.ts";
 import { connectT3 } from "./workers/t3/client.ts";
 
-// Real dependencies for workflow steps. Tests build JobDeps from fakes instead.
+// Real dependencies for workflow steps, schedules, and tools. Tests build JobDeps from fakes.
 
 let pool: Sql | undefined;
 
-function ledger(): Sql {
+export function ledger(): Sql {
   pool ??= connect();
   return pool;
+}
+
+// Sym posts to Slack itself only when the deployment has a bot token. Without one (local runs
+// through the Eve channel), posts wait in the outbox.
+export function slackFromEnv(): SlackApi | undefined {
+  return process.env.SLACK_BOT_TOKEN ? slackApiFromEnv() : undefined;
+}
+
+export function ledgerDeps(): LedgerDeps {
+  const slack = slackFromEnv();
+  return { sql: ledger(), ...(slack ? { slack } : {}) };
 }
 
 // Opens a worker connection for one step and closes it after. A step can run on any replay, so
@@ -26,7 +39,7 @@ export async function withJobDeps<T>(fn: (deps: JobDeps) => Promise<T>): Promise
   try {
     const workerModel = parseWorkerModel(process.env.SYM_WORKER_MODEL);
     return await fn({
-      sql: ledger(),
+      ...ledgerDeps(),
       worker: t3Adapter(connection.call),
       ...(workerModel ? { workerModel } : {}),
     });
