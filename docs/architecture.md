@@ -113,16 +113,28 @@ update?" cheap and lets a new session continue the job.
 
 ## Flow 4: checking the result
 
-1. Read the final messages and parse the output contract block.
-2. Run deterministic checks first: the PR exists and its branch matches the worktree, CI status,
-   changed files sit inside the allowed paths, and no production config changed.
-3. For code jobs, run the `verifier` subagent. It compares the done-when list with the diff and
-   the worker's claims, and returns `pass`, `concerns[]`, and `confidence`.
-4. Post one message: verdict, summary, PR link, concerns, the worker thread ID, and the buttons
-   Looks good, Fix, and Close. "Fix" sends the reply to the same worker thread.
-5. If a PR opened, ask the worker to watch it, so the worker agent can fix CI failures and answer
+1. The worker finishes. For a code job, `checkJob` moves the job to `checking`, and the card shows
+   "Check result" in progress. Nothing posts yet.
+2. Read the final message and parse the output contract block.
+3. Run the deterministic rule checks first (`lib/jobs/verify.ts`): changed files sit inside the
+   allowed paths, and a PR opened only when the job allowed one. Checking the PR branch, CI
+   status, and production config needs the worker or GitHub and comes later.
+4. The `t3_job` body runs the `verifier` subagent through `ctx.agent` (decision 032). It gets the
+   brief, the rule-check concerns, and the worker's claims as untrusted data. It compares the
+   done-when list with the claims and returns `pass` or `concerns`, `concerns[]`, and
+   `confidence`. It has no tools.
+5. `finishJob` sets `done`, collapses the card, and posts one message: a one-line verdict,
+   summary, PR link, the concerns from both checks without repeats under "Check before you
+   merge", and the worker thread ID. Buttons Looks good, Fix, and Close come later. "Fix" will
+   send the reply to the same worker thread.
+6. If a PR opened, ask the worker to watch it, so the worker agent can fix CI failures and answer
    review comments. Reconcile reports those wakes in the job thread.
-6. When the owner closes the job, settle the worker thread.
+7. When the owner closes the job, settle the worker thread.
+
+The model check is skipped, and the job ends with the rule checks alone, when reconcile finishes
+an orphaned job (including one left in `checking`), for a scheduled check, when the task stops or
+fails while checking, and when the verifier fails or times out. In the last case the result says
+"Model check unavailable".
 
 ## Flow 5: "what's the update?"
 

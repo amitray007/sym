@@ -18,7 +18,13 @@ import {
   resultMessage,
 } from "./messages.ts";
 import type { ProgressEvent } from "./progress.ts";
-import { checkResult } from "./verify.ts";
+import {
+  checkResult,
+  type ModelCheck,
+  mergeConcerns,
+  modelConcerns,
+  verdictLine,
+} from "./verify.ts";
 
 // How a job shows in Slack (docs/display.md, docs/slack.md). Every post goes through
 // chooseDisplay and the outbox. The card is Sym's own message: the job row holds the card Sym
@@ -128,8 +134,9 @@ export async function presentProgress(
     switch (event.type) {
       case "pr_opened":
         // At the end the result message carries the PR, so the thread gets one end message. A
-        // scheduled run reports only at its end.
-        if (!ended && !scheduled) {
+        // job in `checking` has ended its work, and its result message follows. A scheduled run
+        // reports only at its end.
+        if (!ended && job.status !== "checking" && !scheduled) {
           await post(
             sql,
             job,
@@ -165,13 +172,15 @@ export async function presentProgress(
   }
 }
 
-// Collapses the card and posts the one result message.
+// Collapses the card and posts the one result message. `check` is the model check, when the job
+// tried one; its concerns join the rule-check concerns.
 export async function presentEnd(
   sql: Sql,
   job: Job,
   contract: OutputContract | null,
   now: Date,
   pack?: Pack,
+  check?: ModelCheck,
 ): Promise<void> {
   if (!job.slackChannel || !TERMINAL.includes(job.status)) return;
   const ref = jobRef(job.id);
@@ -189,13 +198,13 @@ export async function presentEnd(
       }),
     );
   }
-  const concerns = resultConcerns(job, contract, pack);
+  const concerns = endConcerns(job, contract, pack, check);
   // A clean scheduled check has nothing new to say (display rule step 2); the digest lists it.
   const clean = job.status === "done" && contract !== null && contract.openQuestions.length === 0;
   if (job.kind === SCHEDULED_CHECK && clean && concerns.length === 0) return;
   const text =
     job.status === "done"
-      ? resultMessage(facts(job, now), contract, concerns)
+      ? resultMessage(facts(job, now), contract, concerns, verdictLine(check, concerns))
       : job.status === "failed"
         ? failureMessage(facts(job, now), job.lastSummary)
         : `${ref} was cancelled.`;
@@ -216,6 +225,17 @@ export function resultConcerns(job: Job, contract: OutputContract | null, pack?:
     pullRequestAllowed: brief.openPullRequest && (!project || project.prPolicy === "draft"),
   });
   return concerns.filter((concern) => !concern.includes("open question"));
+}
+
+// Every concern the result message lists: the rule checks first, then the model check's, without
+// repeats. The run outcome uses the same list, so the digest and Slack agree.
+export function endConcerns(
+  job: Job,
+  contract: OutputContract | null,
+  pack?: Pack,
+  check?: ModelCheck,
+): string[] {
+  return mergeConcerns(resultConcerns(job, contract, pack), modelConcerns(check));
 }
 
 // The card's block_id carries its version, because Slack redraws a plan block only under a new

@@ -1,9 +1,11 @@
 // Ledger migrations, applied in order by `migrate`. Never edit a migration after it ships. Add a
 // new one. The SQL lives in TypeScript so the Eve build bundles it.
 
+import { learningMigration } from "../learning/migration.ts";
 import { memoryMigration } from "../memory/migration.ts";
 import { quietMigration } from "../quiet/migration.ts";
 import { schedulesMigration } from "../schedules/migration.ts";
+import { workerMigration } from "../workers/migration.ts";
 
 export interface Migration {
   version: string;
@@ -111,4 +113,6 @@ export const migrations: Migration[] = [
   schedulesMigration,
   memoryMigration,
   quietMigration,
+  learningMigration,
+  workerMigration,
 ];

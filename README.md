@@ -8,8 +8,9 @@ Code or Codex thread on your own machine, run through [T3 Code](https://github.c
 Sym tracks the job, answers status questions, relays the worker's questions as buttons, checks the
 result, and posts the outcome. A scheduled check that finds nothing posts nothing.
 
-> Status: design, before the first spike. There is no runnable code yet. The documents in
-> [`docs/`](docs/README.md) are the source of truth.
+> Status: milestone 1 runs end to end on one machine against fakes, and CI runs that check on
+> every push. The live run with a real Slack workspace and a real worker comes next. The documents
+> in [`docs/`](docs/README.md) are the source of truth.
 
 ## How it works
 
@@ -38,6 +39,25 @@ result, and posts the outcome. A scheduled check that finds nothing posts nothin
 - A coding agent. It plans, delegates, watches, and checks. Workers write the code.
 - Tied to one company. Your playbooks, schedules, and repository rules live in your own private
   pack (see [docs/adopting.md](docs/adopting.md)).
+
+## Run it locally
+
+You need [mise](https://mise.jdx.dev) and Docker. mise installs the pinned Node and pnpm.
+
+```sh
+mise exec -- pnpm install
+mise exec -- pnpm db:up          # Postgres 18 on 127.0.0.1:55432
+mise exec -- pnpm test           # unit tests; ledger tests need DATABASE_URL (see AGENTS.md)
+mise exec -- pnpm test:e2e       # the whole agent against a fake worker and a fake Slack
+```
+
+`pnpm test:e2e` starts a real Eve server with a scripted brain (`SYM_MODEL=fixture`), a fake T3
+Code server, and a fake Slack API, then sends signed Slack events and checks milestone 1 exit
+criteria 1 to 6. It needs no accounts, keys, or network.
+
+To connect a real worker, sign in to T3 Code with `pnpm t3:login <mcp-url>` and list its projects
+with `pnpm t3:check`. To deploy, build the image with `docker build -t sym .` and follow
+[docs/self-hosting.md](docs/self-hosting.md). `.env.example` lists every setting.
 
 ## Documentation
 

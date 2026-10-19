@@ -1,11 +1,14 @@
 import { chooseDisplay } from "../display.ts";
 import { type Job, jobRef, orphanedJobs, updateJob } from "../ledger/jobs.ts";
 import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
-import { checkJob, type JobDeps } from "./run.ts";
+import { checkPrWakes, ensurePrWatched, jobsToWatch, watchedPrJobs } from "./pr-wakes.ts";
+import { checkJob, finishJob, type JobDeps } from "./run.ts";
 
 // The safety net (docs/architecture.md, "Proactive updates"). Every few minutes it takes over
 // the jobs no t3_job task watches, for example after a session died or Sym restarted, and runs
 // the same check a task runs. The job then finishes with its card and result message as usual.
+// Reconcile has no workflow body to run the `verifier` subagent, so it finishes a job with the
+// rule checks alone (decision 032). That covers a job found in `checking` whose task stopped.
 
 // One reconcile check blocks this long on the worker, so a pass over many jobs stays short.
 const RECONCILE_WAIT_MS = 5_000;
@@ -20,6 +23,12 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
   const report: ReconcileReport = { checked: 0, finished: 0, offline: 0 };
   for (const job of await orphanedJobs(deps.sql)) {
     try {
+      if (job.status === "checking") {
+        await finishJob(deps, job.id);
+        report.checked++;
+        report.finished++;
+        continue;
+      }
       // For a job coming back from an outage, hold delivery until the outage notice is dropped
       // or edited, so a notice that never went out does not go out late.
       const { slack: _held, ...holdDelivery } = deps;
@@ -37,7 +46,23 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
       await markOffline(deps, job);
     }
   }
+  await followPullRequests(deps);
   return report;
+}
+
+// A PR outlives its job: the worker watches it and fixes CI failures and review comments, and
+// reconcile reports each wake in the job thread (docs/architecture.md, flow 4 step 5). A failed
+// worker call here waits for the next pass.
+const PR_FOLLOW_DAYS = 7;
+
+async function followPullRequests(deps: JobDeps): Promise<void> {
+  const since = new Date(Date.now() - PR_FOLLOW_DAYS * 86_400_000);
+  for (const job of await jobsToWatch(deps, since)) {
+    await ensurePrWatched(deps, job).catch(() => "failed");
+  }
+  for (const job of await watchedPrJobs(deps, since)) {
+    await checkPrWakes(deps, job).catch(() => 0);
+  }
 }
 
 async function postQuestion(deps: JobDeps, job: Job, requestId: string, prompt: string) {

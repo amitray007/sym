@@ -30,7 +30,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Questions | `ctx.ask` | Use | Worker questions become Slack buttons | `unavailable` in Markdown schedule sessions |
 | Durable timer | `sleep()` from `workflow` | Use | Waits between worker checks, no compute | |
 | Callback URL | `createWebhook()` | Use | The worker POSTs its result for instant completion | Race with `sleep()` for the polling fallback |
-| Subagents | `ctx.agent(name).send(msg, { outputSchema })` | Use | `verifier` checks a result against the brief | Shares the parent's token budget |
+| Subagents | `ctx.agent(name).send(msg, { outputSchema })` | Use | `verifier` (`tool: false`, no tools) checks a code result against the brief from the `t3_job` body (decision 032) | Body only, not in a step. Shares the parent's token budget |
 | Fan-out | `workflow({ maxSubagents })` | Later | Parallel triage | The program cannot call tools |
 | Opt-in tools | `no_reply` | Use | Silence for a clean scheduled check | |
 | Default tools | `bash`, `web_fetch` | Skip most | Workers do repository work. `defaultTools: false` | |
@@ -71,7 +71,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Memory | `defineMemory`, `defineMemoryProvider` | Use | Learning layer 1 | `fileMemory` needs Vercel Blob off Vercel, so Sym uses its own Postgres provider (`lib/memory/provider.ts`) in the `owner` slot. `byPrincipal` scopes it per person and gives schedule turns no memory |
 | Session state | `defineState` | Use lightly | Per-thread scratch | Lost with the session |
 | Hooks | `agent/hooks/*.ts` `defineHook` | Use | Write turns, tool calls, and results to Postgres | Observe-only, at-least-once |
-| Dynamic capabilities | `defineDynamic` | Use | Load approved playbooks and rules at session start (learning layer 2) | Resolvers may re-run. Load only approved rows |
+| Dynamic capabilities | `defineDynamic` in `agent/instructions/playbooks.ts` | Use | Load approved playbooks and rules as system instructions on `session.started` (learning layer 2, decision 033) | Resolvers may re-run, so it is a pure read of approved rows, capped at 8000 characters |
 | Compaction | `compaction`, `clear` | Use defaults | Long job threads stay usable | |
 
 ## Quality and operations

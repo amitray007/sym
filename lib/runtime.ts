@@ -3,6 +3,7 @@ import { type JobDeps, type LedgerDeps, parseWorkerModel } from "./jobs/run.ts";
 import { type Pack, packFromEnv } from "./pack/load.ts";
 import type { SlackApi } from "./slack/api.ts";
 import { slackApiFromEnv } from "./slack/eve-api.ts";
+import { parseSignInExpiry } from "./workers/expiry.ts";
 import { t3Adapter } from "./workers/t3/adapter.ts";
 import { connectT3 } from "./workers/t3/client.ts";
 
@@ -55,7 +56,9 @@ export async function withJobDeps<T>(fn: (deps: JobDeps) => Promise<T>): Promise
     const workerModel = parseWorkerModel(process.env.SYM_WORKER_MODEL);
     return await fn({
       ...ledgerDeps(),
-      worker: t3Adapter(connection.call),
+      worker: t3Adapter(connection.call, {
+        signInExpiresAt: parseSignInExpiry(process.env.T3_TOKEN_EXPIRES_AT),
+      }),
       ...(workerModel ? { workerModel } : {}),
     });
   } finally {

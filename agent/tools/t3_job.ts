@@ -12,12 +12,15 @@ import {
   checkJob,
   closeUnlaunched,
   failJob,
+  finishJob,
   launchOrAdopt,
   markScheduledCheck,
   showBrief,
   startJob,
   statusLine,
+  verifierRequest,
 } from "../../lib/jobs/run.ts";
+import { type ModelCheck, VerifierOutput } from "../../lib/jobs/verify.ts";
 import { getJob, jobRef } from "../../lib/ledger/jobs.ts";
 import { ledger, ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
 import { canSkipStart } from "../../lib/schedules/approval.ts";
@@ -37,6 +40,10 @@ const POLL_SECONDS = 240;
 const POLL_AFTER_CALLBACK_SECONDS = 30;
 // How long one check blocks on the worker. The adapter gives the MCP request a margin on top.
 const WAIT_MS = 60_000;
+// How long the `verifier` subagent may take before the result posts with the rule checks alone.
+// It stays well under the watcher lease, so reconcile does not finish the job first. Local
+// end-to-end runs can change it with SYM_VERIFIER_TIMEOUT_SECONDS.
+const VERIFIER_SECONDS = 300;
 
 const START_OPTIONS = [
   { id: "start", label: "Start", style: "primary" as const },
@@ -158,6 +165,24 @@ export default defineWorkflowTool({
         const result = await check(job.id);
         yield { status: statusLine(ref, result.summary) };
 
+        // The worker finished a code job. The `verifier` subagent checks the result before the
+        // one result message posts (flow 4, decision 032).
+        if (result.status === "checking") {
+          yield { status: statusLine(ref, "Checking the result") };
+          const verdict = await runVerifier(ctx, job.id, stopped, timing.verifierMs);
+          // Stopped while checking: the work is done, so it ends as done with the rule checks.
+          const end = await finish(job.id, verdict === "stopped" ? undefined : verdict);
+          await endRun(ctx.session.id, job.id, end.status, end.lastMessage, end.concerns);
+          return {
+            job: ref,
+            status: end.status,
+            threadId,
+            summary: end.summary,
+            lastMessage: end.lastMessage,
+            note: POSTED_NOTE,
+          };
+        }
+
         for (const question of result.questions) {
           const answers = await askQuestion(ctx.ask, ref, question, stopped);
           if (answers === "stopped") {
@@ -181,14 +206,57 @@ export default defineWorkflowTool({
       }
     } catch (error) {
       // A failed task must not leave the job looking like it still runs.
-      await markFailed(job.id, error instanceof Error ? error.message : String(error));
-      await endRun(ctx.session.id, job.id, "failed", null);
+      const status = await markFailed(
+        job.id,
+        error instanceof Error ? error.message : String(error),
+      );
+      await endRun(ctx.session.id, job.id, status, null);
       throw error;
     }
   },
 });
 
 type Ask = WorkflowToolContext["ask"];
+
+// Runs the `verifier` subagent in the workflow body: `ctx.agent` is not available in a step. A
+// failure, a malformed reply, or a timeout gives an unavailable check, so the result still posts.
+async function runVerifier(
+  ctx: WorkflowToolContext,
+  jobId: number,
+  stopped: Promise<"stopped">,
+  timeoutMs: number,
+): Promise<ModelCheck | undefined | "stopped"> {
+  const message = await verifierInput(jobId);
+  if (!message) return undefined;
+  const reply = (async () => {
+    const response = await ctx
+      .agent("verifier")
+      .send(message, { outputSchema: VerifierOutput, signal: ctx.abortSignal });
+    return response.result();
+  })();
+  // A reply that fails after a timeout or a stop must not surface as an unhandled rejection.
+  reply.catch(() => undefined);
+  try {
+    const outcome = await Promise.race([
+      reply,
+      sleep(timeoutMs).then(() => "timeout" as const),
+      stopped,
+    ]);
+    if (outcome === "stopped") return "stopped";
+    if (outcome === "timeout") return unavailable("The model check timed out.");
+    if (outcome.status === "failed" || outcome.data === undefined) {
+      return unavailable(outcome.error?.message ?? "The verifier gave no verdict.");
+    }
+    // finishJob parses the reply again, so a wrong shape becomes an unavailable check.
+    return { status: "checked", output: outcome.data as VerifierOutput };
+  } catch (error) {
+    return unavailable(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function unavailable(reason: string): ModelCheck {
+  return { status: "unavailable", reason };
+}
 
 // Asks each part of a worker question as Slack buttons, with free text for other answers.
 // Returns nothing when a person dismissed a part, so the worker keeps waiting for the owner.
@@ -231,6 +299,7 @@ async function jobTiming() {
     pollMs: seconds("SYM_JOB_POLL_SECONDS", POLL_SECONDS) * 1000,
     afterCallbackMs:
       seconds("SYM_JOB_POLL_AFTER_CALLBACK_SECONDS", POLL_AFTER_CALLBACK_SECONDS) * 1000,
+    verifierMs: seconds("SYM_VERIFIER_TIMEOUT_SECONDS", VERIFIER_SECONDS) * 1000,
   };
 }
 
@@ -270,7 +339,17 @@ async function launch(jobId: number, webhookUrl: string): Promise<string> {
 
 async function check(jobId: number) {
   "use step";
-  return withJobDeps((deps) => checkJob(deps, jobId, WAIT_MS));
+  return withJobDeps((deps) => checkJob(deps, jobId, WAIT_MS, { verify: true }));
+}
+
+async function verifierInput(jobId: number) {
+  "use step";
+  return verifierRequest(ledgerDeps(), jobId);
+}
+
+async function finish(jobId: number, verdict: ModelCheck | undefined) {
+  "use step";
+  return finishJob(ledgerDeps(), jobId, verdict);
 }
 
 async function answer(jobId: number, requestId: string, answers: WorkerAnswers) {
@@ -290,7 +369,7 @@ async function closeBeforeStart(jobId: number, reason: string) {
 
 async function markFailed(jobId: number, reason: string) {
   "use step";
-  await failJob(ledgerDeps(), jobId, reason);
+  return failJob(ledgerDeps(), jobId, reason);
 }
 
 // True only for a run the owner approved ahead of time (decision 024). The initiator travels in
@@ -316,16 +395,18 @@ async function linkRun(sessionId: string, jobId: number) {
 }
 
 // Records how a scheduled run ended for the digest. A session without a run row is not a
-// scheduled run, so the update changes nothing.
+// scheduled run, so the update changes nothing. `concerns` comes from finishJob when the job
+// went through the model check; otherwise the rule checks run here.
 async function endRun(
   sessionId: string,
   jobId: number,
   status: string,
   lastMessage: string | null,
+  concerns?: string[],
 ) {
   "use step";
   const contract = parseOutputContract(lastMessage);
-  const job = await getJob(ledger(), jobId);
-  const concerns = job ? resultConcerns(job, contract, pack()) : [];
+  const job = concerns ? undefined : await getJob(ledger(), jobId);
+  concerns ??= job ? resultConcerns(job, contract, pack()) : [];
   await finishRunForSession(ledger(), sessionId, runOutcome(status, contract, concerns), jobId);
 }

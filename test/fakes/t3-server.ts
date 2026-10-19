@@ -55,6 +55,8 @@ export interface FakeT3Thread {
   sends: { message: string; mode: string; clientRequestId: string | undefined }[];
   interrupts: { reason: string | undefined; clientRequestId: string | undefined }[];
   launch: Record<string, unknown>;
+  // Pull requests linked to the thread, and whether T3 watches each one.
+  pullRequests: { url: string; watching: boolean }[];
 }
 
 export interface FakeT3Project {
@@ -82,6 +84,12 @@ export interface FakeT3 {
   // Requests the server refused for a missing or wrong token.
   unauthorized: number;
   setScript(script: FakeT3Step[]): void;
+  // Adds the item T3 shows when a watched pull request wakes the worker: a `notification` item
+  // whose text is the summary (orchestration-v2/pullRequestWatch.ts), for example
+  // `#12: checks failed`.
+  addWake(threadId: string, summary: string): void;
+  // The next `watch_pull_request` call fails with this message, like a merged pull request.
+  failNextWatch(message: string): void;
   // The next call to `tool` runs, then the server drops the connection before it answers, like
   // a launch response lost on the network.
   dropNextResponse(tool: string): void;
@@ -101,6 +109,7 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
   let script = options.script ?? DEFAULT_SCRIPT;
   let nextThread = 1;
   const drops: string[] = [];
+  const watchFailures: string[] = [];
   const threads = new Map<string, FakeT3Thread>();
   const state: FakeT3 = {
     url: "",
@@ -110,6 +119,13 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
     unauthorized: 0,
     setScript: (next) => {
       script = next;
+    },
+    addWake: (threadId, summary) => {
+      const thread = getThread(threadId);
+      thread.items.push({ position: thread.items.length, type: "notification", text: summary });
+    },
+    failNextWatch: (message) => {
+      watchFailures.push(message);
     },
     dropNextResponse: (tool) => {
       drops.push(tool);
@@ -241,6 +257,7 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
           sends: [],
           interrupts: [],
           launch: { ...args },
+          pullRequests: [],
         };
         threads.set(thread.threadId, thread);
         return {
@@ -408,6 +425,45 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
         return result;
       },
     );
+
+    // Results follow apps/server/src/mcp/toolkits/pullRequests/tools.ts. A caller outside a
+    // thread must pass threadId.
+    const pullRequestTarget = {
+      threadId: z.string().optional(),
+      url: z.string().optional(),
+      repository: z.string().optional(),
+      number: z.number().int().optional(),
+      host: z.string().optional(),
+    };
+    const identity = (url: string) => {
+      const match = /^https?:\/\/([^/]+)\/(.+)\/pull\/(\d+)/.exec(url);
+      if (!match) throw new Error("This is not a recognised pull request URL.");
+      return { host: match[1], repository: match[2], number: Number(match[3]), url };
+    };
+
+    tool("link_pull_request", pullRequestTarget, ({ threadId, url }) => {
+      const thread = getThread(threadId ?? "");
+      const target = identity(url ?? "");
+      const alreadyLinked = thread.pullRequests.some((link) => link.url === target.url);
+      if (!alreadyLinked) thread.pullRequests.push({ url: target.url, watching: false });
+      return { ...target, alreadyLinked };
+    });
+
+    tool("watch_pull_request", pullRequestTarget, ({ threadId, url }) => {
+      const failure = watchFailures.shift();
+      if (failure) throw new Error(failure);
+      const thread = getThread(threadId ?? "");
+      const target = identity(url ?? "");
+      let link = thread.pullRequests.find((candidate) => candidate.url === target.url);
+      // Watching links the pull request first when needed.
+      if (!link) {
+        link = { url: target.url, watching: false };
+        thread.pullRequests.push(link);
+      }
+      const wasWatching = link.watching;
+      link.watching = true;
+      return { ...target, watching: true, wasWatching };
+    });
 
     return server;
   }

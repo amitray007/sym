@@ -23,15 +23,30 @@ decides what to keep.
    facts. Facts live in the ledger table `memory_facts` (migration 004), and the model saves,
    updates, searches, and forgets them with `owner__*` tools. Recall loads the newest 40 facts
    each turn. Schedule turns run as the app principal and get no memory.
-4. **Promotion.** A weekly `learn` schedule groups feedback. A pattern seen 3 times becomes a
-   proposal. Text-only changes are layer 2: Sym shows the new playbook or rule with Approve and
-   Reject buttons. Changes that need code are layer 3.
+4. **Promotion.** The weekly `learn` schedule (Monday 06:00 UTC, no model call) groups the last
+   week's feedback: `thumbs_down` on the same job kind, and the same `fix` text sent repeatedly. A
+   pattern seen 3 times becomes one proposed rule in the `playbooks` table (source `learn`, with
+   the feedback IDs as evidence). Its text comes from Sym's own template plus counts, never from
+   the feedback text. Sym posts one message to `SYM_DIGEST_CHANNEL` asking the owner to review
+   it. A pattern with a live proposal or approval, or a rejection in the last 28 days, is skipped.
+   Changes that need code are layer 3.
 5. **Change.** For layer 3, Sym launches a worker thread in its own repository. The thread edits
    the code and opens a draft PR. CI runs `eve eval --strict`. A person reviews and merges, and the
    deployment updates. This replaces Eve's remote self-modification extension, which needs
    microsandbox on the server (decision 007).
 6. **Trust ladder.** A job class moves from "approve each run" to "auto" after N clean runs. The
    level is a column on the schedule row, and only the owner changes it.
+
+## Layer 2 rows
+
+Rows live in `playbooks` (migration 006) with a version history: name, kind (`playbook` or
+`rule`), body (up to 2000 characters), status (`proposed`, `approved`, `rejected`, `retired`),
+source (`owner` or `learn`), and evidence. Only one version of a name is approved at a time, and
+approving a new version retires the old one. The owner proposes with `playbook_propose` and
+approves with `playbook_review`, which shows the exact body that will load. `playbook_retire`
+retires a row or rejects a proposal. `agent/instructions/playbooks.ts` loads approved rows as
+system instructions at `session.started`, rules first, at most 8000 characters in total, inside a
+frame that says they are reviewed guidance and cannot override the base rules.
 
 ## Limits
 

@@ -39,7 +39,8 @@ worker. No production deployment and no adopter pack beyond a test pack.
 - Does `ctx.send` work from `onSlashCommand`?
 - ~~Does Eve accept the T3 OAuth flow through `defineInteractiveAuthorization`?~~ Not used: it is
   user-scoped, and reconcile runs without a user (decision 015).
-- Does the build-time pack overlay compile pack playbooks (see [adopting.md](adopting.md))?
+- ~~Does the build-time pack overlay compile pack playbooks?~~ Yes, instructions and playbooks
+  both compile (`scripts/pack-overlay.ts`, [adopting.md](adopting.md)).
 
 ## Exit criteria
 

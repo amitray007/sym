@@ -184,6 +184,46 @@ describe("t3 over the wire", () => {
   });
 });
 
+describe("t3 pull request watch over the wire", () => {
+  const prUrl = "https://github.com/example/app/pull/12";
+
+  it("links and watches a pull request, and a repeat reports it as already watched", async () => {
+    const thread = await launch("[J-9] Watch me");
+    t3.calls.length = 0;
+
+    expect(await worker.watchPullRequest?.(thread.id, prUrl, "J-9:watch")).toEqual({
+      watching: true,
+      alreadyWatching: false,
+    });
+    expect(await worker.watchPullRequest?.(thread.id, prUrl, "J-9:watch")).toEqual({
+      watching: true,
+      alreadyWatching: true,
+    });
+    expect(t3.calls.map((call) => call.name)).toEqual(["watch_pull_request", "watch_pull_request"]);
+    expect(t3.calls[0]?.args).toEqual({ threadId: thread.id, url: prUrl });
+    expect(t3.threads.get(thread.id)?.pullRequests).toEqual([{ url: prUrl, watching: true }]);
+  });
+
+  it("surfaces a T3 refusal", async () => {
+    const thread = await launch("[J-10] Merged");
+    t3.failNextWatch("The pull request is merged, so there is nothing to watch.");
+    await expect(worker.watchPullRequest?.(thread.id, prUrl, "k")).rejects.toThrow(/merged/);
+  });
+
+  it("reads a wake as a notification activity item", async () => {
+    const thread = await launch("[J-11] Wake");
+    t3.addWake(thread.id, "#12: checks failed");
+    const activity = await worker.readActivity(thread.id, null);
+    expect(activity.items).toEqual([
+      { position: 0, type: "notification", text: "#12: checks failed" },
+    ]);
+  });
+
+  it("reports health over the wire", async () => {
+    expect(await worker.health?.()).toMatchObject({ reachable: true, signedIn: true });
+  });
+});
+
 describe("t3 auth", () => {
   it("refuses a wrong bearer token", async () => {
     const before = t3.unauthorized;
