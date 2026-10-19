@@ -12,8 +12,7 @@ export interface T3Connection {
 export interface T3ConnectOptions {
   // T3's MCP endpoint, for example `https://worker.example.ts.net/mcp`.
   url: string;
-  // Returns the bearer token. Milestone 1 reads a manual token. Later, Sym stores the OAuth token
-  // in Postgres after the owner approves the sign-in.
+  // Returns the bearer token: the stored sign-in, else `T3_TOKEN` (lib/workers/resolve.ts).
   getToken(): Promise<string>;
 }
 

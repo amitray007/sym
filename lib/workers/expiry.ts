@@ -18,7 +18,8 @@ export interface SignInNotice {
   daysLeft: number;
 }
 
-// Reads `T3_TOKEN_EXPIRES_AT`. An empty or invalid value means the expiry is unknown.
+// Reads `T3_TOKEN_EXPIRES_AT`, the expiry of an env token. A stored sign-in keeps its expiry on
+// its row (decision 036). An empty or invalid value means the expiry is unknown.
 export function parseSignInExpiry(value: string | undefined): Date | null {
   if (!value?.trim()) return null;
   const date = new Date(value);
@@ -52,14 +53,16 @@ export interface SignInNoticeInput {
   now: Date;
   // A user ID or channel ID, from `ownerTarget`.
   target: string | undefined;
-  // The worker's MCP URL, shown in the re-approve step.
-  mcpUrl?: string | undefined;
 }
+
+// The in-app sign-in (decision 036): the owner asks Sym, and Sym sends the T3 link in a DM.
+export const RENEW_STEP =
+  'To renew it, tell Sym "sign in to the worker" and approve the link Sym sends you in a DM.';
 
 export function signInText(stage: Exclude<SignInStage, "none">, input: SignInNoticeInput): string {
   const day = (input.expiresAt as Date).toISOString().slice(0, 10);
   const { daysLeft } = signInNotice(input.expiresAt, input.now);
-  const step = `To renew it, run \`pnpm t3:login ${input.mcpUrl || "<mcp-url>"}\` and approve it in the browser.`;
+  const step = RENEW_STEP;
   return stage === "warn"
     ? `The worker sign-in expires in ${daysLeft} ${daysLeft === 1 ? "day" : "days"} (${day}). ${step}`
     : `The worker sign-in expired on ${day}. Jobs pause until you approve a new one. ${step}`;

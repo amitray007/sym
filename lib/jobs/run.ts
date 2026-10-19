@@ -7,6 +7,7 @@ import {
   type JobStatus,
   jobRef,
   renewWatch,
+  StaleJobError,
   updateJob,
 } from "../ledger/jobs.ts";
 import { getSessionThread } from "../ledger/threads.ts";
@@ -53,6 +54,8 @@ export interface JobDeps {
   slack?: SlackApi;
   // The adopter pack. With one, jobs run only in its projects and under its rules (decision 026).
   pack?: Pack;
+  // The pack worker this process is connected to. A pack project on another worker is refused.
+  workerName?: string;
   now?: () => Date;
 }
 
@@ -129,7 +132,9 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
   let launched: Job;
   try {
     await lock`select pg_advisory_lock(${LAUNCH_LOCK}, ${jobId})`;
-    const job = await mustGetJob(deps.sql, jobId);
+    // Reads and writes under the lock use the reserved connection. Taking another pooled
+    // connection while holding this one could deadlock the pool under concurrent launches.
+    const job = await mustGetJob(lock, jobId);
     if (job.workerThreadId) return job;
 
     const plan = await planLaunch(deps, Brief.parse(job.brief));
@@ -146,7 +151,7 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
       }));
     const projectId = plan.projectId;
 
-    launched = await updateJob(deps.sql, job.id, {
+    launched = await updateJob(lock, job.id, {
       status: "running",
       workerProjectId: projectId,
       workerThreadId: thread.id,
@@ -223,18 +228,29 @@ export async function checkJob(
         ? "Waiting for a permission prompt on the worker"
         : (firstLine(latest) ?? job.lastSummary ?? "Working");
 
-  const updated = await updateJob(deps.sql, job.id, {
-    status,
-    cursor: activity.cursor,
-    lastSummary: summary.slice(0, SUMMARY_MAX),
-    // Kept on the row: the final message can arrive in an earlier check than the final status.
-    ...(message ? { lastMessage: message } : {}),
-    ...(progress.state.prUrl ? { prUrl: progress.state.prUrl } : {}),
-    ...(activity.items.length > 0 ? { lastActivityAt: at } : {}),
-    ...(progress.state.lastQuietPostAt
-      ? { quietNoticedAt: new Date(progress.state.lastQuietPostAt) }
-      : {}),
+  // Two watchers can check one job (a task and reconcile). The update applies only while the
+  // cursor is the one this check read; otherwise the newer check already recorded more.
+  const updated = await updateJob(
+    deps.sql,
+    job.id,
+    {
+      status,
+      cursor: activity.cursor,
+      lastSummary: summary.slice(0, SUMMARY_MAX),
+      // Kept on the row: the final message can arrive in an earlier check than the final status.
+      ...(message ? { lastMessage: message } : {}),
+      ...(progress.state.prUrl ? { prUrl: progress.state.prUrl } : {}),
+      ...(activity.items.length > 0 ? { lastActivityAt: at } : {}),
+      ...(progress.state.lastQuietPostAt
+        ? { quietNoticedAt: new Date(progress.state.lastQuietPostAt) }
+        : {}),
+    },
+    { cursor: job.cursor },
+  ).catch(async (error: unknown) => {
+    if (error instanceof StaleJobError) return undefined;
+    throw error;
   });
+  if (!updated) return toCheck(await mustGetJob(deps.sql, job.id), []);
 
   await presentProgress(
     deps.sql,
@@ -341,10 +357,16 @@ export async function cancelJob(deps: JobDeps, jobId: number): Promise<JobCheck>
 
 // Records a job whose task failed, so the ledger does not show it as still running. A job in
 // `checking` already has its result, so it ends as done without the model check.
+// A launched job keeps running on the worker even when its watcher fails, so it is not marked
+// failed: the watcher lease ends at once, and reconcile takes the job over on its next pass.
 export async function failJob(deps: LedgerDeps, jobId: number, reason: string): Promise<JobStatus> {
   const job = await mustGetJob(deps.sql, jobId);
   if (job.status === "checking") {
     return (await finishJob(deps, jobId, { status: "unavailable", reason })).status;
+  }
+  if (job.workerThreadId && !TERMINAL.includes(job.status)) {
+    await deps.sql`update jobs set watch_until = null where id = ${job.id}`;
+    return job.status;
   }
   return (await endWithoutWorker(deps, job, "failed", reason)).status;
 }
@@ -482,12 +504,24 @@ async function planLaunch(deps: JobDeps, brief: Brief): Promise<LaunchPlan> {
   }
   const allowed = resolvePackProject(deps.pack, brief.project);
   if (!allowed.ok) throw new JobSetupError(allowed.reason);
+  // Sym connects to one worker at a time. A project the pack gives to another worker must not
+  // run here, even when this worker has a project with the same name.
+  const connected =
+    deps.workerName ??
+    (deps.pack.config.workers.length === 1 ? deps.pack.config.workers[0]?.name : undefined);
+  if (allowed.worker.name !== connected) {
+    throw new JobSetupError(
+      `"${brief.project}" runs on worker "${allowed.worker.name}", but Sym is connected to ${
+        connected ? `"${connected}"` : "an unnamed worker"
+      }.`,
+    );
+  }
   const openPullRequest = brief.openPullRequest && allowed.project.prPolicy === "draft";
   return {
     projectId: await resolveProject(deps.worker, allowed.workerProject),
     baseRef: brief.baseRef ?? allowed.project.defaultBaseBranch,
     brief: { ...brief, openPullRequest },
-    guardrails: briefGuardrails(deps.pack, allowed.project),
+    guardrails: briefGuardrails(deps.pack, allowed.project, openPullRequest),
   };
 }
 

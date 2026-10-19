@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import { migrate } from "../lib/ledger/migrate.ts";
+import type { Schedule } from "../lib/schedules/rows.ts";
 import {
   approveSchedule,
+  attachSession,
   claimDueSchedules,
+  claimRunForJob,
   completeClaim,
   createSchedule,
   deleteSchedule,
@@ -13,9 +17,11 @@ import {
   parseScheduleRef,
   pauseSchedule,
   recordRun,
+  reserveRun,
   resumeSchedule,
   runsSince,
 } from "../lib/schedules/rows.ts";
+import { scheduleRunsMigration } from "../lib/schedules/runs-migration.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
 const brief = { project: "p", title: "On-call check", goal: "g", doneWhen: ["d"] };
@@ -25,6 +31,18 @@ const T0 = new Date("2026-10-20T08:00:00Z");
 describe.skipIf(!hasDatabase)("schedule rows", () => {
   const ledger = useLedger();
   const sql = async () => ledger.sql();
+  // No-op once the ledger registers the migration.
+  beforeAll(async () => {
+    await migrate(ledger.sql(), [scheduleRunsMigration]);
+  });
+
+  const newJob = async (key: string) => {
+    const [job] = await ledger.sql()<{ id: string }[]>`
+      insert into jobs (request_key, kind, title, brief, worker)
+      values (${key}, 'code-change', 't', '{}', 't3') returning id
+    `;
+    return Number(job?.id);
+  };
 
   it("creates a pending row that does not fire", async () => {
     const db = await sql();
@@ -94,7 +112,7 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
     const created = await createSchedule(db, { ...input, title: "Lease" });
     await approveSchedule(db, created.id, "U1", T0);
     const due = new Date("2026-10-20T09:00:00Z");
-    const mine = (rows: { id: number }[]) => rows.filter((row) => row.id === created.id);
+    const mine = (rows: Schedule[]) => rows.filter((row) => row.id === created.id);
     expect(mine(await claimDueSchedules(db, due, 60_000))).toHaveLength(1);
     expect(mine(await claimDueSchedules(db, new Date("2026-10-20T09:00:30Z"), 60_000))).toEqual([]);
     expect(
@@ -177,6 +195,102 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
     expect(await isApprovedBrief(db, created.id, { ...brief, goal: "write code" })).toBe(false);
     await pauseSchedule(db, created.id);
     expect(await isApprovedBrief(db, created.id, brief)).toBe(false);
+  });
+  it("reserves one run per fire, so a repeated dispatch does not send twice", async () => {
+    const db = await sql();
+    const created = await createSchedule(db, { ...input, title: "Identity" });
+    await approveSchedule(db, created.id, "U1", T0);
+    const due = new Date("2026-10-20T09:00:00Z");
+    const first = await reserveRun(db, { scheduleId: created.id, dueAt: due, firedAt: due });
+    expect(first?.scheduleId).toBe(created.id);
+    // A second dispatcher after a crash and a lease expiry sees the same fire.
+    expect(
+      await reserveRun(db, {
+        scheduleId: created.id,
+        dueAt: due,
+        firedAt: new Date("2026-10-20T09:06:00Z"),
+      }),
+    ).toBeUndefined();
+    // The next fire is a new identity.
+    const later = new Date("2026-10-21T09:00:00Z");
+    expect(
+      await reserveRun(db, { scheduleId: created.id, dueAt: later, firedAt: later }),
+    ).toBeDefined();
+  });
+
+  it("recovers a crash after the send: the lease expires, the fire is skipped, the claim completes", async () => {
+    const db = await sql();
+    const created = await createSchedule(db, { ...input, title: "Crash", cron: "0 * * * *" });
+    await approveSchedule(db, created.id, "U1", T0);
+    const t1 = new Date("2026-10-20T09:00:30Z");
+    const mine = (rows: Schedule[]) => rows.filter((r) => r.id === created.id);
+    const [claim1] = mine(await claimDueSchedules(db, t1, 60_000));
+    if (!claim1?.nextFireAt) throw new Error("expected a claim");
+    const run = await reserveRun(db, {
+      scheduleId: created.id,
+      dueAt: claim1.nextFireAt,
+      firedAt: t1,
+    });
+    if (!run) throw new Error("expected a run");
+    await attachSession(db, run.id, "s-crash");
+    // Dispatcher 1 dies here, before completeClaim.
+    const t2 = new Date("2026-10-20T09:03:00Z");
+    const [claim2] = mine(await claimDueSchedules(db, t2, 60_000));
+    if (!claim2?.nextFireAt) throw new Error("expected a second claim after the lease");
+    expect(
+      await reserveRun(db, { scheduleId: created.id, dueAt: claim2.nextFireAt, firedAt: t2 }),
+    ).toBeUndefined();
+    expect(await completeClaim(db, claim2, t2)).toBe(true);
+    const after = await getSchedule(db, created.id);
+    expect(after?.nextFireAt?.toISOString()).toBe("2026-10-20T10:00:00.000Z");
+    const runs = (await runsSince(db, T0)).filter((r) => r.scheduleId === created.id);
+    expect(runs).toHaveLength(1);
+  });
+
+  it("completeClaim does nothing for a dispatcher that lost its lease", async () => {
+    const db = await sql();
+    const created = await createSchedule(db, { ...input, title: "Lost lease", cron: "0 * * * *" });
+    await approveSchedule(db, created.id, "U1", T0);
+    const mine = (rows: Schedule[]) => rows.filter((r) => r.id === created.id);
+    const [old] = mine(await claimDueSchedules(db, new Date("2026-10-20T09:00:30Z"), 60_000));
+    const [fresh] = mine(await claimDueSchedules(db, new Date("2026-10-20T09:05:00Z"), 60_000));
+    if (!old || !fresh) throw new Error("expected two claims");
+    expect(await completeClaim(db, old, new Date("2026-10-20T09:05:10Z"))).toBe(false);
+    expect((await getSchedule(db, created.id))?.leaseUntil).not.toBeNull();
+    expect(await completeClaim(db, fresh, new Date("2026-10-20T09:05:10Z"))).toBe(true);
+  });
+
+  it("binds pre-approval to the run of this session, one job only", async () => {
+    const db = await sql();
+    const a = await createSchedule(db, { ...input, title: "Bind A" });
+    const b = await createSchedule(db, { ...input, title: "Bind B" });
+    const due = new Date("2026-10-20T09:00:00Z");
+    const run = await reserveRun(db, { scheduleId: a.id, dueAt: due, firedAt: due });
+    if (!run) throw new Error("expected a run");
+    const job1 = await newJob("bind-1");
+    const job2 = await newJob("bind-2");
+    // Before the session is attached, nothing matches.
+    expect(await claimRunForJob(db, "s-bind", a.id, job1)).toBe(false);
+    await attachSession(db, run.id, "s-bind");
+    // Another session, or another schedule, cannot use this run.
+    expect(await claimRunForJob(db, "s-other", a.id, job1)).toBe(false);
+    expect(await claimRunForJob(db, "s-bind", b.id, job1)).toBe(false);
+    // The first job claims it, a replay of the same job passes, a second job does not.
+    expect(await claimRunForJob(db, "s-bind", a.id, job1)).toBe(true);
+    expect(await claimRunForJob(db, "s-bind", a.id, job1)).toBe(true);
+    expect(await claimRunForJob(db, "s-bind", a.id, job2)).toBe(false);
+  });
+
+  it("lets only one of two concurrent jobs claim the run", async () => {
+    const db = await sql();
+    const a = await createSchedule(db, { ...input, title: "Race" });
+    const due = new Date("2026-10-20T09:00:00Z");
+    const run = await reserveRun(db, { scheduleId: a.id, dueAt: due, firedAt: due });
+    if (!run) throw new Error("expected a run");
+    await attachSession(db, run.id, "s-race");
+    const jobs = [await newJob("race-1"), await newJob("race-2")];
+    const results = await Promise.all(jobs.map((id) => claimRunForJob(db, "s-race", a.id, id)));
+    expect(results.filter(Boolean)).toHaveLength(1);
   });
 });
 

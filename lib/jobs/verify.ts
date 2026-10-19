@@ -23,9 +23,12 @@ export function checkResult(contract: OutputContract | null, rules: ResultRules)
   }
   const concerns: string[] = [];
   if (rules.allowedPaths && rules.allowedPaths.length > 0) {
-    const outside = contract.filesChanged.filter(
-      (file) => !rules.allowedPaths?.some((pattern) => matchesGlob(file, pattern)),
-    );
+    const outside = contract.filesChanged.filter((file) => {
+      const path = repoPath(file);
+      return (
+        path === undefined || !rules.allowedPaths?.some((pattern) => matchesGlob(path, pattern))
+      );
+    });
     if (outside.length > 0) {
       concerns.push(`Changed files outside the allowed paths: ${outside.join(", ")}.`);
     }
@@ -37,6 +40,24 @@ export function checkResult(contract: OutputContract | null, rules: ResultRules)
     concerns.push(`The worker left ${contract.openQuestions.length} open question(s).`);
   }
   return { verdict: concerns.length > 0 ? "concerns" : "pass", concerns };
+}
+
+// A worker's path as a clean repository-relative path, or nothing when it is absolute or climbs
+// out of the repository. `src/../../x` must not pass as `src/**`.
+export function repoPath(file: string): string | undefined {
+  const raw = file.trim().replace(/\\/g, "/");
+  if (raw === "" || raw.startsWith("/") || /^[a-zA-Z]:\//.test(raw)) return undefined;
+  const parts: string[] = [];
+  for (const part of raw.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (parts.length === 0) return undefined;
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return parts.length > 0 ? parts.join("/") : undefined;
 }
 
 // `**` matches across folders, `*` within one folder, `?` one character. A leading `./` or `/` on

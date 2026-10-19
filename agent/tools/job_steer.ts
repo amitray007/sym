@@ -19,6 +19,6 @@ export default defineTool({
   label: { start: ({ job }) => `Steer ${job}` },
   async execute({ job, text }, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
-    return withJobDeps((deps) => steerJob(deps, job, text, "steer"));
+    return withJobDeps((deps) => steerJob(deps, job, text, "steer", ctx.callId));
   },
 });

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -80,6 +80,36 @@ describe("loadPack", () => {
     expect(() => loadPack(dir)).toThrow(/missing\.md: ENOENT/);
   });
 
+  it("rejects a symlink that leads outside the pack folder", () => {
+    const secretDir = mkdtempSync(join(tmpdir(), "sym-secret-"));
+    dirs.push(secretDir);
+    writeFileSync(join(secretDir, "private.md"), "private notes");
+    const dir = packWith({ ...base, instructions: ["note.md"] });
+    symlinkSync(join(secretDir, "private.md"), join(dir, "note.md"));
+    expect(() => loadPack(dir)).toThrow(/outside the pack folder/);
+  });
+
+  it("rejects a symlinked folder that leads outside the pack folder", () => {
+    const secretDir = mkdtempSync(join(tmpdir(), "sym-secret-"));
+    dirs.push(secretDir);
+    writeFileSync(join(secretDir, "private.md"), "private notes");
+    const dir = packWith({ ...base, playbooks: ["linked/private.md"] });
+    symlinkSync(secretDir, join(dir, "linked"));
+    expect(() => loadPack(dir)).toThrow(/outside the pack folder/);
+  });
+
+  it("follows a symlink that stays inside the pack folder", () => {
+    const dir = packWith({ ...base, instructions: ["alias.md"] }, { "real.md": "inside" });
+    symlinkSync(join(dir, "real.md"), join(dir, "alias.md"));
+    expect(loadPack(dir).instructions[0]?.content).toBe("inside");
+  });
+
+  it("reads only regular files", () => {
+    const dir = packWith({ ...base, instructions: ["folder.md"] });
+    mkdirSync(join(dir, "folder.md"));
+    expect(() => loadPack(dir)).toThrow(/not a regular file/);
+  });
+
   it("rejects a referenced file outside the pack folder", () => {
     const dir = packWith({ ...base, instructions: ["../outside.md"] });
     expect(() => loadPack(dir)).toThrow(/outside the pack folder/);
@@ -127,12 +157,16 @@ describe("pack policy", () => {
     const drafting = resolvePackProject(pack, "sync-service");
     const closed = resolvePackProject(pack, "docs-site");
     if (!drafting.ok || !closed.ok) throw new Error("fixture projects missing");
-    expect(briefGuardrails(pack, drafting.project)).toEqual([
+    expect(briefGuardrails(pack, drafting.project, true)).toEqual([
       "Change only files that match: src/**, test/**.",
-      "A draft pull request is allowed. Never mark it ready for review.",
+      "Push the branch and open a draft pull request. Never mark it ready for review.",
       "Keep production data read-only.",
     ]);
-    expect(briefGuardrails(pack, closed.project)[1]).toBe(
+    // The pack allows a draft PR, but this brief asked for none: the brief's no-push stands.
+    expect(briefGuardrails(pack, drafting.project, false)[1]).toBe(
+      "Do not push and do not open a pull request.",
+    );
+    expect(briefGuardrails(pack, closed.project, true)[1]).toBe(
       "Do not push and do not open a pull request.",
     );
   });

@@ -9,6 +9,7 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A message with a ```brief JSON block calls t3_job with that brief.
 // - A scheduled run message calls t3_job with its brief and its schedule reference.
 // - A message that asks for an update or status calls jobs_status and repeats its answer.
+// - A message that says "sign in to the worker" calls worker_sign_in.
 // - A task result, or a tool result that says Sym already posted, ends the turn with no_reply.
 // - Anything else gets a one-line echo.
 export function fixtureBrain(): LanguageModel {
@@ -40,6 +41,9 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   const schedule = /^Scheduled run of (S-\d+):/m.exec(message)?.[1];
   if (brief && schedule) return { toolCalls: [{ name: "t3_job", input: { ...brief, schedule } }] };
   if (brief) return { toolCalls: [{ name: "t3_job", input: brief }] };
+  if (/\bsign in to the worker\b/i.test(message)) {
+    return { toolCalls: [{ name: "worker_sign_in", input: {} }] };
+  }
   if (/\b(update|status)\b/i.test(message)) {
     const job = /\bJ-\d+\b/.exec(message)?.[0];
     return { toolCalls: [{ name: "jobs_status", input: job ? { job } : {} }] };

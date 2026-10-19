@@ -1,8 +1,11 @@
 import { chooseDisplay } from "../display.ts";
-import { type Job, jobRef, orphanedJobs, updateJob } from "../ledger/jobs.ts";
+import { getJob, type Job, jobRef, orphanedJobs, updateJob } from "../ledger/jobs.ts";
 import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
+import type { WorkerAdapter } from "../workers/types.ts";
+import { parseOutputContract } from "./contract.ts";
 import { checkPrWakes, ensurePrWatched, jobsToWatch, watchedPrJobs } from "./pr-wakes.ts";
-import { checkJob, finishJob, type JobDeps } from "./run.ts";
+import { presentEnd } from "./present.ts";
+import { checkJob, finishJob, type JobDeps, type LedgerDeps } from "./run.ts";
 
 // The safety net (docs/architecture.md, "Proactive updates"). Every few minutes it takes over
 // the jobs no t3_job task watches, for example after a session died or Sym restarted, and runs
@@ -47,8 +50,80 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
     }
   }
   await followPullRequests(deps);
+  await presentMissingEnds(deps);
   return report;
 }
+
+// A crash between a job's terminal status and its end post would lose the result message, and
+// reconcile no longer looks at finished jobs. So it re-presents recent ended jobs whose end post
+// was never queued. presentEnd is idempotent (one `J-n:end` key) and stays silent where it
+// should, such as a clean scheduled check.
+async function presentMissingEnds(deps: JobDeps): Promise<void> {
+  const rows = await deps.sql<{ id: number }[]>`
+    select j.id from jobs j
+    where j.status in ('done', 'failed', 'cancelled')
+      and j.worker_thread_id is not null and j.slack_channel is not null
+      and j.finished_at >= now() - interval '1 day'
+      and not exists (
+        select 1 from outbox o where o.idempotency_key = 'J-' || j.id || ':end'
+      )
+    order by j.id limit 20
+  `;
+  for (const row of rows) {
+    const job = await getJob(deps.sql, Number(row.id));
+    if (!job) continue;
+    await presentEnd(deps.sql, job, parseOutputContract(job.lastMessage), new Date(), deps.pack);
+  }
+}
+
+// Runs `fn` with a worker connection, like `withJobDeps` in lib/runtime.ts.
+export type WithWorker = <T>(fn: (deps: JobDeps) => Promise<T>) => Promise<T>;
+
+export const WORKER_NOT_CONFIGURED =
+  "Reconcile skipped the worker pass: Sym has no worker URL and token. Ask Sym to sign in to " +
+  "the worker, or set T3_MCP_URL and T3_TOKEN.";
+
+// One reconcile pass over the worker. No worker configured at all is a setup gap, not an
+// outage: the pass logs one warning and leaves the jobs as they are (decision 036). Pass no
+// `withWorker` for that case. A connection that fails is an outage: every orphaned job goes
+// offline, once.
+export async function reconcileWorkerPass(
+  deps: LedgerDeps,
+  withWorker: WithWorker | undefined,
+  warn: (message: string) => void = console.warn,
+): Promise<ReconcileReport | "not_configured"> {
+  if (!withWorker) {
+    warn(WORKER_NOT_CONFIGURED);
+    return "not_configured";
+  }
+  try {
+    return await withWorker(reconcileJobs);
+  } catch (error) {
+    // The sign-in went away between the check and the connection.
+    if (error instanceof Error && error.name === "WorkerNotConfiguredError") {
+      warn(WORKER_NOT_CONFIGURED);
+      return "not_configured";
+    }
+    return reconcileJobs({ ...deps, worker: unreachableWorker });
+  }
+}
+
+const unreachable = async (): Promise<never> => {
+  throw new Error("The worker is unreachable.");
+};
+
+const unreachableWorker: WorkerAdapter = {
+  capabilities: unreachable,
+  projects: unreachable,
+  findByTitle: unreachable,
+  launch: unreachable,
+  wait: unreachable,
+  readActivity: unreachable,
+  interrupt: unreachable,
+  pendingQuestions: unreachable,
+  answer: unreachable,
+  send: unreachable,
+};
 
 // A PR outlives its job: the worker watches it and fixes CI failures and review comments, and
 // reconcile reports each wake in the job thread (docs/architecture.md, flow 4 step 5). A failed

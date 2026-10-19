@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OutputContract } from "../lib/jobs/contract.ts";
-import { checkResult, matchesGlob } from "../lib/jobs/verify.ts";
+import { checkResult, matchesGlob, repoPath } from "../lib/jobs/verify.ts";
 
 const contract = (extra: Partial<OutputContract> = {}): OutputContract => ({
   summary: "Added retry",
@@ -68,5 +68,29 @@ describe("checkResult", () => {
     expect(
       checkResult(contract({ filesChanged: ["anything/x"] }), { pullRequestAllowed: true }),
     ).toEqual({ verdict: "pass", concerns: [] });
+  });
+});
+
+describe("repoPath", () => {
+  it.each([
+    ["src/a.ts", "src/a.ts"],
+    ["./src//a.ts", "src/a.ts"],
+    ["src/x/../a.ts", "src/a.ts"],
+    ["src/../../outside.txt", undefined],
+    ["/etc/passwd", undefined],
+    ["C:/temp/x", undefined],
+    ["..", undefined],
+  ])("%s gives %s", (input, expected) => {
+    expect(repoPath(input)).toBe(expected);
+  });
+
+  it("does not let a climbing path pass the allowed-path check", () => {
+    const verdict = checkResult(contract({ filesChanged: ["src/../../outside.txt"] }), {
+      allowedPaths: ["src/**"],
+      pullRequestAllowed: true,
+    });
+    expect(verdict.concerns).toEqual([
+      "Changed files outside the allowed paths: src/../../outside.txt.",
+    ]);
   });
 });

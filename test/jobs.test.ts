@@ -658,18 +658,27 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       expect(texts(s.slack.posts().slice(before))).toEqual([`${s.ref} was cancelled.`]);
     });
 
-    it("posts one failure message for a failed job", async () => {
+    it("hands a launched job to reconcile when its watcher fails", async () => {
       const s = await launched();
       const before = s.slack.posts().length;
 
+      const status = await failJob(s.deps, s.job.id, "The task crashed");
+
+      // The worker keeps running, so the job stays active with no watcher lease.
+      expect(status).toBe("running");
+      const job = await getJob(s.deps.sql, s.job.id);
+      expect(job).toMatchObject({ status: "running", watchUntil: null });
+      expect(s.slack.posts().slice(before)).toEqual([]);
+    });
+
+    it("posts one failure message for a job that failed before it launched", async () => {
+      const s = await setup();
       await failJob(s.deps, s.job.id, "The task crashed");
       await failJob(s.deps, s.job.id, "The task crashed");
 
-      const added = s.slack.posts().slice(before);
-      expect(added).toHaveLength(1);
-      expect(added[0]?.body).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });
-      expect(String(added[0]?.body.text)).toContain(`*${s.ref} failed`);
-      expect(String(added[0]?.body.text)).toContain("The task crashed");
+      expect((await getJob(s.deps.sql, s.job.id))?.status).toBe("failed");
+      // It never posted a card or a brief here, so it posts nothing.
+      expect(s.slack.posts()).toEqual([]);
     });
 
     it("posts nothing when it closes a job that never launched", async () => {

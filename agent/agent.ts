@@ -10,6 +10,9 @@ const DEFAULT_MODEL = "anthropic/claude-sonnet-5.5";
 export default defineAgent({
   // Workers do repository work, so Sym needs no shell or file tools (docs/eve.md).
   defaultTools: false,
+  // The brain plans and summarizes; workers spend the real compute. A session that passes this
+  // model cost pauses and asks a person to continue or stop (docs/eve.md, spend limits).
+  limits: { maxTokenCostUsdPerSession: 2 },
   // Resolved per step because the fixture is a live model object, which only step selections
   // may return. A gateway ID stays the same each step, so the prompt cache stays valid.
   model: defineDynamic({

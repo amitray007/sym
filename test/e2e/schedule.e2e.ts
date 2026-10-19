@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { migrate } from "../../lib/ledger/migrate.ts";
 import { approveSchedule, createSchedule, type ScheduleRun } from "../../lib/schedules/rows.ts";
+import { scheduleRunsMigration } from "../../lib/schedules/runs-migration.ts";
 import {
   BOT,
   contractMessage,
@@ -24,6 +26,8 @@ let h: Harness;
 
 beforeAll(async () => {
   h = await startHarness({ database: "sym_e2e_schedule" });
+  // No-op once the ledger registers the migration.
+  await migrate(h.sql, [scheduleRunsMigration]);
   await h.startEve();
 });
 

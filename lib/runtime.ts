@@ -3,7 +3,8 @@ import { type JobDeps, type LedgerDeps, parseWorkerModel } from "./jobs/run.ts";
 import { type Pack, packFromEnv } from "./pack/load.ts";
 import type { SlackApi } from "./slack/api.ts";
 import { slackApiFromEnv } from "./slack/eve-api.ts";
-import { parseSignInExpiry } from "./workers/expiry.ts";
+import { getCredential } from "./workers/credentials.ts";
+import { type ResolvedWorker, resolveWorker } from "./workers/resolve.ts";
 import { t3Adapter } from "./workers/t3/adapter.ts";
 import { connectT3 } from "./workers/t3/client.ts";
 
@@ -41,26 +42,42 @@ export function ledgerDeps(): LedgerDeps {
   };
 }
 
+// The worker URL and token: the stored sign-in, then the pack worker with T3_TOKEN, then
+// T3_MCP_URL with T3_TOKEN (decision 036). Nothing when none is configured.
+export function currentWorker(): Promise<ResolvedWorker | undefined> {
+  return resolveWorker(pack(), process.env, (name) => getCredential(ledger(), name));
+}
+
+// No worker URL and token at all: a setup gap, not an outage. Reconcile skips the worker pass
+// for it instead of marking jobs offline.
+export class WorkerNotConfiguredError extends Error {
+  override name = "WorkerNotConfiguredError";
+  constructor() {
+    super(
+      "Sym has no worker sign-in. Ask Sym to sign in to the worker, or set T3_MCP_URL and " +
+        "T3_TOKEN (docs/workers.md).",
+    );
+  }
+}
+
 // Opens a worker connection for one step and closes it after. A step can run on any replay, so
 // it holds no connection across durable waits.
 export async function withJobDeps<T>(fn: (deps: JobDeps) => Promise<T>): Promise<T> {
-  const url = process.env.T3_MCP_URL;
-  const token = process.env.T3_TOKEN;
-  if (!url || !token) {
-    throw new Error(
-      "Set T3_MCP_URL and T3_TOKEN. Run `pnpm t3:login <mcp-url>` (docs/workers.md).",
-    );
-  }
-  const connection = await connectT3({ url, getToken: async () => token });
+  const worker = await currentWorker();
+  if (!worker) throw new WorkerNotConfiguredError();
+  const { token } = worker;
+  const connection = await connectT3({ url: worker.url, getToken: async () => token });
   try {
     const workerModel = parseWorkerModel(process.env.SYM_WORKER_MODEL);
-    return await fn({
+    // `workerName` names the worker this connection reaches, so a job for a pack project on
+    // another worker is refused instead of running here.
+    const deps = {
       ...ledgerDeps(),
-      worker: t3Adapter(connection.call, {
-        signInExpiresAt: parseSignInExpiry(process.env.T3_TOKEN_EXPIRES_AT),
-      }),
+      worker: t3Adapter(connection.call, { signInExpiresAt: worker.expiresAt }),
+      workerName: worker.name,
       ...(workerModel ? { workerModel } : {}),
-    });
+    };
+    return await fn(deps);
   } finally {
     await connection.close();
   }

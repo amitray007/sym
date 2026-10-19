@@ -1,6 +1,12 @@
 import type { Sql } from "../db.ts";
-import { jobsWithStaleCards, markCardSent, type SlackCard, updateJob } from "../ledger/jobs.ts";
-import { claimPosts, markPostFailed, markPostSent, type OutboxPost } from "../ledger/outbox.ts";
+import { getJob, jobsWithStaleCards, markCardSent, type SlackCard } from "../ledger/jobs.ts";
+import {
+  claimPosts,
+  markCardPostSent,
+  markPostFailed,
+  markPostSent,
+  type OutboxPost,
+} from "../ledger/outbox.ts";
 import { type SlackApi, SlackApiError } from "../slack/api.ts";
 
 // Sends Sym's own Slack posts from the outbox and brings job cards up to date (docs/slack.md).
@@ -31,18 +37,36 @@ export async function deliver(sql: Sql, slack: SlackApi, limit = 20): Promise<De
     }
   }
 
-  for (const job of await jobsWithStaleCards(sql, limit)) {
-    if (!job.card || !job.cardTs || !job.slackChannel) continue;
+  for (const stale of await jobsWithStaleCards(sql, limit)) {
     try {
-      await slack.call("chat.update", cardBody(job.slackChannel, job.cardTs, job.card));
-      await markCardSent(sql, job.id, job.cardVersion);
-      report.cardsUpdated++;
+      if (await updateCard(sql, slack, stale.id)) report.cardsUpdated++;
     } catch {
       // The next delivery tries again. The card keeps its last shown version until then.
       report.failed++;
     }
   }
   return report;
+}
+
+// Edits one job's card. One sender at a time owns a job's card (a transaction-scoped advisory
+// lock). The owner reloads the newest card first, so a slower sender never writes an old version
+// over a newer one. A sender that cannot get the lock skips: the owner covers its version.
+async function updateCard(sql: Sql, slack: SlackApi, jobId: number): Promise<boolean> {
+  return sql.begin(async (transaction) => {
+    // A transaction runs the same queries as the pool. The ledger helpers take the pool type.
+    const tx = transaction as unknown as Sql;
+    // The schema name keeps test schemas that share one database apart.
+    const [lock] = await tx<{ owned: boolean }[]>`
+      select pg_try_advisory_xact_lock(hashtext(current_schema()), ${jobId}::int) as owned
+    `;
+    if (!lock?.owned) return false;
+    const job = await getJob(tx, jobId);
+    if (!job?.card || !job.cardTs || !job.slackChannel) return false;
+    if (job.cardVersion <= job.cardSentVersion) return false;
+    await slack.call("chat.update", cardBody(job.slackChannel, job.cardTs, job.card));
+    await markCardSent(tx, job.id, job.cardVersion);
+    return true;
+  });
 }
 
 async function sendPost(sql: Sql, slack: SlackApi, post: OutboxPost): Promise<void> {
@@ -55,10 +79,16 @@ async function sendPost(sql: Sql, slack: SlackApi, post: OutboxPost): Promise<vo
   const ts = typeof response.ts === "string" ? response.ts : (payload.ts as string | undefined);
   if (!ts) throw new Error(`Slack ${post.method} returned no ts`);
 
-  await markPostSent(sql, post.id, ts);
   if (post.purpose === "card" && post.jobId !== null) {
-    await updateJob(sql, post.jobId, { cardTs: ts });
-    if (typeof cardVersion === "number") await markCardSent(sql, post.jobId, cardVersion);
+    // One statement: the post is sent and the job knows the card's ts and version.
+    await markCardPostSent(
+      sql,
+      post.id,
+      ts,
+      typeof cardVersion === "number" ? cardVersion : undefined,
+    );
+  } else {
+    await markPostSent(sql, post.id, ts);
   }
 }
 

@@ -3,7 +3,8 @@ import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { playbookDetail } from "../../lib/learning/format.ts";
 import { MAX_BODY_CHARS, NAME_PATTERN, playbookRef, propose } from "../../lib/learning/rows.ts";
-import { ledger } from "../../lib/runtime.ts";
+import { mayDecideAsOwner, OWNER_ONLY, slackUserOfPrincipal } from "../../lib/owner.ts";
+import { ledger, pack } from "../../lib/runtime.ts";
 
 // Writes a proposal only. Nothing loads into a session until the owner approves it with
 // playbook_review (docs/learning.md, layer 2).
@@ -22,6 +23,8 @@ export default defineTool({
   label: { start: ({ name }) => `Propose: ${name}` },
   async execute(input, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
+    const caller = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    if (!mayDecideAsOwner(caller, pack())) return OWNER_ONLY;
     const row = await propose(ledger(), { ...input, source: "owner" });
     return `Proposed ${playbookRef(row.id)}. It loads only after the owner approves it.\n${playbookDetail(row)}`;
   },

@@ -1,6 +1,6 @@
 // Reads an adopter pack from disk (docs/adopting.md). Errors name the file and the field.
-import { readFileSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse } from "yaml";
 import { findSecretFields, type PackConfig, packSchema } from "./schema.ts";
 
@@ -32,16 +32,37 @@ function read(path: string): string {
   }
 }
 
+function isInside(root: string, target: string): boolean {
+  const inside = relative(root, target);
+  return inside !== ".." && !inside.startsWith(`..${sep}`) && !isAbsolute(inside);
+}
+
+// Containment holds on real paths: a symlink inside the pack must not lead to a file outside it.
+// Only regular files are read.
 function readReferenced(dir: string, paths: string[], field: string): PackFile[] {
+  const outside = (path: string) =>
+    new PackError(`${join(dir, MANIFEST_NAME)}: ${field} "${path}" is outside the pack folder`);
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(dir);
+  } catch {
+    throw new PackError(`Cannot read the pack folder ${dir}`);
+  }
   return paths.map((path) => {
     const full = resolve(dir, path);
-    const inside = relative(dir, full);
-    if (inside.startsWith("..") || isAbsolute(inside)) {
-      throw new PackError(
-        `${join(dir, MANIFEST_NAME)}: ${field} "${path}" is outside the pack folder`,
-      );
+    if (!isInside(dir, full)) throw outside(path);
+    let real: string;
+    try {
+      real = realpathSync(full);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      throw new PackError(`Cannot read ${full}: ${code ?? (error as Error).message}`);
     }
-    return { path, content: read(full) };
+    if (!isInside(realRoot, real)) throw outside(path);
+    if (!statSync(real).isFile()) {
+      throw new PackError(`${join(dir, MANIFEST_NAME)}: ${field} "${path}" is not a regular file`);
+    }
+    return { path, content: read(real) };
   });
 }
 

@@ -35,7 +35,8 @@ decides what to keep.
    deployment updates. This replaces Eve's remote self-modification extension, which needs
    microsandbox on the server (decision 007).
 6. **Trust ladder.** A job class moves from "approve each run" to "auto" after N clean runs. The
-   level is a column on the schedule row, and only the owner changes it.
+   level is a column on the schedule row, and only the owner changes it. Not built yet: today
+   every job asks for Start, except runs of an approved schedule (decision 024).
 
 ## Layer 2 rows
 

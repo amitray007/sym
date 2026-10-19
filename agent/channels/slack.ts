@@ -1,6 +1,8 @@
 import {
   defaultSlackAuth,
   defineSlackRenderer,
+  postCompletedSlackReply,
+  type SlackInputResponseSubmission,
   type SlackMessage,
   slackChannel,
 } from "eve/channels/slack";
@@ -18,10 +20,13 @@ import { jobListAnswer } from "../../lib/jobs/status.ts";
 import { stopJob } from "../../lib/jobs/steer.ts";
 import { recentJobs } from "../../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../../lib/ledger/threads.ts";
+import { isApprovalAction, mayDecideAsOwner } from "../../lib/owner.ts";
 import { isAllowedSlackUser } from "../../lib/pack/policy.ts";
 import { parseSymCommand, slackText, USAGE } from "../../lib/quiet/command.ts";
 import { formatClock, getQuietUntil, setQuietUntil } from "../../lib/quiet/quiet.ts";
 import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
+import { scheduleList } from "../../lib/schedules/format.ts";
+import { listSchedules } from "../../lib/schedules/rows.ts";
 
 // The Slack channel (docs/slack.md). It reads SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET from the
 // environment. A valid signature proves Slack sent the event, not that the sender may use Sym,
@@ -75,6 +80,9 @@ async function answerSymCommand(text: string, now: Date): Promise<string> {
           : "";
       return slackText(jobListAnswer(jobs, now)) + quiet;
     }
+    case "schedules":
+      // Creating or changing a schedule needs an approval, so it goes through Sym in a thread.
+      return slackText(scheduleList(await listSchedules(ledger())));
     case "quiet": {
       if (command.arg.kind === "off") {
         await setQuietUntil(ledger(), null);
@@ -87,6 +95,14 @@ async function answerSymCommand(text: string, now: Date): Promise<string> {
     case "usage":
       return USAGE;
   }
+}
+
+// A modal answer (`view_submission`) is always a question.
+function isApprovalSubmission(submission: SlackInputResponseSubmission): boolean {
+  return (
+    submission.type === "block_actions" &&
+    submission.actions.some((action) => isApprovalAction(action.actionId))
+  );
 }
 
 const fromAllowedHuman = (message: SlackMessage) =>
@@ -112,19 +128,15 @@ const symRenderer = defineSlackRenderer({
       }
       await next(event);
     },
-    // Feedback buttons under each final reply (docs/learning.md). The reply is already posted
-    // when the buttons go out, so a failed follow-up is logged and never reaches Eve's notice.
+    // Feedback buttons ride inside each final reply (docs/learning.md), so they add no message
+    // and no notification. postCompletedSlackReply keeps Eve's fallbacks: a refused or long
+    // reply still goes out as plain Markdown or a snippet, without the buttons.
     async "message.completed"(event, channel, _ctx, next) {
-      await next();
-      if (event.finishReason === "tool-calls") return;
-      try {
-        await channel.thread.post({
-          blocks: feedbackBlocks() as never,
-          text: "Was this helpful?",
-        });
-      } catch (error) {
-        console.warn("Sym could not post feedback buttons.", String(error));
-      }
+      if (event.finishReason === "tool-calls" || !event.message) return next();
+      await postCompletedSlackReply(channel, {
+        blocks: [{ type: "markdown", text: event.message }, ...feedbackBlocks()] as never,
+        markdown: event.message,
+      });
     },
   },
   taskCard(view, next) {
@@ -227,8 +239,13 @@ export default slackChannel({
       console.warn("Sym could not record a reaction.", String(error));
     }
   },
-  // Approvals and answers count only from allowed people.
+  // Answers count from allowed people. A tool approval is an owner decision, so it counts only
+  // from the owner (lib/owner.ts). Without a configured owner, the allow-list decides.
   onInputResponse(ctx, submission) {
-    return isAllowed(submission.user.id) ? { auth: ctx.defaultAuth } : null;
+    if (!isAllowed(submission.user.id)) return null;
+    if (isApprovalSubmission(submission) && !mayDecideAsOwner(submission.user.id, pack())) {
+      return null;
+    }
+    return { auth: ctx.defaultAuth };
   },
 });

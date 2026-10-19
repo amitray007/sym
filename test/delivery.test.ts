@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { CARD_VERSION_FIELD, deliver } from "../lib/delivery/deliver.ts";
 import type { DisplayChoice } from "../lib/display.ts";
-import { createJob, getJob, setJobCard } from "../lib/ledger/jobs.ts";
-import { claimPosts, enqueuePost } from "../lib/ledger/outbox.ts";
+import { createJob, getJob, markCardSent, setJobCard, updateJob } from "../lib/ledger/jobs.ts";
+import { claimPosts, enqueuePost, markCardPostSent } from "../lib/ledger/outbox.ts";
 import { type SlackApi, SlackApiError } from "../lib/slack/api.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
@@ -165,5 +165,77 @@ describe.skipIf(!hasDatabase)("deliver", () => {
     const ids = (posts: { idempotencyKey: string }[]) => posts.map((p) => p.idempotencyKey);
     expect(ids(first)).toContain("claimed");
     expect(ids(second)).not.toContain("claimed");
+  });
+
+  it("saves the card ts and the shown version with the outbox completion", async () => {
+    const sql = ledger.sql();
+    const job = await newJob("card-atomic");
+    const v1 = await setJobCard(sql, job.id, { blocks: [], text: "v1" });
+    const post = await enqueuePost(sql, {
+      idempotencyKey: `card-atomic-${job.id}`,
+      jobId: job.id,
+      method: "chat.postMessage",
+      purpose: "card",
+      payload: { channel: "C1", text: "v1" },
+      display: card,
+    });
+
+    await markCardPostSent(sql, post.id, "1700000000.9", v1.cardVersion);
+    const [row] = await sql`select status, slack_ts from outbox where id = ${post.id}`;
+    const saved = await getJob(sql, job.id);
+    expect(row).toEqual({ status: "sent", slackTs: "1700000000.9" });
+    expect(saved).toMatchObject({ cardTs: "1700000000.9", cardSentVersion: v1.cardVersion });
+
+    // A late completion of an older version cannot move the shown version back.
+    const v2 = await setJobCard(sql, job.id, { blocks: [], text: "v2" });
+    await markCardSent(sql, job.id, v2.cardVersion);
+    await markCardPostSent(sql, post.id, "1700000000.9", v1.cardVersion);
+    expect((await getJob(sql, job.id))?.cardSentVersion).toBe(v2.cardVersion);
+  });
+
+  it("serializes card edits per job and ends with the newest card in Slack", async () => {
+    const sql = ledger.sql();
+    const job = await newJob("card-race");
+    await updateJob(sql, job.id, { cardTs: "1700000000.5" });
+    await setJobCard(sql, job.id, { blocks: [], text: "v1" });
+
+    const updates: string[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered: () => void = () => {};
+    const inFlight = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const slow: SlackApi = {
+      async call(_method, body) {
+        updates.push(String(body.text));
+        if (body.text === "v1") {
+          entered();
+          await gate;
+        }
+        return { ok: true, ts: body.ts };
+      },
+    };
+    const fast = fakeSlack();
+
+    // Sender A holds the card at v1. The card changes to v2. Sender B must not edit meanwhile.
+    const a = deliver(sql, slow);
+    await inFlight;
+    const v2 = await setJobCard(sql, job.id, { blocks: [], text: "v2" });
+    const skipped = await deliver(sql, fast.api);
+    expect(skipped.cardsUpdated).toBe(0);
+    expect(fast.calls).toHaveLength(0);
+
+    release();
+    await a;
+    expect((await getJob(sql, job.id))?.cardSentVersion).toBe(v2.cardVersion - 1);
+
+    // The next delivery reloads the newest card and edits it.
+    await deliver(sql, fast.api);
+    expect(fast.calls.at(-1)?.body).toMatchObject({ text: "v2" });
+    expect((await getJob(sql, job.id))?.cardSentVersion).toBe(v2.cardVersion);
+    expect(updates).toEqual(["v1"]);
   });
 });

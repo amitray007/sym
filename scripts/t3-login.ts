@@ -1,22 +1,16 @@
-// Milestone 1: sign Sym in to a T3 worker with T3's OAuth consent flow, then save the token to
-// `.env.local` for `pnpm t3:check` and `eve dev`. Run `pnpm t3:login <mcp-url>`.
+// Signs Sym in to a T3 worker from the command line, then saves the token to `.env.local` for
+// `pnpm t3:check` and `eve dev`. Run `pnpm t3:login <mcp-url>`.
 //
-// The owner approves the sign-in on T3's page and picks the access level there (Auto by default,
-// decision 009). The script never prints the token or the authorization code. Later, Sym runs
-// this flow itself and stores the token in Postgres (decision 015).
+// Deployed Sym signs in from Slack instead: the owner asks Sym, and the `worker_sign_in` tool
+// stores the token in Postgres (decision 036). Both use lib/workers/t3/oauth.ts. The owner
+// approves on T3's page and picks the access level there (decision 009). The script never
+// prints the token or the authorization code.
 import { execFile } from "node:child_process";
-import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import {
-  discoverOAuthServerInfo,
-  exchangeAuthorization,
-  registerClient,
-  startAuthorization,
-} from "@modelcontextprotocol/client";
+import { beginSignIn, finishSignIn, newState, readRedirect } from "../lib/workers/t3/oauth.ts";
 
 const ENV_FILE = ".env.local";
-const SCOPE = "orchestration:read orchestration:operate";
 const TIMEOUT_MS = 10 * 60 * 1000;
 
 const mcpUrl = process.argv[2] ?? process.env.T3_MCP_URL;
@@ -27,61 +21,24 @@ if (!mcpUrl) {
 
 // A loopback listener receives the redirect. T3 matches loopback redirects on everything but the
 // port, so a random port works.
-const state = randomBytes(16).toString("hex");
+const state = newState();
 const callback = await listenForCallback(state);
 const redirectUrl = `http://127.0.0.1:${callback.port}/callback`;
 
 try {
-  const { authorizationServerUrl, authorizationServerMetadata: metadata } =
-    await discoverOAuthServerInfo(mcpUrl);
-  const clientInformation = await registerClient(authorizationServerUrl, {
-    ...(metadata ? { metadata } : {}),
-    clientMetadata: {
-      client_name: "Sym",
-      redirect_uris: [redirectUrl],
-      grant_types: ["authorization_code"],
-      response_types: ["code"],
-      token_endpoint_auth_method: "none",
-    },
-  });
-
-  const { authorizationUrl, codeVerifier } = await startAuthorization(authorizationServerUrl, {
-    ...(metadata ? { metadata } : {}),
-    clientInformation,
-    redirectUrl,
-    scope: SCOPE,
-    state,
-    resource: mcpUrl,
-  });
-
-  openInBrowser(authorizationUrl.toString());
+  const start = await beginSignIn({ mcpUrl, redirectUrl, state });
+  openInBrowser(start.authorizationUrl);
   console.info("Approve Sym on the T3 sign-in page in your browser, and pick the access level.");
 
-  const params = await callback.result;
-  const error = params.get("error");
-  if (error) throw new Error(`T3 refused the sign-in: ${error}`);
-  const code = params.get("code");
-  const issuer = params.get("iss");
-  if (!code) throw new Error("The sign-in redirect had no authorization code.");
+  const redirect = readRedirect(await callback.result, start);
+  if (redirect.kind === "refused") throw new Error(redirect.reason);
+  if (redirect.kind === "ignore") throw new Error("The sign-in redirect had the wrong state.");
+  const token = await finishSignIn(start, redirect);
 
-  const tokens = await exchangeAuthorization(authorizationServerUrl, {
-    ...(metadata ? { metadata } : {}),
-    clientInformation,
-    authorizationCode: code,
-    // T3 sends its issuer on the redirect (RFC 9207). The SDK checks it against the metadata.
-    ...(issuer ? { iss: issuer } : {}),
-    codeVerifier,
-    redirectUri: redirectUrl,
-    resource: mcpUrl,
-  });
-
-  const expiresAt =
-    tokens.expires_in === undefined
-      ? undefined
-      : new Date(Date.now() + tokens.expires_in * 1000).toISOString();
+  const expiresAt = token.expiresAt?.toISOString();
   upsertEnv(ENV_FILE, {
     T3_MCP_URL: mcpUrl,
-    T3_TOKEN: tokens.access_token,
+    T3_TOKEN: token.accessToken,
     // An empty value clears an expiry left by an earlier token.
     T3_TOKEN_EXPIRES_AT: expiresAt ?? "",
   });

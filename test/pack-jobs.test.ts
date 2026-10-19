@@ -56,8 +56,29 @@ describe.skipIf(!hasDatabase)("jobs under a pack", () => {
     expect(launched.workerProjectId).toBe("p-sync");
     expect(request?.baseRef).toBe("develop");
     expect(request?.message).toContain("- Change only files that match: src/**, test/**.");
-    expect(request?.message).toContain("A draft pull request is allowed.");
+    expect(request?.message).toContain("Push the branch and open a draft pull request.");
     expect(request?.message).not.toContain("Keep production systems and customer data");
+  });
+
+  it("keeps the brief's no-push when the pack would allow a draft PR", async () => {
+    const { request } = await launch(brief("sync-service", { openPullRequest: false }));
+    expect(request?.message).toContain("Do not push and do not open a pull request.");
+    expect(request?.message).not.toContain("open a draft pull request.");
+  });
+
+  it("refuses a pack project that runs on another worker", async () => {
+    const worker = new FakeWorker({ projects });
+    const job = await createJob(ledger.sql(), {
+      requestKey: `pack-${++n}`,
+      kind: "code-change",
+      title: "Retry",
+      brief: brief("sync-service"),
+      worker: "t3",
+    });
+    await expect(
+      launchOrAdopt({ sql: ledger.sql(), worker, pack, workerName: "server" }, job.id, CALLBACK),
+    ).rejects.toThrow('runs on worker "laptop", but Sym is connected to "server"');
+    expect(worker.launches).toBe(0);
   });
 
   it("keeps a base branch the brief names", async () => {

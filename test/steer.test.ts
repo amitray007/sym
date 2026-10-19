@@ -74,15 +74,29 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
       mode: "steer",
     });
     expect(s.worker.sends[0]?.text).toContain("skip the staging test");
-    // Same text, same request ID: the worker deduplicates the retry.
+    // Without a tool call ID, the text keys the request, so the worker deduplicates a retry.
     expect(s.worker.sends[1]?.requestId).toBe(s.worker.sends[0]?.requestId);
-    expect(s.worker.sends[0]?.requestId).toMatch(new RegExp(`^steer-J-${job.id}-[0-9a-f]{8}$`));
+    expect(s.worker.sends[0]?.requestId).toMatch(new RegExp(`^steer-J-${job.id}-[0-9a-f]{12}$`));
     expect((await getJob(ledger.sql(), job.id))?.lastSummary).toBe(
       "Steered: skip the staging test",
     );
 
     await steerJob(s.deps, `J-${job.id}`, "also skip lint");
     expect(s.worker.sends[2]?.requestId).not.toBe(s.worker.sends[0]?.requestId);
+  });
+
+  it("treats the same words in a new tool call as a new request", async () => {
+    const s = setup();
+    const job = await newJob("steer-calls");
+    await launchOrAdopt(s.deps, job.id, CALLBACK);
+
+    await steerJob(s.deps, `J-${job.id}`, "rerun the tests", "steer", "call-1");
+    await steerJob(s.deps, `J-${job.id}`, "rerun the tests", "steer", "call-1");
+    await steerJob(s.deps, `J-${job.id}`, "rerun the tests", "steer", "call-2");
+
+    const ids = s.worker.sends.map((send) => send.requestId);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[0]);
   });
 
   it("refuses unknown, unlaunched, and finished jobs", async () => {

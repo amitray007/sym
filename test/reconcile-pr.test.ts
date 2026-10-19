@@ -71,3 +71,39 @@ describe.skipIf(!hasDatabase)("reconcile follows pull requests", () => {
     ]);
   });
 });
+
+describe.skipIf(!hasDatabase)("reconcile recovers a lost end post", () => {
+  const ledger = useLedger();
+
+  it("posts the result of a job that ended without one", async () => {
+    const sql = ledger.sql();
+    const posts: string[] = [];
+    let ts = 1;
+    const slack: SlackApi = {
+      async call(method, body) {
+        if (method === "chat.postMessage") posts.push(String(body.text));
+        return { ok: true, ts: `1700000000.${ts++}` };
+      },
+    };
+    await recordSessionThread(sql, {
+      sessionId: "lost-end",
+      teamId: "T1",
+      channelId: "C1",
+      threadTs: "1690000000.2",
+      userId: "U1",
+    });
+    const worker = new FakeWorker({ script: [{ status: "running" }] });
+    const deps = { sql, worker, slack };
+    const job = await startJob(sql, { requestKey: "lost-end", sessionId: "lost-end", brief });
+    await launchOrAdopt(deps, job.id, "http://127.0.0.1/cb");
+    // A crash after the status moved to done, before the end post was queued.
+    await sql`update jobs set status = 'done', finished_at = now(), last_message = ${FINAL}
+      where id = ${job.id}`;
+
+    await reconcileJobs(deps);
+    await reconcileJobs(deps);
+    await deliver(sql, slack);
+
+    expect(posts.filter((text) => text.includes("Added retry"))).toHaveLength(1);
+  });
+});

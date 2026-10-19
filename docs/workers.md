@@ -90,8 +90,17 @@ and attachments (10 MiB images, 50 MiB files) for passing Slack files into a thr
   most Supervised. Sym needs the consent flow for Auto (decision 009).
 - An outside client must pass `modelSelection` when the project has no default model. Sym
   passes `SYM_WORKER_MODEL` and first checks that `orchestrator_capabilities` offers it.
-- Sym calls T3 from code through `lib/workers/t3/` (decision 015). Milestone 1 signs in with
-  `pnpm t3:login <mcp-url>`, which saves the token to `.env.local`.
+- Sym calls T3 from code through `lib/workers/t3/` (decision 015).
+- The owner signs Sym in from Slack (decision 036): "sign in to the worker" runs the
+  `worker_sign_in` tool. Sym registers with T3 for a redirect on `SYM_SIGNIN_URL` (else
+  `SYM_CALLBACK_URL`), sends the owner the T3 link in a DM, and waits 10 minutes for the browser
+  redirect on an Eve webhook. It checks `state` and `iss`, redeems the code, and stores the token
+  in Postgres (`worker_credentials`). Only the owner can run it.
+- Sym takes the worker URL and token from the stored sign-in, then the pack worker's `mcpUrl`
+  with `T3_TOKEN`, then `T3_MCP_URL` with `T3_TOKEN`. `pnpm t3:login <mcp-url>` uses the same
+  OAuth code and saves the token to `.env.local` for local runs.
+- With no URL and token at all, reconcile logs a warning and skips the worker pass. It marks jobs
+  `worker_offline` only when a connection fails.
 
 ### Limits
 

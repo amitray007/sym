@@ -46,6 +46,8 @@ describe("parseSymCommand", () => {
     ["quiet whenever", { type: "usage" }],
     ["status now", { type: "usage" }],
     ["schedule list", { type: "usage" }],
+    ["schedules", { type: "schedules" }],
+    ["Schedule", { type: "schedules" }],
   ])("reads %j", (text, expected) => {
     expect(parseSymCommand(text)).toEqual(expected);
   });

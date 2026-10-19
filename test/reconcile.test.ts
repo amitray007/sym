@@ -78,7 +78,8 @@ describe.skipIf(!hasDatabase)("reconcileJobs", () => {
 
   // Reconcile looks at every orphaned job in the schema, so each test starts with none.
   beforeEach(async () => {
-    await ledger.sql()`update jobs set status = 'cancelled', finished_at = now()
+    // Raw cleanup, not a real cancel: clear the channel so reconcile has no end post to recover.
+    await ledger.sql()`update jobs set status = 'cancelled', finished_at = now(), slack_channel = null
       where status not in ('done', 'failed', 'cancelled')`;
   });
 

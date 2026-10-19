@@ -57,16 +57,15 @@ describe("signInText", () => {
       expiresAt,
       now: at(4),
       target: "U1",
-      mcpUrl: "https://worker.example/mcp",
     });
     expect(text).toBe(
-      "The worker sign-in expires in 4 days (2026-11-10). To renew it, run `pnpm t3:login https://worker.example/mcp` and approve it in the browser.",
+      'The worker sign-in expires in 4 days (2026-11-10). To renew it, tell Sym "sign in to the worker" and approve the link Sym sends you in a DM.',
     );
   });
 
   it("says jobs pause after expiry", () => {
     expect(signInText("expired", { expiresAt, now: at(-1), target: "U1" })).toMatch(
-      /expired on 2026-11-10\. Jobs pause until you approve a new one\. .*<mcp-url>/,
+      /expired on 2026-11-10\. Jobs pause until you approve a new one\. .*sign in to the worker/,
     );
   });
 });
@@ -88,7 +87,7 @@ describe.skipIf(!hasDatabase)("queueSignInNotice", () => {
 
   it("queues one DM per stage and expiry date, however often reconcile runs", async () => {
     const sql = ledger.sql();
-    const input = { expiresAt, target: "U1", mcpUrl: "https://worker.example/mcp" };
+    const input = { expiresAt, target: "U1" };
 
     expect(await queueSignInNotice(sql, { ...input, now: at(4) })).toBe(true);
     expect(await queueSignInNotice(sql, { ...input, now: at(3) })).toBe(false);

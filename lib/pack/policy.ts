@@ -23,12 +23,17 @@ export function resolvePackProject(pack: Pack, name: string): PackProjectResult 
   return { ok: true, project, worker, workerProject: project.workerProject ?? project.name };
 }
 
-// Extra constraint lines for the worker message.
-export function briefGuardrails(_pack: Pack, project: PackProject): string[] {
+// Extra constraint lines for the worker message. A draft PR needs both the pack's policy and the
+// brief's request: the pack narrows a brief, never widens it.
+export function briefGuardrails(
+  _pack: Pack,
+  project: PackProject,
+  openPullRequest: boolean,
+): string[] {
   return [
     `Change only files that match: ${project.allowedPaths.join(", ")}.`,
-    project.prPolicy === "draft"
-      ? "A draft pull request is allowed. Never mark it ready for review."
+    project.prPolicy === "draft" && openPullRequest
+      ? "Push the branch and open a draft pull request. Never mark it ready for review."
       : "Do not push and do not open a pull request.",
     "Keep production data read-only.",
   ];

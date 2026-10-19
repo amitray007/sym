@@ -29,7 +29,8 @@ into edits of a card. New messages are only for "you need to act" and "it is don
 
 ## Modifiers
 
-Code applies these after the four steps.
+Code applies these after the four steps. Quiet mode and DM targets are built; requester hints,
+learned preferences, and shared channels are planned.
 
 - The requester's words win. "Quick", "just tell me", or "quietly" force text. "Show me
   progress" forces a card. The model passes these as a `hint`; code still applies step 1.

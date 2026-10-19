@@ -26,7 +26,12 @@ import { ledger, ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
 import { canSkipStart } from "../../lib/schedules/approval.ts";
 import { ScheduledBrief } from "../../lib/schedules/input.ts";
 import { runOutcome } from "../../lib/schedules/outcome.ts";
-import { finishRunForSession, getSchedule, parseScheduleRef } from "../../lib/schedules/rows.ts";
+import {
+  claimRunForJob,
+  finishRunForSession,
+  getSchedule,
+  parseScheduleRef,
+} from "../../lib/schedules/rows.ts";
 import type { WorkerAnswers, WorkerQuestion } from "../../lib/workers/types.ts";
 
 // One worker job from brief to result (docs/architecture.md, flows 1 and 3, decision 017). It
@@ -83,7 +88,13 @@ export default defineWorkflowTool({
     try {
       // Decision 024: only an approved schedule run skips the click. The step checks the
       // session's initiator, the schedule row, and the brief, so the model cannot widen it.
-      const preApproved = await isPreApproved(schedule, brief, ctx.session.auth.initiator);
+      const preApproved = await isPreApproved(
+        schedule,
+        brief,
+        ctx.session.auth.initiator,
+        ctx.session.id,
+        job.id,
+      );
       if (preApproved) {
         // A scheduled check speaks only when something needs attention (decision 031).
         await markScheduled(job.id);
@@ -378,15 +389,21 @@ async function isPreApproved(
   schedule: string | undefined,
   brief: unknown,
   initiator: SessionAuthContext | null | undefined,
+  sessionId: string,
+  jobId: number,
 ): Promise<boolean> {
   "use step";
   const id = schedule ? parseScheduleRef(schedule) : undefined;
   if (id === undefined || !isScheduleAuth(initiator)) return false;
-  return canSkipStart({
+  const sql = ledger();
+  const allowed = canSkipStart({
     isSchedulePrincipal: true,
-    schedule: await getSchedule(ledger(), id),
+    schedule: await getSchedule(sql, id),
     brief,
   });
+  // The approval covers one job of this session's own run, once. Another job, or a run of
+  // another schedule, gets the normal Start prompt.
+  return allowed && (await claimRunForJob(sql, sessionId, id, jobId));
 }
 
 async function linkRun(sessionId: string, jobId: number) {

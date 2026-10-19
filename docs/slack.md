@@ -22,7 +22,7 @@ and for scheduled jobs.
   ○ Draft PR
   ○ Verify result
 Codex · thread 8f2c… · updated 1 min ago
-[ Steer ]  [ Stop ]  [ Open PR ]
+[ Stop ]  [ Open PR ]
 ```
 
 - The card is a Slack `plan` block. Each row is a step with a status: `pending`, `in_progress`,
@@ -40,12 +40,12 @@ Codex · thread 8f2c… · updated 1 min ago
 | Surface | What Sym shows | Driven by | When |
 |---|---|---|---|
 | Thread status line | "Launching worker thread", "Tests running" | Eve: `label.start`, `label.delta`, task `yield` | Milestone 1 |
-| Job card (`plan` block) | Live steps with Steer, Stop, Open PR | Sym: `chat.update` | Milestone 1 |
+| Job card (`plan` block) | Live steps with Stop and Open PR. Steering is a thread reply | Sym: `chat.update` | Built |
 | Eve task card | Short tasks that are not worker jobs | Eve | Milestone 1 |
 | Buttons and selects | Approve a brief, answer worker questions, approve rules | Eve: approvals, `ctx.ask` | Milestone 1 |
 | "Type your answer" modal | Free-text answers | Eve, inside `ctx.ask` | Milestone 1 |
-| Feedback buttons | 👍/👎 under each final reply | Sym: renderer with a `context_actions` block | Production |
-| Status reactions | 👀 picked up, ✅ done, ⚠️ needs you | Sym: `reactions.add` | Production |
+| Feedback buttons | 👍/👎 inside each final reply | Sym: renderer posts the reply with a `context_actions` block | Built |
+| Status reactions | 👀 picked up, ✅ done, ⚠️ needs you | Sym: `reactions.add` | Later |
 | Ephemeral replies | `/sym status`, private sign-in prompts | Eve | Production |
 | Long output | Over 12,000 characters as an `eve-response.md` snippet | Eve | Production |
 | Modals | "New schedule" form | Sym: `views.open` with the `trigger_id` | Team phase |
@@ -73,8 +73,10 @@ Notes:
 - The live card has **Stop** (with a confirm step; the worker is interrupted and the job
   cancelled) and, once a PR is known, **Open PR**. The collapsed card keeps only **Open PR**.
   Steering is a thread message for now; a modal button comes later.
-- Under each final reply, Sym adds Slack's feedback buttons. Clicks and reactions on Sym's
-  messages go to the `feedback` table, and Sym uses them only after review (docs/learning.md).
+- Each final reply carries Slack's feedback buttons in the same message, so they add no
+  notification. A reply Slack refuses as blocks goes out as plain Markdown or a snippet without
+  them. Clicks and reactions on Sym's messages go to the `feedback` table, and Sym uses them only
+  after review (docs/learning.md).
 
 ## App setup
 
@@ -88,15 +90,20 @@ with the public host before you import it.
 | `im:history`, `im:read`, `im:write` | DMs and approval DMs |
 | `channels:history`, `groups:history` | Replies in job threads without a mention |
 | `files:read`, `files:write` | Logs and screenshots in; long reports out |
-| `reactions:read`, `reactions:write` | Feedback reactions in; status reactions out |
+| `assistant:write` | The thread status line (`assistant.threads.setStatus`) |
+| `reactions:read`, `reactions:write` | Feedback reactions in; status reactions out (later) |
 | `commands` | `/sym` |
 | `users:read` | Resolve the approver for DM routing |
 
-Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reaction_added`,
-`app_home_opened`. Interactivity and the slash command use the same request URL,
-`/eve/v1/slack`.
+Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reaction_added`.
+Interactivity and the slash command use the same request URL, `/eve/v1/slack`. The Home tab and
+`app_home_opened` come with team use. To post the digest in a channel, invite Sym to it first;
+the manifest has no `chat:write.public`.
 
-Milestone 1 allow-list: the owner's Slack user ID only, in `SYM_SLACK_USERS`. Every inbound
+Allow-list: the pack's owner and `allowList`, or `SYM_SLACK_USERS` without a pack. Approvals
+(tool approvals such as schedules, playbooks, and Stop) count only from the owner: the pack owner,
+else `SYM_OWNER_SLACK_USER`. Questions, including Start, Edit, and Cancel, stay open to allowed
+users. Every inbound
 handler checks it and fails closed, including answers to buttons. Thread context still includes
 messages from other people in the thread. The instructions treat that text as data, and job
 launches need approval.

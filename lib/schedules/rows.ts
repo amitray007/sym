@@ -162,14 +162,55 @@ export async function claimDueSchedules(
 
 // Ends a claim: records the fire and moves to the next cron time after `now`. A missed window
 // is skipped, not replayed. A row paused or deleted during the fire keeps its status.
-export async function completeClaim(sql: Sql, schedule: Schedule, now: Date): Promise<void> {
+// Only the claim owner ends the claim: the lease must still be the one `schedule` carries.
+// Returns false when another dispatcher took over after the lease ran out.
+export async function completeClaim(sql: Sql, schedule: Schedule, now: Date): Promise<boolean> {
   const next = nextFire(schedule.cron, now) ?? null;
-  await sql`
+  const rows = await sql`
     update schedules
     set last_fired_at = ${now}, lease_until = null,
       next_fire_at = case when status = 'active' then ${next} else next_fire_at end
-    where id = ${schedule.id}
+    where id = ${schedule.id} and lease_until = ${schedule.leaseUntil}
+    returning id
   `;
+  return rows.length > 0;
+}
+
+// Persists the identity of one fire before the dispatcher sends. Returns undefined when this
+// fire (schedule and due time) already has a run, so the caller must not send again.
+export async function reserveRun(
+  sql: Sql,
+  run: { scheduleId: number; dueAt: Date; firedAt: Date },
+): Promise<ScheduleRun | undefined> {
+  const [row] = await sql<ScheduleRun[]>`
+    insert into schedule_runs (schedule_id, due_at, fired_at)
+    values (${run.scheduleId}, ${run.dueAt}, ${run.firedAt})
+    on conflict (schedule_id, due_at) do nothing
+    returning *
+  `;
+  return row ? normalizeRun(row) : undefined;
+}
+
+// Binds a pre-approved job to the run of this session. The run must belong to the named
+// schedule and have no job yet. The same job may claim it again (a replayed step).
+export async function claimRunForJob(
+  sql: Sql,
+  sessionId: string,
+  scheduleId: number,
+  jobId: number,
+): Promise<boolean> {
+  const rows = await sql`
+    update schedule_runs set job_id = ${jobId}
+    where session_id = ${sessionId} and schedule_id = ${scheduleId}
+      and (job_id is null or job_id = ${jobId})
+    returning id
+  `;
+  return rows.length > 0;
+}
+
+// Sets the session of a reserved run, after the send.
+export async function attachSession(sql: Sql, runId: number, sessionId: string): Promise<void> {
+  await sql`update schedule_runs set session_id = ${sessionId} where id = ${runId}`;
 }
 
 export async function recordRun(

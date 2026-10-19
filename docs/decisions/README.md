@@ -41,3 +41,5 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [033](033-playbook-rows.md) | Approved playbook rows load as instructions at session start |
 | [034](034-follow-prs-and-sign-in.md) | Reconcile follows pull requests and the worker sign-in |
 | [035](035-pack-overlay.md) | The pack overlay copies instructions and playbooks before the build |
+| [036](036-in-app-worker-sign-in.md) | The owner signs Sym in to the worker from Slack |
+| [037](037-review-fixes.md) | Fixes from the first independent review |

@@ -20,9 +20,12 @@ export function cleanSteerText(text: string): string {
   return plain.length <= STEER_TEXT_MAX ? plain : `${plain.slice(0, STEER_TEXT_MAX - 1)}…`;
 }
 
-// The same text for the same job gives the same ID, so a re-run step sends once.
-export function steerRequestId(ref: string, text: string): string {
-  return `steer-${ref}-${createHash("sha256").update(text).digest("hex").slice(0, 8)}`;
+// One steering request is one tool call, so the call ID keys it: a re-run of that call sends
+// once, and the same words said again later are a new request. Without a call ID, the text keys
+// it.
+export function steerRequestId(ref: string, text: string, callId?: string): string {
+  const key = callId ?? text;
+  return `steer-${ref}-${createHash("sha256").update(key).digest("hex").slice(0, 12)}`;
 }
 
 type Found = { job: Job } | { answer: string };
@@ -41,6 +44,7 @@ export async function steerJob(
   ref: string,
   text: string,
   mode: SendMode = "steer",
+  callId?: string,
 ): Promise<string> {
   const found = await findActive(deps, ref);
   if ("answer" in found) return found.answer;
@@ -52,7 +56,7 @@ export async function steerJob(
     job.workerThreadId as string,
     `Direction from the person in the Slack thread: ${clean}`,
     mode,
-    steerRequestId(name, clean),
+    steerRequestId(name, clean, callId),
   );
   const short =
     clean.length <= SUMMARY_TEXT_MAX ? clean : `${clean.slice(0, SUMMARY_TEXT_MAX - 1)}…`;

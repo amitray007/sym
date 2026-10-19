@@ -39,8 +39,9 @@ export function parseCron(expression: string): Cron {
     daysOfMonth,
     months,
     daysOfWeek,
-    domRestricted: parts[2] !== "*",
-    dowRestricted: parts[4] !== "*",
+    // Like cronie, a field that starts with `*` (including `*/n`) counts as a wildcard.
+    domRestricted: !parts[2]?.startsWith("*"),
+    dowRestricted: !parts[4]?.startsWith("*"),
   };
 }
 

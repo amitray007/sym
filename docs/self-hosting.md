@@ -35,9 +35,14 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_API_TOKEN` | Bearer for scripts, CI, and operators calling `/eve/v1/session`. Unset means production rejects them (decision 019) |
 | `SYM_SLACK_USERS` | Slack user IDs allowed to use Sym, comma-separated |
 | `SYM_CALLBACK_URL` | Base URL a worker uses to call Sym back, such as Sym's private-network address. Without it, jobs wait for the 4-minute poll (decision 028) |
+| `SYM_SIGNIN_URL` | Base URL the owner's browser returns to after the worker sign-in, such as Sym's public HTTPS address. Must be https unless it is loopback. Defaults to `SYM_CALLBACK_URL` (decision 036) |
+| `SYM_OWNER_SLACK_USER` | The owner's Slack user ID when there is no pack. Only the owner can sign Sym in to the worker |
+| `T3_MCP_URL` | Worker MCP URL when the pack has no `workers` entry |
+| `T3_TOKEN`, `T3_TOKEN_EXPIRES_AT` | Fallback worker token and its expiry, from `pnpm t3:login`. Sym uses them only when Postgres holds no sign-in for the worker |
 
-The worker sign-in token is not an environment variable. Sym stores it in Postgres after the owner
-approves the OAuth sign-in. A T3 sign-in lasts 30 days, and Sym warns 5 days before it ends.
+The worker sign-in token is not an environment variable. The owner asks Sym in Slack to sign in
+to the worker, approves on T3's page, and Sym stores the token in Postgres (decision 036). A T3
+sign-in lasts 30 days, and Sym warns 5 days before it ends.
 
 Keep secrets in the deployment's environment or secret store. Never commit them, and never put
 them in the pack.
@@ -63,8 +68,11 @@ them in the pack.
    Funnel on its own port (8443 or 10000). Funnel exposes a whole HTTPS port, so a Funnel on 443
    would also expose T3.
 2. Copy the MCP URL from T3 Settings, Connections, into the pack's `workers` entry.
-3. Start Sym. It registers as an OAuth client and posts a private sign-in prompt to the owner.
-4. Approve the sign-in on the T3 page and pick the access level (Auto by default, decision 009).
+3. Set `SYM_SIGNIN_URL` to Sym's public HTTPS base, the one that serves `/.well-known/workflow/`.
+   Start Sym, then tell it "sign in to the worker" in a DM. Sym registers as an OAuth client and
+   sends you the T3 link in a DM. Until then, reconcile logs a warning and leaves jobs alone.
+4. Open the link within 10 minutes, approve the sign-in on the T3 page, and pick the access
+   level (Auto by default, decision 009). The browser returns to Sym, and Sym confirms in Slack.
 5. Keep the host awake and logged in. The macOS T3 service stops at logout. The Linux service
    survives it.
 
@@ -74,5 +82,6 @@ Only a person can do these:
 
 - Create and install the Slack app from [`slack/manifest.yaml`](../slack/manifest.yaml).
 - Choose and configure the public route.
-- Approve the worker sign-in and pick its access level, then re-approve every 30 days.
+- Approve the worker sign-in and pick its access level, then re-approve every 30 days. Ask Sym
+  to sign in to the worker for a new link.
 - Approve permission prompts on the worker when a thread blocks.
