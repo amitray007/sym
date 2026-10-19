@@ -2,6 +2,7 @@
 // new one. The SQL lives in TypeScript so the Eve build bundles it.
 
 import { memoryMigration } from "../memory/migration.ts";
+import { quietMigration } from "../quiet/migration.ts";
 import { schedulesMigration } from "../schedules/migration.ts";
 
 export interface Migration {
@@ -109,4 +110,5 @@ export const migrations: Migration[] = [
   // Later migrations live next to the code that owns their tables.
   schedulesMigration,
   memoryMigration,
+  quietMigration,
 ];

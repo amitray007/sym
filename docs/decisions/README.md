@@ -34,3 +34,6 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [026](026-pack-format.md) | The pack manifest is validated YAML without secrets |
 | [027](027-worker-mcp-channel.md) | Worker threads call Sym through the MCP channel, and tools check the caller |
 | [028](028-callback-base-url.md) | The worker callback uses a configured base URL |
+| [029](029-quiet-buttons-feedback.md) | Quiet mode, the slash command, card buttons, and feedback |
+| [030](030-pack-enforcement-and-checks.md) | The pack shapes each launch, and results get rule checks |
+| [031](031-silent-scheduled-checks.md) | A clean scheduled check posts nothing |

@@ -3,6 +3,7 @@ import { deliver } from "../delivery/deliver.ts";
 import { chooseDisplay } from "../display.ts";
 import { getJobByRef, type JobStatus, jobRef, updateJob } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
+import type { Pack } from "../pack/load.ts";
 import type { SlackApi } from "../slack/api.ts";
 import { escapeMrkdwn } from "./messages.ts";
 import { presentProgress } from "./present.ts";
@@ -20,6 +21,8 @@ export interface WorkerCallDeps {
   sql: Sql;
   /** When set, the call sends its posts at once. Otherwise the delivery schedule sends them. */
   slack?: SlackApi;
+  // The adopter pack, for quiet hours.
+  pack?: Pack;
   now?: () => Date;
 }
 
@@ -78,7 +81,7 @@ export async function postProgress(
     lastSummary: summary,
     lastActivityAt: now,
   });
-  await presentProgress(deps.sql, job, [], `worker-progress:${shortHash(summary)}`, now);
+  await presentProgress(deps.sql, job, [], `worker-progress:${shortHash(summary)}`, now, deps.pack);
   await sendNow(deps);
   return { ok: true, message: `Progress recorded for ${jobRef(job.id)}.` };
 }

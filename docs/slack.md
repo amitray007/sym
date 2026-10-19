@@ -64,6 +64,18 @@ Notes:
 - Slack's reference uses `complete`; `completed` appears only in guide prose. Sym sends
   `complete`. `chat.update` is Tier 3 (50 or more per minute).
 
+## Slash command, card buttons, and feedback
+
+- `/sym status` and `/sym jobs` answer privately (ephemeral) with one line per active job and per
+  job finished in the last 24 hours, plus the quiet state. `/sym quiet [minutes|2h]` stays silent
+  for that long (default 60 minutes, at most 7 days); `/sym quiet off` ends it. Only allowed
+  users can run it, and no model call is made.
+- The live card has **Stop** (with a confirm step; the worker is interrupted and the job
+  cancelled) and, once a PR is known, **Open PR**. The collapsed card keeps only **Open PR**.
+  Steering is a thread message for now; a modal button comes later.
+- Under each final reply, Sym adds Slack's feedback buttons. Clicks and reactions on Sym's
+  messages go to the `feedback` table, and Sym uses them only after review (docs/learning.md).
+
 ## App setup
 
 [`slack/manifest.yaml`](../slack/manifest.yaml) creates the app. Replace `https://sym.example.com`

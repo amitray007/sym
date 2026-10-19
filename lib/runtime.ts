@@ -1,5 +1,6 @@
 import { connect, type Sql } from "./db.ts";
 import { type JobDeps, type LedgerDeps, parseWorkerModel } from "./jobs/run.ts";
+import { type Pack, packFromEnv } from "./pack/load.ts";
 import type { SlackApi } from "./slack/api.ts";
 import { slackApiFromEnv } from "./slack/eve-api.ts";
 import { t3Adapter } from "./workers/t3/adapter.ts";
@@ -20,9 +21,23 @@ export function slackFromEnv(): SlackApi | undefined {
   return process.env.SLACK_BOT_TOKEN ? slackApiFromEnv() : undefined;
 }
 
+let loadedPack: { pack: Pack | undefined } | undefined;
+
+// The adopter pack from SYM_PACK_DIR, read once. An invalid pack throws with the file and the
+// field, so a bad pack stops jobs instead of running them without its rules (decision 026).
+export function pack(): Pack | undefined {
+  loadedPack ??= { pack: packFromEnv() };
+  return loadedPack.pack;
+}
+
 export function ledgerDeps(): LedgerDeps {
   const slack = slackFromEnv();
-  return { sql: ledger(), ...(slack ? { slack } : {}) };
+  const adopterPack = pack();
+  return {
+    sql: ledger(),
+    ...(slack ? { slack } : {}),
+    ...(adopterPack ? { pack: adopterPack } : {}),
+  };
 }
 
 // Opens a worker connection for one step and closes it after. A step can run on any replay, so

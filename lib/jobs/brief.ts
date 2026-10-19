@@ -8,7 +8,10 @@ export const Brief = z.object({
   goal: z.string().min(1).describe("What the worker should achieve."),
   constraints: z.array(z.string()).default([]).describe("Limits the worker must respect."),
   doneWhen: z.array(z.string()).min(1).describe("Checks that prove the job is done."),
-  baseRef: z.string().default("main").describe("Branch the new worktree starts from."),
+  baseRef: z
+    .string()
+    .optional()
+    .describe("Branch the new worktree starts from. Defaults to the project's base branch."),
   openPullRequest: z.boolean().default(false).describe("Push the branch and open a draft PR."),
   estimatedMinutes: z
     .number()
@@ -22,12 +25,19 @@ export const Brief = z.object({
 export type Brief = z.infer<typeof Brief>;
 
 // The first message of the worker thread: the brief, the guardrails, the output contract, and
-// the callback that ends Sym's wait early.
-export function workerMessage(brief: Brief, ref: string, callbackUrl: string): string {
+// the callback that ends Sym's wait early. A pack's guardrails replace the generic data and
+// delivery lines, because they state the project's own rules (decision 026).
+export function workerMessage(
+  brief: Brief,
+  ref: string,
+  callbackUrl: string,
+  guardrails?: string[],
+): string {
   const list = (items: string[]) => items.map((item) => `- ${item}`).join("\n");
   const delivery = brief.openPullRequest
     ? "Commit on this worktree's branch, push it, and open a draft pull request."
     : "Commit on this worktree's branch. Do not push and do not open a pull request.";
+  const rules = guardrails ?? ["Keep production systems and customer data read-only.", delivery];
 
   return `You are working on Sym job ${ref}: ${brief.title}
 
@@ -35,12 +45,7 @@ Goal:
 ${brief.goal}
 
 Constraints:
-${list([
-  ...brief.constraints,
-  "Work only in this worktree.",
-  "Keep production systems and customer data read-only.",
-  delivery,
-])}
+${list([...brief.constraints, "Work only in this worktree.", ...rules])}
 
 Done when:
 ${list(brief.doneWhen)}

@@ -17,3 +17,12 @@ export const ScheduleInput = z.object({
     .optional()
     .describe("Slack channel ID for the run threads. Default: the channel of this conversation."),
 });
+
+// The t3_job tool input: a brief, plus the schedule reference when a scheduled run passes the
+// stored brief (decision 024).
+export const ScheduledBrief = Brief.extend({
+  schedule: z
+    .string()
+    .optional()
+    .describe("Schedule reference such as S-3. Only for a scheduled run; leave the brief as is."),
+});

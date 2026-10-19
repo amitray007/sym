@@ -35,8 +35,10 @@ Code applies these after the four steps.
   progress" forces a card. The model passes these as a `hint`; code still applies step 1.
 - Learned preferences per job class. Example: "on-call check: text only", learned from a 👎
   or "too noisy" on an earlier card. These are memory facts, so they apply on the next turn.
-- Quiet mode. `/sym quiet`, or the owner's quiet hours (configurable, for example 22:00 to
-  09:00 local time). Only level 2 and failures post. The rest waits for the digest.
+- Quiet mode. `/sym quiet` saves `quiet_until` in the ledger `settings` table, and the pack's
+  `quietHours` and `timeZone` (UTC when unset) give the quiet hours. A window such as 22:00 to
+  07:00 crosses midnight; `from` is inside it and `to` is outside. Only level 2 and failures post.
+  The rest waits for the digest (decision 029).
 - Shared channels (team phase). Level 3 only for jobs someone asked for in that channel. Other
   updates go to the requester's DM.
 - Upgrade and downgrade during a job. Text work that passes 2 minutes gets a card ("This is

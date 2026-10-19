@@ -43,7 +43,7 @@ worker. No production deployment and no adopter pack beyond a test pack.
 
 ## Exit criteria
 
-`pnpm test:e2e` checks criteria 1 to 5 against fakes, and CI runs it on every push. A live run
+`pnpm test:e2e` checks criteria 1 to 6 against fakes, and CI runs it on every push. A live run
 with the test Slack app and a real worker is still to do.
 
 1. A Slack mention produces a brief with Start, Edit, and Cancel. Start launches exactly one T3

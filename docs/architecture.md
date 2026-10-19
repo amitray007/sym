@@ -76,12 +76,14 @@ Example: "Every weekday at 09:00, run the on-call check and tell me only what ne
 1. The owner says it once. Sym calls `schedule_create`, which needs approval. Sym shows the row:
    cron in UTC, project, brief, runtime mode, read-only. That approval covers every fire.
 2. Every minute, `dispatch` claims due rows with a lease, so a row cannot fire twice.
-3. For each due row, `dispatch` opens a new Slack thread with `to(slack, { channelId })`. The
-   session has a real channel, so buttons and the job card work.
-4. The model calls `t3_job` with the stored brief. The approval policy skips the click for rows
-   that are already approved.
-5. When the check finds nothing, the model calls `no_reply`. Nothing posts, and the evening digest
-   lists "On-call check: all clear".
+3. For each due row, `dispatch` starts a session in the schedule's channel with
+   `to(slack, { channelId })` and no root message, and records a `schedule_runs` row.
+4. The model calls `t3_job` with the stored brief and the schedule reference. The job skips the
+   Start click only when the session came from the dispatcher and the brief equals the approved
+   one (decision 024).
+5. The scheduled job posts nothing while it runs. When the check is clean, nothing posts at all,
+   and the evening digest lists "On-call check: all clear". When something needs attention, one
+   message posts and opens the thread (decision 031).
 
 Sym owns schedules instead of the worker (decision 008). Sym then knows each run before it starts,
 so it can open the thread, record the job, and pick the display level.

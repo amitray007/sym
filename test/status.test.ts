@@ -81,14 +81,14 @@ describe("jobAnswer", () => {
         status: "done",
         finishedAt: minutesAgo(3),
         lastSummary: "Added retry",
-        prUrl: "https://github.com/acme/widgets/pull/42",
+        prUrl: "https://github.com/example/widgets/pull/42",
       }),
       NOW,
     );
     expect(answer).toBe(
       "J-12 Billing sync retry: done 3m ago.\n" +
         "Last: Added retry\n" +
-        "PR: https://github.com/acme/widgets/pull/42",
+        "PR: https://github.com/example/widgets/pull/42",
     );
   });
 

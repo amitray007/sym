@@ -155,3 +155,57 @@ export function blockActionsRequest(
     },
   };
 }
+
+// A slash command invocation. Slack sends it form-encoded.
+export function slashCommandRequest(
+  input: EventContext & {
+    command?: string;
+    text: string;
+    channel: string;
+    user: string;
+    triggerId?: string;
+  },
+): SlackRequestParts {
+  const body = new URLSearchParams({
+    command: input.command ?? "/sym",
+    text: input.text,
+    user_id: input.user,
+    user_name: input.user.toLowerCase(),
+    channel_id: input.channel,
+    channel_name: "general",
+    team_id: input.teamId ?? "T0FAKE",
+    api_app_id: input.appId ?? "A0FAKE",
+    trigger_id: input.triggerId ?? "1337.42.fake",
+    response_url: "https://hooks.slack.test/commands/T0FAKE/1/fake",
+    is_enterprise_install: "false",
+  }).toString();
+  return {
+    body,
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      ...signSlackRequest(body, input.signingSecret, input.timestamp),
+    },
+  };
+}
+
+// A `reaction_added` event_callback on a message.
+export function reactionAddedRequest(
+  input: EventContext & {
+    channel: string;
+    user: string;
+    reaction: string;
+    messageTs: string;
+    // The author of the reacted-to message. Defaults to the bot.
+    itemUser?: string;
+  },
+): SlackRequestParts {
+  const event: Record<string, unknown> = {
+    type: "reaction_added",
+    user: input.user,
+    reaction: input.reaction,
+    item: { type: "message", channel: input.channel, ts: input.messageTs },
+    item_user: input.itemUser ?? input.botUserId ?? "UBOT",
+    event_ts: String(Date.now() / 1000),
+  };
+  return jsonRequest(envelope(input, event), input.signingSecret, input.timestamp);
+}

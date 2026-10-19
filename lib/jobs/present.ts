@@ -3,6 +3,9 @@ import { CARD_VERSION_FIELD } from "../delivery/deliver.ts";
 import { chooseDisplay, type Surface } from "../display.ts";
 import { type Job, type JobStatus, jobRef, setJobCard, updateJob } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
+import type { Pack } from "../pack/load.ts";
+import { resolvePackProject } from "../pack/policy.ts";
+import { isQuiet } from "../quiet/quiet.ts";
 import { Brief } from "./brief.ts";
 import { jobCardSteps, renderCollapsedCard, renderJobCard } from "./card.ts";
 import type { OutputContract } from "./contract.ts";
@@ -15,6 +18,7 @@ import {
   resultMessage,
 } from "./messages.ts";
 import type { ProgressEvent } from "./progress.ts";
+import { checkResult } from "./verify.ts";
 
 // How a job shows in Slack (docs/display.md, docs/slack.md). Every post goes through
 // chooseDisplay and the outbox. The card is Sym's own message: the job row holds the card Sym
@@ -22,10 +26,16 @@ import type { ProgressEvent } from "./progress.ts";
 // second watcher posts each message once.
 
 const TERMINAL: readonly JobStatus[] = ["done", "failed", "cancelled"];
+
+// The kind of a pre-approved scheduled run. It posts nothing while it runs, and at the end only
+// when something needs attention: a clean check stays silent, and the digest lists it (decision
+// 031, docs/display.md step 2).
+export const SCHEDULED_CHECK = "scheduled-check";
 const WORKER_LABEL = "T3 Code";
 
 // Posts the full brief before the Start prompt. Eve's prompt card keeps only about 200
-// characters, so the brief itself is Sym's own message in the job thread.
+// characters, so the brief itself is Sym's own message in the job thread. A brief needs an
+// action, so quiet mode never hides it.
 export async function presentBrief(sql: Sql, job: Job): Promise<void> {
   if (!job.slackChannel) return;
   const ref = jobRef(job.id);
@@ -51,18 +61,21 @@ export async function presentBrief(sql: Sql, job: Job): Promise<void> {
 }
 
 // Posts the start of a job: a live card for long jobs with steps, otherwise one line.
-export async function presentStart(sql: Sql, job: Job, now: Date): Promise<Job> {
+// `pack` supplies the quiet hours. The owner's `/sym quiet` comes from the ledger.
+export async function presentStart(sql: Sql, job: Job, now: Date, pack?: Pack): Promise<Job> {
   if (!job.slackChannel) return job;
   const brief = Brief.parse(job.brief);
+  const scheduled = job.kind === SCHEDULED_CHECK;
   const display = chooseDisplay({
     kind: job.kind,
     needsAction: false,
-    isNew: true,
+    // A scheduled run has nothing to say when it starts.
+    isNew: !scheduled,
     estMinutes: brief.estimatedMinutes,
     steps: brief.doneWhen.length + 4,
     lines: 1,
     surface: surfaceOf(job.slackChannel),
-    quiet: false,
+    quiet: await isQuiet(sql, pack, now),
   });
   const withDisplay = await updateJob(sql, job.id, { display });
   if (display.level === 0) return withDisplay;
@@ -103,31 +116,44 @@ export async function presentProgress(
   events: ProgressEvent[],
   step: string,
   now: Date,
+  pack?: Pack,
 ): Promise<void> {
   if (!job.slackChannel) return;
+  const quiet = await isQuiet(sql, pack, now);
   const ended = TERMINAL.includes(job.status);
+  const scheduled = job.kind === SCHEDULED_CHECK;
   if (job.display?.level === 3 && !ended) await refreshCard(sql, job, now);
   const ref = jobRef(job.id);
   for (const event of events) {
     switch (event.type) {
       case "pr_opened":
-        // At the end the result message carries the PR, so the thread gets one end message.
-        if (!ended) {
-          await post(sql, job, `${ref}:pr`, `${ref} opened a pull request: <${event.url}>`, false);
+        // At the end the result message carries the PR, so the thread gets one end message. A
+        // scheduled run reports only at its end.
+        if (!ended && !scheduled) {
+          await post(
+            sql,
+            job,
+            `${ref}:pr`,
+            `${ref} opened a pull request: <${event.url}>`,
+            false,
+            quiet,
+          );
         }
         break;
       case "needs_permission":
         // A permission prompt blocks until a person approves it on the worker. Only the owner
         // can do that, so the notice goes to the owner's DM.
-        await post(sql, job, `${ref}:permission:${step}`, permissionBlockMessage(ref), true);
+        await post(sql, job, `${ref}:permission:${step}`, permissionBlockMessage(ref), true, quiet);
         break;
       case "quiet":
+        if (scheduled) break;
         await post(
           sql,
           job,
           `${ref}:quiet:${step}`,
           quietNotice(facts(job, now), quietFor(job, now)),
           false,
+          quiet,
         );
         break;
       // Questions become buttons through ctx.ask in the t3_job task. The end posts its own result.
@@ -145,6 +171,7 @@ export async function presentEnd(
   job: Job,
   contract: OutputContract | null,
   now: Date,
+  pack?: Pack,
 ): Promise<void> {
   if (!job.slackChannel || !TERMINAL.includes(job.status)) return;
   const ref = jobRef(job.id);
@@ -162,14 +189,33 @@ export async function presentEnd(
       }),
     );
   }
+  const concerns = resultConcerns(job, contract, pack);
+  // A clean scheduled check has nothing new to say (display rule step 2); the digest lists it.
+  const clean = job.status === "done" && contract !== null && contract.openQuestions.length === 0;
+  if (job.kind === SCHEDULED_CHECK && clean && concerns.length === 0) return;
   const text =
     job.status === "done"
-      ? resultMessage(facts(job, now), contract)
+      ? resultMessage(facts(job, now), contract, concerns)
       : job.status === "failed"
         ? failureMessage(facts(job, now), job.lastSummary)
         : `${ref} was cancelled.`;
   // A failure notifies even in quiet mode (docs/display.md).
-  await post(sql, job, `${ref}:end`, text, false, job.status === "failed");
+  const quiet = await isQuiet(sql, pack, now);
+  await post(sql, job, `${ref}:end`, text, false, quiet, job.status === "failed");
+}
+
+// Checks the result against what the job allowed. Open questions and a missing result block
+// already show in the result message, so only the rule breaks are added.
+export function resultConcerns(job: Job, contract: OutputContract | null, pack?: Pack): string[] {
+  if (!contract) return [];
+  const brief = Brief.parse(job.brief);
+  const allowed = pack ? resolvePackProject(pack, brief.project) : undefined;
+  const project = allowed?.ok ? allowed.project : undefined;
+  const { concerns } = checkResult(contract, {
+    ...(project ? { allowedPaths: project.allowedPaths } : {}),
+    pullRequestAllowed: brief.openPullRequest && (!project || project.prPolicy === "draft"),
+  });
+  return concerns.filter((concern) => !concern.includes("open question"));
 }
 
 // The card's block_id carries its version, because Slack redraws a plan block only under a new
@@ -196,6 +242,7 @@ function liveCard(job: Job, now: Date, version = job.cardVersion + 1) {
     }),
     startedAt: job.startedAt ?? job.createdAt,
     now,
+    prUrl: job.prUrl,
     footer: {
       worker: WORKER_LABEL,
       threadId: job.workerThreadId,
@@ -211,6 +258,7 @@ async function post(
   key: string,
   text: string,
   toOwner: boolean,
+  quiet: boolean,
   failed = false,
 ): Promise<void> {
   const display = chooseDisplay({
@@ -222,7 +270,7 @@ async function post(
     steps: 0,
     lines: text.split("\n").length,
     surface: surfaceOf(job.slackChannel ?? ""),
-    quiet: false,
+    quiet,
   });
   if (display.level === 0) return;
   const dm = toOwner && job.owner !== null;

@@ -1,7 +1,11 @@
+import type { SessionAuthContext } from "eve/context";
+import { isScheduleAuth } from "eve/schedules";
 import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
 import { createWebhook, FatalError, sleep } from "workflow";
-import { Brief } from "../../lib/jobs/brief.ts";
+import type { Brief } from "../../lib/jobs/brief.ts";
 import { callbackFor } from "../../lib/jobs/callback.ts";
+import { parseOutputContract } from "../../lib/jobs/contract.ts";
+import { resultConcerns } from "../../lib/jobs/present.ts";
 import {
   answerQuestion,
   cancelJob,
@@ -9,12 +13,17 @@ import {
   closeUnlaunched,
   failJob,
   launchOrAdopt,
+  markScheduledCheck,
   showBrief,
   startJob,
   statusLine,
 } from "../../lib/jobs/run.ts";
-import { jobRef } from "../../lib/ledger/jobs.ts";
-import { ledger, ledgerDeps, withJobDeps } from "../../lib/runtime.ts";
+import { getJob, jobRef } from "../../lib/ledger/jobs.ts";
+import { ledger, ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
+import { canSkipStart } from "../../lib/schedules/approval.ts";
+import { ScheduledBrief } from "../../lib/schedules/input.ts";
+import { runOutcome } from "../../lib/schedules/outcome.ts";
+import { finishRunForSession, getSchedule, parseScheduleRef } from "../../lib/schedules/rows.ts";
 import type { WorkerAnswers, WorkerQuestion } from "../../lib/workers/types.ts";
 
 // One worker job from brief to result (docs/architecture.md, flows 1 and 3, decision 017). It
@@ -42,15 +51,17 @@ const POSTED_NOTE =
 export default defineWorkflowTool({
   description:
     "Hand a coding task to a worker agent in a new worktree of a project the worker knows. " +
-    "The owner sees the brief and presses Start before anything runs. Runs as a task: you get " +
+    "The owner sees the brief and presses Start before anything runs. A scheduled run passes " +
+    "its stored brief unchanged with its schedule reference, and starts without a click. Runs as a task: you get " +
     "a receipt now and the result later. Write a complete brief.",
-  inputSchema: Brief,
+  inputSchema: ScheduledBrief,
   label: {
     start: (brief) => `Worker job: ${brief.title}`,
     delta: (_brief, progress: { status: string }) => progress.status,
   },
-  async *task(brief, ctx) {
+  async *task(input, ctx) {
     "use workflow";
+    const { schedule, ...brief } = input;
     const job = await recordJob(brief, ctx.callId, ctx.session.id);
     const ref = jobRef(job.id);
     const timing = await jobTiming();
@@ -63,17 +74,30 @@ export default defineWorkflowTool({
     });
 
     try {
-      // The full brief is Sym's own post; Eve's prompt card keeps only about 200 characters.
-      await postBrief(job.id);
-      yield { status: statusLine(ref, "Waiting for Start") };
-      const decision = await Promise.race([
-        ctx.ask({
-          prompt: `Start ${ref}: ${brief.title}? The brief is above.`,
-          display: "confirmation",
-          options: START_OPTIONS,
-        }),
-        stopped,
-      ]);
+      // Decision 024: only an approved schedule run skips the click. The step checks the
+      // session's initiator, the schedule row, and the brief, so the model cannot widen it.
+      const preApproved = await isPreApproved(schedule, brief, ctx.session.auth.initiator);
+      if (preApproved) {
+        // A scheduled check speaks only when something needs attention (decision 031).
+        await markScheduled(job.id);
+        await linkRun(ctx.session.id, job.id);
+      } else {
+        // The full brief is Sym's own post; Eve's prompt card keeps only about 200 characters.
+        await postBrief(job.id);
+      }
+      yield {
+        status: statusLine(ref, preApproved ? "Starting scheduled run" : "Waiting for Start"),
+      };
+      const decision = preApproved
+        ? ({ status: "answered", optionId: "start" } as const)
+        : await Promise.race([
+            ctx.ask({
+              prompt: `Start ${ref}: ${brief.title}? The brief is above.`,
+              display: "confirmation",
+              options: START_OPTIONS,
+            }),
+            stopped,
+          ]);
       if (decision === "stopped") {
         await closeBeforeStart(job.id, "Cancelled before start");
         return { job: ref, status: "cancelled" };
@@ -81,6 +105,7 @@ export default defineWorkflowTool({
       if (decision.status === "unavailable") {
         // A session without a person, such as a schedule, cannot approve. Fail closed.
         await closeBeforeStart(job.id, "No one could approve the brief");
+        await endRun(ctx.session.id, job.id, "cancelled", null);
         return { job: ref, status: "not_started", reason: "This session cannot ask for approval." };
       }
       if (decision.status !== "answered" || decision.optionId === "cancel") {
@@ -125,6 +150,7 @@ export default defineWorkflowTool({
         ]);
         if (woke === "stopped") {
           await cancel(job.id);
+          await endRun(ctx.session.id, job.id, "cancelled", null);
           return { job: ref, status: "cancelled", threadId, note: POSTED_NOTE };
         }
         if (woke === "callback") calledBack = true;
@@ -142,6 +168,7 @@ export default defineWorkflowTool({
         }
 
         if (result.terminal) {
+          await endRun(ctx.session.id, job.id, result.status, result.lastMessage);
           return {
             job: ref,
             status: result.status,
@@ -155,6 +182,7 @@ export default defineWorkflowTool({
     } catch (error) {
       // A failed task must not leave the job looking like it still runs.
       await markFailed(job.id, error instanceof Error ? error.message : String(error));
+      await endRun(ctx.session.id, job.id, "failed", null);
       throw error;
     }
   },
@@ -214,6 +242,11 @@ async function recordJob(brief: Brief, callId: string, sessionId: string) {
   return { id: job.id };
 }
 
+async function markScheduled(jobId: number) {
+  "use step";
+  await markScheduledCheck(ledger(), jobId);
+}
+
 async function postBrief(jobId: number) {
   "use step";
   await showBrief(ledgerDeps(), jobId);
@@ -258,4 +291,41 @@ async function closeBeforeStart(jobId: number, reason: string) {
 async function markFailed(jobId: number, reason: string) {
   "use step";
   await failJob(ledgerDeps(), jobId, reason);
+}
+
+// True only for a run the owner approved ahead of time (decision 024). The initiator travels in
+// as data, and the principal check, the row lookup, and the brief comparison run in this step.
+async function isPreApproved(
+  schedule: string | undefined,
+  brief: unknown,
+  initiator: SessionAuthContext | null | undefined,
+): Promise<boolean> {
+  "use step";
+  const id = schedule ? parseScheduleRef(schedule) : undefined;
+  if (id === undefined || !isScheduleAuth(initiator)) return false;
+  return canSkipStart({
+    isSchedulePrincipal: true,
+    schedule: await getSchedule(ledger(), id),
+    brief,
+  });
+}
+
+async function linkRun(sessionId: string, jobId: number) {
+  "use step";
+  await finishRunForSession(ledger(), sessionId, "started", jobId);
+}
+
+// Records how a scheduled run ended for the digest. A session without a run row is not a
+// scheduled run, so the update changes nothing.
+async function endRun(
+  sessionId: string,
+  jobId: number,
+  status: string,
+  lastMessage: string | null,
+) {
+  "use step";
+  const contract = parseOutputContract(lastMessage);
+  const job = await getJob(ledger(), jobId);
+  const concerns = job ? resultConcerns(job, contract, pack()) : [];
+  await finishRunForSession(ledger(), sessionId, runOutcome(status, contract, concerns), jobId);
 }
