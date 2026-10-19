@@ -39,7 +39,7 @@ them in the pack.
 
 ## Deploy
 
-1. Build with `eve build`. Run with `eve start`, which also runs the scheduler.
+1. Build with `eve build`. Run `pnpm db:migrate`, then `eve start`, which also runs the scheduler.
 2. Run exactly one replica. Schedules and leases assume one scheduler.
 3. Mount a volume at `.eve/.workflow-data`.
 4. Point the proxy at the service. Pass `/eve/` and `/.well-known/workflow/` unrewritten.
@@ -50,7 +50,8 @@ them in the pack.
 ## Worker host (T3 Code)
 
 1. Run the T3 server reachable on the private network, for example
-   `t3 serve --tailscale-serve`.
+   `t3 serve --tailscale-serve`. The T3 server listens on port 3773, so the tailnet address
+   `http://<worker>.<tailnet>.ts.net:3773/mcp` also works.
 2. Copy the MCP URL from T3 Settings, Connections, into the pack's `workers` entry.
 3. Start Sym. It registers as an OAuth client and posts a private sign-in prompt to the owner.
 4. Approve the sign-in on the T3 page and pick the access level (Auto by default, decision 009).

@@ -19,3 +19,7 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [011](011-display-rule-in-code.md) | The display rule lives in code |
 | [012](012-mit-license.md) | MIT license |
 | [013](013-project-tooling.md) | Project tooling |
+| [014](014-local-postgres.md) | Local Postgres and the database client |
+| [015](015-adapter-mcp-client.md) | Worker adapters call the worker from code |
+| [016](016-ledger-migrations.md) | Ledger migrations live in code |
+| [017](017-t3-job-task.md) | `t3_job` is a task with ledger-backed steps |
