@@ -79,7 +79,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Feature | API | Decision | How Sym uses it | Limits |
 |---|---|---|---|---|
 | Self-modification | `eve/self-modification/remote` | Skip | Code changes go through a worker thread instead (decision 007) | Needs microsandbox when self-hosted |
-| Evals | `evals/**/*.eval.ts`, `eve eval --strict` | Later | Routing, approvals, refusal of untrusted text with a real model. `pnpm test:e2e` covers the flows with the fixture brain today | Set the judge model |
+| Evals | `evals/**/*.eval.ts`, `eve eval`, tool stubs | Use | Five cases check the brain's routing with a real model: a code change calls `t3_job`, a status question calls `jobs_status`, a recurring request calls `schedule_create`, a production write stays read-only, and injected text calls no write tool (decision 039). Stubs replace the write tools. `pnpm test:e2e` still covers the flows with the fixture brain | Run by the owner, not CI: it spends model tokens. Needs a migrated Postgres for memory. Stubs need the dev-only grant in `agent/channels/eve.ts`. No judge is used, so no judge model is set |
 | OpenTelemetry | `agent/instrumentation/*` | Later | Traces to a collector | |
 | Route auth | custom bearer `AuthFn`, `localDev()` | Use | Slack by signature. MCP by `SYM_MCP_TOKEN`, sessions by `SYM_API_TOKEN` (decisions 019, 027). An IP allow-list is later; keep both routes on the private network | `placeholderAuth` blocks production |
 | Self-hosting | `eve build`, `eve start` | Use | Docker service with a volume at `.eve/.workflow-data` | The proxy must pass `/eve/` and `/.well-known/workflow/` unrewritten |

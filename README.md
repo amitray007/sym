@@ -49,6 +49,7 @@ mise exec -- pnpm install
 mise exec -- pnpm db:up          # Postgres 18 on 127.0.0.1:55432
 mise exec -- pnpm test           # unit tests; ledger tests need DATABASE_URL (see AGENTS.md)
 mise exec -- pnpm test:e2e       # the whole agent against a fake worker and a fake Slack
+mise exec -- pnpm eval           # routing evals with the real brain model; spends tokens (decision 039)
 ```
 
 `pnpm test:e2e` starts a real Eve server with a scripted brain (`SYM_MODEL=fixture`), a fake T3
