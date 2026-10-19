@@ -13,7 +13,7 @@ import { workerMigration } from "../lib/workers/migration.ts";
 import { FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
-const PR = "https://github.com/acme/app/pull/12";
+const PR = "https://github.com/example/app/pull/12";
 
 describe("wakeOf", () => {
   it("reads a wake notification", () => {

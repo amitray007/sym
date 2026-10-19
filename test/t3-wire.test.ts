@@ -185,7 +185,7 @@ describe("t3 over the wire", () => {
 });
 
 describe("t3 pull request watch over the wire", () => {
-  const prUrl = "https://github.com/acme/app/pull/12";
+  const prUrl = "https://github.com/example/app/pull/12";
 
   it("links and watches a pull request, and a repeat reports it as already watched", async () => {
     const thread = await launch("[J-9] Watch me");
