@@ -208,6 +208,32 @@ export async function claimRunForJob(
   return rows.length > 0;
 }
 
+// The dispatcher sends first and attaches the session to its run right after, so a fast model
+// can ask before the attach lands. While this schedule has a run reserved in the last 2 minutes
+// and not yet attached, wait a little and claim again. Without such a run, there is nothing to
+// wait for.
+export async function claimRunWhenAttached(
+  sql: Sql,
+  sessionId: string,
+  scheduleId: number,
+  jobId: number,
+  options: { attempts?: number; delayMs?: number } = {},
+): Promise<boolean> {
+  const attempts = options.attempts ?? 30;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (await claimRunForJob(sql, sessionId, scheduleId, jobId)) return true;
+    const [pending] = await sql`
+      select 1 from schedule_runs
+      where schedule_id = ${scheduleId} and session_id is null and job_id is null
+        and fired_at >= now() - interval '2 minutes'
+      limit 1
+    `;
+    if (!pending) return false;
+    await new Promise((resolve) => setTimeout(resolve, options.delayMs ?? 500));
+  }
+  return false;
+}
+
 // Sets the session of a reserved run, after the send.
 export async function attachSession(sql: Sql, runId: number, sessionId: string): Promise<void> {
   await sql`update schedule_runs set session_id = ${sessionId} where id = ${runId}`;

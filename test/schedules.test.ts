@@ -6,6 +6,7 @@ import {
   attachSession,
   claimDueSchedules,
   claimRunForJob,
+  claimRunWhenAttached,
   completeClaim,
   createSchedule,
   deleteSchedule,
@@ -279,6 +280,37 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
     expect(await claimRunForJob(db, "s-bind", a.id, job1)).toBe(true);
     expect(await claimRunForJob(db, "s-bind", a.id, job1)).toBe(true);
     expect(await claimRunForJob(db, "s-bind", a.id, job2)).toBe(false);
+  });
+
+  it("waits for the dispatcher to attach the session, then claims", async () => {
+    const db = await sql();
+    const a = await createSchedule(db, { ...input, title: "Late attach" });
+    // fired_at is now, so the run counts as recently reserved.
+    const run = await reserveRun(db, {
+      scheduleId: a.id,
+      dueAt: new Date("2026-10-21T09:00:00Z"),
+      firedAt: new Date(),
+    });
+    if (!run) throw new Error("expected a run");
+    const job = await newJob("late-attach");
+
+    const claim = claimRunWhenAttached(db, "s-late", a.id, job, { attempts: 20, delayMs: 50 });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    await attachSession(db, run.id, "s-late");
+
+    expect(await claim).toBe(true);
+  });
+
+  it("does not wait when no run is waiting to be attached", async () => {
+    const db = await sql();
+    const a = await createSchedule(db, { ...input, title: "No run" });
+    const job = await newJob("no-run");
+    const started = Date.now();
+
+    expect(await claimRunWhenAttached(db, "s-none", a.id, job, { attempts: 20, delayMs: 50 })).toBe(
+      false,
+    );
+    expect(Date.now() - started).toBeLessThan(500);
   });
 
   it("lets only one of two concurrent jobs claim the run", async () => {

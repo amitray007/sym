@@ -6,6 +6,7 @@ import { parseOutputContract } from "./contract.ts";
 import { checkPrWakes, ensurePrWatched, jobsToWatch, watchedPrJobs } from "./pr-wakes.ts";
 import { presentEnd } from "./present.ts";
 import { checkJob, finishJob, type JobDeps, type LedgerDeps } from "./run.ts";
+import type { ModelCheck } from "./verify.ts";
 
 // The safety net (docs/architecture.md, "Proactive updates"). Every few minutes it takes over
 // the jobs no t3_job task watches, for example after a session died or Sym restarted, and runs
@@ -64,15 +65,21 @@ async function presentMissingEnds(deps: JobDeps): Promise<void> {
     where j.status in ('done', 'failed', 'cancelled')
       and j.worker_thread_id is not null and j.slack_channel is not null
       and j.finished_at >= now() - interval '1 day'
-      and not exists (
-        select 1 from outbox o where o.idempotency_key = 'J-' || j.id || ':end'
-      )
+      and j.end_presented_at is null
     order by j.id limit 20
   `;
   for (const row of rows) {
     const job = await getJob(deps.sql, Number(row.id));
     if (!job) continue;
-    await presentEnd(deps.sql, job, parseOutputContract(job.lastMessage), new Date(), deps.pack);
+    const verdict = job.verdict ? (job.verdict as ModelCheck) : undefined;
+    await presentEnd(
+      deps.sql,
+      job,
+      parseOutputContract(job.lastMessage),
+      new Date(),
+      deps.pack,
+      verdict,
+    );
   }
 }
 

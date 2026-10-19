@@ -43,3 +43,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [035](035-pack-overlay.md) | The pack overlay copies instructions and playbooks before the build |
 | [036](036-in-app-worker-sign-in.md) | The owner signs Sym in to the worker from Slack |
 | [037](037-review-fixes.md) | Fixes from the first independent review |
+| [038](038-second-review-fixes.md) | Fixes from the second independent review |

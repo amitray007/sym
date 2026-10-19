@@ -245,7 +245,7 @@ export async function checkJob(
         ? { quietNoticedAt: new Date(progress.state.lastQuietPostAt) }
         : {}),
     },
-    { cursor: job.cursor },
+    { revision: job.revision },
   ).catch(async (error: unknown) => {
     if (error instanceof StaleJobError) return undefined;
     throw error;
@@ -306,7 +306,12 @@ export async function finishJob(
   if (job.status !== "checking") {
     return { ...toCheck(job, []), concerns: endConcerns(job, contract, deps.pack, model) };
   }
-  const ended = await updateJob(deps.sql, job.id, { status: "done" });
+  // Keep the model check on the row before the job is done, so a crash before the end post still
+  // lets reconcile post the full verdict.
+  const ended = await updateJob(deps.sql, job.id, {
+    status: "done",
+    ...(model ? { verdict: model } : {}),
+  });
   await presentEnd(deps.sql, ended, contract, now(deps), deps.pack, model);
   await deliverNow(deps);
   return { ...toCheck(ended, []), concerns: endConcerns(ended, contract, deps.pack, model) };

@@ -2,7 +2,8 @@ import { defineTool } from "eve/tools";
 import { always } from "eve/tools/approval";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
-import { ledger } from "../../lib/runtime.ts";
+import { ownerResponse } from "../../lib/owner.ts";
+import { ledger, pack } from "../../lib/runtime.ts";
 import { nextFire } from "../../lib/schedules/cron.ts";
 import { scheduleLine } from "../../lib/schedules/format.ts";
 import { ScheduleInput } from "../../lib/schedules/input.ts";
@@ -20,6 +21,7 @@ export default defineTool({
   inputSchema: ScheduleInput,
   approval: {
     request: always(),
+    response: ownerResponse(pack),
     prompt: ({ input }) =>
       [
         `Create schedule "${input.title}"?`,

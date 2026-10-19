@@ -27,7 +27,7 @@ import { canSkipStart } from "../../lib/schedules/approval.ts";
 import { ScheduledBrief } from "../../lib/schedules/input.ts";
 import { runOutcome } from "../../lib/schedules/outcome.ts";
 import {
-  claimRunForJob,
+  claimRunWhenAttached,
   finishRunForSession,
   getSchedule,
   parseScheduleRef,
@@ -403,7 +403,7 @@ async function isPreApproved(
   });
   // The approval covers one job of this session's own run, once. Another job, or a run of
   // another schedule, gets the normal Start prompt.
-  return allowed && (await claimRunForJob(sql, sessionId, id, jobId));
+  return allowed && (await claimRunWhenAttached(sql, sessionId, id, jobId));
 }
 
 async function linkRun(sessionId: string, jobId: number) {

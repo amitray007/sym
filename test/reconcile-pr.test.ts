@@ -107,3 +107,61 @@ describe.skipIf(!hasDatabase)("reconcile recovers a lost end post", () => {
     expect(posts.filter((text) => text.includes("Added retry"))).toHaveLength(1);
   });
 });
+
+describe.skipIf(!hasDatabase)("end presentation marks", () => {
+  const ledger = useLedger();
+
+  async function endedJob(key: string, extra: Record<string, unknown> = {}) {
+    const sql = ledger.sql();
+    await recordSessionThread(sql, {
+      sessionId: key,
+      teamId: "T1",
+      channelId: "C1",
+      threadTs: "1690000000.3",
+      userId: "U1",
+    });
+    const worker = new FakeWorker({ script: [{ status: "running" }] });
+    const job = await startJob(sql, { requestKey: key, sessionId: key, brief });
+    await launchOrAdopt({ sql, worker }, job.id, "http://127.0.0.1/cb");
+    await sql`update jobs set status = 'done', finished_at = now(), last_message = ${FINAL},
+      kind = ${String(extra.kind ?? "code-change")}, verdict = ${sql.json(
+        (extra.verdict ?? null) as never,
+      )}
+      where id = ${job.id}`;
+    return { sql, worker, job };
+  }
+
+  it("marks a silent scheduled check as presented, so recovery skips it", async () => {
+    const { sql, worker, job } = await endedJob("silent-check", { kind: "scheduled-check" });
+    const clean = FINAL.replace(PR, "");
+    await sql`update jobs set last_message = ${clean.replace('"pr_url":""', '"pr_url":null')}
+      where id = ${job.id}`;
+
+    await reconcileJobs({ sql, worker });
+
+    const [row] = await sql`select end_presented_at from jobs where id = ${job.id}`;
+    expect(row?.endPresentedAt).toBeInstanceOf(Date);
+  });
+
+  it("posts the stored verdict when it recovers an end post", async () => {
+    const posts: string[] = [];
+    let ts = 1;
+    const slack: SlackApi = {
+      async call(method, body) {
+        if (method === "chat.postMessage") posts.push(String(body.text));
+        return { ok: true, ts: `1700000000.${ts++}` };
+      },
+    };
+    const verdict = {
+      status: "checked",
+      output: { verdict: "concerns", concerns: ["The retry has no upper bound."], confidence: 0.7 },
+    };
+    const { sql, worker } = await endedJob("stored-verdict", { verdict });
+
+    await reconcileJobs({ sql, worker, slack });
+    await deliver(sql, slack);
+
+    const result = posts.find((text) => text.includes("Added retry"));
+    expect(result).toContain("The retry has no upper bound.");
+  });
+});

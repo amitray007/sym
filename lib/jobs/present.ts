@@ -174,7 +174,23 @@ export async function presentProgress(
 
 // Collapses the card and posts the one result message. `check` is the model check, when the job
 // tried one; its concerns join the rule-check concerns.
+// Presents a job's end once, then marks it presented, silent or not. Reconcile re-presents ended
+// jobs without the mark, so a crash between the terminal status and the end post loses nothing.
 export async function presentEnd(
+  sql: Sql,
+  job: Job,
+  contract: OutputContract | null,
+  now: Date,
+  pack?: Pack,
+  check?: ModelCheck,
+): Promise<void> {
+  await presentEndOnce(sql, job, contract, now, pack, check);
+  if (TERMINAL.includes(job.status)) {
+    await sql`update jobs set end_presented_at = coalesce(end_presented_at, now()) where id = ${job.id}`;
+  }
+}
+
+async function presentEndOnce(
   sql: Sql,
   job: Job,
   contract: OutputContract | null,

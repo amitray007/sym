@@ -10,7 +10,12 @@ import {
   retirePlaybook,
 } from "../../lib/learning/rows.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
-import { mayDecideAsOwner, OWNER_ONLY, slackUserOfPrincipal } from "../../lib/owner.ts";
+import {
+  mayDecideAsOwner,
+  OWNER_ONLY,
+  ownerResponse,
+  slackUserOfPrincipal,
+} from "../../lib/owner.ts";
 import { ledger, pack } from "../../lib/runtime.ts";
 
 // Retires an approved row so new sessions stop loading it. On a proposed row it rejects the
@@ -22,6 +27,7 @@ export default defineTool({
   inputSchema: z.object({ id: z.number().int().positive() }),
   approval: {
     request: always(),
+    response: ownerResponse(pack),
     prompt: ({ input }) => `Retire or reject ${playbookRef(input.id)}?`,
   },
   label: { start: ({ id }) => `Retire ${playbookRef(id)}` },

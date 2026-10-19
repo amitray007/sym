@@ -112,10 +112,12 @@ describe.skipIf(!hasDatabase)("ledger", () => {
     it("refuses a conditional update after another check moved the cursor", async () => {
       const sql = ledger.sql();
       const job = await createJob(sql, newJob("Cursor race"));
-      await updateJob(sql, job.id, { cursor: "5" }, { cursor: null });
+      // Two checks read revision r. The first commits; the second is stale, even for a
+      // status-only change.
+      await updateJob(sql, job.id, { cursor: "5" }, { revision: job.revision });
 
       await expect(
-        updateJob(sql, job.id, { cursor: "3", lastSummary: "older" }, { cursor: null }),
+        updateJob(sql, job.id, { status: "running" }, { revision: job.revision }),
       ).rejects.toThrow(StaleJobError);
       expect((await getJob(sql, job.id))?.cursor).toBe("5");
     });
