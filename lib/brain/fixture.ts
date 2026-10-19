@@ -7,6 +7,7 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 //
 // Script:
 // - A message with a ```brief JSON block calls t3_job with that brief.
+// - A scheduled run message calls t3_job with its brief and its schedule reference.
 // - A message that asks for an update or status calls jobs_status and repeats its answer.
 // - A task result, or a tool result that says Sym already posted, ends the turn with no_reply.
 // - Anything else gets a one-line echo.
@@ -35,6 +36,9 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   // A reply in a thread carries the earlier thread messages first. Only the new message counts.
   const message = text.replace(/<slack_thread_context>[\s\S]*?<\/slack_thread_context>/g, "");
   const brief = briefIn(message);
+  // A dispatch message names the schedule. The brief goes back unchanged, with the reference.
+  const schedule = /^Scheduled run of (S-\d+):/m.exec(message)?.[1];
+  if (brief && schedule) return { toolCalls: [{ name: "t3_job", input: { ...brief, schedule } }] };
   if (brief) return { toolCalls: [{ name: "t3_job", input: brief }] };
   if (/\b(update|status)\b/i.test(message)) {
     const job = /\bJ-\d+\b/.exec(message)?.[0];
@@ -50,11 +54,12 @@ function quiet(request: MockModelRequest): MockModelResponse {
     : { text: "" };
 }
 
-function briefIn(text: string): unknown {
+function briefIn(text: string): Record<string, unknown> | undefined {
   const block = /```brief\s*([\s\S]*?)```/.exec(text)?.[1];
   if (!block) return undefined;
   try {
-    return JSON.parse(block);
+    const value: unknown = JSON.parse(block);
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
   } catch {
     return undefined;
   }

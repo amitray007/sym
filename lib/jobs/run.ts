@@ -10,6 +10,8 @@ import {
   updateJob,
 } from "../ledger/jobs.ts";
 import { getSessionThread } from "../ledger/threads.ts";
+import type { Pack } from "../pack/load.ts";
+import { briefGuardrails, resolvePackProject } from "../pack/policy.ts";
 import type { SlackApi } from "../slack/api.ts";
 import type {
   Activity,
@@ -21,7 +23,13 @@ import type {
 } from "../workers/types.ts";
 import { Brief, workerMessage } from "./brief.ts";
 import { parseOutputContract } from "./contract.ts";
-import { presentBrief, presentEnd, presentProgress, presentStart } from "./present.ts";
+import {
+  presentBrief,
+  presentEnd,
+  presentProgress,
+  presentStart,
+  SCHEDULED_CHECK,
+} from "./present.ts";
 import { detectEvents } from "./progress.ts";
 
 // The worker job steps that `t3_job` and reconcile run (docs/architecture.md, flows 1 and 3).
@@ -41,11 +49,13 @@ export interface JobDeps {
   // Sends Sym's own posts right after a step enqueues them. Without it, posts wait for the
   // delivery schedule.
   slack?: SlackApi;
+  // The adopter pack. With one, jobs run only in its projects and under its rules (decision 026).
+  pack?: Pack;
   now?: () => Date;
 }
 
 // The ledger and Slack part of JobDeps, for steps that do not call the worker.
-export type LedgerDeps = Pick<JobDeps, "sql" | "slack" | "now">;
+export type LedgerDeps = Pick<JobDeps, "sql" | "slack" | "now" | "pack">;
 
 // The Slack status line shows at most 50 characters (docs/slack.md).
 export const STATUS_LINE_MAX = 50;
@@ -120,19 +130,19 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
     const job = await mustGetJob(deps.sql, jobId);
     if (job.workerThreadId) return job;
 
-    const brief = Brief.parse(job.brief);
-    const projectId = await resolveProject(deps.worker, brief.project);
+    const plan = await planLaunch(deps, Brief.parse(job.brief));
     if (deps.workerModel) await checkModel(deps.worker, deps.workerModel);
-    const existing = await deps.worker.findByTitle(projectId, `[${jobRef(job.id)}]`);
+    const existing = await deps.worker.findByTitle(plan.projectId, `[${jobRef(job.id)}]`);
     const thread =
       existing ??
       (await deps.worker.launch({
-        projectId,
+        projectId: plan.projectId,
         title: threadTitle(job),
-        message: workerMessage(brief, jobRef(job.id), callbackUrl),
-        baseRef: brief.baseRef,
+        message: workerMessage(plan.brief, jobRef(job.id), callbackUrl, plan.guardrails),
+        baseRef: plan.baseRef,
         ...(deps.workerModel ? { model: deps.workerModel } : {}),
       }));
+    const projectId = plan.projectId;
 
     launched = await updateJob(deps.sql, job.id, {
       status: "running",
@@ -146,7 +156,7 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
   }
 
   await renewWatch(deps.sql, launched.id, WATCH_LEASE_MS);
-  const presented = await presentStart(deps.sql, launched, now(deps));
+  const presented = await presentStart(deps.sql, launched, now(deps), deps.pack);
   await deliverNow(deps);
   return presented;
 }
@@ -208,9 +218,16 @@ export async function checkJob(deps: JobDeps, jobId: number, waitMs: number): Pr
       : {}),
   });
 
-  await presentProgress(deps.sql, updated, progress.events, `${activity.cursor}-${status}`, at);
+  await presentProgress(
+    deps.sql,
+    updated,
+    progress.events,
+    `${activity.cursor}-${status}`,
+    at,
+    deps.pack,
+  );
   if (TERMINAL.includes(updated.status)) {
-    await presentEnd(deps.sql, updated, parseOutputContract(updated.lastMessage), at);
+    await presentEnd(deps.sql, updated, parseOutputContract(updated.lastMessage), at, deps.pack);
   } else {
     await renewWatch(deps.sql, updated.id, WATCH_LEASE_MS);
   }
@@ -252,6 +269,11 @@ export async function failJob(deps: LedgerDeps, jobId: number, reason: string): 
   await endWithoutWorker(deps, job, "failed", reason);
 }
 
+// Marks a pre-approved scheduled run, which posts only when something needs attention.
+export async function markScheduledCheck(sql: Sql, jobId: number): Promise<void> {
+  await sql`update jobs set kind = ${SCHEDULED_CHECK} where id = ${jobId}`;
+}
+
 // Shows the owner the full brief in the job thread before the Start prompt.
 export async function showBrief(deps: LedgerDeps, jobId: number): Promise<void> {
   const job = await mustGetJob(deps.sql, jobId);
@@ -281,7 +303,7 @@ async function endWithoutWorker(
     lastSummary: reason.slice(0, SUMMARY_MAX),
   });
   if (wasRunning && ended.workerThreadId) {
-    await presentEnd(deps.sql, ended, null, now(deps));
+    await presentEnd(deps.sql, ended, null, now(deps), deps.pack);
     await deliverNow(deps);
   }
   return toCheck(ended, []);
@@ -358,6 +380,35 @@ function latestText(items: ActivityItem[]): string | undefined {
 
 function firstLine(text: string | undefined): string | undefined {
   return text?.split("\n").find((line) => line.trim() !== "");
+}
+
+interface LaunchPlan {
+  projectId: string;
+  baseRef: string;
+  // The brief as the worker gets it: a pack can turn a requested PR off.
+  brief: Brief;
+  guardrails?: string[];
+}
+
+// Applies the pack, when there is one: only its projects, its base branch, its PR policy, and
+// its guardrails. A pack narrows what a brief may ask for; it never widens it.
+async function planLaunch(deps: JobDeps, brief: Brief): Promise<LaunchPlan> {
+  if (!deps.pack) {
+    return {
+      projectId: await resolveProject(deps.worker, brief.project),
+      baseRef: brief.baseRef ?? "main",
+      brief,
+    };
+  }
+  const allowed = resolvePackProject(deps.pack, brief.project);
+  if (!allowed.ok) throw new JobSetupError(allowed.reason);
+  const openPullRequest = brief.openPullRequest && allowed.project.prPolicy === "draft";
+  return {
+    projectId: await resolveProject(deps.worker, allowed.workerProject),
+    baseRef: brief.baseRef ?? allowed.project.defaultBaseBranch,
+    brief: { ...brief, openPullRequest },
+    guardrails: briefGuardrails(deps.pack, allowed.project),
+  };
 }
 
 async function resolveProject(worker: WorkerAdapter, project: string): Promise<string> {

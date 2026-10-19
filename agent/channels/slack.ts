@@ -4,25 +4,89 @@ import {
   type SlackMessage,
   slackChannel,
 } from "eve/channels/slack";
+import {
+  FEEDBACK_ACTION_ID,
+  feedbackBlocks,
+  jobIdOfMessage,
+  jobIdOfThread,
+  kindOfButton,
+  kindOfReaction,
+  recordFeedback,
+} from "../../lib/feedback/feedback.ts";
+import { STOP_ACTION_ID } from "../../lib/jobs/card.ts";
+import { jobListAnswer } from "../../lib/jobs/status.ts";
+import { stopJob } from "../../lib/jobs/steer.ts";
+import { recentJobs } from "../../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../../lib/ledger/threads.ts";
-import { ledger } from "../../lib/runtime.ts";
+import { isAllowedSlackUser } from "../../lib/pack/policy.ts";
+import { parseSymCommand, slackText, USAGE } from "../../lib/quiet/command.ts";
+import { formatClock, getQuietUntil, setQuietUntil } from "../../lib/quiet/quiet.ts";
+import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
 
 // The Slack channel (docs/slack.md). It reads SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET from the
 // environment. A valid signature proves Slack sent the event, not that the sender may use Sym,
 // so every inbound handler checks the allow-list and fails closed.
 
-// Milestone 1 allow-list: the owner only. Comma-separated Slack user IDs.
-function allowedUsers(): Set<string> {
-  return new Set(
-    (process.env.SYM_SLACK_USERS ?? "")
-      .split(",")
-      .map((id) => id.trim())
-      .filter(Boolean),
-  );
+// The pack's owner and allow-list decide who may use Sym. Without a pack, SYM_SLACK_USERS does:
+// comma-separated Slack user IDs. Nobody is allowed when neither is set.
+function isAllowed(userId: string | undefined): boolean {
+  if (!userId) return false;
+  const adopterPack = pack();
+  if (adopterPack) return isAllowedSlackUser(adopterPack, userId);
+  return (process.env.SYM_SLACK_USERS ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .includes(userId);
 }
 
-function isAllowed(userId: string | undefined): boolean {
-  return Boolean(userId && allowedUsers().has(userId));
+// An ephemeral reply only the person who asked sees. A failed reply is logged, never thrown,
+// because a handler that throws leaves the person with nothing.
+async function sayPrivately(
+  slack: { request(operation: string, body: unknown): Promise<{ ok?: boolean }> },
+  where: { channel: string; user: string; threadTs?: string },
+  text: string,
+): Promise<void> {
+  try {
+    const response = await slack.request("chat.postEphemeral", {
+      channel: where.channel,
+      user: where.user,
+      text,
+      ...(where.threadTs ? { thread_ts: where.threadTs } : {}),
+    });
+    if (response.ok === false) console.warn("Sym could not send an ephemeral reply.");
+  } catch (error) {
+    console.warn("Sym could not send an ephemeral reply.", String(error));
+  }
+}
+
+const STATUS_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// `/sym ...` answers from the ledger without a model call (docs/slack.md).
+async function answerSymCommand(text: string, now: Date): Promise<string> {
+  const command = parseSymCommand(text);
+  const zone = pack()?.config.timeZone;
+  switch (command.type) {
+    case "status": {
+      const jobs = await recentJobs(ledger(), new Date(now.getTime() - STATUS_WINDOW_MS));
+      const until = await getQuietUntil(ledger());
+      const quiet =
+        until && until.getTime() > now.getTime()
+          ? `\nQuiet until ${formatClock(until, zone)}.`
+          : "";
+      return slackText(jobListAnswer(jobs, now)) + quiet;
+    }
+    case "quiet": {
+      if (command.arg.kind === "off") {
+        await setQuietUntil(ledger(), null);
+        return "Quiet mode is off.";
+      }
+      const until = new Date(now.getTime() + command.arg.minutes * 60_000);
+      await setQuietUntil(ledger(), until);
+      return `Quiet until ${formatClock(until, zone)}. Questions, approvals, and failures still post.`;
+    }
+    case "usage":
+      return USAGE;
+  }
 }
 
 const fromAllowedHuman = (message: SlackMessage) =>
@@ -47,6 +111,20 @@ const symRenderer = defineSlackRenderer({
         });
       }
       await next(event);
+    },
+    // Feedback buttons under each final reply (docs/learning.md). The reply is already posted
+    // when the buttons go out, so a failed follow-up is logged and never reaches Eve's notice.
+    async "message.completed"(event, channel, _ctx, next) {
+      await next();
+      if (event.finishReason === "tool-calls") return;
+      try {
+        await channel.thread.post({
+          blocks: feedbackBlocks() as never,
+          text: "Was this helpful?",
+        });
+      } catch (error) {
+        console.warn("Sym could not post feedback buttons.", String(error));
+      }
     },
   },
   taskCard(view, next) {
@@ -75,6 +153,79 @@ export default slackChannel({
   async onMessage(ctx, message) {
     if (!fromAllowedHuman(message) || !(await ctx.isSubscribed())) return null;
     return { auth: defaultSlackAuth(message, ctx) };
+  },
+  // `/sym status`, `/sym jobs`, `/sym quiet`: ephemeral answers from the ledger, no model call.
+  async onSlashCommand(command, ctx) {
+    if (command.command !== "/sym") return;
+    const where = { channel: command.channelId, user: command.user.id };
+    if (!isAllowed(command.user.id)) {
+      await sayPrivately(ctx.slack, where, "You are not on Sym's allow-list.");
+      return;
+    }
+    try {
+      await sayPrivately(ctx.slack, where, await answerSymCommand(command.text, new Date()));
+    } catch (error) {
+      console.warn("Sym could not answer a slash command.", String(error));
+      await sayPrivately(ctx.slack, where, "Sym could not answer that. Try again in a moment.");
+    }
+  },
+  // The Stop button on a job card and the feedback buttons. Open PR is a URL button, so its
+  // click needs no work. Steer needs a modal and is not a button yet.
+  async onInteraction(action, ctx) {
+    if (action.actionId !== STOP_ACTION_ID && action.actionId !== FEEDBACK_ACTION_ID) return;
+    if (!isAllowed(action.user.id)) return;
+    const { channelId, threadTs } = ctx.slack;
+    if (action.actionId === FEEDBACK_ACTION_ID) {
+      const kind = kindOfButton(action.value);
+      if (!kind) return;
+      try {
+        await recordFeedback(ledger(), {
+          jobId: await jobIdOfThread(ledger(), channelId, threadTs),
+          slackUser: action.user.id,
+          kind,
+          value: action.value ?? "",
+          channel: channelId,
+          messageTs: action.messageTs ?? null,
+        });
+      } catch (error) {
+        console.warn("Sym could not record feedback.", String(error));
+      }
+      return;
+    }
+    const where = { channel: channelId, user: action.user.id, threadTs };
+    const ref = action.value ?? "";
+    if (!/^J-\d+$/.test(ref)) return;
+    try {
+      const answer = await withJobDeps((deps) => stopJob(deps, ref));
+      await sayPrivately(ctx.slack, where, slackText(answer));
+    } catch (error) {
+      console.warn("Sym could not stop a job.", String(error));
+      await sayPrivately(ctx.slack, where, `Sym could not stop ${ref}. Try again in a moment.`);
+    }
+  },
+  // Reactions on Sym's messages are feedback. A reaction on another message is not.
+  async onEvent(ctx, event) {
+    if (event.type !== "reaction_added") return;
+    const user = typeof event.user === "string" ? event.user : undefined;
+    const name = typeof event.reaction === "string" ? event.reaction : undefined;
+    const item = event.item as { type?: string; channel?: string; ts?: string } | undefined;
+    if (!user || !name || item?.type !== "message" || !item.channel || !item.ts) return;
+    if (!isAllowed(user)) return;
+    try {
+      const jobId = await jobIdOfMessage(ledger(), item.channel, item.ts);
+      const botId = ctx.envelope.authorizations?.find((a) => a.is_bot)?.user_id;
+      if (jobId === null && (!botId || event.item_user !== botId)) return;
+      await recordFeedback(ledger(), {
+        jobId,
+        slackUser: user,
+        kind: kindOfReaction(name),
+        value: name,
+        channel: item.channel,
+        messageTs: item.ts,
+      });
+    } catch (error) {
+      console.warn("Sym could not record a reaction.", String(error));
+    }
   },
   // Approvals and answers count only from allowed people.
   onInputResponse(ctx, submission) {

@@ -198,6 +198,21 @@ export async function finishRun(
   `;
 }
 
+// Ends the run a session started, once. Later calls keep the first result. Links the job.
+export async function finishRunForSession(
+  sql: Sql,
+  sessionId: string,
+  outcome: RunOutcome,
+  jobId?: number,
+): Promise<void> {
+  await sql`
+    update schedule_runs
+    set outcome = case when outcome = 'started' then ${outcome} else outcome end,
+      job_id = coalesce(job_id, ${jobId ?? null})
+    where session_id = ${sessionId}
+  `;
+}
+
 export async function runsSince(sql: Sql, since: Date): Promise<ScheduleRun[]> {
   const rows = await sql<ScheduleRun[]>`
     select * from schedule_runs where fired_at >= ${since} order by id

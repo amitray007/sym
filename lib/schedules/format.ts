@@ -16,11 +16,12 @@ export function scheduleList(schedules: Schedule[]): string {
 // The message that starts a scheduled session. It is plain text, so the brain follows it step
 // by step. The stored brief is exactly what the owner approved.
 export function dispatchMessage(schedule: Schedule): string {
+  const ref = scheduleRef(schedule.id);
   return [
-    `Scheduled run of ${scheduleRef(schedule.id)}: ${schedule.title}.`,
-    "The owner approved this brief. Call t3_job with exactly this brief and " +
-      `schedule ${schedule.id}. Do not change it.`,
-    JSON.stringify(schedule.brief, null, 2),
+    `Scheduled run of ${ref}: ${schedule.title}.`,
+    `The owner approved this brief. Call t3_job with exactly this brief and schedule "${ref}". ` +
+      "Do not change the brief.",
+    `\`\`\`brief\n${JSON.stringify(schedule.brief, null, 2)}\n\`\`\``,
     "When the check finds nothing that needs attention, call no_reply.",
   ].join("\n\n");
 }

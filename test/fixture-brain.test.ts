@@ -139,3 +139,12 @@ describe("respondAsFixture", () => {
     expect(respondAsFixture(request(null))).toBe("Fixture brain heard: ");
   });
 });
+
+describe("respondAsFixture scheduled runs", () => {
+  it("calls t3_job with the stored brief and the schedule reference", () => {
+    const text = `Scheduled run of S-3: On-call check.\n\nCall t3_job.\n\n\`\`\`brief\n${JSON.stringify(BRIEF)}\n\`\`\`\n\nWhen nothing, call no_reply.`;
+    expect(respondAsFixture(request(text))).toEqual({
+      toolCalls: [{ name: "t3_job", input: { ...BRIEF, schedule: "S-3" } }],
+    });
+  });
+});

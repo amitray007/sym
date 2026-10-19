@@ -148,6 +148,10 @@ export interface CardFooter {
   updatedAt?: Date | number;
 }
 
+/** Sym's own action IDs. Eve keeps the `eve_input:` prefix for its controls. */
+export const STOP_ACTION_ID = "sym_job_stop";
+export const PR_ACTION_ID = "sym_job_pr";
+
 export interface RenderCardInput {
   ref: string;
   title: string;
@@ -158,6 +162,8 @@ export interface RenderCardInput {
   footer: CardFooter;
   /** Grows on every edit. Slack needs a new block_id to redraw a plan block. */
   version: number;
+  /** The pull request, once known. It becomes an Open PR button. */
+  prUrl?: string | null;
 }
 
 export interface Rendered {
@@ -177,6 +183,38 @@ function ago(from: number, now: number): string {
   return minutes < 1 ? "just now" : `${minutes} min ago`;
 }
 
+// A URL button needs an http(s) URL of at most 3000 characters, and Slack rejects the whole
+// message otherwise. The URL comes from a worker, so anything else gets no button.
+function buttonUrl(url: string | null | undefined): string | null {
+  if (!url || url.length > 3000 || !/^https?:\/\/\S+$/i.test(url)) return null;
+  return url;
+}
+
+function openPrButton(url: string): Record<string, unknown> {
+  return {
+    type: "button",
+    action_id: PR_ACTION_ID,
+    text: { type: "plain_text", text: "Open PR" },
+    url,
+  };
+}
+
+function stopButton(ref: string): Record<string, unknown> {
+  return {
+    type: "button",
+    action_id: STOP_ACTION_ID,
+    style: "danger",
+    text: { type: "plain_text", text: "Stop" },
+    value: ref,
+    confirm: {
+      title: { type: "plain_text", text: `Stop ${ref}?` },
+      text: { type: "plain_text", text: "The worker stops its current work." },
+      confirm: { type: "plain_text", text: "Stop" },
+      deny: { type: "plain_text", text: "Keep going" },
+    },
+  };
+}
+
 export function renderJobCard(input: RenderCardInput): Rendered {
   const now = ms(input.now);
   const elapsed = formatDuration(now - ms(input.startedAt));
@@ -187,6 +225,7 @@ export function renderJobCard(input: RenderCardInput): Rendered {
   const updated = input.footer.updatedAt === undefined ? now : ms(input.footer.updatedAt);
   parts.push(`updated ${ago(updated, now)}`);
 
+  const prUrl = buttonUrl(input.prUrl);
   return {
     blocks: [
       {
@@ -194,6 +233,11 @@ export function renderJobCard(input: RenderCardInput): Rendered {
         block_id: `job-${input.ref}-v${input.version}`,
         title,
         tasks: input.steps.slice(0, MAX_TASKS),
+      },
+      {
+        type: "actions",
+        block_id: `job-${input.ref}-actions-v${input.version}`,
+        elements: [stopButton(input.ref), ...(prUrl ? [openPrButton(prUrl)] : [])],
       },
       { type: "context", elements: [{ type: "mrkdwn", text: parts.join(" · ") }] },
     ],
@@ -225,8 +269,20 @@ export function renderCollapsedCard(input: CollapsedCardInput): Rendered {
   const line = [`[${input.ref}] ${clip(input.title, 80)}`, `${END_WORD[input.status]} ${took}`, pr]
     .filter(Boolean)
     .join(" · ");
+  const prUrl = buttonUrl(input.prUrl);
   return {
-    blocks: [{ type: "section", text: { type: "mrkdwn", text: escapeText(line) } }],
+    blocks: [
+      { type: "section", text: { type: "mrkdwn", text: escapeText(line) } },
+      ...(prUrl
+        ? [
+            {
+              type: "actions",
+              block_id: `job-${input.ref}-actions-end`,
+              elements: [openPrButton(prUrl)],
+            },
+          ]
+        : []),
+    ],
     text: line,
   };
 }

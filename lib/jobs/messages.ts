@@ -36,7 +36,12 @@ function lines(parts: (string | null | false | undefined)[]): string {
   return parts.filter((part): part is string => typeof part === "string" && part !== "").join("\n");
 }
 
-export function resultMessage(job: JobFacts, contract: OutputContract | null): string {
+// `concerns` come from the deterministic result checks (lib/jobs/verify.ts).
+export function resultMessage(
+  job: JobFacts,
+  contract: OutputContract | null,
+  concerns: string[] = [],
+): string {
   const head = `*${job.ref} done${took(job)}:* ${escapeMrkdwn(job.title)}`;
   if (!contract) {
     return lines([
@@ -59,6 +64,8 @@ export function resultMessage(job: JobFacts, contract: OutputContract | null): s
         "Open questions:",
         ...contract.openQuestions.map((question) => `• ${escapeMrkdwn(question)}`),
       ]),
+    concerns.length > 0 &&
+      lines(["Check before you merge:", ...concerns.map((c) => `• ${escapeMrkdwn(c)}`)]),
     threadLine(job),
   ]);
 }

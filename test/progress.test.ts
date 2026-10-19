@@ -10,15 +10,15 @@ const item = (text: string) => ({ type: "message", text });
 describe("findPullRequestUrl", () => {
   it.each([
     [
-      "Opened https://github.com/acme/app/pull/812 for review",
-      "https://github.com/acme/app/pull/812",
+      "Opened https://github.com/example/app/pull/812 for review",
+      "https://github.com/example/app/pull/812",
     ],
     [
       "see https://gitlab.com/g/sub/p/-/merge_requests/7.",
       "https://gitlab.com/g/sub/p/-/merge_requests/7",
     ],
-    ["https://github.com/acme/app/issues/3", undefined],
-    ["https://github.com/acme/app/pull/", undefined],
+    ["https://github.com/example/app/issues/3", undefined],
+    ["https://github.com/example/app/pull/", undefined],
     ["no link", undefined],
   ])("%s", (text, expected) => {
     expect(findPullRequestUrl([item(text)])).toBe(expected);

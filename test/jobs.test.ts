@@ -332,7 +332,7 @@ const T0 = new Date("2026-03-02T10:00:00.000Z");
 const CHANNEL = "C100";
 const THREAD_TS = "1690000000.000100";
 const OWNER = "U100";
-const PR_URL = "https://github.com/acme/widgets/pull/42";
+const PR_URL = "https://github.com/example/widgets/pull/42";
 const FINAL = `All set.\n\`\`\`json\n${JSON.stringify({
   summary: "Added retry with backoff",
   pr_url: PR_URL,

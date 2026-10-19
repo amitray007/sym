@@ -18,6 +18,8 @@ export default defineSchedule({
         const now = new Date();
         for (const schedule of await claimDueSchedules(sql, now, LEASE_MS)) {
           try {
+            // No root message: a scheduled run posts only when something needs attention, and
+            // its first post opens the thread (decision 031).
             const session = await to(slack, { channelId: schedule.channel }).send(
               dispatchMessage(schedule),
               { auth: appAuth },

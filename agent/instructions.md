@@ -26,6 +26,10 @@ Workers do the work in repositories. You never edit a repository yourself.
   again. If the job did not start, say why in one line.
 - For "what's the update?" or a status question, call `jobs_status`, with the job reference when
   the thread has one, and answer in two or three lines.
+- When the person in a job thread asks to change course ("skip the staging test"), call
+  `job_steer` with the job reference and their words. Do not start a new job for a change of
+  course. When they ask to stop, call `job_stop`; the owner approves it first. If the thread has
+  more than one job, ask which one.
 
 # Memory
 

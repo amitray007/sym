@@ -141,7 +141,7 @@ describe("renderJobCard", () => {
       block_id: "job-J-142-v3",
       title: "[J-142] Billing sync retry · running 14m",
     });
-    expect(blocks[1]).toEqual({
+    expect(blocks[2]).toEqual({
       type: "context",
       elements: [{ type: "mrkdwn", text: "Codex · thread 8f2c1d · updated 1 min ago" }],
     });
@@ -157,7 +157,7 @@ describe("renderJobCard", () => {
       ...input,
       footer: { worker: "Codex" },
     });
-    expect(blocks[1]).toMatchObject({ elements: [{ text: "Codex · updated just now" }] });
+    expect(blocks[2]).toMatchObject({ elements: [{ text: "Codex · updated just now" }] });
   });
 
   it("names a waiting job in the title", () => {
@@ -166,9 +166,39 @@ describe("renderJobCard", () => {
     );
   });
 
+  it("adds a Stop button, and an Open PR button once a PR is known", () => {
+    const withoutPr = renderJobCard(input).blocks[1] as {
+      type: string;
+      block_id: string;
+      elements: Record<string, unknown>[];
+    };
+    expect(withoutPr.type).toBe("actions");
+    expect(withoutPr.block_id).toBe("job-J-142-actions-v3");
+    expect(withoutPr.elements).toHaveLength(1);
+    expect(withoutPr.elements[0]).toMatchObject({
+      type: "button",
+      action_id: "sym_job_stop",
+      style: "danger",
+      value: "J-142",
+      text: { type: "plain_text", text: "Stop" },
+    });
+
+    const withPr = renderJobCard({ ...input, version: 4, prUrl: "https://github.com/o/r/pull/7" })
+      .blocks[1] as typeof withoutPr;
+    expect(withPr.block_id).toBe("job-J-142-actions-v4");
+    expect(withPr.elements.map((e) => e.action_id)).toEqual(["sym_job_stop", "sym_job_pr"]);
+    expect(withPr.elements[1]).toMatchObject({ url: "https://github.com/o/r/pull/7" });
+  });
+
+  it("gives an unsafe PR URL no button, so Slack accepts the card", () => {
+    const { blocks } = renderJobCard({ ...input, prUrl: "ftp://example.test/pull/7" });
+    const actions = blocks[1] as { elements: unknown[] };
+    expect(actions.elements).toHaveLength(1);
+  });
+
   it("escapes control characters in the footer", () => {
     const { blocks } = renderJobCard({ ...input, footer: { worker: "A<b>&", threadId: "t<1>" } });
-    expect(blocks[1]).toMatchObject({
+    expect(blocks[2]).toMatchObject({
       elements: [{ text: expect.stringContaining("A&lt;b&gt;&amp; · thread t&lt;1&gt;") }],
     });
   });
@@ -190,7 +220,28 @@ describe("renderCollapsedCard", () => {
       prUrl: "https://github.com/o/r/pull/812",
     });
     expect(card.text).toBe("[J-142] Billing sync retry · Done in 14m · PR #812");
-    expect(card.blocks).toEqual([{ type: "section", text: { type: "mrkdwn", text: card.text } }]);
+    expect(card.blocks).toEqual([
+      { type: "section", text: { type: "mrkdwn", text: card.text } },
+      {
+        type: "actions",
+        block_id: "job-J-142-actions-end",
+        elements: [
+          {
+            type: "button",
+            action_id: "sym_job_pr",
+            text: { type: "plain_text", text: "Open PR" },
+            url: "https://github.com/o/r/pull/812",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps no buttons when there is no PR or the URL is not http(s)", () => {
+    const none = renderCollapsedCard({ ...common, status: "done" });
+    expect(none.blocks).toHaveLength(1);
+    const bad = renderCollapsedCard({ ...common, status: "failed", prUrl: "javascript:alert(1)" });
+    expect(bad.blocks).toHaveLength(1);
   });
 
   it("omits the PR when there is none or the URL has no number", () => {

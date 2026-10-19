@@ -33,7 +33,8 @@ describe("schedule text", () => {
 
   it("tells the brain to run the stored brief and use no_reply", () => {
     const message = dispatchMessage(row);
-    expect(message).toContain("schedule 3");
+    expect(message).toContain('schedule "S-3"');
+    expect(message).toContain("```brief");
     expect(message).toContain('"project": "p"');
     expect(message).toContain("no_reply");
   });
@@ -44,7 +45,7 @@ describe("schedule_create input", () => {
 
   it("accepts a valid cron and fills brief defaults", () => {
     const parsed = ScheduleInput.parse({ cron: "0 9 * * 1-5", title: "On-call check", brief });
-    expect(parsed.brief.baseRef).toBe("main");
+    expect(parsed.brief.baseRef).toBeUndefined();
     expect(parsed.brief.openPullRequest).toBe(false);
   });
 

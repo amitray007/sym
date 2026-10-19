@@ -6,6 +6,7 @@ import {
   createSchedule,
   deleteSchedule,
   finishRun,
+  finishRunForSession,
   getSchedule,
   isApprovedBrief,
   listSchedules,
@@ -140,6 +141,24 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
       (r) => r.scheduleId === created.id,
     );
     expect(runs.map((r) => [r.sessionId, r.outcome])).toEqual([["s1", "all_clear"]]);
+  });
+
+  it("ends a run by session once and links the job", async () => {
+    const db = await sql();
+    const created = await createSchedule(db, { ...input, title: "By session" });
+    const run = await recordRun(db, { scheduleId: created.id, firedAt: T0, sessionId: "s-by" });
+    const [job] = await db<{ id: string }[]>`
+      insert into jobs (request_key, kind, title, brief, worker)
+      values ('k-by', 'code-change', 't', '{}', 't3') returning id
+    `;
+    const jobId = Number(job?.id);
+    await finishRunForSession(db, "s-by", "started", jobId);
+    await finishRunForSession(db, "s-by", "all_clear", jobId);
+    await finishRunForSession(db, "s-by", "failed", jobId);
+    const [after] = (await runsSince(db, new Date("2026-10-20T00:00:00Z"))).filter(
+      (r) => r.id === run.id,
+    );
+    expect([after?.outcome, after?.jobId]).toEqual(["all_clear", jobId]);
   });
 
   it("isApprovedBrief matches only the approved brief of an active row", async () => {
