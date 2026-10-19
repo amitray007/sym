@@ -1,0 +1,96 @@
+# Eve features
+
+Sym runs on [Eve](https://eve.dev) (npm `eve`, Apache-2.0, Node 24 or later). This page records
+which Eve features Sym uses and the limits that shape the design. Source: the Eve docs corpus at
+https://eve.dev/llms-full.txt, read 2026-10-19 against version 0.81.0. Pin the Eve version in
+`package.json`.
+
+Legend: **Use** = part of the design. **Later** = after milestone 1 or in the team phase.
+**Skip** = not needed.
+
+## Core
+
+| Feature | API | Decision | How Sym uses it | Limits |
+|---|---|---|---|---|
+| Agent definition | `agent/agent.ts` `defineAgent` | Use | Model, limits, compaction | Self-hosted upgrades strand running sessions |
+| Model | `anthropic()` from `eve/models/anthropic` | Use | Chat, briefs, triage, summaries. Workers do heavy work | String model IDs need AI Gateway |
+| Dynamic model | `defineDynamic` on `turn.started` | Later | Cheap model for status, stronger model for planning | Switching mid-session loses the prompt cache |
+| Spend limits | `limits.maxTokenCostUsdPerSession`, `sessionTimeoutMs` | Use | Cap brain spend per thread | Cost tracking needs reported cost |
+| Instructions | `agent/instructions.md`, `instructions/` | Use | Persona, trust ladder, Slack style | TS instructions evaluate at build time |
+| Skills | `agent/skills/*.md` | Use | Playbooks: `task-brief`, `progress`, result checks | Supporting files need a sandbox |
+
+## Tools and durable work
+
+| Feature | API | Decision | How Sym uses it | Limits |
+|---|---|---|---|---|
+| Plain tools | `defineTool` | Use | `jobs_status`, `schedule_*`, memory tools | Not retried. Interrupted steps re-run, so use idempotency keys |
+| Approvals | `approval: never/once/always/policy` | Use | Gate launches with write intent, schedule deletes, merges | Default `never`. Check the clicker in `onInputResponse` |
+| Workflow task | `defineWorkflowTool({ task })` | Use | `t3_job`: one worker thread from launch to checked result | 32 working tasks per session. Result capped at 50 KB |
+| Progress | `async *task` + `yield` | Use | The thread status line | The task card row does not show yields. `serve` tasks cannot yield |
+| Questions | `ctx.ask` | Use | Worker questions become Slack buttons | `unavailable` in Markdown schedule sessions |
+| Durable timer | `sleep()` from `workflow` | Use | Waits between worker checks, no compute | |
+| Callback URL | `createWebhook()` | Use | The worker POSTs its result for instant completion | Race with `sleep()` for the polling fallback |
+| Subagents | `ctx.agent(name).send(msg, { outputSchema })` | Use | `verifier` checks a result against the brief | Shares the parent's token budget |
+| Fan-out | `workflow({ maxSubagents })` | Later | Parallel triage | The program cannot call tools |
+| Opt-in tools | `no_reply` | Use | Silence for a clean scheduled check | |
+| Default tools | `bash`, `web_fetch` | Skip most | Workers do repository work. `defaultTools: false` | |
+| Sandbox | Docker, microsandbox, just-bash | Skip | Not needed while workers do the work | Docker needs the host socket |
+
+## Channels
+
+| Feature | API | Decision | How Sym uses it | Limits |
+|---|---|---|---|---|
+| Slack channel | `channels/slack.ts` `slackChannel` | Use | Main interface | HTTP Events API only. Needs a public HTTPS URL |
+| Portable credentials | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` | Use | Slack auth off Vercel | |
+| Handlers | `onAppMention`, `onDirectMessage`, `onMessage` | Use | Allow-list check, then start work | First matching handler wins |
+| Reply without mention | `onMessage` + `isSubscribed()` | Use | Replies in job threads without `@sym` | Needs `message.channels` and history scopes |
+| Thread context | `threadContext: { since: "thread-root" }` | Use | Sym reads the whole job thread | |
+| Task card | automatic, `taskCard` renderer | Use | Short non-job tasks. Hidden for `t3_job` | Rows show no progress. Schedule sessions get no card |
+| Status line | tool `label.start`, `label.delta` | Use | "Launching worker thread", "Tests running" | Cut at 50 characters. Cleared after 2 min idle |
+| Approval routing | `approvalChannel: "direct-message"` | Use | Sensitive approvals go to a DM | Fails closed if the user cannot be resolved |
+| Renderers | `defineSlackRenderer` | Use | Feedback buttons, job footer | Clicks arrive in `onInteraction` |
+| Events | `onEvent` | Use | `reaction_added`, `app_home_opened` | |
+| Slash commands | `onSlashCommand` | Use | `/sym status`, `/sym quiet`, `/sym schedule` | Check `ctx.send` from a handler |
+| Shortcuts | `onShortcut` | Later | "Send to Sym" on any message | `trigger_id` valid about 3 s |
+| Proactive posts | `to(slack, { channelId, threadTs? })` | Use | Schedule threads, recovery sessions, digests | Each fire is a new session unless `threadTs` is set |
+| Plain posts | `callSlackApi`, `ctx.slack.request` | Use | Outbox, job card edits, reactions | |
+| MCP channel | `channels/mcp.ts`, `tools: true` | Use | Worker threads call `sym_post_progress`, `sym_ask_owner` | HTTPS unless loopback. Approval tools return `approval_required` |
+| HTTP channel | `/eve/v1/session` | Use | Scripts and CI start a session | Use `operationId` for create-once |
+| GitHub channel | `githubChannel` | Later | CI and PR events instead of polling | Needs a GitHub App |
+| Custom channel | `defineChannel` | Later | Error tracker or ticket webhooks | Verify signatures. Dedupe |
+| Continuation aliases | `channel.continuation.alias()` | Later | Address a thread by worker thread ID or PR number | 256 per session |
+
+## Schedules, memory, state, hooks
+
+| Feature | API | Decision | How Sym uses it | Limits |
+|---|---|---|---|---|
+| Handler schedules | `defineSchedule({ cron, run })` | Use | `dispatch` (1 min), `reconcile` (3 min), `digest`, `learn` | Cron in UTC. `eve start` runs the scheduler. One replica |
+| Markdown schedules | `.md` with `cron` | Skip | | Output discarded. Approvals fail the session |
+| Dynamic scheduling | dispatcher + rows + CRUD tools | Use | Owner schedules as rows | At-least-once. Lease each row |
+| Durable notifications | outbox + schedule + `callSlackApi` | Use | Posts that retry | At-least-once. Idempotency key per post |
+| Memory | `defineMemory`, `defineMemoryProvider` | Use | Learning layer 1 | `fileMemory` needs Vercel Blob off Vercel, so Sym uses a Postgres provider. `byPrincipal` gives schedule turns no memory |
+| Session state | `defineState` | Use lightly | Per-thread scratch | Lost with the session |
+| Hooks | `agent/hooks/*.ts` `defineHook` | Use | Write turns, tool calls, and results to Postgres | Observe-only, at-least-once |
+| Dynamic capabilities | `defineDynamic` | Use | Load approved playbooks and rules at session start (learning layer 2) | Resolvers may re-run. Load only approved rows |
+| Compaction | `compaction`, `clear` | Use defaults | Long job threads stay usable | |
+
+## Quality and operations
+
+| Feature | API | Decision | How Sym uses it | Limits |
+|---|---|---|---|---|
+| Self-modification | `eve/self-modification/remote` | Skip | Code changes go through a worker thread instead (decision 007) | Needs microsandbox when self-hosted |
+| Evals | `evals/**/*.eval.ts`, `eve eval --strict` | Use | Routing, approvals, display rule, refusal of untrusted text | Set the judge model |
+| OpenTelemetry | `agent/instrumentation/*` | Later | Traces to a collector | |
+| Route auth | `jwtHmac`, `oidc`, `httpBasic`, `createIpAllowList` | Use | Slack by signature. MCP and HTTP by bearer plus IP allow-list | `placeholderAuth` blocks production |
+| Self-hosting | `eve build`, `eve start` | Use | Docker service with a volume at `.eve/.workflow-data` | The proxy must pass `/eve/` and `/.well-known/workflow/` unrewritten |
+| CLI | `eve remote connect`, `eve logs`, `eve traces` | Use | Debug the deployed agent | CLI telemetry is on by default |
+
+## What Eve cannot do here
+
+- Receive Slack events without a public HTTPS endpoint.
+- Learn on its own. It provides memory slots, hooks, and buttons. Sym builds the loop.
+- Know about workers. It sees a worker only as an MCP connection.
+- Answer "what is running?" across sessions. The ledger fills that gap.
+- Keep running sessions across a self-hosted upgrade.
+- Retry failed tools or deliver exactly once.
+- Document Slack's agent surface or streamed replies. See [slack.md](slack.md).

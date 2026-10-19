@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": ["agent/**", "lib/**", "test/**", "*.ts", "*.json"]
+  },
+  "formatter": { "indentStyle": "space", "lineWidth": 100 },
+  "linter": { "rules": { "preset": "recommended" } },
+  "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always" } }
+}

@@ -1,0 +1,53 @@
+# Slack app manifest for Sym. Import it at https://api.slack.com/apps (Create New App > From a manifest).
+# Replace https://sym.example.com with your public host. Eve serves events, interactivity,
+# and slash commands at the same route: /eve/v1/slack.
+display_information:
+  name: Sym
+  description: Hands work to coding agents and reports back only what matters.
+  background_color: "#1a1d21"
+features:
+  bot_user:
+    display_name: sym
+    always_online: true
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  slash_commands:
+    - command: /sym
+      url: https://sym.example.com/eve/v1/slack
+      description: Status, quiet mode, and schedules
+      usage_hint: status | jobs | quiet | schedule
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - chat:write
+      - commands
+      - channels:history
+      - groups:history
+      - im:history
+      - im:read
+      - im:write
+      - files:read
+      - files:write
+      - reactions:read
+      - reactions:write
+      - users:read
+settings:
+  event_subscriptions:
+    request_url: https://sym.example.com/eve/v1/slack
+    bot_events:
+      - app_mention
+      - app_home_opened
+      - message.channels
+      - message.groups
+      - message.im
+      - reaction_added
+  interactivity:
+    is_enabled: true
+    request_url: https://sym.example.com/eve/v1/slack
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

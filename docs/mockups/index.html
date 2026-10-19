@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sym: how it looks and flows</title>
+<style>
+:root {
+  color-scheme: dark;
+  --ds-background-100: #000000;
+  --ds-gray-100: #1a1a1a;
+  --ds-gray-200: #1f1f1f;
+  --ds-gray-300: #292929;
+  --ds-gray-400: #2e2e2e;
+  --ds-gray-500: #454545;
+  --ds-gray-600: #878787;
+  --ds-gray-900: #a0a0a0;
+  --ds-gray-1000: #ededed;
+  --ds-blue-100: #06193a;
+  --ds-blue-400: #003771;
+  --ds-blue-900: #50a8ff;
+  --ds-red-100: #330a11;
+  --ds-red-400: #6f101b;
+  --ds-red-900: #ff5e63;
+  --ds-amber-100: #291800;
+  --ds-amber-400: #573200;
+  --ds-amber-900: #ff9900;
+  --ds-green-100: #00250a;
+  --ds-green-400: #004616;
+  --ds-green-900: #00ca52;
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", "SFMono-Regular", Consolas, monospace;
+  --radius-control: 6px;
+  --radius-panel: 12px;
+  /* Slack dark theme, used only inside the Slack mockups */
+  --sl-bg: #1a1d21;
+  --sl-raised: #222529;
+  --sl-border: #35373b;
+  --sl-text: #d1d2d3;
+  --sl-strong: #f8f8f8;
+  --sl-muted: #ababad;
+  --sl-link: #1d9bd1;
+  --sl-green: #007a5a;
+  --sl-red: #e01e5a;
+  --sl-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Lato", sans-serif;
+}
+* { box-sizing: border-box; }
+html { background: var(--ds-background-100); }
+body { margin: 0; color: var(--ds-gray-1000); font: 400 16px/24px var(--font-sans); -webkit-font-smoothing: antialiased; }
+a { color: var(--ds-blue-900); text-underline-offset: 4px; }
+:focus-visible { outline: 2px solid var(--ds-blue-900); outline-offset: 4px; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 40px; line-height: 48px; letter-spacing: -1.6px; font-weight: 600; }
+h2 { font-size: 24px; line-height: 32px; letter-spacing: -.96px; font-weight: 600; }
+h3 { font-size: 20px; line-height: 26px; letter-spacing: -.4px; font-weight: 600; }
+code, .mono { font-family: var(--font-mono); font-size: 13px; line-height: 20px; }
+svg { max-width: 100%; height: auto; display: block; }
+.page { width: min(100%, 1168px); margin-inline: auto; padding: 64px 24px; }
+.section { padding-block: 48px; border-top: 1px solid var(--ds-gray-400); }
+.section:first-of-type { margin-top: 48px; }
+.section > * + * { margin-top: 24px; }
+.prose { max-width: 70ch; }
+.muted { color: var(--ds-gray-900); }
+.small { font-size: 14px; line-height: 20px; }
+.eyebrow { color: var(--ds-gray-900); font: 400 13px/20px var(--font-mono); margin-bottom: 24px; }
+.lede { margin-top: 16px; max-width: 70ch; color: var(--ds-gray-900); }
+.panel { min-width: 0; padding: 24px; border: 1px solid var(--ds-gray-400); border-radius: var(--radius-panel); }
+.figure { padding: 24px; border: 1px solid var(--ds-gray-400); border-radius: var(--radius-panel); overflow-x: auto; }
+.figure svg { min-width: 720px; }
+.figure-note { margin-top: 12px; font-size: 14px; line-height: 20px; color: var(--ds-gray-900); }
+.badge { display: inline-flex; align-items: center; padding: 1px 8px; border: 1px solid var(--ds-gray-400); border-radius: var(--radius-control); background: var(--ds-gray-100); color: var(--ds-gray-1000); font-size: 13px; line-height: 20px; white-space: nowrap; }
+.badge.success { background: var(--ds-green-100); color: var(--ds-green-900); border-color: var(--ds-green-400); }
+.badge.warning { background: var(--ds-amber-100); color: var(--ds-amber-900); border-color: var(--ds-amber-400); }
+.badge.error { background: var(--ds-red-100); color: var(--ds-red-900); border-color: var(--ds-red-400); }
+.badge.info { background: var(--ds-blue-100); color: var(--ds-blue-900); border-color: var(--ds-blue-400); }
+.table-scroll { overflow: auto; border: 1px solid var(--ds-gray-400); border-radius: var(--radius-panel); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 20px; text-align: left; }
+th, td { padding: 12px 16px; border-bottom: 1px solid var(--ds-gray-400); vertical-align: top; }
+th { color: var(--ds-gray-900); background: var(--ds-gray-100); font-weight: 500; }
+tr:last-child td { border-bottom: 0; }
+footer { margin-top: 48px; border-top: 1px solid var(--ds-gray-400); padding-top: 24px; font-size: 14px; color: var(--ds-gray-900); }
+footer p + p { margin-top: 8px; }
+.toc { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 24px; font-size: 14px; }
+
+/* Scene layout: Slack window plus a notes rail */
+.scene { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+.scene.wide { grid-template-columns: minmax(0, 1fr); }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }
+.pair > div > .label { margin-bottom: 12px; }
+.label { font-size: 14px; line-height: 20px; font-weight: 500; }
+.notes { font-size: 14px; line-height: 20px; }
+.notes h3 { font-size: 16px; line-height: 24px; margin-bottom: 8px; }
+.notes dl { margin: 16px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 8px 12px; }
+.notes dt { color: var(--ds-gray-900); }
+.notes dd { margin: 0; }
+.notes ul { margin: 12px 0 0; padding-left: 18px; }
+.notes li + li { margin-top: 6px; }
+
+/* Annotation chips sit on the mockups but are not Slack UI */
+.anno { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 0 6px; border: 1px dashed var(--ds-gray-600); border-radius: 4px; color: var(--ds-gray-900); font: 500 11px/18px var(--font-mono); vertical-align: middle; white-space: nowrap; }
+.anno.ping { border-color: var(--ds-amber-900); color: var(--ds-amber-900); }
+.anno.quiet { border-color: var(--ds-gray-600); }
+
+/* Slack mockup */
+.slack { background: var(--sl-bg); border: 1px solid var(--sl-border); border-radius: 8px; overflow: hidden; color: var(--sl-text); font: 400 15px/22px var(--sl-font); }
+.sl-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--sl-border); }
+.sl-top b { color: var(--sl-strong); font-weight: 800; }
+.sl-top span { color: var(--sl-muted); font-size: 13px; }
+.sl-body { padding: 8px 0 12px; }
+.sl-day { display: flex; align-items: center; gap: 12px; margin: 8px 16px; color: var(--sl-muted); font-size: 12px; font-weight: 700; }
+.sl-day::before, .sl-day::after { content: ""; flex: 1; height: 1px; background: var(--sl-border); }
+.msg { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 8px; padding: 6px 16px; }
+.msg.cont { padding-left: 60px; grid-template-columns: minmax(0, 1fr); }
+.av { width: 36px; height: 36px; border-radius: 6px; display: grid; place-items: center; font-weight: 800; font-size: 15px; color: #fff; }
+.av.user { background: #4a3a78; }
+.av.sym { background: #0b6e63; }
+.mh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.mh b { color: var(--sl-strong); font-weight: 900; }
+.mh time { color: var(--sl-muted); font-size: 12px; }
+.app { padding: 0 3px; border-radius: 2px; background: #ffffff1a; color: var(--sl-muted); font-size: 10px; font-weight: 700; line-height: 14px; }
+.mt p + p, .mt p + ul, .mt ul + p { margin-top: 6px; }
+.mt ul { margin: 4px 0 0; padding-left: 20px; }
+.mt code { font-size: 12px; padding: 1px 4px; border: 1px solid #ffffff21; border-radius: 3px; background: #ffffff0d; color: #e8912d; }
+.mention { padding: 0 2px; border-radius: 3px; background: #1d9bd126; color: var(--sl-link); }
+.mention.you { background: #f2c74433; color: #f2c744; }
+.sl-link { color: var(--sl-link); }
+.edited { color: var(--sl-muted); font-size: 12px; }
+.strike { text-decoration: line-through; color: var(--sl-muted); }
+.rxs { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.rx { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 7px; border: 1px solid transparent; border-radius: 12px; background: #ffffff0f; font-size: 12px; }
+.rx.mine { border-color: var(--sl-link); background: #1d9bd126; }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.sb { display: inline-block; padding: 3px 12px; border: 1px solid #ffffff4d; border-radius: 4px; color: var(--sl-text); font-size: 13px; font-weight: 700; line-height: 20px; }
+.sb.go { background: var(--sl-green); border-color: var(--sl-green); color: #fff; }
+.sb.danger { background: var(--sl-red); border-color: var(--sl-red); color: #fff; }
+.sb.done { opacity: .55; }
+.ctxline { margin-top: 6px; color: var(--sl-muted); font-size: 12px; line-height: 18px; }
+.fb { display: inline-flex; gap: 2px; margin-top: 6px; border: 1px solid #ffffff21; border-radius: 4px; }
+.fb span { padding: 1px 8px; font-size: 13px; color: var(--sl-muted); }
+.fb span + span { border-left: 1px solid #ffffff21; }
+.status { display: flex; align-items: center; gap: 8px; padding: 4px 16px 4px 60px; color: var(--sl-muted); font-size: 13px; font-style: italic; }
+.status::before { content: ""; width: 10px; height: 10px; border: 2px solid #ffffff40; border-top-color: var(--sl-text); border-radius: 50%; flex: none; }
+.eph { margin: 6px 16px; padding: 8px 0; border-top: 1px solid var(--sl-border); }
+.eph-tag { padding-left: 44px; color: var(--sl-muted); font-size: 12px; }
+.thread-root { border-bottom: 1px solid var(--sl-border); padding-bottom: 8px; margin-bottom: 4px; }
+.replies { padding: 2px 16px 6px 60px; color: var(--sl-link); font-size: 13px; font-weight: 700; }
+.compose { margin: 4px 16px 0; padding: 8px 12px; border: 1px solid var(--sl-border); border-radius: 8px; color: #ffffff59; font-size: 14px; }
+.empty-ch { padding: 28px 16px; color: var(--sl-muted); font-size: 13px; text-align: center; }
+
+/* Slack plan / task card rendering (approximate) */
+.plan { max-width: 520px; margin-top: 8px; padding: 12px 14px; border: 1px solid var(--sl-border); border-radius: 8px; background: var(--sl-raised); }
+.plan-title { color: var(--sl-strong); font-weight: 700; }
+.plan ol { list-style: none; margin: 8px 0 0; padding: 0; }
+.plan li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; padding: 3px 0; }
+.plan li .meta { color: var(--sl-muted); font-size: 13px; }
+.ic { width: 16px; height: 16px; margin-top: 3px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 900; line-height: 1; }
+.ic.done { background: #2bac76; color: #1a1d21; }
+.ic.doing { border: 2px solid #ffffff33; border-top-color: var(--sl-link); border-right-color: var(--sl-link); }
+.ic.todo { border: 2px solid #ffffff40; }
+.ic.wait { background: #e8912d; color: #1a1d21; }
+.ic.err { background: var(--sl-red); color: #fff; }
+.plan li.todo-row span:last-child { color: var(--sl-muted); }
+.plan.collapsed { padding: 8px 12px; }
+.plan.collapsed .plan-title { display: flex; gap: 8px; align-items: center; font-weight: 600; color: var(--sl-text); }
+.states { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.state-card .label { margin-bottom: 8px; }
+.state-card .plan { margin-top: 0; max-width: none; font: 400 15px/22px var(--sl-font); color: var(--sl-text); }
+
+/* App Home mockup */
+.home { display: grid; gap: 0; }
+.home-sec { padding: 12px 20px; border-bottom: 1px solid var(--sl-border); }
+.home-sec:last-child { border-bottom: 0; }
+.home-h { color: var(--sl-strong); font-weight: 800; font-size: 16px; }
+.home-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; }
+.home-row .sb { font-size: 12px; padding: 1px 10px; }
+.tabs { display: flex; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--sl-border); font-size: 13px; font-weight: 700; color: var(--sl-muted); }
+.tabs span { padding: 8px 0; }
+.tabs span.on { color: var(--sl-strong); box-shadow: inset 0 -2px 0 var(--sl-strong); }
+
+@media (max-width: 900px) {
+  .scene, .pair, .states { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 600px) {
+  .page { padding: 32px 16px; }
+  h1 { font-size: 32px; line-height: 40px; letter-spacing: -1.28px; }
+  .section { padding-block: 32px; }
+  .figure, .panel { padding: 16px; }
+  .msg.cont, .status, .replies { padding-left: 16px; }
+  .msg.cont { padding-left: 60px; }
+}
+</style>
+</head>
+<body>
+<main class="page">
+  <header>
+    <p class="eyebrow">work-sym-slack-agent · mockups · 2026-10-19</p>
+    <h1>Sym: how it looks and flows</h1>
+    <p class="lede">Slack mockups and flow diagrams for every idea in the rundown. One rule runs through all of them: an edited message notifies nobody, and a new message notifies you. So Sym puts progress in edits, sends new messages only when you must act or when work is done, and uses plain text whenever a visual adds nothing.</p>
+    <nav class="toc" aria-label="Sections">
+      <a href="#arch">1. The pieces</a>
+      <a href="#rule">2. The display rule</a>
+      <a href="#job">3. A code job end to end</a>
+      <a href="#asks">4. Quick asks and updates</a>
+      <a href="#sched">5. Scheduled work</a>
+      <a href="#needs">6. When it needs you</a>
+      <a href="#learn">7. Learning</a>
+      <a href="#home">8. Later: Home tab</a>
+    </nav>
+  </header>
+
+  <!-- 1. Architecture -->
+  <section class="section" id="arch" aria-labelledby="arch-h">
+    <h2 id="arch-h">1. The pieces</h2>
+    <p class="prose muted">Sym's brain runs on Eve on your Dokploy server. Only the Slack route is public. T3 Code on your Mac does the real work in Claude Code and Codex threads, reached over the tailnet. Postgres holds the job ledger, so a job survives a dead Eve session.</p>
+    <div class="figure">
+      <svg viewBox="0 0 1000 440" role="img" aria-labelledby="arch-title arch-desc">
+        <title id="arch-title">Sym architecture</title>
+        <desc id="arch-desc">You talk to Sym in Slack. Slack sends events to Sym on Eve in Dokploy, which keeps a Postgres ledger and calls T3 Code on your Mac over the tailnet. T3 runs agent threads that open PRs on GitHub. Permission prompts in T3 still need you.</desc>
+        <defs>
+          <marker id="a-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#878787"/></marker>
+          <marker id="a-acc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#50a8ff"/></marker>
+        </defs>
+        <!-- zones -->
+        <rect x="290" y="148" width="360" height="240" rx="8" fill="none" stroke="#454545" stroke-dasharray="4,4"/>
+        <text x="306" y="168" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" letter-spacing="0.08em">DOKPLOY · PUBLIC: /eve/v1/slack ONLY</text>
+        <rect x="700" y="148" width="280" height="240" rx="8" fill="none" stroke="#454545" stroke-dasharray="4,4"/>
+        <text x="716" y="168" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" letter-spacing="0.08em">YOUR MAC · TAILNET ONLY</text>
+        <!-- arrows -->
+        <path d="M130 112 V194" fill="none" stroke="#878787" marker-end="url(#a-arr)"/>
+        <path d="M220 220 H318" fill="none" stroke="#878787" marker-end="url(#a-arr)"/>
+        <path d="M320 252 H222" fill="none" stroke="#878787" marker-end="url(#a-arr)"/>
+        <path d="M620 216 H738" fill="none" stroke="#50a8ff" marker-end="url(#a-acc)"/>
+        <path d="M740 252 H622" fill="none" stroke="#878787" stroke-dasharray="5,4" marker-end="url(#a-arr)"/>
+        <path d="M470 280 V306" fill="none" stroke="#878787" marker-end="url(#a-arr)"/>
+        <path d="M840 280 V306" fill="none" stroke="#878787" marker-end="url(#a-arr)"/>
+        <path d="M940 336 H956 Q964 336 964 328 V92 Q964 84 956 84 H942" fill="none" stroke="#878787" marker-end="url(#a-arr)"/>
+        <path d="M220 92 H236 Q244 92 244 100 V124 Q244 132 252 132 H908 Q916 132 916 140 V182" fill="none" stroke="#878787" stroke-dasharray="5,4" marker-end="url(#a-arr)"/>
+        <!-- arrow labels -->
+        <rect x="138" y="146" width="34" height="14" fill="#000"/><text x="140" y="157" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace">ASKS</text>
+        <rect x="244" y="198" width="52" height="14" fill="#000"/><text x="270" y="209" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">EVENTS</text>
+        <rect x="248" y="260" width="44" height="14" fill="#000"/><text x="270" y="271" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">POSTS</text>
+        <rect x="644" y="194" width="72" height="14" fill="#000"/><text x="680" y="205" fill="#50a8ff" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">MCP CALLS</text>
+        <rect x="648" y="260" width="64" height="14" fill="#000"/><text x="680" y="271" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">CALLBACK</text>
+        <rect x="478" y="286" width="46" height="14" fill="#000"/><text x="480" y="297" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace">LEDGER</text>
+        <rect x="848" y="286" width="34" height="14" fill="#000"/><text x="850" y="297" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace">RUNS</text>
+        <rect x="970" y="203" width="28" height="14" fill="#000"/><text x="971" y="214" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace">PRS</text>
+        <rect x="488" y="110" width="84" height="14" fill="#000"/><text x="530" y="121" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">PERMISSIONS</text>
+        <!-- nodes -->
+        <rect x="40" y="56" width="180" height="56" rx="6" fill="#000"/><rect x="40" y="56" width="180" height="56" rx="6" fill="#ffffff12" stroke="#8f8f8f"/>
+        <text x="130" y="80" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">You</text>
+        <text x="130" y="98" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">Slack + T3 app on phone</text>
+
+        <rect x="40" y="196" width="180" height="72" rx="6" fill="#000"/><rect x="40" y="196" width="180" height="72" rx="6" fill="#ffffff08" stroke="#ffffff4d"/>
+        <text x="130" y="228" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Slack</text>
+        <text x="130" y="246" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">#sym · DMs · Home</text>
+
+        <rect x="320" y="184" width="300" height="96" rx="6" fill="#000"/><rect x="320" y="184" width="300" height="96" rx="6" fill="#06193a" stroke="#50a8ff"/>
+        <text x="470" y="220" fill="#ededed" font-size="14" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Sym on Eve</text>
+        <text x="470" y="240" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">slack · t3_job · display rule</text>
+        <text x="470" y="256" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">dispatch · reconcile · memory</text>
+
+        <rect x="380" y="308" width="180" height="56" rx="6" fill="#000"/><rect x="380" y="308" width="180" height="56" rx="6" fill="#ffffff0d" stroke="#878787"/>
+        <text x="470" y="332" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Postgres</text>
+        <text x="470" y="350" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">jobs · schedules · feedback</text>
+
+        <rect x="740" y="184" width="200" height="96" rx="6" fill="#000"/><rect x="740" y="184" width="200" height="96" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="840" y="224" fill="#ededed" font-size="14" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">T3 Code</text>
+        <text x="840" y="244" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">/mcp · OAuth · Auto level</text>
+
+        <rect x="740" y="308" width="200" height="56" rx="6" fill="#000"/><rect x="740" y="308" width="200" height="56" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="840" y="332" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Agent threads</text>
+        <text x="840" y="350" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">Claude Code · Codex · worktrees</text>
+
+        <rect x="760" y="56" width="180" height="56" rx="6" fill="#000"/><rect x="760" y="56" width="180" height="56" rx="6" fill="#ffffff08" stroke="#ffffff4d"/>
+        <text x="850" y="80" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">GitHub</text>
+        <text x="850" y="98" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">draft PRs · CI</text>
+        <!-- legend -->
+        <line x1="30" y1="400" x2="970" y2="400" stroke="#2e2e2e"/>
+        <text x="30" y="424" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" letter-spacing="0.14em">LEGEND</text>
+        <rect x="110" y="414" width="14" height="12" rx="2" fill="#06193a" stroke="#50a8ff"/><text x="132" y="424" fill="#a0a0a0" font-size="11" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Sym's brain</text>
+        <rect x="250" y="414" width="14" height="12" rx="2" fill="#ffffff0d" stroke="#878787"/><text x="272" y="424" fill="#a0a0a0" font-size="11" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Data store</text>
+        <rect x="370" y="414" width="14" height="12" rx="2" fill="#ffffff08" stroke="#ffffff4d"/><text x="392" y="424" fill="#a0a0a0" font-size="11" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Outside service</text>
+        <line x1="510" y1="420" x2="540" y2="420" stroke="#878787" stroke-dasharray="5,4"/><text x="548" y="424" fill="#a0a0a0" font-size="11" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Optional or human path</text>
+        <line x1="710" y1="420" x2="740" y2="420" stroke="#50a8ff"/><text x="748" y="424" fill="#a0a0a0" font-size="11" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Main control path</text>
+      </svg>
+      <p class="figure-note">Permission prompts below Full access can't be approved over MCP. That dashed line is you, in the T3 app.</p>
+    </div>
+  </section>
+
+  <!-- 2. Display rule -->
+  <section class="section" id="rule" aria-labelledby="rule-h">
+    <h2 id="rule-h">2. The display rule</h2>
+    <p class="prose muted">Sym runs every post through one function in code, <code>chooseDisplay()</code>. The model only passes hints from your words. Four questions, in order, pick one of five levels.</p>
+    <div class="figure">
+      <svg viewBox="0 0 1000 580" role="img" aria-labelledby="rule-title rule-desc">
+        <title id="rule-title">How Sym picks a display level</title>
+        <desc id="rule-desc">Four questions in order. If you must act, buttons. If nothing is new, silence. If the work is long with several steps, a live card. If the answer is long, a snippet. Otherwise plain text.</desc>
+        <defs>
+          <marker id="r-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#878787"/></marker>
+        </defs>
+        <path d="M360 72 H558" fill="none" stroke="#878787" marker-end="url(#r-arr)"/>
+        <path d="M360 184 H558" fill="none" stroke="#878787" marker-end="url(#r-arr)"/>
+        <path d="M360 296 H558" fill="none" stroke="#878787" marker-end="url(#r-arr)"/>
+        <path d="M360 408 H558" fill="none" stroke="#878787" marker-end="url(#r-arr)"/>
+        <path d="M200 104 V150" fill="none" stroke="#878787" marker-end="url(#r-arr)"/>
+        <path d="M200 216 V262" fill="none" stroke="#878787" marker-end="url(#r-arr)"/>
+        <path d="M200 328 V374" fill="none" stroke="#878787" marker-end="url(#r-arr)"/>
+        <path d="M200 440 V486" fill="none" stroke="#878787" marker-end="url(#r-arr)"/>
+        <rect x="442" y="50" width="36" height="14" fill="#000"/><text x="460" y="61" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">YES</text>
+        <rect x="446" y="162" width="28" height="14" fill="#000"/><text x="460" y="173" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">NO</text>
+        <rect x="442" y="274" width="36" height="14" fill="#000"/><text x="460" y="285" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">YES</text>
+        <rect x="442" y="386" width="36" height="14" fill="#000"/><text x="460" y="397" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">YES</text>
+        <rect x="208" y="120" width="22" height="14" fill="#000"/><text x="210" y="131" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace">NO</text>
+        <rect x="208" y="232" width="28" height="14" fill="#000"/><text x="210" y="243" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace">YES</text>
+        <rect x="208" y="344" width="22" height="14" fill="#000"/><text x="210" y="355" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace">NO</text>
+        <rect x="208" y="456" width="22" height="14" fill="#000"/><text x="210" y="467" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace">NO</text>
+        <!-- questions -->
+        <rect x="40" y="40" width="320" height="64" rx="6" fill="#000"/><rect x="40" y="40" width="320" height="64" rx="6" fill="#06193a" stroke="#50a8ff"/>
+        <text x="56" y="62" fill="#50a8ff" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" letter-spacing="0.08em">Q1 · ALWAYS FIRST</text>
+        <text x="56" y="84" fill="#ededed" font-size="14" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Must Sam act?</text>
+        <rect x="40" y="152" width="320" height="64" rx="6" fill="#000"/><rect x="40" y="152" width="320" height="64" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="56" y="174" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" letter-spacing="0.08em">Q2</text>
+        <text x="56" y="196" fill="#ededed" font-size="14" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Anything new to say?</text>
+        <rect x="40" y="264" width="320" height="64" rx="6" fill="#000"/><rect x="40" y="264" width="320" height="64" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="56" y="286" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" letter-spacing="0.08em">Q3</text>
+        <text x="56" y="308" fill="#ededed" font-size="14" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Over ~2 min, with 3+ steps to follow?</text>
+        <rect x="40" y="376" width="320" height="64" rx="6" fill="#000"/><rect x="40" y="376" width="320" height="64" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="56" y="398" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" letter-spacing="0.08em">Q4</text>
+        <text x="56" y="420" fill="#ededed" font-size="14" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Answer over ~40 lines?</text>
+        <!-- outcomes -->
+        <rect x="560" y="40" width="380" height="64" rx="6" fill="#000"/><rect x="560" y="40" width="380" height="64" rx="6" fill="#ffffff08" stroke="#ffffff4d"/>
+        <text x="576" y="66" fill="#ededed" font-size="14" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Level 2 · Text + buttons</text>
+        <text x="576" y="86" fill="#a0a0a0" font-size="11" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Notifies. Quiet mode can't hide it.</text>
+        <rect x="560" y="152" width="380" height="64" rx="6" fill="#000"/><rect x="560" y="152" width="380" height="64" rx="6" fill="#ffffff08" stroke="#ffffff4d"/>
+        <text x="576" y="178" fill="#ededed" font-size="14" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Level 0 · Silent</text>
+        <text x="576" y="198" fill="#a0a0a0" font-size="11" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Nothing posts. One line in the 18:00 digest.</text>
+        <rect x="560" y="264" width="380" height="64" rx="6" fill="#000"/><rect x="560" y="264" width="380" height="64" rx="6" fill="#ffffff08" stroke="#ffffff4d"/>
+        <text x="576" y="290" fill="#ededed" font-size="14" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Level 3 · Live card</text>
+        <text x="576" y="310" fill="#a0a0a0" font-size="11" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Edits are silent. Notifies at start and end only.</text>
+        <rect x="560" y="376" width="380" height="64" rx="6" fill="#000"/><rect x="560" y="376" width="380" height="64" rx="6" fill="#ffffff08" stroke="#ffffff4d"/>
+        <text x="576" y="402" fill="#ededed" font-size="14" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Level 4 · Summary + snippet</text>
+        <text x="576" y="422" fill="#a0a0a0" font-size="11" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">2 lines in the thread, the rest as a file.</text>
+        <rect x="40" y="488" width="320" height="64" rx="6" fill="#000"/><rect x="40" y="488" width="320" height="64" rx="6" fill="#ffffff08" stroke="#ffffff4d"/>
+        <text x="56" y="514" fill="#ededed" font-size="14" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Level 1 · Plain text</text>
+        <text x="56" y="534" fill="#a0a0a0" font-size="11" font-family="Geist, -apple-system, 'Segoe UI', sans-serif">Status line while working. One reply.</text>
+      </svg>
+    </div>
+
+    <div class="table-scroll">
+      <table>
+        <caption class="small muted" style="text-align:left;padding:12px 16px;">Then modifiers apply, in this order. None of them can hide a level 2 "needs you" message.</caption>
+        <thead><tr><th scope="col">Modifier</th><th scope="col">Example</th><th scope="col">Effect</th></tr></thead>
+        <tbody>
+          <tr><td>Your words</td><td>"quick", "just tell me", "quietly" / "show me progress"</td><td>Forces text / forces a card for this request</td></tr>
+          <tr><td>Learned preference</td><td>👎 on an on-call card, or "too noisy"</td><td>"On-call check: text only" saved to memory, used from the next turn</td></tr>
+          <tr><td>Quiet mode</td><td><code>/sym quiet</code>, or 22:00 to 09:00 local time</td><td>Only "needs you" and failures post. The rest waits for the digest</td></tr>
+          <tr><td>Upgrade during work</td><td>A text job passes 2 minutes</td><td>Posts a card: "This is taking longer. Tracking it here."</td></tr>
+          <tr><td>Downgrade at the end</td><td>A card job finishes</td><td>Card collapses to one line, the result posts as text</td></tr>
+          <tr><td>Shared channel (team phase)</td><td>Someone else's job</td><td>Cards only for jobs asked for in that channel. Other updates go to DMs</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Same job, two levels</h3>
+    <p class="prose muted small">A read-only job that's already trusted (no approval needed): "why did the Billing sync fail for account 4412?" Both versions notify you twice. The card version gives you something to glance at while it runs. The text version keeps the thread to two lines.</p>
+    <div class="pair">
+      <div>
+        <p class="label">Card (default for a 10-minute job)</p>
+        <div class="slack">
+          <div class="sl-top"><b># sym</b><span>Thread</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>11:02</time></div><div class="mt">why did the Billing sync fail for account 4412 last night?</div><div class="rxs"><span class="rx mine">👀 1</span></div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>11:02</time><span class="anno ping">notifies</span></div>
+              <div class="plan">
+                <div class="plan-title">[J-143] Store 4412 sync failure · running 4m</div>
+                <ol>
+                  <li><span class="ic done">✓</span><span>Pulled sync logs <span class="meta">· 2,140 lines</span></span></li>
+                  <li><span class="ic doing"></span><span>Checking billing API errors <span class="meta">· 37 × 429</span></span></li>
+                  <li class="todo-row"><span class="ic todo"></span><span>Checking token and webhook state</span></li>
+                  <li class="todo-row"><span class="ic todo"></span><span>Write the answer</span></li>
+                </ol>
+                <div class="ctxline">Codex · T3 thread 4b1e… · updated 40s ago <span class="anno quiet">edits: silent</span></div>
+              </div>
+            </div></div>
+            <div class="status">Checking billing API errors…</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="label">Text (you said "just tell me", or a learned preference)</p>
+        <div class="slack">
+          <div class="sl-top"><b># sym</b><span>Thread</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>11:02</time></div><div class="mt">why did the Billing sync fail for account 4412 last night? just tell me when you know</div><div class="rxs"><span class="rx mine">👀 1</span></div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>11:12</time><span class="anno ping">notifies</span></div><div class="mt"><p>Rate limits. The billing API returned 37 × 429 between 02:10 and 02:40, and the sync gave up after 3 retries with no backoff. Token and webhooks are fine.</p><p>Want me to add backoff? That's a code change, so I'll show you the brief first.</p></div>
+              <div class="btns"><span class="sb go">Write the brief</span><span class="sb">Not now</span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Code job -->
+  <section class="section" id="job" aria-labelledby="job-h">
+    <h2 id="job-h">3. A code job end to end</h2>
+    <p class="prose muted">The full path of one request, then the same thread as you'd see it in Slack.</p>
+    <div class="figure">
+      <svg viewBox="0 0 1000 640" role="img" aria-labelledby="seq-title seq-desc">
+        <title id="seq-title">Lifecycle of one code job</title>
+        <desc id="seq-desc">You ask in Slack. Sym shows a brief, you click Start, Sym writes a ledger row and launches a T3 thread, posts a job card, then loops reading T3 and editing the card silently. When T3 calls back, Sym verifies the result and posts it with buttons.</desc>
+        <defs>
+          <marker id="s-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#878787"/></marker>
+          <marker id="s-acc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#50a8ff"/></marker>
+        </defs>
+        <!-- lifelines -->
+        <line x1="130" y1="64" x2="130" y2="620" stroke="#454545" stroke-dasharray="4,4"/>
+        <line x1="390" y1="64" x2="390" y2="620" stroke="#454545" stroke-dasharray="4,4"/>
+        <line x1="630" y1="64" x2="630" y2="620" stroke="#454545" stroke-dasharray="4,4"/>
+        <line x1="870" y1="64" x2="870" y2="620" stroke="#454545" stroke-dasharray="4,4"/>
+        <!-- loop frame -->
+        <rect x="100" y="324" width="800" height="140" rx="4" fill="none" stroke="#454545"/>
+        <rect x="100" y="324" width="236" height="18" rx="2" fill="#1a1a1a" stroke="#454545"/>
+        <text x="110" y="337" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" letter-spacing="0.06em">LOOP · every 4 min or on callback</text>
+        <!-- messages -->
+        <path d="M130 104 H388" stroke="#878787" marker-end="url(#s-arr)"/>
+        <rect x="186" y="82" width="148" height="14" fill="#000"/><text x="260" y="93" fill="#a0a0a0" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">@sym add retry…</text>
+        <path d="M390 144 H132" stroke="#878787" marker-end="url(#s-arr)"/>
+        <rect x="170" y="122" width="180" height="14" fill="#000"/><text x="260" y="133" fill="#a0a0a0" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">brief · Start Edit Cancel</text>
+        <path d="M130 184 H388" stroke="#878787" marker-end="url(#s-arr)"/>
+        <rect x="236" y="162" width="48" height="14" fill="#000"/><text x="260" y="173" fill="#a0a0a0" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">Start</text>
+        <path d="M390 224 H628" stroke="#878787" marker-end="url(#s-arr)"/>
+        <rect x="446" y="202" width="128" height="14" fill="#000"/><text x="510" y="213" fill="#a0a0a0" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">job row J-142</text>
+        <path d="M390 264 H868" stroke="#50a8ff" marker-end="url(#s-acc)"/>
+        <rect x="446" y="242" width="128" height="14" fill="#000"/><text x="510" y="253" fill="#50a8ff" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">launch [J-142]</text>
+        <path d="M390 304 H132" stroke="#878787" marker-end="url(#s-arr)"/>
+        <rect x="180" y="282" width="160" height="14" fill="#000"/><text x="260" y="293" fill="#a0a0a0" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">job card · notifies</text>
+        <path d="M390 372 H868" stroke="#878787" marker-end="url(#s-arr)"/>
+        <rect x="430" y="350" width="160" height="14" fill="#000"/><text x="510" y="361" fill="#a0a0a0" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">wait 60s · read activity</text>
+        <path d="M870 404 H392" stroke="#878787" stroke-dasharray="5,4" marker-end="url(#s-arr)"/>
+        <rect x="686" y="382" width="128" height="14" fill="#000"/><text x="750" y="393" fill="#a0a0a0" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">status · new steps</text>
+        <path d="M390 444 H132" stroke="#878787" marker-end="url(#s-arr)"/>
+        <rect x="180" y="422" width="160" height="14" fill="#000"/><text x="260" y="433" fill="#a0a0a0" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">edit card · silent</text>
+        <path d="M870 504 H392" stroke="#878787" stroke-dasharray="5,4" marker-end="url(#s-arr)"/>
+        <rect x="670" y="482" width="160" height="14" fill="#000"/><text x="750" y="493" fill="#a0a0a0" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">callback · result JSON</text>
+        <path d="M390 532 H430 Q438 532 438 540 V548 Q438 556 430 556 H392" fill="none" stroke="#878787" marker-end="url(#s-arr)"/>
+        <rect x="446" y="537" width="196" height="14" fill="#000"/><text x="448" y="548" fill="#a0a0a0" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace">checks + verifier vs brief</text>
+        <path d="M390 596 H132" stroke="#50a8ff" marker-end="url(#s-acc)"/>
+        <rect x="158" y="574" width="204" height="14" fill="#000"/><text x="260" y="585" fill="#50a8ff" font-size="11" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">result · notifies · buttons</text>
+        <!-- headers -->
+        <rect x="40" y="20" width="180" height="44" rx="6" fill="#000"/><rect x="40" y="20" width="180" height="44" rx="6" fill="#ffffff12" stroke="#8f8f8f"/>
+        <text x="130" y="47" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">You · Slack</text>
+        <rect x="300" y="20" width="180" height="44" rx="6" fill="#000"/><rect x="300" y="20" width="180" height="44" rx="6" fill="#06193a" stroke="#50a8ff"/>
+        <text x="390" y="47" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Sym · t3_job task</text>
+        <rect x="540" y="20" width="180" height="44" rx="6" fill="#000"/><rect x="540" y="20" width="180" height="44" rx="6" fill="#ffffff0d" stroke="#878787"/>
+        <text x="630" y="47" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Ledger · Postgres</text>
+        <rect x="780" y="20" width="180" height="44" rx="6" fill="#000"/><rect x="780" y="20" width="180" height="44" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="870" y="47" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">T3 thread</text>
+      </svg>
+      <p class="figure-note">Every loop also writes status and a read cursor to the ledger row. That's what makes "what's the update?" cheap and lets reconcile pick the job up if the Eve session dies.</p>
+    </div>
+
+    <div class="scene">
+      <div class="slack">
+        <div class="sl-top"><b># sym</b><span>Thread · 6 replies</span></div>
+        <div class="sl-body">
+          <div class="msg thread-root"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>10:02</time></div><div class="mt"><span class="mention">@Sym</span> add retry with backoff to the billing sync in sync-service, open a draft PR</div><div class="rxs"><span class="rx mine">👀 1</span></div></div></div>
+
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:02</time><span class="anno ping">notifies · needs you</span></div>
+            <div class="mt"><p><b>Brief for J-142</b> · sync-service · new worktree · Codex</p>
+              <ul><li>Retry 429 and 5xx with exponential backoff, max 5 tries</li><li>Keep the current batch size</li><li>Done when: unit tests cover retry, CI green, draft PR open</li><li>Won't touch: prod config, customer data</li></ul></div>
+            <div class="btns"><span class="sb go done">Start ✓ Sam</span><span class="sb done">Edit</span><span class="sb done">Cancel</span></div>
+          </div></div>
+
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:03</time><span class="anno ping">notifies once</span></div>
+            <div class="plan">
+              <div class="plan-title">[J-142] Billing sync retry · running 9m</div>
+              <ol>
+                <li><span class="ic done">✓</span><span>Brief approved</span></li>
+                <li><span class="ic done">✓</span><span>T3 thread started <span class="meta">· worktree in sync-service</span></span></li>
+                <li><span class="ic doing"></span><span>Writing code <span class="meta">· 3 files changed</span></span></li>
+                <li class="todo-row"><span class="ic todo"></span><span>Tests</span></li>
+                <li class="todo-row"><span class="ic todo"></span><span>Draft PR</span></li>
+                <li class="todo-row"><span class="ic todo"></span><span>Verify result</span></li>
+              </ol>
+              <div class="ctxline">Codex · T3 thread 8f2c… · updated 1 min ago <span class="anno quiet">edits: silent</span></div>
+              <div class="btns"><span class="sb">Steer</span><span class="sb">Stop</span></div>
+            </div>
+          </div></div>
+
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:08</time><span class="anno ping">notifies · needs you</span></div>
+            <div class="mt"><span class="mention you">@Sam</span> Codex asks: should 408 timeouts retry too, or only 429 and 5xx?</div>
+            <div class="btns"><span class="sb go done">Yes, retry 408 ✓</span><span class="sb done">No</span><span class="sb done">Type your answer</span></div>
+          </div></div>
+
+          <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>10:11</time></div><div class="mt">what's the update?</div></div></div>
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:11</time></div><div class="mt">Running 8 min. Code is done, tests pass locally, and Codex is opening the PR now. Waiting on nothing. Next I check CI and the diff against your brief.</div></div></div>
+
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:16</time><span class="anno ping">notifies</span></div>
+            <div class="plan collapsed"><div class="plan-title"><span class="ic done">✓</span>[J-142] Billing sync retry · done in 14m · PR #812</div></div>
+            <div class="mt" style="margin-top:8px"><p><b>Verified.</b> Draft PR <span class="sl-link">#812</span> adds backoff for 429, 5xx, and 408 with max 5 tries. CI green. 4 new tests. Diff stays inside <code>sync/</code>.</p><p>One concern: the max wait is 62s per batch, so a full catalog sync can run about 6 minutes longer during an outage.</p></div>
+            <div class="btns"><span class="sb go">Looks good</span><span class="sb">Fix…</span><span class="sb">Close</span></div>
+            <div class="fb" aria-label="Feedback buttons"><span>👍</span><span>👎</span></div>
+          </div></div>
+          <div class="compose">Reply…</div>
+        </div>
+      </div>
+      <div class="notes">
+        <h3>What happened, by level</h3>
+        <dl>
+          <dt>10:02</dt><dd><span class="badge">👀</span> reaction: it's a job now. Silent.</dd>
+          <dt>10:02</dt><dd><span class="badge warning">L2</span> brief with buttons. A code change needs your yes.</dd>
+          <dt>10:03</dt><dd><span class="badge info">L3</span> card, posted once. About 20 edits after this, none notify.</dd>
+          <dt>10:08</dt><dd><span class="badge warning">L2</span> a T3 question relayed as buttons. You're mentioned.</dd>
+          <dt>10:11</dt><dd><span class="badge">L1</span> "what's the update?" gets 2 lines of text. No new card.</dd>
+          <dt>10:16</dt><dd>Card collapses to one line. <span class="badge">L1</span> result with buttons and 👍/👎.</dd>
+        </dl>
+        <ul>
+          <li>You got 4 notifications in 14 minutes: brief, card, question, result.</li>
+          <li>The status line under the thread ("Running tests in sync-service…") covers gaps and never notifies.</li>
+          <li>"Fix…" opens a box. Your text goes to the same T3 thread.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Job card states</h3>
+    <div class="states">
+      <div class="state-card"><p class="label">Running</p>
+        <div class="plan"><div class="plan-title">[J-142] Billing sync retry · running 9m</div>
+          <ol><li><span class="ic done">✓</span><span>T3 thread started</span></li><li><span class="ic doing"></span><span>Tests <span class="meta">· 41 of 58</span></span></li><li class="todo-row"><span class="ic todo"></span><span>Draft PR</span></li></ol>
+          <div class="btns"><span class="sb">Steer</span><span class="sb">Stop</span></div></div></div>
+      <div class="state-card"><p class="label">Needs you (plus a separate message that pings you)</p>
+        <div class="plan"><div class="plan-title">[J-139] Lint cleanup · waiting for you 6m</div>
+          <ol><li><span class="ic done">✓</span><span>Code changed</span></li><li><span class="ic wait">!</span><span>Permission prompt in T3 <span class="meta">· approve in the T3 app</span></span></li><li class="todo-row"><span class="ic todo"></span><span>Tests</span></li></ol>
+          <div class="btns"><span class="sb">Remind me in 15m</span><span class="sb">Stop</span></div></div></div>
+      <div class="state-card"><p class="label">Failed</p>
+        <div class="plan"><div class="plan-title">[J-140] Flaky test fix · failed after 22m</div>
+          <ol><li><span class="ic done">✓</span><span>Fix written</span></li><li><span class="ic err">×</span><span>Tests <span class="meta">· failed twice, same test</span></span></li></ol>
+          <div class="btns"><span class="sb">Retry</span><span class="sb">Show details</span></div></div></div>
+      <div class="state-card"><p class="label">Done (collapsed)</p>
+        <div class="plan collapsed"><div class="plan-title"><span class="ic done">✓</span>[J-142] Billing sync retry · done in 14m · PR #812</div></div>
+        <p class="small muted" style="margin-top:8px">The result is a separate text message. The card never repeats it.</p></div>
+    </div>
+  </section>
+
+  <!-- 4. Quick asks -->
+  <section class="section" id="asks" aria-labelledby="asks-h">
+    <h2 id="asks-h">4. Quick asks and updates</h2>
+    <p class="prose muted">Most messages are level 1. Under about 2 minutes there's no card, no reaction, and no buttons. The status line shows the work while it runs.</p>
+    <div class="pair">
+      <div>
+        <p class="label">A question in DM: text</p>
+        <div class="slack">
+          <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>12:40</time></div><div class="mt">what's running right now?</div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>12:40</time></div><div class="mt"><p>2 running, 1 waiting on you:</p><ul><li><span class="sl-link">J-142</span> Billing sync retry · 9m · tests</li><li><span class="sl-link">J-143</span> Store 4412 sync failure · 3m · reading logs</li><li><span class="sl-link">J-139</span> Lint cleanup · blocked 22m on a T3 permission</li></ul></div></div></div>
+            <div class="compose">Message Sym</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="label"><code>/sym status</code>: only you see it</p>
+        <div class="slack">
+          <div class="sl-top"><b># release-eng</b><span>Channel</span></div>
+          <div class="sl-body">
+            <div class="eph">
+              <div class="msg" style="padding:0"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>12:41</time></div>
+                <div class="mt"><p><b>Running (2)</b> J-142 · J-143</p><p><b>Waiting on you (1)</b> J-139 permission in T3, 22m</p><p><b>Today</b> 4 done · 1 failed · on-call check all clear</p><p><b>Mode</b> normal</p></div>
+                <div class="btns"><span class="sb">Switch to quiet</span><span class="sb">Dismiss</span></div></div></div>
+              <p class="eph-tag" style="margin-top:6px">👁 Only visible to you</p>
+            </div>
+            <div class="compose">Message #release-eng</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. Scheduled -->
+  <section class="section" id="sched" aria-labelledby="sched-h">
+    <h2 id="sched-h">5. Scheduled work</h2>
+    <p class="prose muted">Eve's dispatcher claims due rows every minute and starts a session aimed at #sym. The Slack thread exists only once Sym has something to post, so a clean run leaves no trace in the channel.</p>
+    <div class="figure">
+      <svg viewBox="0 0 1000 400" role="img" aria-labelledby="sch-title sch-desc">
+        <title id="sch-title">Scheduled check flow</title>
+        <desc id="sch-desc">The dispatcher claims a due schedule row with a lease and starts a Sym session aimed at the channel. The session runs a T3 check thread. A clean result posts nothing and adds a digest line. Findings open a thread with text and a Fix button, which starts a code job with a live card.</desc>
+        <defs>
+          <marker id="c-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#878787"/></marker>
+          <marker id="c-acc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#50a8ff"/></marker>
+        </defs>
+        <path d="M200 148 H238" stroke="#878787" marker-end="url(#c-arr)"/>
+        <path d="M120 184 V270" stroke="#878787" marker-end="url(#c-arr)"/>
+        <path d="M420 148 H458" stroke="#878787" marker-end="url(#c-arr)"/>
+        <path d="M640 148 H678" stroke="#878787" marker-end="url(#c-arr)"/>
+        <path d="M740 112 V80 Q740 72 748 72 H838" fill="none" stroke="#50a8ff" marker-end="url(#c-acc)"/>
+        <path d="M740 184 V276 Q740 284 748 284 H838" fill="none" stroke="#878787" marker-end="url(#c-arr)"/>
+        <path d="M910 320 V364 Q910 372 902 372 H478 Q470 372 470 364 V346" fill="none" stroke="#878787" stroke-dasharray="5,4" marker-end="url(#c-arr)"/>
+        <rect x="128" y="220" width="46" height="14" fill="#000"/><text x="130" y="231" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace">CLAIM</text>
+        <rect x="768" y="50" width="50" height="14" fill="#000"/><text x="793" y="61" fill="#50a8ff" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">CLEAN</text>
+        <rect x="748" y="226" width="56" height="14" fill="#000"/><text x="750" y="237" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace">ISSUES</text>
+        <rect x="660" y="350" width="60" height="14" fill="#000"/><text x="690" y="361" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">FIX IT</text>
+        <rect x="40" y="112" width="160" height="72" rx="6" fill="#000"/><rect x="40" y="112" width="160" height="72" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="120" y="144" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Dispatch</text>
+        <text x="120" y="162" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">every minute · UTC</text>
+        <rect x="40" y="272" width="160" height="56" rx="6" fill="#000"/><rect x="40" y="272" width="160" height="56" rx="6" fill="#ffffff0d" stroke="#878787"/>
+        <text x="120" y="296" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Schedules table</text>
+        <text x="120" y="314" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">lease per row</text>
+        <rect x="240" y="112" width="180" height="72" rx="6" fill="#000"/><rect x="240" y="112" width="180" height="72" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="330" y="144" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Session for #sym</text>
+        <text x="330" y="162" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">to(slack) · no thread yet</text>
+        <rect x="460" y="112" width="180" height="72" rx="6" fill="#000"/><rect x="460" y="112" width="180" height="72" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="550" y="144" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">T3 check thread</text>
+        <text x="550" y="162" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">ops-repo · /oncall:check</text>
+        <rect x="680" y="112" width="120" height="72" rx="6" fill="#000"/><rect x="680" y="112" width="120" height="72" rx="6" fill="#06193a" stroke="#50a8ff"/>
+        <text x="740" y="144" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Findings?</text>
+        <text x="740" y="162" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">display rule</text>
+        <rect x="840" y="40" width="140" height="64" rx="6" fill="#000"/><rect x="840" y="40" width="140" height="64" rx="6" fill="#ffffff08" stroke="#ffffff4d"/>
+        <text x="910" y="68" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Nothing posts</text>
+        <text x="910" y="86" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">1 digest line</text>
+        <rect x="840" y="248" width="140" height="72" rx="6" fill="#000"/><rect x="840" y="248" width="140" height="72" rx="6" fill="#ffffff08" stroke="#ffffff4d"/>
+        <text x="910" y="278" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Thread + text</text>
+        <text x="910" y="296" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">Fix it · Ignore</text>
+        <rect x="380" y="288" width="180" height="56" rx="6" fill="#000"/><rect x="380" y="288" width="180" height="56" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="470" y="312" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Code job</text>
+        <text x="470" y="330" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">brief → live card</text>
+      </svg>
+    </div>
+
+    <div class="pair">
+      <div>
+        <p class="label">09:00 run, all clear: the channel stays empty</p>
+        <div class="slack">
+          <div class="sl-top"><b># sym</b><span>Channel</span></div>
+          <div class="sl-body">
+            <div class="sl-day">Today</div>
+            <div class="empty-ch">No new messages from the 09:00 on-call check.<br>It shows up once, at 18:00, in your digest.</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="label">09:00 run with findings: one thread, text first</p>
+        <div class="slack">
+          <div class="sl-top"><b># sym</b><span>Channel</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>09:04</time><span class="anno ping">notifies</span></div>
+              <div class="mt"><p><b>On-call check:</b> 2 things need attention.</p><ul><li>Sentry: <code>ExportTimeoutError</code> up 4× since 02:00, 31 accounts</li><li>Release queue: hotfix 3.18.2 stuck in staging for 19h</li></ul></div>
+              <div class="btns"><span class="sb go">Fix #1</span><span class="sb">Look at #2</span><span class="sb">Ignore today</span></div></div></div>
+            <div class="replies">1 reply</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scene">
+      <div class="slack">
+        <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+        <div class="sl-body">
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>18:00</time><span class="anno ping">notifies once a day</span></div>
+            <div class="mt"><p><b>Today</b></p>
+              <ul>
+                <li>✅ 4 done: <span class="sl-link">J-142</span> Billing sync retry (PR #812), <span class="sl-link">J-143</span> account 4412 answer, 2 more</li>
+                <li>❌ 1 failed: <span class="sl-link">J-140</span> flaky test fix, same test failed twice</li>
+                <li>⏳ 1 waiting on you: <span class="sl-link">J-139</span> T3 permission, 7h</li>
+                <li>On-call check 09:00: all clear</li>
+                <li>Learned: on-call checks are text only, nothing when clear</li>
+              </ul></div>
+            <div class="fb" aria-label="Feedback buttons"><span>👍</span><span>👎</span></div>
+          </div></div>
+        </div>
+      </div>
+      <div class="notes">
+        <h3>The 18:00 digest</h3>
+        <p class="muted">One level 1 message. Everything that stayed silent during the day lands here, so silence never means "lost".</p>
+        <ul>
+          <li>Quiet-mode items also wait for it.</li>
+          <li>A day with nothing to report still gets one line: "Quiet day. 0 jobs."</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. Needs you -->
+  <section class="section" id="needs" aria-labelledby="needs-h">
+    <h2 id="needs-h">6. When it needs you, or something breaks</h2>
+    <div class="pair">
+      <div>
+        <p class="label">Blocked on a T3 permission: your DM</p>
+        <div class="slack">
+          <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>14:12</time><span class="anno ping">notifies · needs you</span></div>
+              <div class="mt"><p><b>J-139 is blocked.</b> Codex wants to run <code>pnpm install</code>, and T3 needs your approval for it.</p><p>I can't approve permissions from Slack. Open T3 on your Mac or phone.</p></div>
+              <div class="btns"><span class="sb">Remind me in 15m</span><span class="sb danger">Stop J-139</span></div></div></div>
+          </div>
+        </div>
+        <p class="small muted" style="margin-top:12px">The job card also turns amber, silently. This DM is the only ping.</p>
+      </div>
+      <div>
+        <p class="label">Mac offline, then back: one post, edited later</p>
+        <div class="slack">
+          <div class="sl-top"><b># sym</b><span>Channel</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:31</time><span class="anno ping">notifies once</span></div>
+              <div class="mt"><p><span class="strike">Your Mac is unreachable. J-142 and J-143 are paused, not lost. I'll retry every 5 min.</span></p><p>✅ Back at 10:44. Both jobs resumed. <span class="edited">(edited)</span> <span class="anno quiet">silent edit</span></p></div></div></div>
+          </div>
+        </div>
+        <p class="small muted" style="margin-top:12px">If the Mac stays down for more than an hour, Sym posts once more. Nothing else repeats.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. Learning -->
+  <section class="section" id="learn" aria-labelledby="learn-h">
+    <h2 id="learn-h">7. Learning</h2>
+    <p class="prose muted">Signals become feedback rows. Sym then changes in one of three layers. The more a change can do, the more approval it needs.</p>
+    <div class="figure">
+      <svg viewBox="0 0 1000 380" role="img" aria-labelledby="lrn-title lrn-desc">
+        <title id="lrn-title">Learning loop in three layers</title>
+        <desc id="lrn-desc">Signals such as thumbs, reactions, and corrections go through hooks into a feedback table. From there, memory changes right away, playbooks change weekly with your click, and code changes go through a draft PR you merge. All three change how Sym behaves on later jobs, which produce new signals.</desc>
+        <defs>
+          <marker id="l-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#878787"/></marker>
+          <marker id="l-acc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#50a8ff"/></marker>
+        </defs>
+        <path d="M200 180 H258" stroke="#878787" marker-end="url(#l-arr)"/>
+        <path d="M440 166 H462 Q470 166 470 158 V80 Q470 72 478 72 H538" fill="none" stroke="#878787" marker-end="url(#l-arr)"/>
+        <path d="M440 180 H538" stroke="#50a8ff" marker-end="url(#l-acc)"/>
+        <path d="M440 194 H482 Q490 194 490 202 V280 Q490 288 498 288 H538" fill="none" stroke="#878787" marker-end="url(#l-arr)"/>
+        <path d="M740 72 H772 Q780 72 780 80 V152 Q780 160 788 160 H818" fill="none" stroke="#878787" marker-end="url(#l-arr)"/>
+        <path d="M740 180 H818" stroke="#50a8ff" marker-end="url(#l-acc)"/>
+        <path d="M740 288 H792 Q800 288 800 280 V208 Q800 200 808 200 H818" fill="none" stroke="#878787" marker-end="url(#l-arr)"/>
+        <path d="M890 220 V344 Q890 352 882 352 H128 Q120 352 120 344 V222" fill="none" stroke="#878787" stroke-dasharray="5,4" marker-end="url(#l-arr)"/>
+        <rect x="206" y="158" width="46" height="14" fill="#000"/><text x="229" y="169" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">HOOKS</text>
+        <rect x="468" y="330" width="74" height="14" fill="#000"/><text x="505" y="341" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">NEXT JOBS</text>
+        <rect x="40" y="140" width="160" height="80" rx="6" fill="#000"/><rect x="40" y="140" width="160" height="80" rx="6" fill="#ffffff12" stroke="#8f8f8f"/>
+        <text x="120" y="172" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Signals</text>
+        <text x="120" y="190" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">👍👎 · reactions</text>
+        <text x="120" y="204" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">"too noisy" · Fix…</text>
+        <rect x="260" y="152" width="180" height="56" rx="6" fill="#000"/><rect x="260" y="152" width="180" height="56" rx="6" fill="#ffffff0d" stroke="#878787"/>
+        <text x="350" y="176" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Feedback table</text>
+        <text x="350" y="194" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">Postgres · per job</text>
+        <rect x="540" y="40" width="200" height="64" rx="6" fill="#000"/><rect x="540" y="40" width="200" height="64" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="640" y="66" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">1 · Memory</text>
+        <text x="640" y="84" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">now · no click · next turn</text>
+        <rect x="540" y="148" width="200" height="64" rx="6" fill="#000"/><rect x="540" y="148" width="200" height="64" rx="6" fill="#06193a" stroke="#50a8ff"/>
+        <text x="640" y="174" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">2 · Playbooks + rules</text>
+        <text x="640" y="192" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">weekly · your click</text>
+        <rect x="540" y="256" width="200" height="64" rx="6" fill="#000"/><rect x="540" y="256" width="200" height="64" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="640" y="282" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">3 · Code</text>
+        <text x="640" y="300" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">draft PR via T3 · your merge</text>
+        <rect x="820" y="140" width="140" height="80" rx="6" fill="#000"/><rect x="820" y="140" width="140" height="80" rx="6" fill="#1a1a1a" stroke="#878787"/>
+        <text x="890" y="176" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Sym</text>
+        <text x="890" y="194" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">acts differently</text>
+      </svg>
+    </div>
+
+    <div class="scene">
+      <div class="slack">
+        <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+        <div class="sl-body">
+          <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>Fri 09:20</time></div><div class="mt">too noisy. for on-call checks just tell me what's wrong, no cards</div></div></div>
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>Fri 09:20</time><span class="badge" style="margin-left:6px">layer 1</span></div><div class="mt">Got it. On-call checks: text only, and nothing when all clear. Saved as a preference, so it applies from the next run.</div></div></div>
+          <div class="sl-day">Monday</div>
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>Mon 10:00</time><span class="anno ping">notifies · weekly</span></div>
+            <div class="mt"><p><b>Weekly learning: 2 proposals</b></p>
+              <p><span class="badge" style="font-size:11px">layer 2</span> New playbook <b>"Billing sync failures"</b>, seen in 3 jobs this week. Check 429s first, then token expiry, then the webhook backlog.</p></div>
+            <div class="btns"><span class="sb go">Approve</span><span class="sb">Show full text</span><span class="sb">Reject</span></div>
+            <div class="mt" style="margin-top:12px"><p><span class="badge" style="font-size:11px">layer 3</span> I keep reading Sentry through T3, which is slow. A T3 thread opened draft PR <span class="sl-link">#23</span> in the sym repo that adds a direct <code>sentry_issue_read</code> tool. Evals pass. Merge it to turn it on.</p></div>
+            <div class="btns"><span class="sb">Open PR #23</span><span class="sb">Not now</span></div>
+          </div></div>
+        </div>
+      </div>
+      <div class="notes">
+        <h3>Who approves what</h3>
+        <dl>
+          <dt>Layer 1</dt><dd>Facts and preferences. Sym saves them right away and tells you it did.</dd>
+          <dt>Layer 2</dt><dd>Playbooks, rules, trust levels. One click. Loaded from Postgres at the next session, no deploy.</dd>
+          <dt>Layer 3</dt><dd>New tools and code. Draft PR, evals in CI, your merge, then Dokploy redeploys.</dd>
+        </dl>
+        <ul>
+          <li>Everything is text, rows, or code you can read and revert. No model training.</li>
+          <li>The weekly message is one ping, even with several proposals.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. Home -->
+  <section class="section" id="home" aria-labelledby="home-h">
+    <h2 id="home-h">8. Later: the Home tab</h2>
+    <p class="prose muted">Phase 2. A dashboard that never notifies. Sym rebuilds it with <code>views.publish</code> each time you open the app's Home tab.</p>
+    <div class="scene">
+      <div class="slack">
+        <div class="sl-top"><b>Sym</b><span>App</span></div>
+        <div class="tabs"><span class="on">Home</span><span>Messages</span><span>About</span></div>
+        <div class="home">
+          <div class="home-sec"><div class="home-h">Needs you (1)</div>
+            <div class="home-row"><span>⏳ J-139 Lint cleanup · T3 permission · 22m</span><span class="sb">Remind me</span></div></div>
+          <div class="home-sec"><div class="home-h">Running (2)</div>
+            <div class="home-row"><span>◐ J-142 Billing sync retry · tests · 9m</span><span class="sb">Open thread</span></div>
+            <div class="home-row"><span>◐ J-143 Store 4412 sync failure · logs · 3m</span><span class="sb">Open thread</span></div></div>
+          <div class="home-sec"><div class="home-h">Schedules (3)</div>
+            <div class="home-row"><span>On-call check · weekdays 09:00 · text only · auto</span><span class="sb">Pause</span></div>
+            <div class="home-row"><span>Release status · weekdays 17:30 · text · approve each run</span><span class="sb">Pause</span></div>
+            <div class="home-row"><span>Digest · daily 18:00</span><span class="sb">Pause</span></div></div>
+          <div class="home-sec"><div class="home-h">Mode</div>
+            <div class="home-row"><span>Normal. Quiet hours 22:00 to 09:00 local time</span><span class="sb">Switch to quiet</span></div></div>
+          <div class="home-sec"><div class="home-h">Learned this week</div>
+            <div class="home-row"><span>On-call checks: text only · Playbook "Billing sync failures" (approved)</span><span class="sb">Review</span></div></div>
+        </div>
+      </div>
+      <div class="notes">
+        <h3>Why a Home tab</h3>
+        <p class="muted">It answers "what's going on?" without a message. Every row reads from the ledger, so it stays right even after an Eve restart.</p>
+        <ul>
+          <li>The trust ladder shows per schedule: "auto" or "approve each run".</li>
+          <li>Slack's AI side panel and suggested prompts come later. They need raw API calls and may need a paid plan.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>Slack visuals are close approximations of Slack's dark theme. The plan and task card blocks follow Slack's AI app docs, and their exact status values get checked in Block Kit Builder during the spike. Repo names, job IDs, PR numbers, and times are examples.</p>
+    <p>Source: <code>rundown.md</code> sections 5.1 to 5.10 in work-sym-slack-agent.</p>
+  </footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,36 @@
+{
+  "name": "sym",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Self-hosted Slack agent that hands work to coding agents and reports back only what matters.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@12.14.0",
+  "scripts": {
+    "dev": "eve dev",
+    "build": "eve build",
+    "build:compile": "eve build --skip-sandbox-prewarm",
+    "start": "eve start",
+    "eval": "eve eval",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "knip": "knip"
+  },
+  "dependencies": {
+    "ai": "^7.0.137",
+    "eve": "0.81.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^24.19.2",
+    "knip": "^6.42.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

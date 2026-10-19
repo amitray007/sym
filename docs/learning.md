@@ -1,0 +1,37 @@
+# Learning
+
+Sym changes its own behavior in three layers. Eve supplies the parts. Sym owns the loop that
+decides what to keep.
+
+| Layer | What changes | Eve part | Takes effect | Who approves |
+|---|---|---|---|---|
+| 1. Memory | Facts and preferences: "draft PRs, never ready for review" | `defineMemory` with a Postgres provider. Recall before each turn, capture after it | Next turn | Nobody. Sym saves them |
+| 2. Playbooks and rules | New playbooks, instruction snippets, schedules, trust levels | `defineDynamic` loads approved rows at session start | Next session, no redeploy | The owner, one click |
+| 3. Code | New tools, Slack handlers, integrations | A worker thread in Sym's own repository opens a draft PR | After merge and redeploy | A person, by merging |
+
+## The loop
+
+1. **Signals.** 👍/👎 buttons, reactions, "Fix: ..." replies, edits to a brief before Start, and
+   repeated instructions.
+2. **Capture.** Hooks write every signal to the `feedback` table, linked to its job.
+3. **Memory.** Sym saves short facts at once (layer 1). Milestone 1 uses one fixed owner scope,
+   because Eve's `byPrincipal` scope gives schedule turns no memory.
+4. **Promotion.** A weekly `learn` schedule groups feedback. A pattern seen 3 times becomes a
+   proposal. Text-only changes are layer 2: Sym shows the new playbook or rule with Approve and
+   Reject buttons. Changes that need code are layer 3.
+5. **Change.** For layer 3, Sym launches a worker thread in its own repository. The thread edits
+   the code and opens a draft PR. CI runs `eve eval --strict`. A person reviews and merges, and the
+   deployment updates. This replaces Eve's remote self-modification extension, which needs
+   microsandbox on the server (decision 007).
+6. **Trust ladder.** A job class moves from "approve each run" to "auto" after N clean runs. The
+   level is a column on the schedule row, and only the owner changes it.
+
+## Limits
+
+- Sym does not train a model. Everything it learns is text, rows, and code that a person can read
+  and revert.
+- Self-written rules can drift, or carry injected text from an untrusted source. That is why
+  layer 2 needs a click and keeps a version history.
+- A layer 3 redeploy strands running sessions. The ledger and reconcile cover this.
+- Learned rows stay in the adopter's database. They never enter this repository. A layer 3 PR
+  changes only generic code; adopter-specific changes go to the adopter's pack.
