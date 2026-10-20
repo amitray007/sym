@@ -43,8 +43,10 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Slack channel | `channels/slack.ts` `slackChannel` | Use | Main interface | HTTP Events API only. Needs a public HTTPS URL |
 | Portable credentials | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` | Use | Slack auth off Vercel | |
 | Handlers | `onAppMention`, `onDirectMessage`, `onMessage` | Use | Allow-list check, then start work | First matching handler wins |
-| Reply without mention | `onMessage` + `isSubscribed()` | Use | Replies in job threads without `@sym` | Needs `message.channels` and history scopes |
-| Thread context | `threadContext: { since: "thread-root" }` | Use | Sym reads the whole job thread | |
+| Reply without mention | `onMessage` + `isSubscribed()` | Use | Replies in job threads without `@sym`, when the message is meant for Sym (decision 050) | Needs `message.channels` and history scopes |
+| Dispatch context | `{ auth, context }` from a message hook | Use | A People note (who is in the thread, with roles) and a note on a message that did not tag Sym | Strings join the session history before the message |
+| Thread context | `threadContext: { since: predicate }` | Use | A session's first turn reads the whole thread. Later turns read what came after Sym's last post | The predicate reads in-process state, so another instance reads the whole thread |
+| Thread participants | `ctx.thread.listParticipants()` | Use | Tells a solo thread from a shared one | Sees the first 50 messages only. A failure reads as a shared thread |
 | Task card | automatic, `taskCard` renderer | Use | Short non-job tasks. Hidden for `worker_job` | Rows show no progress. Schedule sessions get no card |
 | Status line | tool `label.start`, `label.delta` | Use | "Launching worker thread", "Tests running" | Cut at 50 characters. Cleared after 2 min idle |
 | Approval routing | `approvalChannel: "direct-message"` | Later | Approvals stay in the job thread for the owner-only allow-list; a DM route comes with team use | Fails closed if the user cannot be resolved |

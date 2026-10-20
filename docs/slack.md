@@ -166,12 +166,12 @@ with the public host before you import it.
 | `app_mentions:read` | `@sym` in channels |
 | `chat:write` | Replies, job cards, card edits |
 | `im:history`, `im:read`, `im:write` | DMs and approval DMs |
-| `channels:history`, `groups:history` | Replies in job threads without a mention |
+| `channels:history`, `groups:history` | Replies in job threads without a mention, and the people in a thread |
 | `files:read`, `files:write` | Logs and screenshots in; long reports out |
 | `assistant:write` | The thread status line (`assistant.threads.setStatus`) |
 | `reactions:read`, `reactions:write` | Feedback reactions in; status reactions out (later) |
 | `commands` | `/sym` |
-| `users:read` | Resolve the approver for DM routing |
+| `users:read` | Resolve the approver for DM routing, and display names in a shared thread |
 
 Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reaction_added`.
 Interactivity and the slash command use the same request URL, `/eve/v1/slack`. The Home tab and
@@ -185,3 +185,30 @@ users. Every inbound
 handler checks it and fails closed, including answers to buttons. Thread context still includes
 messages from other people in the thread. The instructions treat that text as data, and job
 launches need approval.
+
+## Threads with several people
+
+Decision 050. A reply in a thread with a session no longer starts a turn by default. Code in
+`onMessage` (`lib/slack/addressing.ts`) decides, in this order:
+
+1. A message that tags Sym is for Sym.
+2. In a thread set to `mention-only`, nothing else starts a turn.
+3. A message that tags someone else is for them, so Sym skips it.
+4. If the sender is the only human in the thread, Sym replies.
+5. The person Sym last served (the user of the thread's latest turn), or any message that says
+   Sym's name as a word (`SYM_BOT_NAME`, default `sym`), starts a quiet turn. The brain decides
+   whether to reply or call `no_reply`.
+6. Anything else is skipped. In a shared thread, other people tag Sym.
+
+A quiet turn shows no status line and no loading messages until the brain calls a tool other than
+`no_reply` or writes reply text. A quiet turn does not change who Sym serves.
+
+Each dispatched turn in a shared thread carries a People note: each human as `<@ID>` with a
+display name and a role (owner, allowed, or not on the allow-list). Names are cleaned and cached
+for an hour. The roles and user IDs decide what a person may do.
+
+Anyone allowed can say "answer only when tagged" and Sym records `mention-only` for that thread
+(`thread_listen`, table `thread_listen`). It needs no approval. "Listen again" sets it back.
+
+Thread context: the first turn of a session reads the whole thread. Later turns read only what
+came after Sym's last post. Direct messages are unchanged.

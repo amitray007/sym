@@ -37,3 +37,18 @@ export async function getSessionThread(
   `;
   return row;
 }
+
+// The person Sym last served in a Slack thread: the user of the thread's most recent turn. Only
+// the owner of a turn can start one by tag, so this is who Sym works for (decision 050).
+export async function lastTurnUser(
+  sql: Sql,
+  channelId: string,
+  threadTs: string,
+): Promise<string | undefined> {
+  const [row] = await sql<{ userId: string }[]>`
+    select user_id from session_threads
+    where channel_id = ${channelId} and thread_ts = ${threadTs} and user_id is not null
+    order by updated_at desc limit 1
+  `;
+  return row?.userId;
+}
