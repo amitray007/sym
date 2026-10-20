@@ -494,11 +494,11 @@ footer p + p { margin-top: 8px; }
           </div></div>
 
           <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>10:11</time></div><div class="mt">what's the update?</div></div></div>
-          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:11</time></div><div class="mt">Running 8 min. Code is done, tests pass locally, and Codex is opening the PR now. Waiting on nothing. Next I check CI and the diff against your brief.</div></div></div>
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:11</time></div><div class="mt"><p>still running, 8 min in.</p><ul><li>✅ code done, tests pass locally</li><li>🔄 the PR is opening now</li><li>☐ next: CI and the diff against your brief</li></ul><p>nothing needs you.</p></div></div></div>
 
           <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:16</time><span class="anno ping">notifies</span></div>
             <div class="plan collapsed"><div class="plan-title"><span class="ic done">✓</span>[J-142] Billing sync retry · done in 14m · PR #812</div></div>
-            <div class="mt" style="margin-top:8px"><p><b>Verified.</b> Draft PR <span class="sl-link">#812</span> adds backoff for 429, 5xx, and 408 with max 5 tries. CI green. 4 new tests. Diff stays inside <code>sync/</code>.</p><p>One concern: the max wait is 62s per batch, so a full catalog sync can run about 6 minutes longer during an outage.</p></div>
+            <div class="mt" style="margin-top:8px"><p>⚠️ <b>J-142 · Billing sync retry</b> · 14m<br><b>tl;dr</b> adds backoff for 429, 5xx, and 408 with max 5 tries.</p><p><b>⚠️ check before merge</b> (85% sure)<br>1. the max wait is 62s per batch, so a full catalog sync can run about 6 minutes longer during an outage</p><p><b>open questions</b><br>☐ cap the wait at 30s?</p><p>🔗 <span class="sl-link">PR #812</span> · tests: 4 new, CI green · 3 files changed</p></div>
             <div class="btns"><span class="sb go">Looks good</span><span class="sb">Fix…</span><span class="sb">Close</span></div>
             <div class="fb" aria-label="Feedback buttons"><span>👍</span><span>👎</span></div>
           </div></div>

@@ -58,9 +58,13 @@ const START_OPTIONS = [
   { id: "cancel", label: "Cancel", style: "danger" as const },
 ];
 
-// Sym posts each result in the job thread itself, so a lost session cannot lose it.
-const POSTED_NOTE =
-  "Sym already posted this in the job thread. Call no_reply unless the person asked for more.";
+// Sym posts each result in the job thread itself, so a lost session cannot lose it (decision
+// 044). The result gives the brain no summary to repeat, only `posted: true`: when the result
+// carried the worker's summary, the brain wrote it out a second time.
+const POSTED = {
+  posted: true,
+  note: "Sym already posted the result in the job thread. Call no_reply and write nothing.",
+} as const;
 
 export default defineWorkflowTool({
   description:
@@ -178,7 +182,7 @@ export default defineWorkflowTool({
         if (woke === "stopped") {
           await cancel(job.id);
           await endRun(ctx.session.id, job.id, "cancelled", null);
-          return { job: ref, status: "cancelled", threadId, note: POSTED_NOTE };
+          return { job: ref, status: "cancelled", threadId, ...POSTED };
         }
         if (woke === "callback") calledBack = true;
 
@@ -197,9 +201,7 @@ export default defineWorkflowTool({
             job: ref,
             status: end.status,
             threadId,
-            summary: end.summary,
-            lastMessage: end.lastMessage,
-            note: POSTED_NOTE,
+            ...POSTED,
           };
         }
 
@@ -207,7 +209,7 @@ export default defineWorkflowTool({
           const answers = await askQuestion(ctx.ask, ref, question, stopped);
           if (answers === "stopped") {
             await cancel(job.id);
-            return { job: ref, status: "cancelled", threadId, note: POSTED_NOTE };
+            return { job: ref, status: "cancelled", threadId, ...POSTED };
           }
           if (answers) await answer(job.id, question.requestId, answers);
         }
@@ -218,9 +220,7 @@ export default defineWorkflowTool({
             job: ref,
             status: result.status,
             threadId,
-            summary: result.summary,
-            lastMessage: result.lastMessage,
-            note: POSTED_NOTE,
+            ...POSTED,
           };
         }
       }

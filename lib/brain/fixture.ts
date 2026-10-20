@@ -10,7 +10,7 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A scheduled run message calls worker_job with its brief and its schedule reference.
 // - A message that asks for an update or status calls jobs_status and repeats its answer.
 // - A message that says "sign in to the worker" calls worker_sign_in.
-// - A task result, or a tool result that says Sym already posted, ends the turn with no_reply.
+// - A task result, or a tool result with `posted: true`, ends the turn with no_reply.
 // - Anything else gets a one-line echo.
 export function fixtureBrain(): LanguageModel {
   return mockModel({ modelId: "sym-fixture", provider: "sym", respond: respondAsFixture });
@@ -24,7 +24,12 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
     (message) => message.role === "user" && message.text === text,
   );
   const since = request.messages.slice(authoredAt + 1);
-  if (text.includes("<task_result") || since.some((m) => m.text.includes("<task_result"))) {
+  // A task result, or any result with `posted: true`, means Sym already posted (decision 044).
+  const posted = (m: { text: string }) => /"posted"\s*:\s*true/.test(m.text);
+  if (
+    text.includes("<task_result") ||
+    since.some((m) => m.text.includes("<task_result") || posted(m))
+  ) {
     return quiet(request);
   }
   if (since.some((message) => message.role === "tool")) {

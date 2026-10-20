@@ -232,7 +232,7 @@ async function presentEndOnce(
       ? resultMessage(facts(job, now), contract, concerns, verdictLine(check, concerns))
       : job.status === "failed"
         ? failureMessage(facts(job, now), job.lastSummary)
-        : `${ref} was cancelled.`;
+        : `🚫 ${ref} was cancelled.`;
   // A failure notifies even in quiet mode (docs/display.md).
   const quiet = await isQuiet(sql, pack, now);
   await post(sql, job, `${ref}:end`, text, false, quiet, job.status === "failed");

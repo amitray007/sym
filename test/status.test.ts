@@ -55,26 +55,28 @@ function job(overrides: Partial<Job> = {}): Job {
 describe("jobAnswer", () => {
   it("answers for a running job with its last summary", () => {
     const answer = jobAnswer(job({ lastSummary: "Writing the retry loop" }), NOW);
-    expect(answer).toBe("J-12 Billing sync retry: running for 14m.\nLast: Writing the retry loop");
+    expect(answer).toBe(
+      "🔄 J-12 Billing sync retry: running for 14m.\nlast: Writing the retry loop",
+    );
   });
 
   it("measures from creation when the job never started", () => {
     expect(jobAnswer(job({ startedAt: null }), NOW)).toBe(
-      "J-12 Billing sync retry: running for 15m.",
+      "🔄 J-12 Billing sync retry: running for 15m.",
     );
   });
 
   it("says what a job waiting for an answer needs", () => {
     expect(jobAnswer(job({ status: "waiting_input" }), NOW)).toBe(
-      "J-12 Billing sync retry: waiting for you for 14m.\n" +
+      "🙋 J-12 Billing sync retry: waiting for you for 14m.\n" +
         "Waiting for your answer to the worker's question.",
     );
   });
 
   it("says what a job blocked on a permission prompt needs", () => {
     expect(jobAnswer(job({ status: "waiting_permission", lastSummary: "Needs shell" }), NOW)).toBe(
-      "J-12 Billing sync retry: blocked on a permission prompt for 14m.\n" +
-        "Last: Needs shell\n" +
+      "🔒 J-12 Billing sync retry: blocked on a permission prompt for 14m.\n" +
+        "last: Needs shell\n" +
         "Waiting for a permission prompt on the worker. Approve it in the worker.",
     );
   });
@@ -90,9 +92,9 @@ describe("jobAnswer", () => {
       NOW,
     );
     expect(answer).toBe(
-      "J-12 Billing sync retry: done 3m ago.\n" +
-        "Last: Added retry\n" +
-        "PR: https://github.com/example/widgets/pull/42",
+      "✅ J-12 Billing sync retry: done 3m ago.\n" +
+        "last: Added retry\n" +
+        "🔗 https://github.com/example/widgets/pull/42",
     );
   });
 
@@ -106,7 +108,7 @@ describe("jobAnswer", () => {
       NOW,
     );
     expect(answer).toBe(
-      "J-12 Billing sync retry: failed 1h 30m ago.\nLast: Worker thread interrupted",
+      "❌ J-12 Billing sync retry: failed 1h 30m ago.\nlast: Worker thread interrupted",
     );
   });
 
@@ -121,7 +123,7 @@ describe("jobAnswer", () => {
 
 describe("jobListAnswer", () => {
   it("says so when there is nothing to list", () => {
-    expect(jobListAnswer([], NOW)).toBe("No active jobs, and none finished today.");
+    expect(jobListAnswer([], NOW)).toBe("no active jobs, and none finished today.");
   });
 
   it("lists one line per job", () => {
@@ -138,8 +140,8 @@ describe("jobListAnswer", () => {
       NOW,
     );
     expect(list).toBe(
-      "J-13 Docs pass: waiting for you for 14m · Asked a question\n" +
-        "J-12 Billing sync retry: done 5m ago",
+      "🙋 J-13 Docs pass: waiting for you for 14m · Asked a question\n" +
+        "✅ J-12 Billing sync retry: done 5m ago",
     );
   });
 });

@@ -506,10 +506,10 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       expect(posts).toHaveLength(1);
       const text = String(posts[0]?.body.text);
       expect(posts[0]?.body).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });
-      expect(text).toContain(`${s.ref} done in 9m`);
+      expect(text).toContain(`*${s.ref} · Billing sync retry* · 9m`);
       expect(text).toContain("Added retry with backoff");
-      expect(text).toContain(`Draft PR: <${PR_URL}|PR #42>`);
-      expect(text).toContain("Tests: 12 passed");
+      expect(text).toContain(`🔗 <${PR_URL}|PR #42>`);
+      expect(text).toContain("tests: 12 passed");
       expect(text).toContain("2 files changed");
     });
 
@@ -629,7 +629,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       const afterQuiet = s.slack.posts().slice(before);
       expect(afterQuiet).toHaveLength(1);
       expect(String(afterQuiet[0]?.body.text)).toContain(
-        `${s.ref} has had no new activity for 21m. It is still running.`,
+        `⏳ ${s.ref} has had no new activity for 21m. still running.`,
       );
 
       clock = minutes(25);
@@ -647,7 +647,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       await cancelJob(s.deps, s.job.id);
 
       expect(s.worker.interrupts).toHaveLength(1);
-      expect(texts(s.slack.posts().slice(before))).toEqual([`${s.ref} was cancelled.`]);
+      expect(texts(s.slack.posts().slice(before))).toEqual([`🚫 ${s.ref} was cancelled.`]);
     });
 
     it("hands a launched job to reconcile when its watcher fails", async () => {

@@ -23,6 +23,7 @@ the pack.
 my-pack/
   sym.config.yaml     owner, allow-list, channels, time zone, quiet hours, workers, projects
   instructions/       extra instruction files (tone, house rules)
+  personas/           optional persona file for the brain's voice
   playbooks/          Eve skills, one Markdown file each
   schedules.yaml      schedules to seed on first start
   evals/              eval cases for your playbooks
@@ -61,6 +62,7 @@ projects:
     productionData: read-only
     model: claudeAgent/claude-opus-5-5   # optional; always this model for this project
 instructions: [instructions/tone.md]
+persona: personas/house.md        # optional; wins over SYM_PERSONA
 playbooks: [playbooks/release-steps.md]
 ```
 
@@ -80,6 +82,10 @@ Rules (decision 026):
   Without a pack, `SYM_PROJECTS` plays this role.
 - The owner is always allowed; `allowList` adds people.
 - Instruction and playbook files are listed by path and stay inside the pack folder.
+- `persona` is one Markdown file inside the pack folder, with the same rules as `instructions`
+  (decision 044). It replaces the built-in persona that `SYM_PERSONA` would pick. Sym reads it at
+  start from `SYM_PACK_DIR`, so it needs no overlay. It sets the brain's tone only. The shared
+  Voice rules in `agent/instructions.md` still apply, and Sym's code-built messages ignore it.
 
 ## How Sym loads a pack
 

@@ -46,6 +46,10 @@ learned preferences, and shared channels are planned.
   taking longer. Tracking it here."). When a card job ends, the card collapses to one line and the
   result posts as text.
 
+The result message has a fixed shape: a status emoji and title, a one-line tl;dr, a numbered
+concerns list, an open-questions checklist, and a footer (docs/slack.md, Voice; decision 044).
+When a `t3_job` result says `posted: true`, the brain posts nothing more.
+
 Sym never shows a visual just to look busy. Reactions mark only requests that became jobs. Buttons
 appear only with a real choice. A card never repeats what the result message says.
 

@@ -61,7 +61,7 @@ describe("slash command", () => {
     const status = await slash("C0SLASH1", "status");
     expect(status.target_user).toBe(OWNER);
     expect(status.channel).toBe("C0SLASH1");
-    expect(status.text).toContain("No active jobs");
+    expect(status.text).toContain("no active jobs");
 
     const quiet = await slash("C0SLASH1", "quiet 30");
     expect(quiet.text).toMatch(/^Quiet until \d\d:\d\d UTC\./);

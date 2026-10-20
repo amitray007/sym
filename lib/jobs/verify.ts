@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { OutputContract } from "./contract.ts";
+import { nearDuplicate } from "./similar.ts";
 
 // Deterministic result checks (docs/architecture.md, flow 4), run before any model review. They
 // compare what the worker says it did with what the job allowed. No I/O: this module runs inside
@@ -108,7 +109,8 @@ const MAX_MODEL_CONCERNS = 8;
 const MAX_CONCERN_LENGTH = 300;
 
 // The deterministic concerns first, then the model's, without repeats. Two concerns repeat when
-// they match after case, spacing, and a final period are ignored.
+// they match after case, spacing, and a final period are ignored, or when they say nearly the
+// same thing (lib/jobs/similar.ts).
 export function mergeConcerns(deterministic: string[], model: string[] = []): string[] {
   const key = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim().replace(/\.$/, "");
   const seen = new Set<string>();
@@ -116,6 +118,7 @@ export function mergeConcerns(deterministic: string[], model: string[] = []): st
   const add = (text: string) => {
     const k = key(text);
     if (k === "" || seen.has(k)) return;
+    if (merged.some((kept) => nearDuplicate(kept, text))) return;
     seen.add(k);
     merged.push(text.trim());
   };
@@ -132,17 +135,21 @@ export function modelConcerns(check: ModelCheck | undefined): string[] {
   return check?.status === "checked" ? check.output.concerns : [];
 }
 
-// The one-line verdict in the result message. Only a job that tried the model check gets one.
+// The header of the concerns list in the result message. The model check's confidence joins it.
+export const CONCERNS_HEADER = "*⚠️ check before merge*";
+
+// The model check's note in the result message. Only a job that tried the model check gets one.
+// A clean verdict is one line. With concerns, the verdict is the header of the concerns list.
 export function verdictLine(check: ModelCheck | undefined, concerns: string[]): string | null {
   if (!check) return null;
   if (check.status === "unavailable") {
-    return "Model check unavailable. Only the rule checks ran.";
+    return "verifier unavailable, only the rule checks ran";
   }
-  const confidence = `${Math.round(check.output.confidence * 100)}% confidence`;
+  const confidence = `${Math.round(check.output.confidence * 100)}% sure`;
   const pass = check.output.verdict === "pass" && concerns.length === 0;
   return pass
-    ? `Verdict: the result matches the brief (${confidence}).`
-    : `Verdict: check the concerns below (${confidence}).`;
+    ? `✅ verifier: matches the brief (${confidence})`
+    : `${CONCERNS_HEADER} (${confidence})`;
 }
 
 export interface VerifierRequest {

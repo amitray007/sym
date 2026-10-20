@@ -30,7 +30,7 @@ Codex · thread 8f2c… · updated 1 min ago
   Slack redraws a plan block only under a new one; the version moves only when the card changes.
 - The job row holds the card Sym wants. Delivery posts it and edits Slack to match (decision 020).
 - Sym fills the steps from the brief's done-when list and the worker activity it reads.
-- Slack text calls the worker by `SYM_WORKER_LABEL` (default `Worker`) and never names the software behind it (decision 043). The mockups show the label `Builder`.
+- Slack text calls the worker by `SYM_WORKER_LABEL` (default `Worker`) and never names the software behind it (decision 044). The mockups show the label `Builder`.
 - Sym's renderer removes `worker_job` rows from Eve's task card, and returns `null` when nothing else
   is left, so the thread has one card.
 - When the job ends, the card collapses to one line, for example "Done in 14m · PR #812", and the
@@ -64,6 +64,44 @@ Notes:
 - Card posts never unfurl links. Put PR and CI links on buttons or in the card footer.
 - Slack's reference uses `complete`; `completed` appears only in guide prose. Sym sends
   `complete`. `chat.update` is Tier 3 (50 or more per minute).
+
+## Voice
+
+Sym's messages are short and structured, so they scan in a glance. Two parts make them, and only
+one has a persona (decision 044).
+
+- **Sym's code** builds the brief, the card, the result, failures, and status answers. These are
+  neutral and never joke. The result message has this shape:
+
+  ```
+  ⚠️ *J-3 · Review PR #7698 data:null fix* · 1m
+  *tl;dr* Merge PR #7698: the one-line fix is correct.
+
+  *⚠️ check before merge* (75% sure)
+  1. The worker opened a pull request the job did not allow.
+  2. Tests were not run, so fail-before / pass-after is unverified.
+
+  *open questions*
+  ☐ Follow-up issue for the other .get('data', {}) sites?
+
+  🔗 <PR #7698> · tests: not run
+  ```
+
+  The emoji is ✅ for a clean result, ⚠️ for concerns, and ❌ for a failure. The tl;dr is the
+  summary's first sentence, capped near 160 characters. Concerns repeat nowhere: Sym drops near
+  duplicates, and drops an open question that a concern already covers. The footer holds the PR
+  link, the tests line, and the file count. The worker thread ID shows only when there is no
+  result to read, or on a failure.
+- **The brain** writes every other reply: answers, questions, status summaries. It follows the
+  shared Voice rules in `agent/instructions.md`: the answer first in one line, then numbered
+  steps, bullets, or `☐`/`✅` checklists, about 6 lines at most, bold on the key word only. It
+  never repeats a Sym post. A `worker_job` result carries `posted: true`, and the brain then calls
+  `no_reply`.
+
+`SYM_PERSONA` picks the brain's tone: `plain` (neutral), `casual` (default: relaxed, lowercase
+friendly, at most one emoji), or `spicy` (playful, may lightly tease the person talking to Sym,
+with hard limits in `agent/personas/spicy.md`). A pack can supply its own persona file. Worker
+threads never get a persona.
 
 ## Slash command, card buttons, and feedback
 

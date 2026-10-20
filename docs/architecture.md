@@ -123,9 +123,10 @@ update?" cheap and lets a new session continue the job.
    brief, the rule-check concerns, and the worker's claims as untrusted data. It compares the
    done-when list with the claims and returns `pass` or `concerns`, `concerns[]`, and
    `confidence`. It has no tools.
-5. `finishJob` sets `done`, collapses the card, and posts one message: a one-line verdict,
-   summary, PR link, the concerns from both checks without repeats under "Check before you
-   merge", and the worker thread ID. Buttons Looks good, Fix, and Close come later. "Fix" will
+5. `finishJob` sets `done`, collapses the card, and posts one message in the shape of decision 044: a status
+   emoji and title, a one-line tl;dr, the concerns from both checks without repeats as a numbered
+   list under "check before merge" with the verifier's confidence, open questions as a checklist,
+   and a footer with the PR link, tests, and file count. Buttons Looks good, Fix, and Close come later. "Fix" will
    send the reply to the same worker thread.
 6. If a PR opened, ask the worker to watch it, so the worker agent can fix CI failures and answer
    review comments. Reconcile reports those wakes in the job thread.
