@@ -21,7 +21,9 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: postgres://sym:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/sym
+      # `sym-postgres` is this stack's own alias. Sym's network includes dokploy-network, where
+      # another stack's `postgres` service could answer to the plain name.
+      DATABASE_URL: postgres://sym:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@sym-postgres:5432/sym
     volumes:
       - workflow-data:/app/.eve/.workflow-data
     depends_on:
@@ -43,7 +45,9 @@ services:
     ports:
       - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
     networks:
-      - default
+      default:
+        aliases:
+          - sym-postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sym -d sym"]
       interval: 5s
