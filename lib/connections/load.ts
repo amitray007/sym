@@ -4,7 +4,14 @@ import type { SignInState } from "./credentials.ts";
 import { hasTokenEnv, nameProblem } from "./names.ts";
 import { checkServerUrl } from "./probe.ts";
 import type { Connection } from "./rows.ts";
-import { bareToolName, type ConnectionTool, hiddenTools, modeFor, truncate } from "./tools.ts";
+import {
+  bareToolName,
+  type ConnectionDefault,
+  type ConnectionTool,
+  hiddenTools,
+  modeFor,
+  truncate,
+} from "./tools.ts";
 
 // Turns active connection rows into Eve MCP connections (decision 045). The loader in
 // agent/connections/rows.ts calls this at each turn, so an approval, a mode change, or a removal
@@ -12,8 +19,9 @@ import { bareToolName, type ConnectionTool, hiddenTools, modeFor, truncate } fro
 //
 // - Hidden tools go in Eve's `tools.block` list, so the model cannot find or call them.
 // - `ask` tools return "user-approval", and only the owner may approve (`response`).
-// - `auto` tools run without a prompt. A tool Sym has not recorded follows the default rule:
-//   read tools run, everything else asks.
+// - `auto` tools run without a prompt. A tool resolves as its own mode, then the connection's
+//   default mode, then the annotation rule (read tools run, everything else asks). That holds
+//   for a tool Sym has not recorded too (decision 049).
 // - A connection without its token or sign-in does not load. connection_list shows why.
 
 export interface LoadDeps {
@@ -35,7 +43,7 @@ export function connectionDefinitions(
     if (row.status !== "active" || !canLoad(row, deps)) continue;
     const url = checkServerUrl(row.url);
     if (!url.ok) continue;
-    const hidden = hiddenTools(row.tools);
+    const hidden = hiddenTools(row.tools, row.defaultMode);
     definitions[row.name] = defineMcpClientConnection({
       url: url.url,
       description: modelDescription(row),
@@ -58,7 +66,10 @@ export function connectionDefinitions(
             },
           }),
       ...(hidden.length > 0 ? { tools: { block: hidden } } : {}),
-      approval: { request: toolApproval(row.name, row.tools), response: deps.response },
+      approval: {
+        request: toolApproval(row.name, row.tools, row.defaultMode),
+        response: deps.response,
+      },
     });
   }
   return definitions;
@@ -75,9 +86,18 @@ function canLoad(row: Connection, deps: LoadDeps): boolean {
 }
 
 // The request-time approval for one connection's tools.
-export function toolApproval(connection: string, tools: readonly ConnectionTool[]): ApprovalPolicy {
+export function toolApproval(
+  connection: string,
+  tools: readonly ConnectionTool[],
+  connectionDefault?: ConnectionDefault,
+): ApprovalPolicy {
   return ({ toolName, toolAnnotations }): ApprovalStatus => {
-    const mode = modeFor(tools, bareToolName(connection, toolName), toolAnnotations);
+    const mode = modeFor(
+      tools,
+      bareToolName(connection, toolName),
+      toolAnnotations,
+      connectionDefault,
+    );
     if (mode === "hidden") return { type: "denied", reason: "The owner hid this tool." };
     return mode === "ask" ? "user-approval" : "not-applicable";
   };

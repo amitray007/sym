@@ -14,15 +14,17 @@ import { refreshStale } from "../lib/connections/refresh.ts";
 import {
   activateConnection,
   activeConnections,
+  type Connection,
   disableConnection,
   getConnection,
   listConnections,
   type NewConnection,
   proposeConnection,
   saveTools,
+  setDefaultMode,
   setToolMode,
 } from "../lib/connections/rows.ts";
-import { recordTools } from "../lib/connections/tools.ts";
+import { recordTools, toolMode } from "../lib/connections/tools.ts";
 import { beginSignIn, clientOf, finishSignIn, newState, readRedirect } from "../lib/oauth.ts";
 import { type FakeMcp, startFakeMcp } from "./fakes/mcp-server.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
@@ -78,8 +80,69 @@ describe.skipIf(!hasDatabase)("connection rows", () => {
     const row = await getConnection(sql, "example-tracker");
     if (!row) throw new Error("no row");
     const changed = await setToolMode(sql, row.id, "create_item", "hidden");
-    expect(changed?.tools.find((tool) => tool.name === "create_item")?.mode).toBe("hidden");
+    expect(changed?.tools.find((tool) => tool.name === "create_item")?.override).toBe("hidden");
     expect(await setToolMode(sql, row.id, "nope", "auto")).toBeUndefined();
+  });
+
+  it("sets and clears the connection default, and an own mode wins and can be cleared", async () => {
+    const sql = ledger.sql();
+    const saved = await proposeConnection(sql, proposal({ name: "example-gateway" }));
+    if (!saved.ok) throw new Error(saved.reason);
+    const id = saved.row.id;
+    expect(saved.row.defaultMode).toBeNull();
+    await activateConnection(sql, id, "UOWNER", now);
+
+    const modeOf = (row: Connection | undefined, name: string) => {
+      const found = row?.tools.find((item) => item.name === name);
+      return found ? toolMode(found, row?.defaultMode ?? null) : undefined;
+    };
+    const wide = await setDefaultMode(sql, id, "auto");
+    expect(wide?.defaultMode).toBe("auto");
+    expect(modeOf(wide, "create_item")).toBe("auto");
+    expect(modeOf(wide, "list_items")).toBe("auto");
+
+    // An own mode wins over the default, and changing the default leaves it alone.
+    await setToolMode(sql, id, "create_item", "ask");
+    const hidden = await setDefaultMode(sql, id, "hidden");
+    expect(modeOf(hidden, "create_item")).toBe("ask");
+    expect(modeOf(hidden, "list_items")).toBe("hidden");
+
+    // Clearing the own mode returns the tool to the default.
+    const cleared = await setToolMode(sql, id, "create_item", null);
+    expect(cleared?.tools.find((item) => item.name === "create_item")?.override).toBeUndefined();
+    expect(modeOf(cleared, "create_item")).toBe("hidden");
+
+    const none = await setDefaultMode(sql, id, null);
+    expect(none?.defaultMode).toBeNull();
+    expect(modeOf(none, "create_item")).toBe("ask");
+    expect(modeOf(none, "list_items")).toBe("auto");
+    expect(await setDefaultMode(sql, id + 9999, "auto")).toBeUndefined();
+    await expect(
+      sql`update connections set default_mode = 'sometimes' where id = ${id}`,
+    ).rejects.toThrow();
+  });
+
+  it("keeps a connection default and own modes through a relist", async () => {
+    const sql = ledger.sql();
+    const row = await getConnection(sql, "example-gateway");
+    if (!row) throw new Error("no row");
+    await setDefaultMode(sql, row.id, "auto");
+    await setToolMode(sql, row.id, "create_item", "hidden");
+    const again = await saveTools(
+      sql,
+      row.id,
+      recordTools(
+        [{ name: "list_items" }, { name: "create_item" }, { name: "added_later" }],
+        (await getConnection(sql, "example-gateway"))?.tools ?? [],
+      ),
+    );
+    expect(again?.defaultMode).toBe("auto");
+    const modes = again?.tools.map((item) => [item.name, toolMode(item, again.defaultMode)]);
+    expect(modes).toEqual([
+      ["list_items", "auto"],
+      ["create_item", "hidden"],
+      ["added_later", "auto"],
+    ]);
   });
 
   it("refuses an env var outside SYM_MCP_*_TOKEN in the database too", async () => {
@@ -193,7 +256,7 @@ describe.skipIf(!hasDatabase)("OAuth connection sign-in against the fake server"
     expect(listed.instructions).toBe("Call search first. Then execute.");
     const withTools = await saveTools(sql, row.id, listed.tools, listed.instructions);
     expect(withTools?.serverInstructions).toBe("Call search first. Then execute.");
-    expect(withTools?.tools.map((tool) => [tool.name, tool.mode])).toEqual([
+    expect(withTools?.tools.map((tool) => [tool.name, toolMode(tool, null)])).toEqual([
       ["list_items", "auto"],
       ["create_item", "ask"],
       ["delete_item", "ask"],

@@ -55,3 +55,13 @@ export const connectionInstructionsMigration: Migration = {
       check (server_instructions is null or length(server_instructions) <= 4000);
   `,
 };
+
+// A connection-wide default tool mode (decision 049). Null keeps the annotation rule. A tool the
+// owner set on its own keeps that mode (the `override` key in `tools`).
+export const connectionDefaultModeMigration: Migration = {
+  version: "014_connection_default_mode",
+  sql: `
+    alter table connections add column default_mode text
+      check (default_mode is null or default_mode in ('auto', 'ask', 'hidden'));
+  `,
+};
