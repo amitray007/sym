@@ -2,11 +2,9 @@ import type { SessionAuthContext } from "eve/context";
 import { defineWorkflowTool } from "eve/tools";
 import { createWebhook, sleep } from "workflow";
 import { z } from "zod";
-import { deliver } from "../../lib/delivery/deliver.ts";
-import { chooseDisplay } from "../../lib/display.ts";
-import { enqueuePost, postStatus } from "../../lib/ledger/outbox.ts";
 import { ownerUserId } from "../../lib/owner.ts";
 import { ledger, pack, slackFromEnv } from "../../lib/runtime.ts";
+import { sendSignInLink } from "../../lib/sign-in-link.ts";
 import { workerLabel, workerNoun } from "../../lib/worker-label.ts";
 import { saveCredential } from "../../lib/workers/credentials.ts";
 import { workerTarget } from "../../lib/workers/resolve.ts";
@@ -163,34 +161,13 @@ async function sendLink(
   key: string,
 ): Promise<"sent" | "queued"> {
   "use step";
-  const sql = ledger();
-  const display = chooseDisplay({
-    kind: "worker-sign-in",
-    needsAction: true,
-    isNew: true,
-    estMinutes: 0,
-    steps: 0,
-    lines: 2,
-    surface: "dm",
-    quiet: false,
-  });
-  const post = await enqueuePost(sql, {
+  return sendSignInLink(ledger(), slackFromEnv(), {
+    owner,
     idempotencyKey: `signin-link:${key}`,
-    method: "chat.postMessage",
-    payload: {
-      channel: owner,
-      text:
-        `Approve Sym on the ${workerNoun()}: <${authorizationUrl}|open the sign-in page>. ` +
-        "Pick the access level there. The link works for 10 minutes. Do not share it.",
-      unfurl_links: false,
-      unfurl_media: false,
-    },
-    display: { ...display, target: "dm" },
+    text:
+      `Approve Sym on the ${workerNoun()}: <${authorizationUrl}|open the sign-in page>. ` +
+      "Pick the access level there. The link works for 10 minutes. Do not share it.",
   });
-  const slack = slackFromEnv();
-  // A failed send stays in the outbox for the delivery schedule.
-  if (slack) await deliver(sql, slack).catch(() => {});
-  return (await postStatus(sql, post.id)) === "sent" ? "sent" : "queued";
 }
 
 // Checks the redirect, redeems the code, and stores the token. The code and the token stay in

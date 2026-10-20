@@ -40,8 +40,13 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_CALLBACK_URL` | Base URL a worker uses to call Sym back, such as Sym's private-network address. Without it, jobs wait for the 4-minute poll (decision 028) |
 | `SYM_SIGNIN_URL` | Base URL the owner's browser returns to after the worker sign-in, such as Sym's public HTTPS address. Must be https unless it is loopback. Defaults to `SYM_CALLBACK_URL` (decision 036) |
 | `SYM_OWNER_SLACK_USER` | The owner's Slack user ID when there is no pack. Only the owner can sign Sym in to the worker |
+| `SYM_MCP_<NAME>_TOKEN` | Bearer token for an MCP connection that needs one, such as `SYM_MCP_EXAMPLE_TRACKER_TOKEN` for `example-tracker`. Sym tells the owner the exact name when the owner connects the server. Sym reads only variables named `SYM_MCP_*_TOKEN` (decision 045) |
 | `T3_MCP_URL` | Worker MCP URL when the pack has no `workers` entry |
 | `T3_TOKEN`, `T3_TOKEN_EXPIRES_AT` | Fallback worker token and its expiry, from `pnpm t3:login`. Sym uses them only when Postgres holds no sign-in for the worker |
+
+OAuth sign-ins for MCP connections are not environment variables either. The owner asks Sym to
+connect a server, Sym sends the sign-in link to the owner's DM, and Sym stores the token and any
+refresh token in Postgres. `SYM_SIGNIN_URL` serves both sign-ins (decision 045).
 
 The worker sign-in token is not an environment variable. The owner asks Sym in Slack to sign in
 to the worker, approves on T3's page, and Sym stores the token in Postgres (decision 036). A T3
@@ -108,3 +113,5 @@ Only a person can do these:
 - Approve the worker sign-in and pick its access level, then re-approve every 30 days. Ask Sym
   to sign in to the worker for a new link.
 - Approve permission prompts on the worker when a thread blocks.
+- Set `SYM_MCP_<NAME>_TOKEN` and redeploy when Sym says an MCP connection needs a token, or
+  approve the sign-in link Sym sends for an OAuth connection.

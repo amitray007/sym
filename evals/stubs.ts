@@ -22,6 +22,12 @@ export const writeToolStubs = [
   { id: "playbook-propose", tool: "playbook_propose", outcome: { response: NOTHING_RAN } },
   { id: "playbook-retire", tool: "playbook_retire", outcome: { response: NOTHING_RAN } },
   { id: "playbook-review", tool: "playbook_review", outcome: { response: NOTHING_RAN } },
+  // Connection tools probe outside servers or change which tools load (decision 045).
+  { id: "connection-add", tool: "connection_add", outcome: { response: NOTHING_RAN } },
+  { id: "connection-approve", tool: "connection_approve", outcome: { response: NOTHING_RAN } },
+  { id: "connection-tools", tool: "connection_tools", outcome: { response: NOTHING_RAN } },
+  { id: "connection-sign-in", tool: "connection_sign_in", outcome: { response: NOTHING_RAN } },
+  { id: "connection-remove", tool: "connection_remove", outcome: { response: NOTHING_RAN } },
   // Worker-facing tools queue Slack posts in the outbox. Stub them too, so an eval run with a
   // real Slack token cannot post.
   { id: "sym-post-progress", tool: "sym_post_progress", outcome: { response: NOTHING_RAN } },

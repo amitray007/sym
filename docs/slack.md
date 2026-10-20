@@ -117,6 +117,21 @@ threads never get a persona.
   them. Clicks and reactions on Sym's messages go to the `feedback` table, and Sym uses them only
   after review (docs/learning.md).
 
+## Connecting a service
+
+The owner connects an MCP server by asking Sym, for example "connect example-tracker at
+https://mcp.example.com/mcp" (decision 045).
+
+1. Sym checks the server and shows an approval prompt in the thread: the URL, the sign-in kind,
+   and every tool with read or write. Only the owner can approve it.
+2. For a server that needs a token, Sym names the env var, such as
+   `SYM_MCP_EXAMPLE_TRACKER_TOKEN`. The owner sets it in the deployment and redeploys. Sym never
+   asks for a token in Slack.
+3. For an OAuth server, Sym sends the sign-in link to the owner's DM, like the worker sign-in.
+4. From the next message, people can use the service through Sym. Read tools run freely. Write
+   tools show an approval prompt that only the owner can approve. The owner can set any tool to
+   auto, ask, or hidden, and can remove the connection.
+
 ## App setup
 
 [`slack/manifest.yaml`](../slack/manifest.yaml) creates the app. Replace `https://sym.example.com`
