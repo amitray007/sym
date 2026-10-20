@@ -8,8 +8,6 @@ import { workerLabel } from "../worker-label.ts";
 // role and gathers the data (lib/home/collect.ts). Text from jobs and schedules is data, so it is
 // escaped and cut before it reaches a block.
 
-export const HOME_REFRESH_ACTION_ID = "sym_home_refresh";
-
 // Slack allows 100 blocks per Home view and 3000 characters per section text.
 export const MAX_BLOCKS = 100;
 export const MAX_SECTION_CHARS = 3000;
@@ -181,16 +179,6 @@ export function homeView(role: HomeRole, data?: HomeData): HomeView {
   const blocks: Block[] = [
     { type: "header", text: { type: "plain_text", text: "Sym" } },
     section(`*Persona:* ${esc(data.persona.name)}\n${workerLine(data.worker, now)}`),
-    {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          action_id: HOME_REFRESH_ACTION_ID,
-          text: { type: "plain_text", text: "Refresh" },
-        },
-      ],
-    },
     { type: "divider" },
   ];
 

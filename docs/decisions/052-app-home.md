@@ -35,8 +35,9 @@ had it as "Team phase".
    and the sign-in expiry. The sign-in row is a ledger read. Reachability is one `projects` call
    with a 3 second timeout. Any error or timeout shows "status unknown". No sign-in shows "not
    signed in". The publish never waits longer than the timeout.
-6. **Refresh.** The view publishes on `app_home_opened`. A `Refresh` button (action ID
-   `sym_home_refresh`) re-publishes through `onInteraction`. Sym does not re-publish after job
+6. **Refresh.** The view publishes on `app_home_opened`, so opening the tab refreshes it. It has
+   no Refresh button: Eve 0.81.0 drops Home-view clicks (see Consequences). Sym does not
+   re-publish after job
    state changes: the cost (a publish per viewer per change, with a 30 s per-user limit to track)
    is not worth it while opening the tab is free.
 7. **The one display exception.** `views.publish` is not a message post. It makes no
@@ -53,9 +54,8 @@ had it as "Team phase".
   fake Slack server.
 - Eve 0.81.0 does not deliver block actions that come from a Home view to `onInteraction`: its
   parser drops a `block_actions` payload without a channel and a message
-  (`parseBlockActionsPayload` in `interactions.js`). The `Refresh` button posts the click, Slack
-  accepts it, and nothing happens until Eve supports it. The tab still refreshes each time it
-  opens. The handler is in place and tested through the same publish path.
+  (`parseBlockActionsPayload` in `interactions.js`). So the view has no buttons until Eve
+  supports them. The tab refreshes each time it opens.
 - `Finished` counts the last 24 hours, the window `/sym status` uses, not the calendar day.
 - Each open of the tab reads the ledger and calls the worker once. A burst of opens costs a burst
   of reads.

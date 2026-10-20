@@ -89,7 +89,6 @@ describe("homeView by role", () => {
     expect(view.type).toBe("home");
     expect(view.blocks).toHaveLength(1);
     expect(textOf(view)).toContain(NOT_SET_UP);
-    expect(textOf(view)).not.toContain("sym_home_refresh");
   });
 
   it("shows the dashboard to an allowed user without owner sections", () => {
@@ -98,7 +97,7 @@ describe("homeView by role", () => {
     expect(text).toContain("Running and waiting");
     expect(text).toContain("Schedules");
     expect(text).toContain("Projects Sym works on");
-    expect(text).toContain("sym_home_refresh");
+    expect(text).not.toContain("sym_home_refresh");
     expect(text).not.toContain("Connections");
     expect(text).not.toContain("Settings");
     expect(text).not.toContain("docs");
@@ -402,7 +401,7 @@ describe.skipIf(!hasDatabase)("publishHome", () => {
     }
   });
 
-  it("re-publishes fresh data when Refresh runs the same path", async () => {
+  it("re-publishes fresh data on the next open", async () => {
     await make("home-refresh", "Added after open", "running");
     const request = async (operation: string, body: Record<string, unknown>) => {
       const response = await fetch(`${slack.apiBaseUrl}${operation}`, {
