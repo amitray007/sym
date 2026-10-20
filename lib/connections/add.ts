@@ -1,7 +1,7 @@
 import { nameProblem, readTokenEnv, tokenEnvVar } from "./names.ts";
 import { checkServerUrl, type Probe, type ProbeOptions } from "./probe.ts";
 import type { AuthKind, NewConnection } from "./rows.ts";
-import { type ConnectionTool, recordTools } from "./tools.ts";
+import { type ConnectionTool, recordInstructions, recordTools } from "./tools.ts";
 
 // Plans a new connection from the owner's request (decision 045): checks the name and URL,
 // probes the server, and decides the sign-in. It writes nothing; connection_add saves the plan
@@ -38,9 +38,11 @@ export async function planConnection(request: AddRequest, deps: AddDeps): Promis
   let authKind: AuthKind = "none";
   let envVar: string | null = null;
   let tools: ConnectionTool[] = [];
+  let serverInstructions: string | null = null;
   const notes: string[] = [];
   if (anonymous.kind === "tools") {
     tools = recordTools(anonymous.tools);
+    serverInstructions = recordInstructions(anonymous.instructions);
   } else if (anonymous.oauth) {
     authKind = "oauth";
     notes.push(
@@ -58,8 +60,10 @@ export async function planConnection(request: AddRequest, deps: AddDeps): Promis
       );
     } else {
       const signedIn = await deps.probe(url.url, { token });
-      if (signedIn.kind === "tools") tools = recordTools(signedIn.tools);
-      else if (signedIn.kind === "unauthorized") {
+      if (signedIn.kind === "tools") {
+        tools = recordTools(signedIn.tools);
+        serverInstructions = recordInstructions(signedIn.instructions);
+      } else if (signedIn.kind === "unauthorized") {
         notes.push(`The server refused the token in ${envVar}. The owner sets a new one.`);
       } else notes.push(signedIn.reason);
     }
@@ -74,22 +78,32 @@ export async function planConnection(request: AddRequest, deps: AddDeps): Promis
       authKind,
       envVar,
       tools,
+      serverInstructions,
       createdBy: request.createdBy,
     },
     notes,
   };
 }
 
-// Lists the tools again with the connection's token, keeping the owner's earlier choices. For
-// a sign-in that just finished, and for a mode change on a tool Sym has not seen yet.
+// Lists the tools again with the connection's token, keeping the owner's earlier choices, and
+// reads the server's instructions again. For a sign-in that just finished, a token that just
+// arrived, and a mode change on a tool Sym has not seen yet.
 export async function relistTools(
   url: string,
   token: string | undefined,
   previous: readonly ConnectionTool[],
   probe: AddDeps["probe"],
-): Promise<{ ok: true; tools: ConnectionTool[] } | { ok: false; reason: string }> {
+): Promise<
+  { ok: true; tools: ConnectionTool[]; instructions: string | null } | { ok: false; reason: string }
+> {
   const result = await probe(url, token ? { token } : {});
-  if (result.kind === "tools") return { ok: true, tools: recordTools(result.tools, previous) };
+  if (result.kind === "tools") {
+    return {
+      ok: true,
+      tools: recordTools(result.tools, previous),
+      instructions: recordInstructions(result.instructions),
+    };
+  }
   if (result.kind === "unauthorized")
     return { ok: false, reason: "The server refused the sign-in." };
   return { ok: false, reason: result.reason };

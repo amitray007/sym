@@ -44,3 +44,14 @@ export const connectionsMigration: Migration = {
     );
   `,
 };
+
+// The text a server sends in its MCP `initialize` result (decision 048).
+export const connectionInstructionsMigration: Migration = {
+  version: "013_connection_instructions",
+  sql: `
+    -- Untrusted server text, cleaned and capped at 4000 characters (lib/connections/tools.ts).
+    -- The model reads it as data; it never changes a mode or a rule.
+    alter table connections add column server_instructions text
+      check (server_instructions is null or length(server_instructions) <= 4000);
+  `,
+};

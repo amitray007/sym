@@ -26,6 +26,7 @@ export default defineTool({
     url: z.string(),
     auth: z.enum(["none", "env", "oauth"]),
     tools: z.array(z.object({ name: z.string(), access: z.enum(["read", "write"]) })).max(100),
+    instructions: z.string().max(400).optional(),
   }),
   approval: {
     request: always(),
@@ -52,7 +53,7 @@ export default defineTool({
     if (active.authKind === "env" && !hasTokenEnv(active.envVar)) {
       return (
         `Approved "${active.name}". It loads once ${active.envVar} is set in the deployment ` +
-        "environment and Sym is redeployed. Tell the owner the variable name. Never ask for the token."
+        "environment and Sym is redeployed. Its tools and instructions list on the next message. Tell the owner the variable name. Never ask for the token."
       );
     }
     if (active.authKind === "oauth") {

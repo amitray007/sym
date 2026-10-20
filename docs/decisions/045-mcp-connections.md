@@ -78,3 +78,6 @@ Eve facts that shape the design (0.81.0):
   prompt says so, and the default rule covers the tools that appear later.
 - Sym has not run against a real third-party MCP server. The tests use a fake server that runs
   open, token, and OAuth modes.
+- Servers can send usage instructions in their `initialize` result. Eve does not show them to the
+  model, so decision 048 stores them and appends them to the connection description. It also
+  refreshes a token server's tools once the token is there, and covers code-mode servers.

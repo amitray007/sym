@@ -208,7 +208,7 @@ async function complete(
   if (row?.id === target.id) {
     const listed = await relistTools(target.url, token.accessToken, row.tools, probeServer);
     if (listed.ok) {
-      await saveTools(sql, row.id, listed.tools);
+      await saveTools(sql, row.id, listed.tools, listed.instructions);
       tools = listed.tools.length;
     }
   }

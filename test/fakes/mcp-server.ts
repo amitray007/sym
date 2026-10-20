@@ -26,6 +26,8 @@ export interface FakeMcpOptions {
   tokenSeconds?: number;
   // Whether the token endpoint issues refresh tokens.
   refresh?: boolean;
+  // The text the server sends in its MCP `initialize` result, as a code-mode server does.
+  instructions?: string;
 }
 
 export interface FakeMcp {
@@ -70,7 +72,10 @@ export async function startFakeMcp(options: FakeMcpOptions): Promise<FakeMcp> {
   };
 
   function buildServer(): McpServer {
-    const server = new McpServer({ name: "fake-mcp", version: "0.0.0" });
+    const server = new McpServer(
+      { name: "fake-mcp", version: "0.0.0" },
+      options.instructions === undefined ? {} : { instructions: options.instructions },
+    );
     const tool = (name: string, description: string, readOnly: boolean | undefined) => {
       server.registerTool(
         name,

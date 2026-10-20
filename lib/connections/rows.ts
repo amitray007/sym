@@ -18,6 +18,8 @@ export interface Connection {
   envVar: string | null;
   status: ConnectionStatus;
   tools: ConnectionTool[];
+  // What the server said in its `initialize` result. Untrusted text, already cleaned.
+  serverInstructions: string | null;
   createdBy: string | null;
   approvedBy: string | null;
   approvedAt: Date | null;
@@ -32,6 +34,7 @@ export interface NewConnection {
   authKind: AuthKind;
   envVar: string | null;
   tools: ConnectionTool[];
+  serverInstructions: string | null;
   createdBy: string | null;
 }
 
@@ -59,10 +62,10 @@ export async function proposeConnection(sql: Sql, input: NewConnection): Promise
     }
     if (existing) await tx`delete from connections where name = ${input.name}`;
     const [row] = await tx<Connection[]>`
-      insert into connections (name, url, description, auth_kind, env_var, tools, created_by)
+      insert into connections (name, url, description, auth_kind, env_var, tools, server_instructions, created_by)
       values (
         ${input.name}, ${input.url}, ${input.description}, ${input.authKind}, ${input.envVar},
-        ${json(sql, input.tools)}, ${input.createdBy}
+        ${json(sql, input.tools)}, ${input.serverInstructions}, ${input.createdBy}
       )
       returning *
     `;
@@ -107,14 +110,21 @@ export async function activateConnection(
   return row && normalize(row);
 }
 
-// Replaces the recorded tools, for example after a sign-in lists them for the first time.
+// Replaces the recorded tools, for example after a sign-in lists them for the first time. A
+// listing also brings the server's instructions: pass them (null when the server sent none) to
+// replace the stored text, or leave them out to keep it.
 export async function saveTools(
   sql: Sql,
   id: number,
   tools: ConnectionTool[],
+  instructions?: string | null,
 ): Promise<Connection | undefined> {
   const [row] = await sql<Connection[]>`
-    update connections set tools = ${json(sql, tools)}, updated_at = now()
+    update connections
+    set tools = ${json(sql, tools)},
+        server_instructions = case when ${instructions !== undefined}
+          then ${instructions ?? null}::text else server_instructions end,
+        updated_at = now()
     where id = ${id}
     returning *
   `;

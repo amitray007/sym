@@ -46,7 +46,7 @@ export default defineTool({
     if (!row.tools.some((tool) => tool.name === input.tool)) {
       const token = await connectionToken(sql, row);
       const listed = await relistTools(row.url, token?.token, row.tools, probeServer);
-      if (listed.ok) row = (await saveTools(sql, row.id, listed.tools)) ?? row;
+      if (listed.ok) row = (await saveTools(sql, row.id, listed.tools, listed.instructions)) ?? row;
     }
     const saved = await setToolMode(sql, row.id, input.tool, input.mode);
     if (!saved) return `"${input.name}" has no tool named "${input.tool}".`;
