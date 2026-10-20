@@ -98,7 +98,10 @@ one has a persona (decision 044).
   never repeats a Sym post. A `worker_job` result carries `posted: true`, and the brain then calls
   `no_reply`.
 
-`SYM_PERSONA` picks the brain's tone: `plain` (neutral), `casual` (default: relaxed, lowercase
+The persona is the pack's persona file, else the owner's `/sym persona` setting, else
+`SYM_PERSONA` (the default), else `casual`. The thinking status line rotates short messages per
+persona (`plain`: "Working..."; `casual`: "on it...", "thinking..."; `spicy`: "cooking...",
+"reading your mess..."). The tones: `plain` (neutral), `casual` (default: relaxed, lowercase
 friendly, at most one emoji), or `spicy` (playful, may lightly tease the person talking to Sym,
 with hard limits in `agent/personas/spicy.md`). A pack can supply its own persona file. Worker
 threads never get a persona.
@@ -109,6 +112,11 @@ threads never get a persona.
   job finished in the last 24 hours, plus the quiet state. `/sym quiet [minutes|2h]` stays silent
   for that long (default 60 minutes, at most 7 days); `/sym quiet off` ends it. Only allowed
   users can run it, and no model call is made.
+- `/sym persona` shows the brain's persona and the choices. `/sym persona <plain|casual|spicy>`
+  sets it. Only the owner can set it; anyone else gets a private refusal. A pack persona file
+  wins, and then Sym says so and stores nothing. The owner can also say "be spicy" or "tone it
+  down" and the brain calls `sym_persona`. Either way the new persona starts in the next
+  conversation (decision 046).
 - The live card has **Stop** (with a confirm step; the worker is interrupted and the job
   cancelled) and, once a PR is known, **Open PR**. The collapsed card keeps only **Open PR**.
   Steering is a thread message for now; a modal button comes later.

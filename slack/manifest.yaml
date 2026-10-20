@@ -17,8 +17,8 @@ features:
   slash_commands:
     - command: /sym
       url: https://sym.example.com/eve/v1/slack
-      description: Status, quiet mode, and schedules
-      usage_hint: status | jobs | schedules | quiet [minutes|off]
+      description: Status, quiet mode, schedules, and persona
+      usage_hint: status | jobs | schedules | quiet [minutes|off] | persona [name]
       should_escape: false
 oauth_config:
   scopes:

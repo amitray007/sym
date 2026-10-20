@@ -1,3 +1,4 @@
+import { PERSONAS, type PersonaName } from "../persona.ts";
 import { parseQuietArg, type QuietArg } from "./quiet.ts";
 
 // The text after `/sym` (docs/slack.md). Pure, so tests cover it without Slack.
@@ -6,6 +7,7 @@ export type SymCommand =
   | { type: "status" }
   | { type: "schedules" }
   | { type: "quiet"; arg: QuietArg }
+  | { type: "persona"; name?: PersonaName }
   | { type: "usage" };
 
 export const USAGE = [
@@ -14,6 +16,7 @@ export const USAGE = [
   "`/sym schedules`: the recurring checks and when they run next",
   "`/sym quiet [minutes|2h]`: stay silent except for questions and failures (default 60 minutes)",
   "`/sym quiet off`: end quiet mode",
+  "`/sym persona [plain|casual|spicy]`: show or change the brain's voice (owner only)",
 ].join("\n");
 
 export function parseSymCommand(text: string): SymCommand {
@@ -28,6 +31,11 @@ export function parseSymCommand(text: string): SymCommand {
     case "quiet": {
       const arg = parseQuietArg(rest.join(" "));
       return arg ? { type: "quiet", arg } : { type: "usage" };
+    }
+    case "persona": {
+      if (rest.length === 0) return { type: "persona" };
+      const name = PERSONAS.find((p) => p === rest[0]?.toLowerCase());
+      return rest.length === 1 && name ? { type: "persona", name } : { type: "usage" };
     }
     default:
       return { type: "usage" };
