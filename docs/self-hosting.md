@@ -109,7 +109,8 @@ Rules for any host:
 
 Only a person can do these:
 
-- Create and install the Slack app from [`slack/manifest.yaml`](../slack/manifest.yaml).
+- Create and install the Slack app from [`slack/manifest.yaml`](../slack/manifest.yaml). After a
+  manifest change (such as the Home tab), import it again and reinstall the app.
 - Choose and configure the public route.
 - Approve the worker sign-in and pick its access level, then re-approve every 30 days. Ask Sym
   to sign in to the worker for a new link.

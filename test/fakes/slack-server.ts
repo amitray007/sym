@@ -53,6 +53,8 @@ export interface FakeSlack {
   // Each assistant.threads.setStatus call, in order.
   statuses: { channel: string; thread_ts: string; status: string }[];
   views: Record<string, unknown>[];
+  // The Home view last published per user (views.publish).
+  homeViews: Record<string, Record<string, unknown>>;
   uploads: { fileId: string; bytes: number }[];
   // Calls to one method, in order.
   callsTo(method: string): FakeSlackCall[];
@@ -117,6 +119,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
   const customEmoji: Record<string, string> = {};
   const statuses: FakeSlack["statuses"] = [];
   const views: Record<string, unknown>[] = [];
+  const homeViews: Record<string, Record<string, unknown>> = {};
   const uploads: FakeSlack["uploads"] = [];
   const pendingUploads = new Set<string>();
   const failures = new Map<string, string[]>();
@@ -289,6 +292,12 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
         },
       };
     },
+    "views.publish": (b) => {
+      if (!b.user_id || typeof b.view !== "object" || b.view === null) throw "invalid_arguments";
+      homeViews[String(b.user_id)] = b.view as Record<string, unknown>;
+      changed();
+      return { view: { id: "VHOME", ...(b.view as Record<string, unknown>) } };
+    },
     "views.open": (b) => {
       if (!b.trigger_id && !b.interactivity_pointer) throw "invalid_arguments";
       const view = (b.view ?? {}) as Record<string, unknown>;
@@ -373,6 +382,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
     customEmoji,
     statuses,
     views,
+    homeViews,
     uploads,
     callsTo: (method) => calls.filter((call) => call.method === method),
     addMessage: (message) => store(message),

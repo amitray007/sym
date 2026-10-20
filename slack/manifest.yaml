@@ -10,8 +10,8 @@ features:
     display_name: sym
     always_online: true
   app_home:
-    # The Home tab comes with team use (docs/slack.md).
-    home_tab_enabled: false
+    # The Home tab shows the dashboard (docs/slack.md). Reinstall the app after enabling it.
+    home_tab_enabled: true
     messages_tab_enabled: true
     messages_tab_read_only_enabled: false
   slash_commands:
@@ -49,6 +49,7 @@ settings:
       - message.groups
       - message.im
       - reaction_added
+      - app_home_opened
   interactivity:
     is_enabled: true
     request_url: https://sym.example.com/eve/v1/slack

@@ -75,6 +75,9 @@ chooseDisplay({
 ```
 
 - Every post goes through `chooseDisplay`. The outbox refuses a post without a display choice.
+- One exception: the App Home view. `views.publish` replaces a page the user opens and sends no
+  message or notification, so it skips the outbox and `chooseDisplay` (decision 052). It still
+  uses the `SlackApi` seam and logs only Slack's error code on a failure.
 - The choice and its reason are logged on the ledger row.
 - Unit tests cover each step and modifier. `eve eval` cases pin the end-to-end behavior: a clean
   on-call check posts nothing, a 30-second question gets text, a code job gets a card.

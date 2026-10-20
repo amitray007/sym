@@ -204,7 +204,7 @@ footer p + p { margin-top: 8px; }
       <a href="#sched">5. Scheduled work</a>
       <a href="#needs">6. When it needs you</a>
       <a href="#learn">7. Learning</a>
-      <a href="#home">8. Later: Home tab</a>
+      <a href="#home">8. Home tab</a>
     </nav>
   </header>
 
@@ -816,33 +816,40 @@ footer p + p { margin-top: 8px; }
 
   <!-- 8. Home -->
   <section class="section" id="home" aria-labelledby="home-h">
-    <h2 id="home-h">8. Later: the Home tab</h2>
-    <p class="prose muted">Phase 2. A dashboard that never notifies. Sym rebuilds it with <code>views.publish</code> each time you open the app's Home tab.</p>
+    <h2 id="home-h">8. The Home tab</h2>
+    <p class="prose muted">A dashboard that never notifies. Sym rebuilds it with <code>views.publish</code> each time you open the app's Home tab (decision 052). Owner-only rows show only to the owner.</p>
     <div class="scene">
       <div class="slack">
         <div class="sl-top"><b>Sym</b><span>App</span></div>
         <div class="tabs"><span class="on">Home</span><span>Messages</span><span>About</span></div>
         <div class="home">
-          <div class="home-sec"><div class="home-h">Needs you (1)</div>
-            <div class="home-row"><span>⏳ J-139 Lint cleanup · Builder permission · 22m</span><span class="sb">Remind me</span></div></div>
-          <div class="home-sec"><div class="home-h">Running (2)</div>
-            <div class="home-row"><span>◐ J-142 Billing sync retry · tests · 9m</span><span class="sb">Open thread</span></div>
-            <div class="home-row"><span>◐ J-143 Store 4412 sync failure · logs · 3m</span><span class="sb">Open thread</span></div></div>
-          <div class="home-sec"><div class="home-h">Schedules (3)</div>
-            <div class="home-row"><span>On-call check · weekdays 09:00 · text only · auto</span><span class="sb">Pause</span></div>
-            <div class="home-row"><span>Release status · weekdays 17:30 · text · approve each run</span><span class="sb">Pause</span></div>
-            <div class="home-row"><span>Digest · daily 18:00</span><span class="sb">Pause</span></div></div>
-          <div class="home-sec"><div class="home-h">Mode</div>
-            <div class="home-row"><span>Normal. Quiet hours 22:00 to 09:00 local time</span><span class="sb">Switch to quiet</span></div></div>
-          <div class="home-sec"><div class="home-h">Learned this week</div>
-            <div class="home-row"><span>On-call checks: text only · Playbook "Billing sync failures" (approved)</span><span class="sb">Review</span></div></div>
+          <div class="home-sec"><div class="home-h">Sym</div>
+            <div class="home-row"><span>Persona: casual<br>Worker: ✅ reachable, signed in · sign-in expires in 12 days</span></div></div>
+          <div class="home-sec"><div class="home-h">Running and waiting (3)</div>
+            <div class="home-row"><span>🙋 J-139 · Lint cleanup · waiting for you · 22m</span></div>
+            <div class="home-row"><span>🔄 J-142 · Billing sync retry · running · 9m</span></div>
+            <div class="home-row"><span>🔄 J-143 · Store sync failure · running · 3m</span></div></div>
+          <div class="home-sec"><div class="home-h">Finished in the last 24 hours</div>
+            <div class="home-row"><span>✅ 4 done · ❌ 1 failed<br>✅ J-141 · Docs typo · done · 1h ago</span></div></div>
+          <div class="home-sec"><div class="home-h">Schedules (2)</div>
+            <div class="home-row"><span>🗓 S-1 · On-call check · next Tomorrow 09:00</span></div>
+            <div class="home-row"><span>⏸ S-2 · Release status · paused</span></div></div>
+          <div class="home-sec"><div class="home-h">Projects Sym works on</div>
+            <div class="home-row"><span>• example-app<br>• example-docs</span></div></div>
+          <div class="home-sec"><div class="home-h">Connections (1) · owner only</div>
+            <div class="home-row"><span>• docs · active · OAuth sign-in valid · default mode ask</span></div></div>
+          <div class="home-sec"><div class="home-h">Settings · owner only</div>
+            <div class="home-row"><span>Persona casual (default) · quiet mode off</span></div></div>
+          <div class="home-row"><span class="muted">Updated Today 14:02</span></div>
         </div>
       </div>
       <div class="notes">
         <h3>Why a Home tab</h3>
         <p class="muted">It answers "what's going on?" without a message. Every row reads from the ledger, so it stays right even after an Eve restart.</p>
         <ul>
-          <li>The trust ladder shows per schedule: "auto" or "approve each run".</li>
+          <li>Someone not on the allow-list sees one line: "Sym isn't set up for you."</li>
+          <li>Lists show at most 10 rows, then "+N more". Only the allow-listed project names appear.</li>
+          <li>If the worker check fails or takes over 3 seconds, the header says "status unknown".</li>
           <li>Slack's AI side panel and suggested prompts come later. They need raw API calls and may need a paid plan.</li>
         </ul>
       </div>

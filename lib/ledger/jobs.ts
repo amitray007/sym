@@ -237,6 +237,31 @@ export async function recentJobs(sql: Sql, since: Date, limit = 20): Promise<Job
   return rows.map(normalize);
 }
 
+// Jobs that ended since `since`: a count per ending status and the newest ones.
+export async function finishedSince(
+  sql: Sql,
+  since: Date,
+  limit = 5,
+): Promise<{ done: number; failed: number; cancelled: number; latest: Job[] }> {
+  const counts = await sql<{ status: JobStatus; n: string }[]>`
+    select status, count(*) as n from jobs
+    where status in ${sql(TERMINAL)} and finished_at >= ${since}
+    group by status
+  `;
+  const count = (status: JobStatus) => Number(counts.find((row) => row.status === status)?.n ?? 0);
+  const latest = await sql<Job[]>`
+    select * from jobs
+    where status in ${sql(TERMINAL)} and finished_at >= ${since}
+    order by finished_at desc limit ${limit}
+  `;
+  return {
+    done: count("done"),
+    failed: count("failed"),
+    cancelled: count("cancelled"),
+    latest: latest.map(normalize),
+  };
+}
+
 // Finds a job by its reference, such as `J-142` or `142`.
 export async function getJobByRef(sql: Sql, ref: string): Promise<Job | undefined> {
   const match = /^(?:J-)?(\d+)$/i.exec(ref.trim());

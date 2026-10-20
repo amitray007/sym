@@ -50,7 +50,7 @@ Codex · thread 8f2c… · updated 1 min ago
 | Ephemeral replies | `/sym status`, private sign-in prompts | Eve | Production |
 | Long output | Over 12,000 characters as an `eve-response.md` snippet | Eve | Production |
 | Modals | "New schedule" form | Sym: `views.open` with the `trigger_id` | Team phase |
-| App Home tab | Running jobs, approvals, schedules, trust ladder, what Sym learned | Sym: `app_home_opened` + `views.publish` | Team phase |
+| App Home tab | Persona and worker state with the sign-in expiry, running and waiting jobs, jobs finished in 24 hours, schedules, the project allow-list; for the owner also MCP connections, persona, and quiet mode (decision 052) | Sym: `app_home_opened` in `onEvent` + `views.publish` on each open | Built (not run on real Slack) |
 | Agent surface | Top-bar entry, suggested prompts, session titles | Sym: `assistant:write`, `assistant.threads.setSuggestedPrompts` | Later |
 | Streamed replies | Text as it is written | `chat.startStream` and related | Skip |
 
@@ -174,9 +174,10 @@ with the public host before you import it.
 | `commands` | `/sym` |
 | `users:read` | Resolve the approver for DM routing, and display names in a shared thread |
 
-Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reaction_added`.
-Interactivity and the slash command use the same request URL, `/eve/v1/slack`. The Home tab and
-`app_home_opened` come with team use. To post the digest in a channel, invite Sym to it first;
+Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reaction_added`, `app_home_opened`.
+Interactivity and the slash command use the same request URL, `/eve/v1/slack`. The manifest turns
+on the Home tab: reinstall the app after you import this change, or Slack sends no
+`app_home_opened`. To post the digest in a channel, invite Sym to it first;
 the manifest has no `chat:write.public`.
 
 Allow-list: the pack's owner and `allowList`, or `SYM_SLACK_USERS` without a pack. Approvals
