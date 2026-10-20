@@ -19,10 +19,12 @@ export interface SignInCaller {
 export type CallerCheck = { ok: true; owner: string } | { ok: false; reason: string };
 
 // Only the owner can sign Sym in: the pack owner, else SYM_OWNER_SLACK_USER. A worker thread,
-// a schedule, another person, and a deployment without an owner are all refused.
+// a schedule, another person, and a deployment without an owner are all refused. `target` names
+// what Sym signs in to in the refusal; the default is the worker.
 export function checkSignInCaller(
   caller: SignInCaller | null | undefined,
   owner: string | undefined,
+  target = `a ${workerNoun()}`,
 ): CallerCheck {
   if (caller?.principalId === WORKER_PRINCIPAL) {
     return { ok: false, reason: "Worker threads cannot call this tool." };
@@ -40,7 +42,7 @@ export function checkSignInCaller(
     caller.principalType !== "user" ||
     userId !== owner
   ) {
-    return { ok: false, reason: `Only the owner can sign Sym in to a ${workerNoun()}.` };
+    return { ok: false, reason: `Only the owner can sign Sym in to ${target}.` };
   }
   return { ok: true, owner };
 }
@@ -71,7 +73,7 @@ export function signInRedirect(
   };
 }
 
-function isLoopback(hostname: string): boolean {
+export function isLoopback(hostname: string): boolean {
   return (
     hostname === "localhost" ||
     hostname === "[::1]" ||

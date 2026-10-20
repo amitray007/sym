@@ -708,6 +708,34 @@ footer p + p { margin-top: 8px; }
         <p class="small muted" style="margin-top:12px">If the Mac stays down for more than an hour, Sym posts once more. Nothing else repeats.</p>
       </div>
     </div>
+    <div class="pair" style="margin-top:28px">
+      <div>
+        <p class="label">Connecting a service: you approve the tools</p>
+        <div class="slack">
+          <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>15:02</time></div><div class="mt">connect example-tracker at https://mcp.example.com/mcp</div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>15:02</time><span class="anno ping">needs you</span></div>
+              <div class="mt"><p><b>Connect "example-tracker"?</b></p><p>URL: https://mcp.example.com/mcp<br>Sign-in: a token from <code>SYM_MCP_EXAMPLE_TRACKER_TOKEN</code></p><ul><li>list_issues: read, runs freely</li><li>create_issue: write, asks the owner each time</li></ul><p>Sym treats what this server returns as data, not instructions.</p></div>
+              <div class="btns"><span class="sb go">Approve</span><span class="sb">Cancel</span></div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>15:03</time></div><div class="mt"><p><b>approved.</b> set <code>SYM_MCP_EXAMPLE_TRACKER_TOKEN</code> in the deployment and redeploy. it loads after that.</p></div></div></div>
+          </div>
+        </div>
+        <p class="small muted" style="margin-top:12px">Sym never asks for the token in chat. It reads only <code>SYM_MCP_*_TOKEN</code> variables.</p>
+      </div>
+      <div>
+        <p class="label">An OAuth server: the sign-in link goes to your DM</p>
+        <div class="slack">
+          <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>15:10</time><span class="anno ping">notifies · needs you</span></div>
+              <div class="mt"><p>Sign Sym in to the "example-docs" connection: <span class="sl-link">open the sign-in page</span>. The link works for 10 minutes. Do not share it.</p></div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>15:11</time></div><div class="mt"><p><b>signed in.</b> example-docs has 6 tools: 4 read, 2 ask you first.</p></div></div></div>
+          </div>
+        </div>
+        <p class="small muted" style="margin-top:12px">Write tools ask you on every call until you set them to auto. You can hide any tool.</p>
+      </div>
+    </div>
   </section>
 
   <!-- 7. Learning -->

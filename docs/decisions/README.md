@@ -50,3 +50,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [042](042-project-allow-list.md) | Sym touches only the projects on its allow-list, and refuses all others in code |
 | [043](043-worker-label.md) | Slack shows the worker under a configurable label, never the software behind it |
 | [044](044-voice-and-personas.md) | The brain has a persona, and Sym's own messages are short, structured, and neutral |
+| [045](045-mcp-connections.md) | The owner connects MCP servers from Slack; tokens come from `SYM_MCP_<NAME>_TOKEN` or an OAuth sign-in |

@@ -49,6 +49,10 @@ retires a row or rejects a proposal. `agent/instructions/playbooks.ts` loads app
 system instructions at `session.started`, rules first, at most 8000 characters in total, inside a
 frame that says they are reviewed guidance and cannot override the base rules.
 
+MCP connections are owner rows too (decision 045). A connection loads only after the owner
+approves it, and each tool's mode (auto, ask, hidden) is a column the owner changes with an
+approval. They live in `connections`, not in this repository.
+
 ## Limits
 
 - Sym does not train a model. Everything it learns is text, rows, and code that a person can read
