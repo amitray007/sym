@@ -1,22 +1,96 @@
-# Local lab: Postgres for the ledger. Start it with `pnpm db:up`. Deployments use
-# deploy/compose.yaml (decision 040).
-# The host port is 55432, so it does not clash with a Postgres already on 5432.
+# Sym's one compose file (decision 040).
+#
+# - Local lab: `pnpm db:up` starts only `postgres`, on 127.0.0.1:55432 with the password `sym`.
+# - Deployment (Dokploy or any Docker host): `docker compose up` runs Sym, Postgres, and a
+#   Tailscale sidecar. Dokploy writes the Environment tab to .env next to this file. Set at least
+#   POSTGRES_PASSWORD (URL-safe, for example `openssl rand -hex 32`) and TS_AUTHKEY.
+#
+# Routes (decision 006):
+# - Public: a Dokploy domain on the `tailscale` service, port 3000, one entry per path:
+#   /eve/v1/slack and /.well-known/workflow. Nothing else is public.
+# - Private: Tailscale Serve publishes all of Sym at https://<TS_HOSTNAME>.<tailnet>.ts.net for
+#   the worker (SYM_CALLBACK_URL, the worker MCP channel) and operators (/eve/v1/session).
+
 services:
+  sym:
+    build: .
+    # Sym shares the sidecar's network: it reaches the worker over the tailnet, and the domain and
+    # Serve reach Sym on port 3000 of the sidecar.
+    network_mode: service:tailscale
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgres://sym:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/sym
+    volumes:
+      - workflow-data:/app/.eve/.workflow-data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tailscale:
+        condition: service_healthy
+    restart: unless-stopped
+
   postgres:
     image: postgres:18-alpine
     environment:
       POSTGRES_USER: sym
-      POSTGRES_PASSWORD: sym
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: sym
-    ports:
-      - "127.0.0.1:55432:5432"
     volumes:
       - postgres:/var/lib/postgresql
+    # Loopback only, for the local lab and for backups from the host.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    networks:
+      - default
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sym -d sym"]
-      interval: 2s
+      interval: 5s
       timeout: 3s
-      retries: 15
+      retries: 20
+    restart: unless-stopped
+
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: ${TS_HOSTNAME:-sym}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: ${TS_HOSTNAME:-sym}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      # Kernel networking, so Sym's own connections reach the tailnet. Sym shares this container's
+      # resolver, so accepted DNS lets it resolve the worker's MagicDNS name.
+      TS_USERSPACE: "false"
+      TS_ACCEPT_DNS: "true"
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+      TS_ENABLE_HEALTH_CHECK: "true"
+      TS_LOCAL_ADDR_PORT: 127.0.0.1:9002
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    volumes:
+      - ts-state:/var/lib/tailscale
+      - ./deploy/tailscale:/config:ro
+    expose:
+      - "3000"
+    networks:
+      - default
+      - dokploy-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9002/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
 
 volumes:
   postgres:
+  workflow-data:
+  ts-state:
+
+networks:
+  dokploy-network:
+    external: true

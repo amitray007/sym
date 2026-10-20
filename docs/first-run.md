@@ -37,26 +37,20 @@ failure here is about the real services, not Sym's logic.
 
 ## 4. Settings (owner)
 
-Set these in the deployment environment, never in Git or the pack:
+Set the variables in [self-hosting.md, Credentials](self-hosting.md#credentials) in the
+deployment environment, never in Git or the pack. For this run:
 
-| Variable | Value |
-|---|---|
-| `POSTGRES_PASSWORD` | A URL-safe value; `deploy/compose.yaml` builds `DATABASE_URL` from it |
-| `TS_AUTHKEY` | A Tailscale auth key for Sym's sidecar |
-| `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` | From step 3 |
-| `AI_GATEWAY_API_KEY` | The gateway key; `SYM_MODEL` is optional |
-| `SYM_OWNER_SLACK_USER`, `SYM_SLACK_USERS` | Your member ID (or use a pack) |
-| `T3_MCP_URL` | From step 1; the in-app sign-in replaces the token |
-| `SYM_CALLBACK_URL` | Sym's tailnet address, `https://sym.<tailnet>.ts.net` |
-| `SYM_SIGNIN_URL` | Sym's public HTTPS address |
-| `SYM_WORKER_MODEL` | `<provider>/<model>` if the worker project has no default model |
-| `SYM_API_TOKEN`, `SYM_MCP_TOKEN` | Long random values |
+- `SYM_OWNER_SLACK_USER` and `SYM_SLACK_USERS`: your member ID from step 3.
+- `T3_MCP_URL`: the URL from step 1. The in-app sign-in replaces the token.
+- `SYM_CALLBACK_URL`: Sym's tailnet address, `https://sym.<tailnet>.ts.net`.
+- `SYM_SIGNIN_URL`: Sym's public HTTPS address from step 2.
+- `POSTGRES_PASSWORD` and `TS_AUTHKEY`: for `compose.yaml` ([Deploy](self-hosting.md#deploy)).
 
 ## 5. Deploy (owner)
 
-1. In Dokploy, create a Docker Compose app from the repository with the compose path
-   `./deploy/compose.yaml`, and add the two public paths as domains on the `tailscale` service,
-   port 3000 ([self-hosting.md](self-hosting.md#deploy)).
+1. In Dokploy, create a Docker Compose app from the repository (compose path `./compose.yaml`),
+   and add the two public paths as domains on the `tailscale` service, port 3000
+   ([self-hosting.md](self-hosting.md#deploy)).
 2. Deploy. The start command applies ledger migrations, then runs `eve start` and the schedules.
 3. **Check:** `GET /eve/v1/health` answers ready.
 4. In the Slack app, open Event Subscriptions and press Retry on the request URL. **Check:** Slack
