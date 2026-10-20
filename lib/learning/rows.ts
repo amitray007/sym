@@ -20,6 +20,8 @@ export interface Playbook {
   proposedAt: Date;
   decidedBy: string | null;
   decidedAt: Date | null;
+  // The trust ladder (decision 059): whether jobs that follow this approved row ask for Start.
+  startMode: "ask" | "auto";
 }
 
 export interface NewPlaybook {

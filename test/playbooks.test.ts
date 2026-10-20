@@ -79,6 +79,7 @@ describe("session text", () => {
         proposedAt: NOW,
         decidedBy: "U1",
         decidedAt: NOW,
+        startMode: "ask",
       },
     ]);
     expect(text).toContain("never replace them");

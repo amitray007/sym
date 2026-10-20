@@ -40,9 +40,15 @@ decides what to keep.
    the code and opens a draft PR. CI runs `eve eval --strict`. A person reviews and merges, and the
    deployment updates. This replaces Eve's remote self-modification extension, which needs
    microsandbox on the server (decision 007).
-6. **Trust ladder.** A job class moves from "approve each run" to "auto" after N clean runs. The
-   level is a column on the schedule row, and only the owner changes it. Not built yet: today
-   every job asks for Start, except runs of an approved schedule (decision 024).
+6. **Trust ladder** (decision 059). A job class is the approved playbook the brain says a brief
+   follows (the brief's `playbook` field). Code ties the job to that playbook row only when the
+   row is approved; an unknown name ties nothing. When the job ends, Sym records `clean` (done,
+   a result block, no open questions, no concerns) or `unclean`. After 5 clean runs in a row
+   (`SYM_TRUST_RUNS`, at least 2), Sym asks the owner to trust the playbook. The owner calls
+   `playbook_trust`, and from then on its jobs start without the Start click on projects it ran
+   clean on, with a line in the brief that says why. A run with concerns, a 👎, or a Fix puts the playbook back to asking,
+   and Sym tells the owner. Trust sits on the approved row, so a new version starts at asking.
+   Scheduled checks keep their own approval (decision 024) and do not count.
 
 ## Layer 2 rows
 
@@ -50,7 +56,8 @@ Rows live in `playbooks` (migration 006) with a version history: name, kind (`pl
 `rule`), body (up to 2000 characters), status (`proposed`, `approved`, `rejected`, `retired`),
 source (`owner`, `learn`, or `repeat`), and evidence (feedback IDs, or job IDs for `repeat`).
 Only one version of a name is approved at a time, and approving a new version retires the old one. The owner proposes with `playbook_propose` and
-approves with `playbook_review`, which shows the exact body that will load. `playbook_retire`
+approves with `playbook_review`, which shows the exact body that will load. An approved playbook
+also has a start mode, `ask` or `auto`, for the trust ladder. `playbook_retire`
 retires a row or rejects a proposal. `agent/instructions/playbooks.ts` loads approved rows as
 system instructions at `session.started`, rules first, at most 8000 characters in total, inside a
 frame that says they are reviewed guidance and cannot override the base rules.

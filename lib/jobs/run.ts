@@ -438,7 +438,12 @@ export async function markScheduledCheck(sql: Sql, jobId: number): Promise<void>
 }
 
 // Shows the owner the full brief in the job thread before the Start prompt.
-export async function showBrief(deps: LedgerDeps, jobId: number): Promise<void> {
+// `trustedPlaybook` names the trusted playbook when the job starts without the click.
+export async function showBrief(
+  deps: LedgerDeps,
+  jobId: number,
+  trustedPlaybook?: string,
+): Promise<void> {
   const job = await mustGetJob(deps.sql, jobId);
   const brief = Brief.parse(job.brief);
   const { models, projectModel } = modelsFor(deps, brief.project);
@@ -447,7 +452,16 @@ export async function showBrief(deps: LedgerDeps, jobId: number): Promise<void> 
     briefModel: brief.model,
     ...(brief.modelReason ? { reason: brief.modelReason } : {}),
   });
-  await presentBrief(deps.sql, job, line);
+  // The owner sees which playbook a brief follows before trusting it (decision 059).
+  const [linked] = await deps.sql<{ name: string }[]>`
+    select p.name from jobs j join playbooks p on p.id = j.playbook_id where j.id = ${job.id}
+  `;
+  await presentBrief(
+    deps.sql,
+    job,
+    line,
+    linked ? { name: linked.name, trusted: trustedPlaybook === linked.name } : undefined,
+  );
   await deliverNow(deps);
 }
 

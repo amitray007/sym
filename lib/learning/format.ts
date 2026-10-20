@@ -19,11 +19,17 @@ export function sessionInstructions(rows: Playbook[]): string | null {
 }
 
 export function playbookLine(row: Playbook): string {
-  return `${playbookRef(row.id)}: ${row.name} v${row.version} - ${row.kind} - ${row.status} - ${row.source}`;
+  const trust = row.status === "approved" && row.startMode === "auto" ? " - trusted" : "";
+  return `${playbookRef(row.id)}: ${row.name} v${row.version} - ${row.kind} - ${row.status} - ${row.source}${trust}`;
 }
 
 export function playbookDetail(row: Playbook): string {
-  const evidence = row.evidence.length > 0 ? `\nEvidence: feedback ${row.evidence.join(", ")}` : "";
+  // A repeated-work proposal cites jobs (decision 058); a learned rule cites feedback rows.
+  const cited =
+    row.source === "repeat"
+      ? row.evidence.map((id) => `J-${id}`).join(", ")
+      : `feedback ${row.evidence.join(", ")}`;
+  const evidence = row.evidence.length > 0 ? `\nEvidence: ${cited}` : "";
   return `${playbookLine(row)}${evidence}\n${row.body}`;
 }
 

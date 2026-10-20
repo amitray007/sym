@@ -119,14 +119,18 @@ export async function startFollowUp(
   }
 
   // A fix is feedback on the parent job: the weekly learn pass groups repeated fixes.
-  await recordFeedback(deps.sql, {
-    jobId: parent.id,
-    slackUser: by,
-    kind: "fix",
-    value: clean,
-    channel: parent.slackChannel,
-    messageTs: null,
-  });
+  await recordFeedback(
+    deps.sql,
+    {
+      jobId: parent.id,
+      slackUser: by,
+      kind: "fix",
+      value: clean,
+      channel: parent.slackChannel,
+      messageTs: null,
+    },
+    deps.pack,
+  );
   await presentStart(deps.sql, job, deps.now?.() ?? new Date(), deps.pack);
   await editEndPost(deps.sql, parent, `Fix sent as ${ref} by <@${by}>.`);
   await deliverNow(deps);
