@@ -1,6 +1,7 @@
 import type postgres from "postgres";
 import type { Sql } from "../db.ts";
 import type { DisplayChoice } from "../display.ts";
+import type { PullRequestFacts } from "../workers/types.ts";
 
 // Job rows (docs/architecture.md). A job row holds enough state to continue in a new session.
 
@@ -50,6 +51,8 @@ export interface Job {
   watchUntil: Date | null;
   revision: number;
   verdict: unknown;
+  // The worker's pull request facts at the job's end (decision 057). Null when never read.
+  prFacts: PullRequestFacts[] | null;
   endPresentedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -88,6 +91,7 @@ export type JobUpdate = Partial<
     | "quietNoticedAt"
     | "watchUntil"
     | "verdict"
+    | "prFacts"
     | "endPresentedAt"
   >
 >;
@@ -151,6 +155,9 @@ export async function updateJob(
   }
   if (update.verdict !== undefined) {
     fields.verdict = update.verdict === null ? null : json(sql, update.verdict);
+  }
+  if (update.prFacts !== undefined) {
+    fields.prFacts = update.prFacts === null ? null : json(sql, update.prFacts);
   }
   const finished = status !== undefined && TERMINAL.includes(status);
   const [row] = await sql<Job[]>`

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { envSwitch } from "../env-switch.ts";
+import type { PullRequestFacts } from "../workers/types.ts";
 import type { OutputContract } from "./contract.ts";
 import { nearDuplicate } from "./similar.ts";
 
@@ -12,6 +13,13 @@ export interface ResultRules {
   allowedPaths?: string[];
   // Whether the job allowed a pull request at all.
   pullRequestAllowed: boolean;
+  // The pull requests the worker lists for the thread (decision 057). Absent when the worker
+  // could not say; the checks that need them then do not run.
+  pullRequests?: PullRequestFacts[];
+  // The branch a pull request should target: the brief's, else the pack project's.
+  expectedBase?: string;
+  // The pack project allows draft pull requests only.
+  draftOnly?: boolean;
 }
 
 export interface Verdict {
@@ -38,10 +46,60 @@ export function checkResult(contract: OutputContract | null, rules: ResultRules)
   if (contract.prUrl && !rules.pullRequestAllowed) {
     concerns.push("worker opened a PR the job didn't allow.");
   }
+  if (rules.pullRequests) concerns.push(...pullRequestConcerns(contract, rules));
   if (contract.openQuestions.length > 0) {
     concerns.push(`worker left ${contract.openQuestions.length} open question(s).`);
   }
   return { verdict: concerns.length > 0 ? "concerns" : "pass", concerns };
+}
+
+// Generic facts about any pull request (decision 057). Each check fires only on a fact the
+// worker reported, and none looks at what kind of task the job was.
+function pullRequestConcerns(contract: OutputContract, rules: ResultRules): string[] {
+  const facts = rules.pullRequests ?? [];
+  const concerns: string[] = [];
+  const reported = contract.prUrl;
+  const match = reported ? facts.find((pr) => samePrUrl(pr.url, reported)) : undefined;
+  // An empty list says nothing: the worker may not have linked the PR to the thread.
+  if (reported && !match && facts.length > 0) {
+    concerns.push("the reported PR link is not one of this thread's pull requests.");
+  }
+  if (!reported && facts.some((pr) => pr.state === "open")) {
+    concerns.push("the thread has an open PR the worker didn't report.");
+    // The reported-link check above only sees a reported PR, so an unreported one is checked here.
+    if (!rules.pullRequestAllowed) concerns.push("worker opened a PR the job didn't allow.");
+  }
+  // With a reported link, check that PR. Without one, check what the thread has.
+  const checked = reported ? (match ? [match] : []) : facts;
+  for (const pr of checked) {
+    const name = `PR #${pr.number}`;
+    if (pr.state === "merged" || pr.state === "closed") {
+      concerns.push(`${name} is ${pr.state}, and workers only open PRs.`);
+      continue;
+    }
+    if (pr.state !== "open") continue;
+    if (rules.expectedBase && pr.baseBranch && pr.baseBranch !== rules.expectedBase) {
+      concerns.push(`${name} targets ${pr.baseBranch}, not ${rules.expectedBase}.`);
+    }
+    if (rules.draftOnly && pr.isDraft === false) {
+      concerns.push(`${name} is ready for review, but the project allows draft PRs only.`);
+    }
+    if (pr.headBranch && pr.headBranch === pr.baseBranch) {
+      concerns.push(`${name} has the same head and base branch (${pr.headBranch}).`);
+    }
+  }
+  return concerns;
+}
+
+function samePrUrl(a: string, b: string): boolean {
+  const clean = (url: string) => url.trim().replace(/\/+$/, "").toLowerCase();
+  return clean(a) === clean(b);
+}
+
+// The pull request to show when the worker reported none: the thread's newest open PR.
+export function openPrUrl(facts: PullRequestFacts[] | null | undefined): string | null {
+  const open = facts?.filter((pr) => pr.state === "open") ?? [];
+  return open.at(-1)?.url ?? null;
 }
 
 // A worker's path as a clean repository-relative path, or nothing when it is absolute or climbs
@@ -168,6 +226,8 @@ export interface VerifierRequest {
   concerns: string[];
   // The worker's final message. Untrusted.
   workerMessage: string | null;
+  // The pull requests the worker lists for the thread. Absent when it could not say.
+  pullRequests?: PullRequestFacts[] | null;
 }
 
 const MAX_WORKER_MESSAGE = 6_000;
@@ -186,6 +246,20 @@ export function verifierMessage(request: VerifierRequest): string {
     "Check this worker result against its brief. Reply with your verdict.",
     `<brief>\n${data({ goal: request.goal, done_when: request.doneWhen, constraints: request.constraints })}\n</brief>`,
     `<rule_check_concerns>\n${data(request.concerns)}\n</rule_check_concerns>`,
+    ...(request.pullRequests
+      ? [
+          `<pull_requests untrusted="true">\n${data(
+            request.pullRequests.map((pr) => ({
+              url: pr.url,
+              number: pr.number,
+              state: pr.state,
+              head_branch: pr.headBranch,
+              base_branch: pr.baseBranch,
+              is_draft: pr.isDraft,
+            })),
+          )}\n</pull_requests>`,
+        ]
+      : []),
     `<worker_result untrusted="true">\n${data({
       summary: request.contract.summary,
       pr_url: request.contract.prUrl,

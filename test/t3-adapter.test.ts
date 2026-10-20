@@ -363,6 +363,92 @@ describe("t3Adapter.send", () => {
   });
 });
 
+describe("t3Adapter.pullRequests", () => {
+  const entry = (extra: Record<string, unknown> = {}) => ({
+    host: "github.com",
+    repository: "o/r",
+    number: 7,
+    url: "https://github.com/o/r/pull/7",
+    source: "agent",
+    watching: false,
+    state: "open",
+    title: "Add retry",
+    headBranch: "feat/retry",
+    baseBranch: "main",
+    isDraft: true,
+    stack: null,
+    ...extra,
+  });
+
+  it("calls list_thread_pull_requests with the thread and maps the facts", async () => {
+    const { call, calls } = fakeT3({
+      list_thread_pull_requests: () => ({ pullRequests: [entry()], chains: [] }),
+    });
+
+    const result = await t3Adapter(call).pullRequests?.("t-1");
+
+    expect(result).toEqual([
+      {
+        url: "https://github.com/o/r/pull/7",
+        number: 7,
+        state: "open",
+        headBranch: "feat/retry",
+        baseBranch: "main",
+        isDraft: true,
+      },
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      name: "list_thread_pull_requests",
+      args: { threadId: "t-1" },
+    });
+  });
+
+  it("keeps unreported fields as null and an unknown state as unknown", async () => {
+    const { call } = fakeT3({
+      list_thread_pull_requests: () => ({
+        pullRequests: [
+          entry({ state: "queued", headBranch: null, baseBranch: undefined, isDraft: undefined }),
+        ],
+      }),
+    });
+
+    expect(await t3Adapter(call).pullRequests?.("t-1")).toEqual([
+      {
+        url: "https://github.com/o/r/pull/7",
+        number: 7,
+        state: "unknown",
+        headBranch: null,
+        baseBranch: null,
+        isDraft: null,
+      },
+    ]);
+  });
+
+  it("ignores an entry that does not parse and keeps the others", async () => {
+    const { call } = fakeT3({
+      list_thread_pull_requests: () => ({
+        pullRequests: [
+          { url: 7 },
+          "nope",
+          entry({ number: 8, url: "https://github.com/o/r/pull/8" }),
+        ],
+      }),
+    });
+
+    const result = await t3Adapter(call).pullRequests?.("t-1");
+
+    expect(result?.map((pr) => pr.number)).toEqual([8]);
+  });
+
+  it("passes a T3 error to the caller", async () => {
+    const call: CallTool = async () => {
+      throw new Error("Thread t-1 was not found.");
+    };
+    await expect(t3Adapter(call).pullRequests?.("t-1")).rejects.toThrow(/not found/);
+  });
+});
+
 describe("t3Adapter.watchPullRequest", () => {
   it("calls watch_pull_request with the thread and URL, and maps the result", async () => {
     const { call, calls } = fakeT3({

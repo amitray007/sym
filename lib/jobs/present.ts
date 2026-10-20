@@ -18,6 +18,7 @@ import {
   type ModelCheck,
   mergeConcerns,
   modelConcerns,
+  openPrUrl,
   verdictLine,
 } from "./verify.ts";
 
@@ -196,13 +197,15 @@ export async function presentEnd(
 async function presentEndOnce(
   sql: Sql,
   job: Job,
-  contract: OutputContract | null,
+  original: OutputContract | null,
   now: Date,
   pack?: Pack,
   check?: ModelCheck,
 ): Promise<void> {
   if (!job.slackChannel || !TERMINAL.includes(job.status)) return;
   const ref = jobRef(job.id);
+  // The checks see what the worker reported. The message may add the PR the worker's facts list.
+  const contract = withFactsPr(job, original);
   if (job.display?.level === 3) {
     await setJobCard(
       sql,
@@ -217,7 +220,7 @@ async function presentEndOnce(
       }),
     );
   }
-  const concerns = endConcerns(job, contract, pack, check);
+  const concerns = endConcerns(job, original, pack, check);
   // A clean scheduled check has nothing new to say (display rule step 2); the digest lists it.
   const clean = job.status === "done" && contract !== null && contract.openQuestions.length === 0;
   if (job.kind === SCHEDULED_CHECK && clean && concerns.length === 0) return;
@@ -241,6 +244,14 @@ async function presentEndOnce(
   );
 }
 
+// A result that names no PR gets the thread's open PR from the worker's facts, so the message
+// still links it (decision 057). The missing report shows as a concern.
+function withFactsPr(job: Job, contract: OutputContract | null): OutputContract | null {
+  if (!contract || contract.prUrl || job.prUrl) return contract;
+  const url = openPrUrl(job.prFacts);
+  return url ? { ...contract, prUrl: url } : contract;
+}
+
 // Checks the result against what the job allowed. Open questions and a missing result block
 // already show in the result message, so only the rule breaks are added.
 export function resultConcerns(job: Job, contract: OutputContract | null, pack?: Pack): string[] {
@@ -248,9 +259,14 @@ export function resultConcerns(job: Job, contract: OutputContract | null, pack?:
   const brief = Brief.parse(job.brief);
   const allowed = pack ? resolvePackProject(pack, brief.project) : undefined;
   const project = allowed?.ok ? allowed.project : undefined;
+  const expectedBase = brief.baseRef ?? project?.defaultBaseBranch;
   const { concerns } = checkResult(contract, {
     ...(project ? { allowedPaths: project.allowedPaths } : {}),
     pullRequestAllowed: brief.openPullRequest && (!project || project.prPolicy === "draft"),
+    ...(job.prFacts ? { pullRequests: job.prFacts } : {}),
+    // The brief's base branch wins; the pack's default applies next; without either, skip.
+    ...(expectedBase ? { expectedBase } : {}),
+    ...(project?.prPolicy === "draft" ? { draftOnly: true } : {}),
   });
   return concerns.filter((concern) => !concern.includes("open question"));
 }

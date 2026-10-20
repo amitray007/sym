@@ -44,6 +44,7 @@ function job(overrides: Partial<Job> = {}): Job {
     watchUntil: null,
     revision: 0,
     verdict: null,
+    prFacts: null,
     endPresentedAt: null,
     createdAt: minutesAgo(15),
     updatedAt: NOW,
