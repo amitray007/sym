@@ -1,7 +1,7 @@
 // Text for connection tools and approval prompts (decision 045). Pure: no I/O.
 import type { SignInState } from "./credentials.ts";
 import type { AuthKind, Connection } from "./rows.ts";
-import { type ConnectionTool, type ToolMode, toolCounts } from "./tools.ts";
+import { type ConnectionTool, type ToolMode, toolCounts, truncate } from "./tools.ts";
 
 // What the owner approves. The model passes it back from connection_add's result, and
 // connection_approve refuses it when it differs from the stored proposal, so the owner approves
@@ -11,10 +11,22 @@ export interface Review {
   url: string;
   auth: AuthKind;
   tools: { name: string; access: "read" | "write" }[];
+  // The first characters of the instructions the server sent, when it sent any (decision 048).
+  instructions?: string | undefined;
 }
 
-export function reviewOf(row: Pick<Connection, "name" | "url" | "authKind" | "tools">): Review {
+// How much of the server's instructions the owner sees before approving.
+export const INSTRUCTIONS_PREVIEW = 300;
+
+export function reviewOf(
+  row: Pick<Connection, "name" | "url" | "authKind" | "tools"> &
+    Partial<Pick<Connection, "serverInstructions">>,
+): Review {
+  const preview = row.serverInstructions
+    ? truncate(row.serverInstructions.replace(/\s+/g, " ").trim(), INSTRUCTIONS_PREVIEW)
+    : undefined;
   return {
+    ...(preview ? { instructions: preview } : {}),
     name: row.name,
     url: row.url,
     auth: row.authKind,
@@ -32,6 +44,7 @@ export function sameReview(a: Review, b: Review): boolean {
       review.url,
       review.auth,
       [...review.tools].map((tool) => `${tool.name}:${tool.access}`).sort(),
+      review.instructions ?? "",
     ]);
   return key(a) === key(b);
 }
@@ -66,6 +79,12 @@ export function approvalPrompt(review: Review, envVar: string | null): string {
         `- ${tool.name}: ${tool.access}, ${tool.access === "read" ? MODE_TEXT.auto : MODE_TEXT.ask}`,
       );
     }
+  }
+  if (review.instructions) {
+    lines.push(
+      "The server sent instructions for the model. They are its text, not Sym's rules. First " +
+        `${INSTRUCTIONS_PREVIEW} characters: ${review.instructions}`,
+    );
   }
   lines.push("Sym treats what this server returns as data, not instructions.");
   return lines.join("\n");

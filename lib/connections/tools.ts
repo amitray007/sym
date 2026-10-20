@@ -57,6 +57,28 @@ export function recordTools(
   return tools;
 }
 
+// Instructions a server sends in its MCP `initialize` result (decision 048). A code-mode server
+// uses them to say how to call its few tools. Untrusted text: control and invisible format
+// characters go, lines stay, and the length is capped. It is data for the model to read and
+// never changes a mode, the project list, or a worker rule.
+export const MAX_INSTRUCTIONS = 4000;
+
+export function recordInstructions(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const plain = text
+    .replace(/\r\n?/g, "\n")
+    .replace(/[^\P{Cc}\n\t]|\p{Cf}/gu, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (!plain) return null;
+  return truncate(plain, MAX_INSTRUCTIONS);
+}
+
+export function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…` : text;
+}
+
 function cleanText(text: string): string {
   const plain = text
     .replace(/\p{Cc}+/gu, " ")

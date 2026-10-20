@@ -8,7 +8,9 @@ import {
   usableAccessToken,
 } from "../lib/connections/credentials.ts";
 import { connectionDefinitions } from "../lib/connections/load.ts";
+import { tokenEnvVar } from "../lib/connections/names.ts";
 import { probeServer } from "../lib/connections/probe.ts";
+import { refreshStale } from "../lib/connections/refresh.ts";
 import {
   activateConnection,
   activeConnections,
@@ -38,6 +40,7 @@ const proposal = (overrides: Partial<NewConnection> = {}): NewConnection => ({
     { name: "list_items", annotations: { readOnlyHint: true } },
     { name: "create_item" },
   ]),
+  serverInstructions: null,
   createdBy: "UOWNER",
   ...overrides,
 });
@@ -125,7 +128,11 @@ describe.skipIf(!hasDatabase)("OAuth connection sign-in against the fake server"
 
   beforeAll(async () => {
     // 30-second tokens are inside the refresh margin, so every read refreshes first.
-    server = await startFakeMcp({ mode: "oauth", tokenSeconds: 30 });
+    server = await startFakeMcp({
+      mode: "oauth",
+      tokenSeconds: 30,
+      instructions: "Call search first.\u0007 Then execute.",
+    });
   });
   afterAll(() => server.close());
 
@@ -183,7 +190,9 @@ describe.skipIf(!hasDatabase)("OAuth connection sign-in against the fake server"
     expect((await probeServer(server.url, { token: first.accessToken })).kind).toBe("unauthorized");
     const listed = await relistTools(server.url, fresh?.token, row.tools, probeServer);
     if (!listed.ok) throw new Error(listed.reason);
-    const withTools = await saveTools(sql, row.id, listed.tools);
+    expect(listed.instructions).toBe("Call search first. Then execute.");
+    const withTools = await saveTools(sql, row.id, listed.tools, listed.instructions);
+    expect(withTools?.serverInstructions).toBe("Call search first. Then execute.");
     expect(withTools?.tools.map((tool) => [tool.name, tool.mode])).toEqual([
       ["list_items", "auto"],
       ["create_item", "ask"],
@@ -246,5 +255,144 @@ describe.skipIf(!hasDatabase)("OAuth connection sign-in against the fake server"
     });
     expect(await connectionToken(sql, row)).toBeUndefined();
     expect((await signInStates(sql, [row.id], new Date())).get(row.id)).toBe("expired");
+  });
+});
+
+describe.skipIf(!hasDatabase)("server instructions in the ledger", () => {
+  const ledger = useLedger();
+  let server: FakeMcp;
+  const TEXT = "Use search to find an operation, then execute to run it.";
+
+  beforeAll(async () => {
+    server = await startFakeMcp({ mode: "token", token: "fake-static", instructions: TEXT });
+  });
+  afterAll(() => server.close());
+
+  async function activeEnvRow(name: string, tools = proposal().tools) {
+    const sql = ledger.sql();
+    const saved = await proposeConnection(
+      sql,
+      proposal({
+        name,
+        url: server.url,
+        authKind: "env",
+        envVar: tokenEnvVar(name),
+        tools,
+      }),
+    );
+    if (!saved.ok) throw new Error(saved.reason);
+    const row = await activateConnection(sql, saved.row.id, "UOWNER", new Date());
+    if (!row) throw new Error("not active");
+    return row;
+  }
+
+  it("stores the instructions with the proposal and keeps them when only tools are saved", async () => {
+    const sql = ledger.sql();
+    const saved = await proposeConnection(sql, proposal({ serverInstructions: TEXT }));
+    if (!saved.ok) throw new Error(saved.reason);
+    expect(saved.row.serverInstructions).toBe(TEXT);
+    const kept = await saveTools(sql, saved.row.id, saved.row.tools);
+    expect(kept?.serverInstructions).toBe(TEXT);
+    const cleared = await saveTools(sql, saved.row.id, saved.row.tools, null);
+    expect(cleared?.serverInstructions).toBeNull();
+  });
+
+  it("refuses more than 4000 characters in the database too", async () => {
+    await expect(
+      proposeConnection(ledger.sql(), proposal({ serverInstructions: "x".repeat(4001) })),
+    ).rejects.toThrow();
+  });
+
+  it("loads the instructions of a token server once the token is there", async () => {
+    const sql = ledger.sql();
+    const row = await activeEnvRow("docs", []);
+    expect(row.tools).toEqual([]);
+    expect(row.serverInstructions).toBeNull();
+    const attempts = new Map<number, number>();
+    const probes: (string | undefined)[] = [];
+    const deps = (token: string | undefined, now: Date) => ({
+      sql,
+      probe: (url: string, options?: { token?: string }) => {
+        probes.push(options?.token);
+        return probeServer(url, options);
+      },
+      token: async () => (token ? { token } : undefined),
+      attempts,
+      now,
+    });
+    const t0 = new Date("2026-10-20T12:00:00Z");
+
+    // No token yet: nothing is probed and nothing is remembered.
+    expect(await refreshStale([row], deps(undefined, t0))).toEqual([row]);
+    expect(probes).toEqual([]);
+
+    // The token arrived: tools and instructions load.
+    const [fresh] = await refreshStale([row], deps("fake-static", t0));
+    expect(fresh?.serverInstructions).toBe(TEXT);
+    expect(fresh?.tools.map((tool) => tool.name)).toEqual([
+      "list_items",
+      "create_item",
+      "delete_item",
+    ]);
+    expect((await getConnection(sql, "docs"))?.serverInstructions).toBe(TEXT);
+    expect(probes).toEqual(["fake-static"]);
+
+    // A row that is complete is not probed again.
+    await refreshStale(fresh ? [fresh] : [], deps("fake-static", t0));
+    expect(probes).toHaveLength(1);
+  });
+
+  it("probes a row without instructions at most once per six hours", async () => {
+    const sql = ledger.sql();
+    const quiet = await startFakeMcp({ mode: "open" });
+    try {
+      const saved = await proposeConnection(
+        sql,
+        proposal({ name: "quiet", url: quiet.url, serverInstructions: null }),
+      );
+      if (!saved.ok) throw new Error(saved.reason);
+      const row = await activateConnection(sql, saved.row.id, "UOWNER", new Date());
+      if (!row) throw new Error("not active");
+      let probes = 0;
+      const attempts = new Map<number, number>();
+      const run = (now: Date) =>
+        refreshStale([row], {
+          sql,
+          probe: (url, options) => {
+            probes++;
+            return probeServer(url, options);
+          },
+          token: async () => undefined,
+          attempts,
+          now,
+        });
+      const t0 = new Date("2026-10-20T12:00:00Z");
+      await run(t0);
+      await run(new Date(t0.getTime() + 60 * 60 * 1000));
+      expect(probes).toBe(1);
+      await run(new Date(t0.getTime() + 7 * 60 * 60 * 1000));
+      expect(probes).toBe(2);
+    } finally {
+      await quiet.close();
+    }
+  });
+
+  it("keeps the stored row when the server is down", async () => {
+    const sql = ledger.sql();
+    const saved = await proposeConnection(
+      sql,
+      proposal({ name: "gone", url: "http://127.0.0.1:9/mcp" }),
+    );
+    if (!saved.ok) throw new Error(saved.reason);
+    const row = await activateConnection(sql, saved.row.id, "UOWNER", new Date());
+    if (!row) throw new Error("not active");
+    const out = await refreshStale([row], {
+      sql,
+      probe: probeServer,
+      token: async () => undefined,
+      attempts: new Map(),
+      now: new Date(),
+    });
+    expect(out).toEqual([row]);
   });
 });

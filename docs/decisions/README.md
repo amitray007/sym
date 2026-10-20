@@ -53,3 +53,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [045](045-mcp-connections.md) | The owner connects MCP servers from Slack; tokens come from `SYM_MCP_<NAME>_TOKEN` or an OAuth sign-in |
 | [046](046-persona-from-slack.md) | The owner switches the persona from Slack, and the status line rotates persona-flavored loading messages |
 | [047](047-blockkit-results.md) | Result and failure posts are Block Kit with a mrkdwn fallback, and the feedback buttons have an off switch |
+| [048](048-mcp-server-instructions.md) | The model reads an MCP server's `initialize` instructions through the connection description; code-mode servers work as ordinary connections |

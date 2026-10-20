@@ -37,7 +37,8 @@ export function checkServerUrl(raw: string): UrlCheck {
 }
 
 export type Probe =
-  | { kind: "tools"; tools: ListedTool[] }
+  // `instructions` is the server's raw `initialize` text. Run it through recordInstructions.
+  | { kind: "tools"; tools: ListedTool[]; instructions?: string | undefined }
   // The server refused the request without a valid token.
   | { kind: "unauthorized"; oauth: boolean }
   | { kind: "failed"; reason: string };
@@ -79,7 +80,7 @@ export async function probeServer(url: string, options: ProbeOptions = {}): Prom
       cursor = result.nextCursor;
       if (!cursor) break;
     }
-    return { kind: "tools", tools };
+    return { kind: "tools", tools, instructions: client.getInstructions() };
   } catch (error) {
     if (challenge) {
       return {
