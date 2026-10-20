@@ -98,7 +98,7 @@ export async function recentFeedback(sql: Sql, now: Date): Promise<Row[]> {
 }
 
 // True when the name has a live proposal or approval, or a recent rejection.
-async function alreadyHandled(sql: Sql, name: string, now: Date): Promise<boolean> {
+export async function alreadyHandled(sql: Sql, name: string, now: Date): Promise<boolean> {
   const since = new Date(now.getTime() - REJECT_QUIET_MS);
   const [row] = await sql<{ n: string }[]>`
     select count(*) as n from playbooks

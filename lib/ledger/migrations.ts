@@ -6,7 +6,7 @@ import {
   connectionInstructionsMigration,
   connectionsMigration,
 } from "../connections/migration.ts";
-import { learningMigration } from "../learning/migration.ts";
+import { learningMigration, repeatSourceMigration } from "../learning/migration.ts";
 import { memoryMigration } from "../memory/migration.ts";
 import { quietMigration } from "../quiet/migration.ts";
 import { reactionsMigration } from "../reactions/migration.ts";
@@ -181,4 +181,5 @@ export const migrations: Migration[] = [
       alter table jobs add column pr_facts jsonb;
     `,
   },
+  repeatSourceMigration,
 ];
