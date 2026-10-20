@@ -3,7 +3,8 @@ import { always } from "eve/tools/approval";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
 import { ownerResponse } from "../../lib/owner.ts";
-import { ledger, pack } from "../../lib/runtime.ts";
+import { checkProject } from "../../lib/projects/allowed.ts";
+import { allowedFromEnv, ledger, pack } from "../../lib/runtime.ts";
 import { nextFire } from "../../lib/schedules/cron.ts";
 import { scheduleLine } from "../../lib/schedules/format.ts";
 import { ScheduleInput } from "../../lib/schedules/input.ts";
@@ -35,6 +36,8 @@ export default defineTool({
   label: { start: ({ title }) => `Schedule: ${title}` },
   async execute(input, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
+    const refusal = checkProject(allowedFromEnv(), input.brief.project);
+    if (refusal) return refusal;
     const sql = ledger();
     const thread = await getSessionThread(sql, ctx.session.id);
     const channel = input.channel ?? thread?.channelId;

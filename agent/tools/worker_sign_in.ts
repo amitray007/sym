@@ -4,7 +4,7 @@ import { createWebhook, sleep } from "workflow";
 import { z } from "zod";
 import { deliver } from "../../lib/delivery/deliver.ts";
 import { chooseDisplay } from "../../lib/display.ts";
-import { enqueuePost } from "../../lib/ledger/outbox.ts";
+import { enqueuePost, postStatus } from "../../lib/ledger/outbox.ts";
 import { ownerUserId } from "../../lib/owner.ts";
 import { ledger, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { saveCredential } from "../../lib/workers/credentials.ts";
@@ -47,8 +47,9 @@ export default defineWorkflowTool({
   description:
     "Sign Sym in to its worker (T3 Code) when the owner asks, or when the sign-in expired. " +
     "Only the owner can use it. Sym sends the owner a private approval link and waits up to " +
-    "10 minutes. Runs as a task: you get a receipt now and the result later. Never repeat " +
-    "the link anywhere.",
+    "10 minutes. Runs as a task: you get a receipt now and the result later. If the status says " +
+    "the DM could not be sent yet, say so and do not tell the owner to check their DM. Never " +
+    "repeat the link anywhere.",
   inputSchema: z.object({}),
   label: {
     start: () => "Worker sign-in",
@@ -69,8 +70,22 @@ export default defineWorkflowTool({
     });
     const begun = await begin(prepared.worker, webhook.url);
     if (!begun.ok) return { status: "not_started", reason: begun.reason };
-    await sendLink(begun.start.authorizationUrl, prepared.owner, `${ctx.session.id}:${ctx.callId}`);
-    yield { status: "Sent the owner a sign-in link in a DM" };
+    const delivery = await sendLink(
+      begun.start.authorizationUrl,
+      prepared.owner,
+      `${ctx.session.id}:${ctx.callId}`,
+    );
+    // The link is never in this text. A DM that did not go out stays queued and retries.
+    yield {
+      status:
+        delivery === "sent"
+          ? "Sent the owner a sign-in link in a DM"
+          : "The sign-in DM could not be sent yet and stays queued for retry",
+    };
+    const queuedNote =
+      delivery === "sent"
+        ? ""
+        : " The DM could not be sent yet and stays queued for retry. Do not tell the owner to check their DM.";
 
     const stopped = new Promise<"stopped">((resolve) => {
       if (ctx.abortSignal.aborted) resolve("stopped");
@@ -84,7 +99,7 @@ export default defineWorkflowTool({
       if (next === "timeout" || next.done) {
         return {
           status: "timed_out",
-          reason: "The owner did not approve within 10 minutes. Ask again for a new link.",
+          reason: `The owner did not approve within 10 minutes. Ask again for a new link.${queuedNote}`,
         };
       }
       const outcome = await complete(begun.start, next.value.url, prepared.worker, prepared.owner);
@@ -139,7 +154,11 @@ async function begin(worker: Target, webhookUrl: string): Promise<Begun> {
 }
 
 // The link goes to the owner's DM only, never to a shared thread.
-async function sendLink(authorizationUrl: string, owner: string, key: string): Promise<void> {
+async function sendLink(
+  authorizationUrl: string,
+  owner: string,
+  key: string,
+): Promise<"sent" | "queued"> {
   "use step";
   const sql = ledger();
   const display = chooseDisplay({
@@ -152,7 +171,7 @@ async function sendLink(authorizationUrl: string, owner: string, key: string): P
     surface: "dm",
     quiet: false,
   });
-  await enqueuePost(sql, {
+  const post = await enqueuePost(sql, {
     idempotencyKey: `signin-link:${key}`,
     method: "chat.postMessage",
     payload: {
@@ -168,6 +187,7 @@ async function sendLink(authorizationUrl: string, owner: string, key: string): P
   const slack = slackFromEnv();
   // A failed send stays in the outbox for the delivery schedule.
   if (slack) await deliver(sql, slack).catch(() => {});
+  return (await postStatus(sql, post.id)) === "sent" ? "sent" : "queued";
 }
 
 // Checks the redirect, redeems the code, and stores the token. The code and the token stay in

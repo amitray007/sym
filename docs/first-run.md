@@ -41,6 +41,8 @@ Set the variables in [self-hosting.md, Credentials](self-hosting.md#credentials)
 deployment environment, never in Git or the pack. For this run:
 
 - `SYM_OWNER_SLACK_USER` and `SYM_SLACK_USERS`: your member ID from step 3.
+- `SYM_PROJECTS`: the title of the throwaway T3 project for this run. Without a pack, Sym starts
+  no job until this is set.
 - `T3_MCP_URL`: the URL from step 1. The in-app sign-in replaces the token.
 - `SYM_CALLBACK_URL`: Sym's tailnet address, `https://sym.<tailnet>.ts.net`.
 - `SYM_SIGNIN_URL`: Sym's public HTTPS address from step 2.

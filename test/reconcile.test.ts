@@ -9,6 +9,7 @@ import type { SlackApi } from "../lib/slack/api.ts";
 import type { WorkerQuestion } from "../lib/workers/types.ts";
 import { type FakeStep, FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
+import { TEST_PROJECTS } from "./helpers/projects.ts";
 
 const brief: Brief = {
   project: "test-repo",
@@ -96,7 +97,13 @@ describe.skipIf(!hasDatabase)("reconcileJobs", () => {
     });
     const worker = new FlakyWorker({ script });
     const slack = fakeSlack();
-    const deps: JobDeps = { sql, worker, slack: slack.api, now: () => new Date() };
+    const deps: JobDeps = {
+      sql,
+      worker,
+      allowedProjects: TEST_PROJECTS,
+      slack: slack.api,
+      now: () => new Date(),
+    };
     let job = await startJob(sql, { requestKey: `reconcile-${id}`, sessionId, brief });
     if (options.launch !== false) job = await launchOrAdopt(deps, job.id, CALLBACK);
     // The post-launch card and start message are out of the way before the test looks at Slack.

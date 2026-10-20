@@ -75,6 +75,9 @@ Rules (decision 026):
   so do two `default: true` entries. A worker with no `models` uses the built-in list in
   `lib/workers/models.ts`. A project `model` must be on its worker's list (or the built-in list)
   and wins over the brief. `SYM_WORKER_MODEL` still sets the default entry.
+- `projects` is the allow-list of projects Sym may work on (decision 042). A brief for any other
+  project is refused in code, and the brain sees only these names. An empty list allows nothing.
+  Without a pack, `SYM_PROJECTS` plays this role.
 - The owner is always allowed; `allowList` adds people.
 - Instruction and playbook files are listed by path and stay inside the pack folder.
 

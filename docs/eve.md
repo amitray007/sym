@@ -23,7 +23,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 
 | Feature | API | Decision | How Sym uses it | Limits |
 |---|---|---|---|---|
-| Plain tools | `defineTool` | Use | `jobs_status`, `schedule_*`, memory tools | Not retried. Interrupted steps re-run, so use idempotency keys |
+| Plain tools | `defineTool` | Use | `jobs_status`, `worker_projects`, `schedule_*`, memory tools | Not retried. Interrupted steps re-run, so use idempotency keys |
 | Approvals | `approval: never/once/always/policy` | Use | Gate launches with write intent, schedule deletes, merges | Default `never`. Check the clicker in `onInputResponse` |
 | Workflow task | `defineWorkflowTool({ task })` | Use | `t3_job`: one worker thread from launch to checked result | 32 working tasks per session. Result capped at 50 KB |
 | Progress | `async *task` + `yield` | Use | The thread status line | The task card row does not show yields. `serve` tasks cannot yield |

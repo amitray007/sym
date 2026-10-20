@@ -43,6 +43,25 @@ const newSince = (c: Conversation, before: string[]): FakeSlackMessage[] =>
   c.botMessages().filter((m) => !before.includes(m.ts));
 
 describe("milestone 1", () => {
+  it("refuses a brief for a project outside SYM_PROJECTS without a job or a launch", async () => {
+    const refused = newConversation(h);
+    const jobsBefore = (await h.sql`select count(*)::int as n from jobs`)[0]?.n;
+    await refused.mention(briefMention("Other repo work", { project: "other-repo" }));
+    // A later allowed brief proves the server handled the refused one first.
+    const allowed = newConversation(h);
+    await allowed.mention(briefMention("Allowed work"));
+    await allowed.waitForControls(/Start J-\d+:/);
+    await settle(h);
+
+    const jobs = await h.sql<{ title: string }[]>`select title from jobs order by id`;
+    expect(jobs.map((job) => job.title)).not.toContain("Other repo work");
+    expect(jobs).toHaveLength((jobsBefore ?? 0) + 1);
+    expect(h.t3.calls.filter((call) => call.name === "t3_thread_launch")).toHaveLength(0);
+    // The refused brief never reached the worker, not even for a project lookup.
+    expect(JSON.stringify(h.t3.calls)).not.toContain("other-repo");
+    expect(refused.botMessages().some((m) => isCard(m))).toBe(false);
+  });
+
   it("brief, Start, one card edited in place, one result", async () => {
     const c = newConversation(h);
     const { approval, job, ref } = await startJob(h, c, "Sync retry");

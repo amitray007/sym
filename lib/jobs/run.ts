@@ -13,6 +13,13 @@ import {
 import { getSessionThread } from "../ledger/threads.ts";
 import type { Pack } from "../pack/load.ts";
 import { briefGuardrails, resolvePackProject, workerModelList } from "../pack/policy.ts";
+import {
+  type AllowedProject,
+  allowedProjects,
+  checkProject,
+  findAllowedProject,
+  matchWorkerProject,
+} from "../projects/allowed.ts";
 import type { SlackApi } from "../slack/api.ts";
 import {
   briefModelLine,
@@ -61,11 +68,17 @@ export interface JobDeps {
   pack?: Pack;
   // The pack worker this process is connected to. A pack project on another worker is refused.
   workerName?: string;
+  // The projects Sym may touch (decision 042). Without it, the pack's projects apply, and
+  // without a pack nothing is allowed.
+  allowedProjects?: AllowedProject[];
   now?: () => Date;
 }
 
 // The ledger and Slack part of JobDeps, for steps that do not call the worker.
-export type LedgerDeps = Pick<JobDeps, "sql" | "slack" | "now" | "pack" | "workerModel">;
+export type LedgerDeps = Pick<
+  JobDeps,
+  "sql" | "slack" | "now" | "pack" | "workerModel" | "allowedProjects"
+>;
 
 // The Slack status line shows at most 50 characters (docs/slack.md).
 export const STATUS_LINE_MAX = 50;
@@ -527,10 +540,15 @@ interface LaunchPlan {
 // its guardrails. A pack narrows what a brief may ask for; it never widens it.
 async function planLaunch(deps: JobDeps, brief: Brief): Promise<LaunchPlan> {
   const envModel = envModelId(deps);
+  // Checked again here, so a stored brief or schedule for a removed project fails closed.
+  const list = deps.allowedProjects ?? allowedProjects(deps.pack);
+  const refusal = checkProject(list, brief.project);
+  if (refusal) throw new JobSetupError(refusal);
+  const entry = findAllowedProject(list, brief.project);
   if (!deps.pack) {
     return {
       models: workerModelList(undefined, undefined, envModel),
-      projectId: await resolveProject(deps.worker, brief.project),
+      projectId: await resolveProject(deps.worker, entry?.workerProject ?? brief.project),
       baseRef: brief.baseRef ?? "main",
       brief,
     };
@@ -580,11 +598,7 @@ const envModelId = (deps: Pick<JobDeps, "workerModel">) =>
   deps.workerModel && `${deps.workerModel.providerId}/${deps.workerModel.model}`;
 
 async function resolveProject(worker: WorkerAdapter, project: string): Promise<string> {
-  const projects = await worker.projects();
-  const wanted = project.trim().toLowerCase();
-  const match =
-    projects.find((p) => p.id === project) ??
-    projects.find((p) => p.title.toLowerCase() === wanted);
+  const match = matchWorkerProject(await worker.projects(), project);
   if (!match) throw new JobSetupError(`The worker has no project "${project}".`);
   return match.id;
 }

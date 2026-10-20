@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CARD_VERSION_FIELD, deliver } from "../lib/delivery/deliver.ts";
 import type { DisplayChoice } from "../lib/display.ts";
 import { createJob, getJob, markCardSent, setJobCard, updateJob } from "../lib/ledger/jobs.ts";
-import { claimPosts, enqueuePost, markCardPostSent } from "../lib/ledger/outbox.ts";
+import { claimPosts, enqueuePost, markCardPostSent, postStatus } from "../lib/ledger/outbox.ts";
 import { type SlackApi, SlackApiError } from "../lib/slack/api.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
@@ -63,6 +63,19 @@ describe.skipIf(!hasDatabase)("deliver", () => {
     expect(posts[0]?.body).toMatchObject({ unfurl_links: false, unfurl_media: false });
     expect(first.sent).toBeGreaterThanOrEqual(1);
     expect(second.sent).toBe(0);
+  });
+
+  it("reports whether one post went out, for the sign-in DM", async () => {
+    const sql = ledger.sql();
+    const post = await enqueuePost(sql, {
+      idempotencyKey: "status-check",
+      method: "chat.postMessage",
+      payload: { channel: "C1", text: "Link" },
+      display: text,
+    });
+    expect(await postStatus(sql, post.id)).toBe("pending");
+    await deliver(sql, fakeSlack().api);
+    expect(await postStatus(sql, post.id)).toBe("sent");
   });
 
   it("saves a card's ts on the job and edits the card only when it changes", async () => {

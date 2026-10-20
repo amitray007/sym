@@ -26,6 +26,7 @@ import { recordSessionThread } from "../lib/ledger/threads.ts";
 import type { SlackApi } from "../lib/slack/api.ts";
 import { type FakeStep, FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
+import { TEST_PROJECTS } from "./helpers/projects.ts";
 
 // The model check of flow 4 (docs/architecture.md, decision 032).
 
@@ -196,7 +197,7 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
     });
     const worker = new FakeWorker({ script });
     const slack = fakeSlack();
-    const deps: JobDeps = { sql, worker, slack: slack.api };
+    const deps: JobDeps = { sql, worker, allowedProjects: TEST_PROJECTS, slack: slack.api };
     const started = await startJob(sql, {
       requestKey: `verify-${id}`,
       sessionId,

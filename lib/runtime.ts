@@ -1,6 +1,7 @@
 import { connect, type Sql } from "./db.ts";
 import { type JobDeps, type LedgerDeps, parseWorkerModel } from "./jobs/run.ts";
 import { type Pack, packFromEnv } from "./pack/load.ts";
+import { type AllowedProject, allowedProjects } from "./projects/allowed.ts";
 import type { SlackApi } from "./slack/api.ts";
 import { slackApiFromEnv } from "./slack/eve-api.ts";
 import { getCredential } from "./workers/credentials.ts";
@@ -43,12 +44,18 @@ function envWorkerModel() {
   }
 }
 
+// The projects Sym may touch: the pack's, else SYM_PROJECTS, else none (decision 042).
+export function allowedFromEnv(): AllowedProject[] {
+  return allowedProjects(pack(), process.env.SYM_PROJECTS);
+}
+
 export function ledgerDeps(): LedgerDeps {
   const slack = slackFromEnv();
   const adopterPack = pack();
   const workerModel = envWorkerModel();
   return {
     sql: ledger(),
+    allowedProjects: allowedFromEnv(),
     ...(workerModel ? { workerModel } : {}),
     ...(slack ? { slack } : {}),
     ...(adopterPack ? { pack: adopterPack } : {}),

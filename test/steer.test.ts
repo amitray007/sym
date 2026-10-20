@@ -6,6 +6,7 @@ import { createJob, getJob, updateJob } from "../lib/ledger/jobs.ts";
 import type { SlackApi } from "../lib/slack/api.ts";
 import { FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
+import { TEST_PROJECTS } from "./helpers/projects.ts";
 
 const brief: Brief = {
   project: "test-repo",
@@ -54,7 +55,7 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
     return {
       worker,
       calls,
-      deps: { sql: ledger.sql(), worker, slack },
+      deps: { sql: ledger.sql(), worker, allowedProjects: TEST_PROJECTS, slack },
       posts: () => calls.filter((c) => c.method === "chat.postMessage"),
     };
   }

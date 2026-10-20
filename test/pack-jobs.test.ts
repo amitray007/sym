@@ -95,9 +95,7 @@ describe.skipIf(!hasDatabase)("jobs under a pack", () => {
   });
 
   it("refuses a project the pack does not list, even when the worker has it", async () => {
-    await expect(launch(brief("other-repo"))).rejects.toThrow(
-      "is not in the pack's allowed projects",
-    );
+    await expect(launch(brief("other-repo"))).rejects.toThrow("is not one of Sym's projects");
   });
 
   it("adds rule breaks to the result message", async () => {

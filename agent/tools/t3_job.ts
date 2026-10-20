@@ -22,7 +22,8 @@ import {
 } from "../../lib/jobs/run.ts";
 import { type ModelCheck, VerifierOutput } from "../../lib/jobs/verify.ts";
 import { getJob, jobRef } from "../../lib/ledger/jobs.ts";
-import { ledger, ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
+import { checkProject } from "../../lib/projects/allowed.ts";
+import { allowedFromEnv, ledger, ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
 import { canSkipStart } from "../../lib/schedules/approval.ts";
 import { ScheduledBrief } from "../../lib/schedules/input.ts";
 import { runOutcome } from "../../lib/schedules/outcome.ts";
@@ -74,6 +75,13 @@ export default defineWorkflowTool({
   async *task(input, ctx) {
     "use workflow";
     const { schedule, ...brief } = input;
+    // Decision 042: a project outside Sym's list never gets a job row or a brief post. The
+    // reason names only the allowed projects, whether or not the asked-for project exists.
+    const refusal = await projectRefusal(brief.project);
+    if (refusal) {
+      await endRefusedRun(ctx.session.id);
+      return { status: "not_started", reason: refusal };
+    }
     const job = await recordJob(brief, ctx.callId, ctx.session.id);
     const ref = jobRef(job.id);
     const timing = await jobTiming();
@@ -312,6 +320,17 @@ async function jobTiming() {
       seconds("SYM_JOB_POLL_AFTER_CALLBACK_SECONDS", POLL_AFTER_CALLBACK_SECONDS) * 1000,
     verifierMs: seconds("SYM_VERIFIER_TIMEOUT_SECONDS", VERIFIER_SECONDS) * 1000,
   };
+}
+
+async function projectRefusal(project: string): Promise<string | undefined> {
+  "use step";
+  return checkProject(allowedFromEnv(), project);
+}
+
+// A scheduled run that is refused has no job. The digest shows it as failed.
+async function endRefusedRun(sessionId: string) {
+  "use step";
+  await finishRunForSession(ledger(), sessionId, "failed");
 }
 
 async function recordJob(brief: Brief, callId: string, sessionId: string) {
