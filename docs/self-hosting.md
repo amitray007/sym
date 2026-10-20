@@ -29,7 +29,7 @@ Tailscale Funnel limited to the Slack path also works.
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway, for the brain model |
 | `SYM_MODEL` | Gateway model ID, for example `anthropic/claude-sonnet-5.5`. Optional |
 | `SYM_WORKER_MODEL` | Worker thread model as `<provider>/<model>`, for example `codex/gpt-6-luna`. Needed when a worker project has no default model |
-| `DATABASE_URL` | Postgres. `deploy/compose.yaml` builds it from `POSTGRES_PASSWORD` |
+| `DATABASE_URL` | Postgres. `compose.yaml` builds it from `POSTGRES_PASSWORD` |
 | `SYM_PACK_DIR` | Path to the mounted pack |
 | `SYM_MCP_TOKEN` | Bearer for worker threads calling `/eve/v1/mcp`. Unset means the channel rejects every request. Keep it on the private network (decision 027) |
 | `SYM_API_TOKEN` | Bearer for scripts, CI, and operators calling `/eve/v1/session`. Unset means production rejects them (decision 019) |
@@ -49,12 +49,13 @@ them in the pack.
 
 ## Deploy
 
-[`deploy/compose.yaml`](../deploy/compose.yaml) is the reference deployment (decision 040). It
-builds the image (decision 019) and runs three services: Sym, Postgres 18, and a Tailscale
-sidecar that Sym shares its network with. The repo-root `compose.yaml` is the local lab only.
+[`compose.yaml`](../compose.yaml) is the reference deployment and the local lab in one file
+(decision 040). `docker compose up` builds the image (decision 019) and runs three services: Sym,
+Postgres 18, and a Tailscale sidecar that Sym shares its network with. `pnpm db:up` starts only
+Postgres.
 
-1. Create a Docker Compose app in Dokploy from this repository, with the compose path
-   `./deploy/compose.yaml`.
+1. Create a Docker Compose app in Dokploy from this repository. The compose path is the default,
+   `./compose.yaml`.
 2. In the Environment tab, set the variables in [Credentials](#credentials), plus:
    - `POSTGRES_PASSWORD`: a URL-safe value, such as `openssl rand -hex 32`. The compose file
      builds `DATABASE_URL` from it, so do not set `DATABASE_URL`.

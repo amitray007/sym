@@ -52,7 +52,7 @@ Node 24 and pnpm, pinned in `mise.toml`. Run tools through mise, for example
 - `pnpm eval` runs `eve eval` (decision 039). It uses the real brain model and spends tokens, so
   the owner runs it. It needs `AI_GATEWAY_API_KEY`, `SYM_MODEL`, and a migrated `DATABASE_URL`.
   `SYM_MODEL=fixture pnpm eval` proves the wiring with no provider; the routing cases then fail.
-- `pnpm db:up` starts Postgres 18 from `compose.yaml` on `127.0.0.1:55432`. `pnpm db:down` stops
+- `pnpm db:up` starts only the Postgres 18 service of `compose.yaml`, on `127.0.0.1:55432`. `pnpm db:down` stops
   it. Ledger tests need it and `DATABASE_URL=postgres://sym:sym@localhost:55432/sym`.
 - `pnpm db:migrate` applies pending ledger migrations (`lib/ledger/migrations.ts`).
 - `pnpm t3:login <mcp-url>` signs Sym in to a T3 worker and saves the token to `.env.local`. The
