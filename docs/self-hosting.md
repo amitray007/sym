@@ -29,7 +29,7 @@ Tailscale Funnel limited to the Slack path also works.
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway, for the brain model |
 | `SYM_MODEL` | Gateway model ID, for example `anthropic/claude-sonnet-5.5`. Optional |
 | `SYM_WORKER_MODEL` | Worker thread model as `<provider>/<model>`, for example `codex/gpt-6-luna`. Needed when a worker project has no default model |
-| `DATABASE_URL` | Postgres |
+| `DATABASE_URL` | Postgres. `deploy/compose.yaml` builds it from `POSTGRES_PASSWORD` |
 | `SYM_PACK_DIR` | Path to the mounted pack |
 | `SYM_MCP_TOKEN` | Bearer for worker threads calling `/eve/v1/mcp`. Unset means the channel rejects every request. Keep it on the private network (decision 027) |
 | `SYM_API_TOKEN` | Bearer for scripts, CI, and operators calling `/eve/v1/session`. Unset means production rejects them (decision 019) |
@@ -49,15 +49,34 @@ them in the pack.
 
 ## Deploy
 
-1. Build the image with `docker build -t sym .` (decision 019). Its start command applies ledger
-   migrations, then runs `eve start`, which also runs the scheduler. The container listens on
-   port 3000.
-2. Run exactly one replica. Schedules and leases assume one scheduler.
-3. Mount a volume at `/app/.eve/.workflow-data`.
-4. Point the proxy at the service. Pass `/eve/` and `/.well-known/workflow/` unrewritten.
-5. Use a Postgres with backups.
-6. Pin the Eve version. Upgrade only when no jobs run, because an upgrade strands running
-   sessions. Reconcile re-attaches jobs after a restart.
+[`deploy/compose.yaml`](../deploy/compose.yaml) is the reference deployment (decision 040). It
+builds the image (decision 019) and runs three services: Sym, Postgres 18, and a Tailscale
+sidecar that Sym shares its network with. The repo-root `compose.yaml` is the local lab only.
+
+1. Create a Docker Compose app in Dokploy from this repository, with the compose path
+   `./deploy/compose.yaml`.
+2. In the Environment tab, set the variables in [Credentials](#credentials), plus:
+   - `POSTGRES_PASSWORD`: a URL-safe value, such as `openssl rand -hex 32`. The compose file
+     builds `DATABASE_URL` from it, so do not set `DATABASE_URL`.
+   - `TS_AUTHKEY`: a Tailscale auth key for the sidecar. `TS_HOSTNAME` is optional (`sym`).
+3. Add the public routes as Dokploy domains on the `tailscale` service, port 3000, one per path:
+   `/eve/v1/slack` and `/.well-known/workflow`. Do not strip the path. Sym listens in the
+   sidecar's network, so the domains point at the sidecar.
+4. Deploy. The start command applies ledger migrations, then runs `eve start`, which also runs
+   the scheduler. Volumes keep Postgres, the workflow state (`/app/.eve/.workflow-data`), and the
+   Tailscale node identity.
+5. The sidecar publishes all of Sym on the tailnet at `https://<TS_HOSTNAME>.<tailnet>.ts.net`.
+   Use that address for `SYM_CALLBACK_URL`, the worker MCP channel, and `/eve/v1/session`.
+6. Check from inside the `sym` container that the worker's MagicDNS name resolves, for example
+   `getent hosts <worker>.<tailnet>.ts.net`. MagicDNS must be on for the tailnet.
+
+Rules for any host:
+
+- Run exactly one Sym replica. Schedules and leases assume one scheduler.
+- Pass `/eve/` and `/.well-known/workflow/` unrewritten.
+- Use a Postgres with backups. In Dokploy, back up the `postgres` named volume.
+- Pin the Eve version. Upgrade only when no jobs run, because an upgrade strands running
+  sessions. Reconcile re-attaches jobs after a restart.
 
 ## Worker host (T3 Code)
 

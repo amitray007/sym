@@ -41,21 +41,23 @@ Set these in the deployment environment, never in Git or the pack:
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | The Postgres URL |
+| `POSTGRES_PASSWORD` | A URL-safe value; `deploy/compose.yaml` builds `DATABASE_URL` from it |
+| `TS_AUTHKEY` | A Tailscale auth key for Sym's sidecar |
 | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` | From step 3 |
 | `AI_GATEWAY_API_KEY` | The gateway key; `SYM_MODEL` is optional |
 | `SYM_OWNER_SLACK_USER`, `SYM_SLACK_USERS` | Your member ID (or use a pack) |
 | `T3_MCP_URL` | From step 1; the in-app sign-in replaces the token |
-| `SYM_CALLBACK_URL` | Sym's private address the worker can reach |
+| `SYM_CALLBACK_URL` | Sym's tailnet address, `https://sym.<tailnet>.ts.net` |
 | `SYM_SIGNIN_URL` | Sym's public HTTPS address |
 | `SYM_WORKER_MODEL` | `<provider>/<model>` if the worker project has no default model |
 | `SYM_API_TOKEN`, `SYM_MCP_TOKEN` | Long random values |
 
 ## 5. Deploy (owner)
 
-1. Build the image: `docker build -t sym .` (add `--build-context pack=<dir>` for a pack).
-2. Run one replica with a volume at `/app/.eve/.workflow-data`. The start command applies ledger
-   migrations, then runs `eve start` and the schedules.
+1. In Dokploy, create a Docker Compose app from the repository with the compose path
+   `./deploy/compose.yaml`, and add the two public paths as domains on the `tailscale` service,
+   port 3000 ([self-hosting.md](self-hosting.md#deploy)).
+2. Deploy. The start command applies ledger migrations, then runs `eve start` and the schedules.
 3. **Check:** `GET /eve/v1/health` answers ready.
 4. In the Slack app, open Event Subscriptions and press Retry on the request URL. **Check:** Slack
    shows it as verified.
