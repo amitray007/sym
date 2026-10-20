@@ -10,7 +10,7 @@ into edits of a card. New messages are only for "you need to act" and "it is don
 
 | Level | What posts | Notifies |
 |---|---|---|
-| 0. Silent | Nothing. One line in the evening digest | No |
+| 0. Silent | Nothing. One line in the evening digest, when it is on (decision 054) | No |
 | 1. Text | One plain message. The status line shows work while it runs | Once |
 | 2. Text and buttons | One message with fixed choices | Yes |
 | 3. Live card | One job card, edited in place, then one result message | At start and end |
@@ -39,7 +39,7 @@ learned preferences, and shared channels are planned.
 - Quiet mode. `/sym quiet` saves `quiet_until` in the ledger `settings` table, and the pack's
   `quietHours` and `timeZone` (UTC when unset) give the quiet hours. A window such as 22:00 to
   07:00 crosses midnight; `from` is inside it and `to` is outside. Only level 2 and failures post.
-  The rest waits for the digest (decision 029).
+  The rest waits for the digest, when it is on (decisions 029 and 054).
 - Shared channels (team phase). Level 3 only for jobs someone asked for in that channel. Other
   updates go to the requester's DM.
 - Upgrade and downgrade during a job. Text work that passes 2 minutes gets a card ("This is

@@ -66,7 +66,7 @@ waits until a person approves it in the T3 app. Sym can only tell the owner.
 | `pendingQuestions`, `answer` | `t3_pending_request_list`, `t3_pending_request_read`, `t3_pending_request_respond` | Read / Supervised+ |
 | `send` | `t3_thread_send` (`mode: auto/queue/steer/restart`, `clientRequestId`) | Supervised+ |
 | `interrupt` | `t3_thread_interrupt`, `t3_workflow_stop` | Supervised+ |
-| `watchPullRequest` | `watch_pull_request` (it links the PR first). A wake shows in the worker thread as a `notification` item such as `#12: checks failed`; reconcile posts each once (decision 034) | Above read-only |
+| `watchPullRequest` | `watch_pull_request` (it links the PR first). A wake shows in the worker thread as a `notification` item such as `#12: checks failed`; reconcile posts each once (decision 034). Only with `SYM_PR_FOLLOW=on` (decision 054) | Above read-only |
 | `settle` | `t3_thread_organize(settle)` | Supervised+ |
 
 Also available: queue tools, thread fork and merge-back, `t3_worktree_list`, T3-side schedules,

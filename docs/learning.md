@@ -27,7 +27,8 @@ decides what to keep.
    week's feedback: `thumbs_down` on the same job kind, and the same `fix` text sent repeatedly. A
    pattern seen 3 times becomes one proposed rule in the `playbooks` table (source `learn`, with
    the feedback IDs as evidence). Its text comes from Sym's own template plus counts, never from
-   the feedback text. Sym posts one message to `SYM_DIGEST_CHANNEL` asking the owner to review
+   the feedback text. Sym posts one message to the digest channel (`SYM_DIGEST_CHANNEL`, which
+   `learn` uses even with the digest off) asking the owner to review
    it. A pattern with a live proposal or approval, or a rejection in the last 28 days, is skipped.
    Changes that need code are layer 3.
 5. **Change.** For layer 3, Sym launches a worker thread in its own repository. The thread edits

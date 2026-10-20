@@ -1,5 +1,6 @@
 import type { Sql } from "../db.ts";
 import { chooseDisplay } from "../display.ts";
+import { envSwitch } from "../env-switch.ts";
 import { recentJobs } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
 import type { Pack } from "../pack/load.ts";
@@ -47,6 +48,12 @@ export async function queueDigest(sql: Sql, channel: string, now: Date): Promise
     display: dm ? { ...display, target: "dm" } : display,
   });
   return true;
+}
+
+// The daily digest is opt-in (decision 054): it posts only with `SYM_DIGEST=on` and a digest
+// channel. The learn proposals and the sign-in notice use the channel without the switch.
+export function digestEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return envSwitch(env.SYM_DIGEST, false);
 }
 
 // Where the digest and learn proposals go: the pack's digest channel, else SYM_DIGEST_CHANNEL

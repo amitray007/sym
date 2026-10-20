@@ -1,4 +1,5 @@
 import { chooseDisplay } from "../display.ts";
+import { envSwitch } from "../env-switch.ts";
 import { getJob, type Job, jobRef } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
 import { workerNoun } from "../worker-label.ts";
@@ -12,6 +13,11 @@ import type { JobDeps } from "./run.ts";
 // T3 puts a wake in the worker thread as a `notification` item whose text is the wake summary,
 // for example `#12: checks failed, new comments` (T3 orchestration-v2/pullRequestWatch.ts). The
 // full wake text goes to the worker agent only.
+
+// PR follow is opt-in (decision 054): reconcile watches PRs only with `SYM_PR_FOLLOW=on`.
+export function prFollowEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return envSwitch(env.SYM_PR_FOLLOW, false);
+}
 
 // Pages of thread activity one wake check reads.
 const MAX_PAGES = 5;

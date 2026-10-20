@@ -37,6 +37,11 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_PROJECTS` | T3 project titles or IDs Sym may work on, comma-separated. Required without a pack: with neither, no job starts (decision 042). Ignored when a pack lists `projects` |
 | `SYM_WORKER_LABEL` | Optional. The name Slack users see for the worker, such as `Builder`. Default `Worker`. Max 30 characters (decision 044) |
 | `SYM_FEEDBACK` | Optional. `on` (default) or `off` (also `false`, `0`, `no`). Off removes the helpful / not helpful buttons from replies. Old buttons still record clicks (decision 047) |
+| `SYM_DIGEST_CHANNEL` | Optional. The daily digest's channel ID, or the owner's user ID for a DM. Unset means no digest and no weekly `learn` proposals. A pack's `channels.digest` wins (decision 024) |
+| `SYM_DIGEST_CRON` | Optional. When the digest posts, as cron in UTC. Default `0 17 * * *`. Read at build time, so a change needs a rebuild |
+| `SYM_DIGEST` | Optional. `off` (default) or `on` (also `true`, `1`, `yes`). On posts the daily digest to the digest channel. The `learn` proposals and the sign-in notice use the channel either way (decision 054) |
+| `SYM_VERIFIER` | Optional. `off` (default) or `on`. On runs the `verifier` subagent, a paid model call, on each finished code job. Off ends the job with the rule checks alone (decision 054) |
+| `SYM_PR_FOLLOW` | Optional. `off` (default) or `on`. On asks the worker to watch each job's PR for 7 days and posts CI and review wakes in the job thread (decision 054) |
 | `SYM_SLACK_USERS` | Slack user IDs allowed to use Sym, comma-separated |
 | `SYM_CALLBACK_URL` | Base URL a worker uses to call Sym back, such as Sym's private-network address. Without it, jobs wait for the 4-minute poll (decision 028) |
 | `SYM_SIGNIN_URL` | Base URL the owner's browser returns to after the worker sign-in, such as Sym's public HTTPS address. Must be https unless it is loopback. Defaults to `SYM_CALLBACK_URL` (decision 036) |

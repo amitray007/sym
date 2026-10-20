@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { envSwitch } from "../env-switch.ts";
 import type { OutputContract } from "./contract.ts";
 import { nearDuplicate } from "./similar.ts";
 
@@ -86,6 +87,12 @@ export function matchesGlob(path: string, pattern: string): boolean {
     }
   }
   return new RegExp(`^${source}$`).test(clean);
+}
+
+// The model check is opt-in (decision 054): without `SYM_VERIFIER=on`, a finished code job ends
+// with the rule checks alone and its result has no verifier line.
+export function verifierEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return envSwitch(env.SYM_VERIFIER, false);
 }
 
 // The model check (docs/architecture.md, flow 4, decision 032). The `verifier` subagent returns

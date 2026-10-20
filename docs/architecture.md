@@ -82,7 +82,7 @@ Example: "Every weekday at 09:00, run the on-call check and tell me only what ne
    Start click only when the session came from the dispatcher and the brief equals the approved
    one (decision 024).
 5. The scheduled job posts nothing while it runs. When the check is clean, nothing posts at all,
-   and the evening digest lists "On-call check: all clear". When something needs attention, one
+   and the evening digest, when it is on, lists "On-call check: all clear". When something needs attention, one
    message posts and opens the thread (decision 031).
 
 Sym owns schedules instead of the worker (decision 008). Sym then knows each run before it starts,
@@ -119,7 +119,8 @@ update?" cheap and lets a new session continue the job.
 3. Run the deterministic rule checks first (`lib/jobs/verify.ts`): changed files sit inside the
    allowed paths, and a PR opened only when the job allowed one. Checking the PR branch, CI
    status, and production config needs the worker or GitHub and comes later.
-4. The `worker_job` body runs the `verifier` subagent through `ctx.agent` (decision 032). It gets the
+4. With `SYM_VERIFIER=on` (decision 054), the `worker_job` body runs the `verifier` subagent
+   through `ctx.agent` (decision 032). It gets the
    brief, the rule-check concerns, and the worker's claims as untrusted data. It compares the
    done-when list with the claims and returns `pass` or `concerns`, `concerns[]`, and
    `confidence`. It has no tools.
@@ -128,11 +129,13 @@ update?" cheap and lets a new session continue the job.
    list under "check before merge" with the verifier's confidence, open questions as a checklist,
    and a footer with the PR link, tests, and file count. Buttons Looks good, Fix, and Close come later. "Fix" will
    send the reply to the same worker thread.
-6. If a PR opened, ask the worker to watch it, so the worker agent can fix CI failures and answer
-   review comments. Reconcile reports those wakes in the job thread.
+6. With `SYM_PR_FOLLOW=on` (decision 054), if a PR opened, ask the worker to watch it, so the
+   worker agent can fix CI failures and answer review comments. Reconcile reports those wakes in
+   the job thread.
 7. When the owner closes the job, settle the worker thread.
 
-The model check is skipped, and the job ends with the rule checks alone, when reconcile finishes
+The model check is skipped, and the job ends with the rule checks alone, when `SYM_VERIFIER` is
+not on (the result then has no verifier line), when reconcile finishes
 an orphaned job (including one left in `checking`), for a scheduled check, when the task stops or
 fails while checking, and when the verifier fails or times out. In the last case the result says
 "Model check unavailable".
@@ -156,11 +159,12 @@ fails while checking, and when the verifier fails or times out. In the last case
 | Worker unreachable | reconcile | Mark jobs `worker_offline`, post once, retry on a timer, post "back" |
 | Session died mid-job | reconcile | The watcher lease runs out; reconcile checks the job in code until it ends (decision 022) |
 | Worker sign-in expires in 5 days | reconcile | DM the owner the re-approve step |
-| PR wake | reconcile | Post the CI failure or review in the job thread |
-| Daily digest | digest schedule | Finished, failed, waiting, and what Sym learned today |
+| PR wake | reconcile | Post the CI failure or review in the job thread. Only with `SYM_PR_FOLLOW=on` |
+| Daily digest | digest schedule | Finished, failed, waiting, and what Sym learned today. Only with `SYM_DIGEST=on` and a digest channel |
 
 Noise budget: at most one unprompted message per job per hour, except "needs you" and failures.
-The digest carries the rest. [display.md](display.md) defines each message's level.
+The digest, when it is on, carries the rest. The digest, the verifier, and PR follow are opt-in
+(decision 054). [display.md](display.md) defines each message's level.
 
 ## Failure modes
 
