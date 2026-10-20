@@ -1,4 +1,5 @@
-# Local lab: Postgres for the ledger. Start it with `pnpm db:up`.
+# Local lab: Postgres for the ledger. Start it with `pnpm db:up`. Deployments use
+# deploy/compose.yaml (decision 040).
 # The host port is 55432, so it does not clash with a Postgres already on 5432.
 services:
   postgres:
