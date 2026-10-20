@@ -153,4 +153,21 @@ export const migrations: Migration[] = [
   },
   connectionInstructionsMigration,
   connectionDefaultModeMigration,
+  {
+    version: "016_thread_listen",
+    sql: `
+      -- How Sym listens in one Slack thread: 'all' or 'mention-only' (decision 050). Kept per
+      -- thread, so it outlives the session. No row means 'all'.
+      create table thread_listen (
+        channel_id text not null,
+        thread_ts text not null,
+        mode text not null check (mode in ('all', 'mention-only')),
+        updated_by text,
+        updated_at timestamptz not null default now(),
+        primary key (channel_id, thread_ts)
+      );
+      -- The person Sym last served in a thread is the latest session_threads row with a user.
+      create index session_threads_thread on session_threads (channel_id, thread_ts, updated_at desc);
+    `,
+  },
 ];

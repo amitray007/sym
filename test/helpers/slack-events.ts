@@ -80,6 +80,29 @@ export function appMentionRequest(
   return jsonRequest(envelope(input, event), input.signingSecret, input.timestamp);
 }
 
+// A plain message event in a public channel, as Slack sends one for a reply in a thread.
+export function channelMessageRequest(
+  input: EventContext & {
+    channel: string;
+    user: string;
+    text: string;
+    ts: string;
+    threadTs?: string;
+  },
+): SlackRequestParts {
+  const event: Record<string, unknown> = {
+    type: "message",
+    channel_type: "channel",
+    user: input.user,
+    text: input.text,
+    ts: input.ts,
+    channel: input.channel,
+    event_ts: input.ts,
+  };
+  if (input.threadTs) event.thread_ts = input.threadTs;
+  return jsonRequest(envelope(input, event), input.signingSecret, input.timestamp);
+}
+
 // A direct message event (`message` in an `im` channel).
 export function directMessageRequest(
   input: EventContext & {

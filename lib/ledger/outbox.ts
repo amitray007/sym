@@ -162,3 +162,20 @@ export async function markPostFailed(sql: Sql, id: number, error: string): Promi
 function normalize(row: OutboxPost): OutboxPost {
   return { ...row, id: Number(row.id), jobId: row.jobId === null ? null : Number(row.jobId) };
 }
+
+// The Slack ts of every message the outbox sent to one thread: job cards, results, progress.
+// They are Sym's posts that never entered a session's history (decision 050). Bounded to the
+// latest 200.
+export async function sentPostTimestamps(
+  sql: Sql,
+  channelId: string,
+  threadTs: string,
+): Promise<string[]> {
+  const rows = await sql<{ slackTs: string }[]>`
+    select slack_ts from outbox
+    where status = 'sent' and method = 'chat.postMessage' and slack_ts is not null
+      and payload->>'channel' = ${channelId} and payload->>'thread_ts' = ${threadTs}
+    order by id desc limit 200
+  `;
+  return rows.map((row) => row.slackTs);
+}

@@ -55,3 +55,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [047](047-blockkit-results.md) | Result and failure posts are Block Kit with a mrkdwn fallback, and the feedback buttons have an off switch |
 | [048](048-mcp-server-instructions.md) | The model reads an MCP server's `initialize` instructions through the connection description; code-mode servers work as ordinary connections |
 | [049](049-connection-default-mode.md) | A connection has a default tool mode: a tool's own mode, then the connection default, then the read-only hint |
+| [050](050-shared-threads.md) | In a thread with several people, Sym answers only a message meant for it, with a quiet turn for the unclear ones, a per-thread listen mode, and a lighter thread context |

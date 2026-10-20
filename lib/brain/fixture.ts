@@ -10,6 +10,7 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A scheduled run message calls worker_job with its brief and its schedule reference.
 // - A message that asks for an update or status calls jobs_status and repeats its answer.
 // - A message that says "sign in to the worker" calls worker_sign_in.
+// - A message that says "thinking out loud" calls no_reply (side talk, decision 050).
 // - A task result, or a tool result with `posted: true`, ends the turn with no_reply.
 // - Anything else gets a one-line echo.
 export function fixtureBrain(): LanguageModel {
@@ -50,6 +51,7 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   if (/\bsign in to the worker\b/i.test(message)) {
     return { toolCalls: [{ name: "worker_sign_in", input: {} }] };
   }
+  if (/\bthinking out loud\b/i.test(message)) return quiet(request);
   if (/\b(update|status)\b/i.test(message)) {
     const job = /\bJ-\d+\b/.exec(message)?.[0];
     return { toolCalls: [{ name: "jobs_status", input: job ? { job } : {} }] };

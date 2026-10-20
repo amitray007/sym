@@ -37,7 +37,8 @@ the worker environment check, and the deployment. Built beyond milestone 1: in-a
 schedules with silent clean checks and the digest, memory, the pack (overlay, jobs, allow-list),
 result checks and the verifier subagent, quiet mode, `/sym`, card buttons, feedback and learned
 playbook rows, steering, PR wakes, the sign-in expiry notice, the worker MCP channel, per-job
-worker models, the project allow-list, the worker label, and owner-managed MCP connections.
+worker models, the project allow-list, the worker label, owner-managed MCP connections, and
+shared-thread manners.
 
 ## Commands
 

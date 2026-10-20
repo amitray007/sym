@@ -25,6 +25,7 @@ import {
 import {
   appMentionRequest,
   blockActionsRequest,
+  channelMessageRequest,
   type SlackRequestParts,
 } from "../helpers/slack-events.ts";
 
@@ -212,6 +213,28 @@ export class Conversation {
         threadTs: this.rootTs,
       }),
     );
+  }
+
+  // A plain reply in the thread that does not tag Sym, as a person talking to the thread.
+  async say(text: string, user = OWNER): Promise<FakeSlackMessage> {
+    const message = this.h.slack.addMessage({
+      channel: this.channel,
+      user,
+      text,
+      thread_ts: this.rootTs,
+    });
+    await postSlack(
+      this.h,
+      channelMessageRequest({
+        signingSecret: SIGNING_SECRET,
+        channel: this.channel,
+        user,
+        text,
+        ts: message.ts,
+        threadTs: this.rootTs,
+      }),
+    );
+    return message;
   }
 
   // Messages in this thread (root excluded), in post order.
