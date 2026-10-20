@@ -21,7 +21,9 @@ import {
   verifierRequest,
 } from "../../lib/jobs/run.ts";
 import { type ModelCheck, VerifierOutput, verifierEnabled } from "../../lib/jobs/verify.ts";
+import { linkPlaybook, markAutoStarted, trustedPlaybookOf } from "../../lib/learning/trust.ts";
 import { getJob, jobRef } from "../../lib/ledger/jobs.ts";
+import { slackUserOfPrincipal } from "../../lib/owner.ts";
 import { checkProject } from "../../lib/projects/allowed.ts";
 import { allowedFromEnv, ledger, ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
 import { canSkipStart } from "../../lib/schedules/approval.ts";
@@ -108,27 +110,34 @@ export default defineWorkflowTool({
         ctx.session.id,
         job.id,
       );
+      // Decision 059: a brief that follows a playbook the owner trusts skips the click. The step
+      // reads the trust from the ledger, so the model cannot grant it.
+      const trusted = preApproved ? null : await trustedStart(job.id, ctx.session.auth.current);
       if (preApproved) {
         // A scheduled check speaks only when something needs attention (decision 031).
         await markScheduled(job.id);
         await linkRun(ctx.session.id, job.id);
       } else {
         // The full brief is Sym's own post; Eve's prompt card keeps only about 200 characters.
-        await postBrief(job.id);
+        await postBrief(job.id, trusted);
       }
       yield {
-        status: statusLine(ref, preApproved ? "Starting scheduled run" : "Waiting for Start"),
+        status: statusLine(
+          ref,
+          preApproved ? "Starting scheduled run" : trusted ? "Starting" : "Waiting for Start",
+        ),
       };
-      const decision = preApproved
-        ? ({ status: "answered", optionId: "start" } as const)
-        : await Promise.race([
-            ctx.ask({
-              prompt: `Start ${ref}: ${brief.title}? The brief is above.`,
-              display: "confirmation",
-              options: START_OPTIONS,
-            }),
-            stopped,
-          ]);
+      const decision =
+        preApproved || trusted
+          ? ({ status: "answered", optionId: "start" } as const)
+          : await Promise.race([
+              ctx.ask({
+                prompt: `Start ${ref}: ${brief.title}? The brief is above.`,
+                display: "confirmation",
+                options: START_OPTIONS,
+              }),
+              stopped,
+            ]);
       if (decision === "stopped") {
         await closeBeforeStart(job.id, "Cancelled before start");
         return { job: ref, status: "cancelled" };
@@ -339,7 +348,24 @@ async function recordJob(brief: Brief, callId: string, sessionId: string) {
   // A tool call ID is unique only inside its session, so the session scopes the key.
   const requestKey = `${sessionId}:${callId}`;
   const job = await startJob(ledger(), { requestKey, sessionId, brief });
+  // The job class for the trust ladder: the approved playbook the brief names, if any.
+  await linkPlaybook(ledger(), job.id, brief.playbook);
   return { id: job.id };
+}
+
+// The name of the trusted playbook that lets this job start without the click, or null. Only a
+// person's turn qualifies: a worker thread or an app session never starts a trusted job.
+async function trustedStart(
+  jobId: number,
+  caller: SessionAuthContext | null | undefined,
+): Promise<string | null> {
+  "use step";
+  if (!slackUserOfPrincipal(caller?.principalId)) return null;
+  const sql = ledger();
+  const playbook = await trustedPlaybookOf(sql, jobId);
+  if (!playbook) return null;
+  await markAutoStarted(sql, jobId);
+  return playbook.name;
 }
 
 async function markScheduled(jobId: number) {
@@ -347,9 +373,9 @@ async function markScheduled(jobId: number) {
   await markScheduledCheck(ledger(), jobId);
 }
 
-async function postBrief(jobId: number) {
+async function postBrief(jobId: number, trustedPlaybook: string | null) {
   "use step";
-  await showBrief(ledgerDeps(), jobId);
+  await showBrief(ledgerDeps(), jobId, trustedPlaybook ?? undefined);
 }
 
 async function launch(jobId: number, webhookUrl: string): Promise<string> {

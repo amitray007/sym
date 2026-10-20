@@ -1,6 +1,7 @@
 import type { Sql } from "../db.ts";
 import { CARD_VERSION_FIELD } from "../delivery/deliver.ts";
 import { chooseDisplay, type Surface } from "../display.ts";
+import { recordOutcome } from "../learning/trust.ts";
 import { type Job, type JobStatus, jobRef, setJobCard, updateJob } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
 import type { Pack } from "../pack/load.ts";
@@ -37,10 +38,22 @@ export const SCHEDULED_CHECK = "scheduled-check";
 // Posts the full brief before the Start prompt. Eve's prompt card keeps only about 200
 // characters, so the brief itself is Sym's own message in the job thread. A brief needs an
 // action, so quiet mode never hides it.
-export async function presentBrief(sql: Sql, job: Job, modelLine?: string): Promise<void> {
+export async function presentBrief(
+  sql: Sql,
+  job: Job,
+  modelLine?: string,
+  playbook?: { name: string; trusted: boolean },
+): Promise<void> {
   if (!job.slackChannel) return;
   const ref = jobRef(job.id);
-  const text = briefPrompt(Brief.parse(job.brief), ref, modelLine);
+  const brief = briefPrompt(Brief.parse(job.brief), ref, modelLine);
+  // The brief names the playbook it follows. A trusted playbook's job starts at once, so the
+  // brief also says why no one is asked (decision 059).
+  const text = !playbook
+    ? brief
+    : playbook.trusted
+      ? `${brief}\nStarting without Start: the owner trusts the playbook ${playbook.name}.`
+      : `${brief}\nFollows the playbook ${playbook.name}.`;
   const display = chooseDisplay({
     kind: job.kind,
     needsAction: true,
@@ -190,6 +203,14 @@ export async function presentEnd(
 ): Promise<void> {
   await presentEndOnce(sql, job, contract, now, pack, check);
   if (TERMINAL.includes(job.status)) {
+    // The trust ladder counts the same checks the result shows (decision 059). It records once,
+    // before the end mark, so recovery re-presents a job whose outcome a crash lost.
+    const clean =
+      job.status === "done" &&
+      contract !== null &&
+      contract.openQuestions.length === 0 &&
+      endConcerns(job, contract, pack, check).length === 0;
+    await recordOutcome(sql, job, clean, pack);
     await sql`update jobs set end_presented_at = coalesce(end_presented_at, now()) where id = ${job.id}`;
   }
 }

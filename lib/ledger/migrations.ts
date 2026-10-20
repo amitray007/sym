@@ -6,7 +6,11 @@ import {
   connectionInstructionsMigration,
   connectionsMigration,
 } from "../connections/migration.ts";
-import { learningMigration, repeatSourceMigration } from "../learning/migration.ts";
+import {
+  learningMigration,
+  repeatSourceMigration,
+  trustLadderMigration,
+} from "../learning/migration.ts";
 import { memoryMigration } from "../memory/migration.ts";
 import { quietMigration } from "../quiet/migration.ts";
 import { reactionsMigration } from "../reactions/migration.ts";
@@ -197,4 +201,5 @@ export const migrations: Migration[] = [
         where worker_thread_id is not null and status not in ('done', 'failed', 'cancelled');
     `,
   },
+  trustLadderMigration,
 ];

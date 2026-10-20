@@ -1,5 +1,7 @@
 import type { Sql } from "../db.ts";
 import { envSwitch } from "../env-switch.ts";
+import { markUnclean } from "../learning/trust.ts";
+import type { Pack } from "../pack/load.ts";
 
 // Feedback from people (docs/learning.md): feedback buttons under replies, reactions on Sym's
 // messages, and fixes. This module only records rows. Learning reads them later, and a row never
@@ -80,7 +82,12 @@ const normalize = (row: Feedback): Feedback => ({
 
 // Saves one piece of feedback. The same person's same reaction to the same message counts once.
 // Returns undefined for a repeat.
-export async function recordFeedback(sql: Sql, input: NewFeedback): Promise<Feedback | undefined> {
+// `pack` names the owner for a trust notice; without it, SYM_OWNER_SLACK_USER does.
+export async function recordFeedback(
+  sql: Sql,
+  input: NewFeedback,
+  pack?: Pack,
+): Promise<Feedback | undefined> {
   const [row] = await sql<Feedback[]>`
     insert into feedback (job_id, slack_user, kind, value, channel, message_ts)
     values (
@@ -92,6 +99,15 @@ export async function recordFeedback(sql: Sql, input: NewFeedback): Promise<Feed
     do nothing
     returning *
   `;
+  // A 👎 or a Fix on a job breaks its playbook's clean run (decision 059).
+  if (row && input.jobId && (input.kind === "thumbs_down" || input.kind === "fix")) {
+    await markUnclean(
+      sql,
+      input.jobId,
+      `${input.kind === "fix" ? "a Fix" : "a 👎"} on J-${input.jobId}`,
+      pack,
+    );
+  }
   return row && normalize(row);
 }
 

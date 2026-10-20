@@ -491,14 +491,18 @@ export default slackChannel({
       const kind = kindOfButton(action.value);
       if (!kind) return;
       try {
-        await recordFeedback(ledger(), {
-          jobId: await jobIdOfThread(ledger(), channelId, threadTs),
-          slackUser: action.user.id,
-          kind,
-          value: action.value ?? "",
-          channel: channelId,
-          messageTs: action.messageTs ?? null,
-        });
+        await recordFeedback(
+          ledger(),
+          {
+            jobId: await jobIdOfThread(ledger(), channelId, threadTs),
+            slackUser: action.user.id,
+            kind,
+            value: action.value ?? "",
+            channel: channelId,
+            messageTs: action.messageTs ?? null,
+          },
+          pack(),
+        );
       } catch (error) {
         console.warn("Sym could not record feedback.", String(error));
       }
@@ -533,14 +537,18 @@ export default slackChannel({
       const jobId = await jobIdOfMessage(ledger(), item.channel, item.ts);
       const botId = ctx.envelope.authorizations?.find((a) => a.is_bot)?.user_id;
       if (jobId === null && (!botId || event.item_user !== botId)) return;
-      await recordFeedback(ledger(), {
-        jobId,
-        slackUser: user,
-        kind: kindOfReaction(name),
-        value: name,
-        channel: item.channel,
-        messageTs: item.ts,
-      });
+      await recordFeedback(
+        ledger(),
+        {
+          jobId,
+          slackUser: user,
+          kind: kindOfReaction(name),
+          value: name,
+          channel: item.channel,
+          messageTs: item.ts,
+        },
+        pack(),
+      );
     } catch (error) {
       console.warn("Sym could not record a reaction.", String(error));
     }

@@ -37,12 +37,12 @@ strands running sessions, so every job keeps enough state to continue in a new s
 
 | Table | Holds |
 |---|---|
-| `jobs` | ID, kind, Slack channel and thread, brief, worker, thread ID, launched model, status, cursor, last summary, job card `ts`, display choice |
-| `schedules` | Cron (UTC), stored brief, approval state, trust level, lease |
+| `jobs` | ID, kind, Slack channel and thread, brief, worker, thread ID, launched model, status, cursor, last summary, job card `ts`, display choice, parent job and close (decision 056), playbook and outcome (decision 059) |
+| `schedules` | Cron (UTC), stored brief, approval state, lease |
 | `outbox` | Pending Slack posts with an idempotency key and the `chooseDisplay` result. Refuses level 0 and missing choices |
 | `feedback` | Buttons, reactions, "Fix" replies, brief edits, linked to a job |
 | `memory` | Facts and preferences (learning layer 1) |
-| `playbooks` | Approved playbooks and rules with version history (learning layer 2) |
+| `playbooks` | Approved playbooks and rules with version history (learning layer 2), and each playbook's start mode for the trust ladder |
 
 Job statuses: `launching`, `running`, `waiting_input`, `waiting_permission`, `quiet`,
 `worker_offline`, `checking`, `done`, `failed`, `cancelled`.

@@ -21,6 +21,13 @@ export const Brief = z.object({
     .max(160)
     .optional()
     .describe("Why this model, in a short phrase. Needed when the model is not the default."),
+  playbook: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
+    .optional()
+    .describe(
+      "The name of the reviewed playbook this brief follows, if one fits. Leave out otherwise.",
+    ),
   openPullRequest: z.boolean().default(false).describe("Push the branch and open a draft PR."),
   estimatedMinutes: z
     .number()

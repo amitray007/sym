@@ -39,3 +39,19 @@ export const repeatSourceMigration: Migration = {
       check (coalesce(source in ('owner', 'learn', 'repeat'), false));
   `,
 };
+
+// The trust ladder (decision 059). Trust sits on the approved playbook row, so a new version
+// starts at asking. A job records the playbook it followed and how it ended.
+export const trustLadderMigration: Migration = {
+  version: "021_trust_ladder",
+  sql: `
+    alter table playbooks add column start_mode text not null default 'ask'
+      check (start_mode in ('ask', 'auto'));
+    alter table playbooks add column trust_changed_by text;
+    alter table playbooks add column trust_changed_at timestamptz;
+    alter table jobs add column playbook_id bigint references playbooks (id);
+    alter table jobs add column outcome text check (outcome in ('clean', 'unclean'));
+    alter table jobs add column auto_started boolean not null default false;
+    create index jobs_playbook on jobs (playbook_id, finished_at desc) where playbook_id is not null;
+  `,
+};
