@@ -1,6 +1,6 @@
 import { defineSchedule } from "eve/schedules";
 import { checkProject } from "../../lib/projects/allowed.ts";
-import { allowedFromEnv, ledger } from "../../lib/runtime.ts";
+import { allowedFromEnv, ledger, pack } from "../../lib/runtime.ts";
 import { dispatchMessage } from "../../lib/schedules/format.ts";
 import {
   attachSession,
@@ -9,6 +9,7 @@ import {
   finishRun,
   reserveRun,
 } from "../../lib/schedules/rows.ts";
+import { seedPackSchedules } from "../../lib/schedules/seed.ts";
 import slack from "../channels/slack.ts";
 
 // Dynamic scheduling (docs/architecture.md, flow 2; decision 008; Eve's dynamic scheduling
@@ -16,12 +17,26 @@ import slack from "../channels/slack.ts";
 // session has a real channel and buttons and the job card work.
 const LEASE_MS = 5 * 60_000;
 
+// Decision 055: seed the pack's schedules once per process, before the first claim. A failure
+// clears the promise, so the next tick tries again.
+let seeded: Promise<unknown> | undefined;
+async function seedOnce(): Promise<void> {
+  try {
+    seeded ??= seedPackSchedules(ledger(), pack());
+    await seeded;
+  } catch (error) {
+    seeded = undefined;
+    console.warn(`Seeding the pack schedules failed: ${(error as Error).message}`);
+  }
+}
+
 export default defineSchedule({
   cron: "* * * * *",
   run({ to, waitUntil, appAuth }) {
     waitUntil(
       (async () => {
         const sql = ledger();
+        await seedOnce();
         const now = new Date();
         for (const schedule of await claimDueSchedules(sql, now, LEASE_MS)) {
           // Persist the fire identity before the send. A crash after the send leaves the row,

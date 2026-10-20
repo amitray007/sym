@@ -85,6 +85,9 @@ Example: "Every weekday at 09:00, run the on-call check and tell me only what ne
    and the evening digest, when it is on, lists "On-call check: all clear". When something needs attention, one
    message posts and opens the thread (decision 031).
 
+A pack can seed schedules from `schedules.yaml`. They start pending, and the owner approves each
+with `schedule_approve` (decision 055).
+
 Sym owns schedules instead of the worker (decision 008). Sym then knows each run before it starts,
 so it can open the thread, record the job, and pick the display level.
 

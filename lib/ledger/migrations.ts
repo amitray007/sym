@@ -10,7 +10,7 @@ import { learningMigration } from "../learning/migration.ts";
 import { memoryMigration } from "../memory/migration.ts";
 import { quietMigration } from "../quiet/migration.ts";
 import { reactionsMigration } from "../reactions/migration.ts";
-import { schedulesMigration } from "../schedules/migration.ts";
+import { schedulePackKeyMigration, schedulesMigration } from "../schedules/migration.ts";
 import { scheduleRunsMigration } from "../schedules/runs-migration.ts";
 import { credentialsMigration } from "../workers/credentials-migration.ts";
 import { workerMigration } from "../workers/migration.ts";
@@ -172,4 +172,5 @@ export const migrations: Migration[] = [
       create index session_threads_thread on session_threads (channel_id, thread_ts, updated_at desc);
     `,
   },
+  schedulePackKeyMigration,
 ];

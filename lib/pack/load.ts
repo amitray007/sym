@@ -2,6 +2,7 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse } from "yaml";
+import { type PackSchedule, parsePackSchedules, SCHEDULES_NAME } from "./schedules.ts";
 import { findSecretFields, type PackConfig, packSchema } from "./schema.ts";
 
 export const MANIFEST_NAME = "sym.config.yaml";
@@ -22,6 +23,8 @@ export interface Pack {
   instructions: PackFile[];
   persona?: PackFile;
   playbooks: PackFile[];
+  // The schedules to seed from schedules.yaml (decision 055). Empty without the file.
+  schedules: PackSchedule[];
 }
 
 function read(path: string): string {
@@ -67,6 +70,29 @@ function readReferenced(dir: string, paths: string[], field: string): PackFile[]
   });
 }
 
+// An absent schedules.yaml means no seeded schedules.
+function readSchedules(root: string, config: PackConfig): PackSchedule[] {
+  const file = join(root, SCHEDULES_NAME);
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new PackError(`Cannot read ${file}: ${(error as Error).message}`);
+  }
+  let raw: unknown;
+  try {
+    raw = parse(text);
+  } catch (error) {
+    throw new PackError(`${file} is not valid YAML: ${(error as Error).message}`);
+  }
+  try {
+    return parsePackSchedules(raw, config, file);
+  } catch (error) {
+    throw new PackError((error as Error).message);
+  }
+}
+
 export function loadPack(dir: string): Pack {
   const root = resolve(dir);
   const manifest = join(root, MANIFEST_NAME);
@@ -101,6 +127,7 @@ export function loadPack(dir: string): Pack {
     instructions: readReferenced(root, config.instructions, "instructions"),
     ...(persona ? { persona } : {}),
     playbooks: readReferenced(root, config.playbooks, "playbooks"),
+    schedules: readSchedules(root, config),
   };
 }
 

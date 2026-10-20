@@ -23,6 +23,8 @@ export interface Schedule {
   lastFiredAt: Date | null;
   nextFireAt: Date | null;
   createdAt: Date;
+  // Set on a row seeded from the pack's schedules.yaml (decision 055).
+  packKey: string | null;
 }
 
 export interface ScheduleRun {
