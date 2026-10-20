@@ -228,7 +228,8 @@ export async function claimRunWhenAttached(
         and fired_at >= now() - interval '2 minutes'
       limit 1
     `;
-    if (!pending) return false;
+    // The attach can land between the claim and this check. Claim once more before giving up.
+    if (!pending) return claimRunForJob(sql, sessionId, scheduleId, jobId);
     await new Promise((resolve) => setTimeout(resolve, options.delayMs ?? 500));
   }
   return false;

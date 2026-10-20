@@ -27,7 +27,7 @@ export interface JobFacts {
   durationMs?: number;
 }
 
-function threadLine(job: JobFacts): string | null {
+export function threadLine(job: JobFacts): string | null {
   return job.workerThreadId
     ? `${workerLabel()} thread: \`${escapeMrkdwn(job.workerThreadId)}\``
     : null;
@@ -73,60 +73,113 @@ function headline(emoji: string, job: JobFacts, tail?: string): string {
   return `${emoji} *${escapeMrkdwn(job.ref)} · ${escapeMrkdwn(job.title)}*${tail ? ` · ${tail}` : ""}`;
 }
 
-function duration(job: JobFacts): string | undefined {
+export function duration(job: JobFacts): string | undefined {
   return job.durationMs === undefined ? undefined : formatDuration(job.durationMs);
+}
+
+/** The facts of a result message, before any Slack formatting. Values are raw worker text. */
+export interface ResultView {
+  emoji: string;
+  /** The model verdict line that stands alone under the gist. */
+  verdict: string | null;
+  gist: string;
+  /** The header of the concerns list, which carries the verdict when there is one. */
+  concernsHeader: string | null;
+  concerns: string[];
+  questions: string[];
+  pr: { url: string; label: string } | null;
+  tests: string;
+  filesChanged: number;
+  duration: string | undefined;
+  /** The worker returned no result block, so there is no summary to show. */
+  noResult: boolean;
 }
 
 // `concerns` come from the result checks (lib/jobs/verify.ts): the rule checks, then the model
 // check. `verdict` is the model check's note, when the job tried one: a clean one-line verdict,
 // or the header of the concerns list with its confidence.
+export function resultView(
+  job: JobFacts,
+  contract: OutputContract | null,
+  concerns: string[] = [],
+  verdict: string | null = null,
+): ResultView {
+  if (!contract) {
+    return {
+      emoji: "⚠️",
+      verdict,
+      gist: `the ${workerNoun()} sent no result summary. open the ${workerNoun()} thread to read the result.`,
+      concernsHeader: null,
+      concerns: [],
+      questions: [],
+      pr: null,
+      tests: "",
+      filesChanged: 0,
+      duration: duration(job),
+      noResult: true,
+    };
+  }
+  const flagged = concerns.length > 0;
+  // A concern that already says what an open question says makes the question redundant.
+  const questions = contract.openQuestions.filter(
+    (question) => !concerns.some((concern) => nearDuplicate(concern, question)),
+  );
+  // The verdict heads the concerns list when there is one, else it stands alone under the gist.
+  const headsList = flagged && verdict?.startsWith(CONCERNS_HEADER) === true;
+  return {
+    emoji: flagged ? "⚠️" : "✅",
+    verdict: headsList ? null : verdict,
+    gist: tldr(contract.summary),
+    concernsHeader: flagged ? (headsList && verdict ? verdict : CONCERNS_HEADER) : null,
+    concerns,
+    questions,
+    pr: contract.prUrl
+      ? { url: contract.prUrl, label: prLabel(contract.prUrl) ?? "pull request" }
+      : null,
+    tests: contract.tests ? testsNote(contract.tests) : "",
+    filesChanged: contract.filesChanged.length,
+    duration: duration(job),
+    noResult: false,
+  };
+}
+
 export function resultMessage(
   job: JobFacts,
   contract: OutputContract | null,
   concerns: string[] = [],
   verdict: string | null = null,
 ): string {
-  if (!contract) {
+  const view = resultView(job, contract, concerns, verdict);
+  if (view.noResult) {
     return sections([
-      lines([
-        headline("⚠️", job, duration(job)),
-        `*tl;dr* the ${workerNoun()} sent no result summary. open the ${workerNoun()} thread to read the result.`,
-        verdict,
-      ]),
+      lines([headline("⚠️", job, view.duration), `*tl;dr* ${view.gist}`, view.verdict]),
       threadLine(job),
     ]);
   }
 
-  const flagged = concerns.length > 0;
-  // A concern that already says what an open question says makes the question redundant.
-  const questions = contract.openQuestions.filter(
-    (question) => !concerns.some((concern) => nearDuplicate(concern, question)),
-  );
-  const pr = contract.prUrl ? (prLabel(contract.prUrl) ?? "pull request") : null;
-  const count = contract.filesChanged.length;
-  const tests = contract.tests ? testsNote(contract.tests) : "";
+  const count = view.filesChanged;
   const facts = [
-    contract.prUrl && pr ? `🔗 ${link(contract.prUrl, pr)}` : null,
-    tests && `tests: ${escapeMrkdwn(tests)}`,
+    view.pr && `🔗 ${link(view.pr.url, view.pr.label)}`,
+    view.tests && `tests: ${escapeMrkdwn(view.tests)}`,
     count > 0 && `${count} ${count === 1 ? "file" : "files"} changed`,
   ].filter((part): part is string => typeof part === "string" && part !== "");
 
-  // The verdict heads the concerns list when there is one, else it stands alone under the gist.
-  const headsList = flagged && verdict?.startsWith(CONCERNS_HEADER) === true;
-  const gist = tldr(contract.summary);
   return sections([
     lines([
-      headline(flagged ? "⚠️" : "✅", job, duration(job)),
-      gist && `*tl;dr* ${escapeMrkdwn(gist)}`,
-      !headsList && verdict,
+      headline(view.emoji, job, view.duration),
+      view.gist && `*tl;dr* ${escapeMrkdwn(view.gist)}`,
+      view.verdict,
     ]),
-    flagged &&
+    view.concernsHeader !== null &&
       lines([
-        headsList ? verdict : CONCERNS_HEADER,
-        ...concerns.map((concern, index) => `${index + 1}. ${escapeMrkdwn(concern)}`),
+        view.concernsHeader,
+        ...view.concerns.map((concern, index) => `${index + 1}. ${escapeMrkdwn(concern)}`),
       ]),
-    questions.length > 0 &&
-      lines(["*open questions*", ...questions.map((question) => `☐ ${escapeMrkdwn(question)}`)]),
+    view.questions.length > 0 &&
+      lines([
+        "*open questions*",
+        ...view.questions.map((question) => `☐ ${escapeMrkdwn(question)}`),
+      ]),
     facts.length > 0 && facts.join(" · "),
   ]);
 }

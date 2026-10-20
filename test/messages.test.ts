@@ -140,7 +140,7 @@ describe("resultMessage", () => {
         ],
       },
       [
-        "The worker opened a pull request the job did not allow.",
+        "worker opened a PR the job didn't allow.",
         "Tests were not run, so fail-before / pass-after is unverified.",
         "CI status for head 271896a was not checked before recommending merge.",
       ],
@@ -152,7 +152,7 @@ describe("resultMessage", () => {
         "*tl;dr* Merge PR #7698: the one-line fix is correct.",
         "",
         "*⚠️ check before merge* (75% sure)",
-        "1. The worker opened a pull request the job did not allow.",
+        "1. worker opened a PR the job didn't allow.",
         "2. Tests were not run, so fail-before / pass-after is unverified.",
         "3. CI status for head 271896a was not checked before recommending merge.",
         "",

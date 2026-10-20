@@ -117,6 +117,13 @@ describe("milestone 1", () => {
     // The verifier subagent checked the result before it posted (flow 4, decision 032).
     expect(result.text).toContain("✅ verifier: matches the brief (90% sure)");
     expect(result.text).not.toContain("check before merge");
+    // The result is Block Kit with the text above as its fallback (decision 047).
+    const blocks = (result.blocks ?? []) as { type: string; elements?: { url?: string }[] }[];
+    expect(blocks[0]?.type).toBe("header");
+    expect(JSON.stringify(blocks)).toContain(SAMPLE_CONTRACT.summary);
+    expect(blocks.find((block) => block.type === "actions")?.elements?.[0]?.url).toBe(
+      SAMPLE_CONTRACT.pr_url,
+    );
     // Decision 043: the worker has its label, and no Slack call names the software behind it.
     const slackBodies = JSON.stringify(h.slack.calls.map((call) => call.body));
     expect(slackBodies).toContain("Builder thread");
@@ -144,11 +151,13 @@ describe("milestone 1", () => {
     await settle(h);
 
     expect(newSince(c, before).map((m) => m.ts)).toEqual([result.ts]);
-    const concern = "The worker opened a pull request the job did not allow.";
+    const concern = "worker opened a PR the job didn't allow.";
     expect(result.text).toContain("*⚠️ check before merge* (60% sure)");
     expect(result.text).toContain(`*⚠️ check before merge* (60% sure)\n1. ${concern}`);
     // The fixture verifier repeats the rule-check concern; the message lists it once.
     expect(result.text?.split(concern)).toHaveLength(2);
+    expect(JSON.stringify(result.blocks)).toContain('"style":"ordered"');
+    expect(JSON.stringify(result.blocks)?.split(concern)).toHaveLength(2);
   });
 
   it("a lost launch response does not start a second worker thread", async () => {

@@ -52,3 +52,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [044](044-voice-and-personas.md) | The brain has a persona, and Sym's own messages are short, structured, and neutral |
 | [045](045-mcp-connections.md) | The owner connects MCP servers from Slack; tokens come from `SYM_MCP_<NAME>_TOKEN` or an OAuth sign-in |
 | [046](046-persona-from-slack.md) | The owner switches the persona from Slack, and the status line rotates persona-flavored loading messages |
+| [047](047-blockkit-results.md) | Result and failure posts are Block Kit with a mrkdwn fallback, and the feedback buttons have an off switch |

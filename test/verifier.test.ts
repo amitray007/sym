@@ -49,14 +49,14 @@ const contract: OutputContract = {
   openQuestions: [],
 };
 
-const PR_NOT_ALLOWED = "The worker opened a pull request the job did not allow.";
+const PR_NOT_ALLOWED = "worker opened a PR the job didn't allow.";
 
 describe("mergeConcerns", () => {
   it("keeps the rule-check concerns first and drops repeats from the model", () => {
     expect(
       mergeConcerns(
         [PR_NOT_ALLOWED],
-        ["the worker opened a pull request  the job did not allow", "No test covers the limit."],
+        ["worker opened a PR  the job didn't allow", "No test covers the limit."],
       ),
     ).toEqual([PR_NOT_ALLOWED, "No test covers the limit."]);
   });
