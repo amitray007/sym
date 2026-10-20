@@ -8,6 +8,7 @@ import { createJob, getJob } from "../lib/ledger/jobs.ts";
 import { loadPack } from "../lib/pack/load.ts";
 import { FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
+import { TEST_PROJECTS } from "./helpers/projects.ts";
 
 const CALLBACK = "http://127.0.0.1:2000/.well-known/workflow/v1/webhook/abc";
 const dirs: string[] = [];
@@ -60,7 +61,11 @@ describe.skipIf(!hasDatabase)("worker model at launch", () => {
       brief: b,
       worker: "t3",
     });
-    const launched = await launchOrAdopt({ sql: ledger.sql(), worker, ...deps }, job.id, CALLBACK);
+    const launched = await launchOrAdopt(
+      { sql: ledger.sql(), worker, allowedProjects: TEST_PROJECTS, ...deps },
+      job.id,
+      CALLBACK,
+    );
     const request = worker.threads.get(launched.workerThreadId ?? "")?.request;
     return { launched, request, job: await getJob(ledger.sql(), job.id) };
   }

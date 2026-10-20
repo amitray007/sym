@@ -18,6 +18,7 @@ import { recordSessionThread } from "../lib/ledger/threads.ts";
 import type { SlackApi } from "../lib/slack/api.ts";
 import { type FakeStep, FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
+import { TEST_PROJECTS } from "./helpers/projects.ts";
 
 const brief: Brief = {
   project: "test-repo",
@@ -92,7 +93,11 @@ describe.skipIf(!hasDatabase)("worker job steps", () => {
       worker: "fake",
     });
 
-  const deps = (worker: FakeWorker) => ({ sql: ledger.sql(), worker });
+  const deps = (worker: FakeWorker) => ({
+    sql: ledger.sql(),
+    worker,
+    allowedProjects: TEST_PROJECTS,
+  });
 
   describe("launchOrAdopt", () => {
     it("launches one thread titled with the job reference", async () => {
@@ -155,9 +160,11 @@ describe.skipIf(!hasDatabase)("worker job steps", () => {
         worker: "fake",
       });
 
-      await expect(launchOrAdopt(deps(worker), job.id, CALLBACK)).rejects.toThrow(
-        'The worker has no project "missing-repo".',
-      );
+      // An allowed project the worker lacks: the message names only that allowed project.
+      const allowed = [{ name: "missing-repo", workerProject: "missing-repo" }];
+      await expect(
+        launchOrAdopt({ ...deps(worker), allowedProjects: allowed }, job.id, CALLBACK),
+      ).rejects.toThrow('The worker has no project "missing-repo".');
       expect(worker.launches).toBe(0);
     });
   });
@@ -359,7 +366,13 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     }
     const worker = new FakeWorker({ script: options.script ?? [{ status: "running" }] });
     const slack = fakeSlack();
-    const deps: JobDeps = { sql, worker, slack: slack.api, now: () => clock };
+    const deps: JobDeps = {
+      sql,
+      worker,
+      allowedProjects: TEST_PROJECTS,
+      slack: slack.api,
+      now: () => clock,
+    };
     const job = await startJob(sql, {
       requestKey: `slack-${n}`,
       sessionId,

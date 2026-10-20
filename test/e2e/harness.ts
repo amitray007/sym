@@ -71,7 +71,14 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
 
   const slack = await startFakeSlack({ botToken: BOT_TOKEN, botUserId: BOT });
   // Each thread waits until the test, acting as the worker agent, gives it steps.
-  const t3 = await startFakeT3({ script: [] });
+  // The worker has a project outside SYM_PROJECTS, so a scenario can show it stays untouched.
+  const t3 = await startFakeT3({
+    script: [],
+    projects: [
+      { id: "project-1", title: "test-repo", workspaceRoot: "/repos/test-repo" },
+      { id: "project-2", title: "other-repo", workspaceRoot: "/repos/other-repo" },
+    ],
+  });
 
   const appDir = copyApp();
   const logFile = join(appDir, "eve.log");
@@ -91,6 +98,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
     T3_MCP_URL: t3.url,
     T3_TOKEN: t3.token,
     SYM_SLACK_USERS: OWNER,
+    SYM_PROJECTS: "test-repo",
     SYM_WORKER_MODEL: "fake/fake-model",
     SYM_JOB_POLL_SECONDS: "2",
     SYM_JOB_POLL_AFTER_CALLBACK_SECONDS: "1",

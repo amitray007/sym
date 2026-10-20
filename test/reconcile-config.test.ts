@@ -5,6 +5,7 @@ import { type JobDeps, launchOrAdopt, startJob } from "../lib/jobs/run.ts";
 import { getJob } from "../lib/ledger/jobs.ts";
 import { FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
+import { TEST_PROJECTS } from "./helpers/projects.ts";
 
 // Reconcile tells a missing worker configuration apart from an outage (decision 036).
 
@@ -29,7 +30,7 @@ describe.skipIf(!hasDatabase)("reconcileWorkerPass", () => {
     await sql`update jobs set status = 'cancelled', finished_at = now()
       where status not in ('done', 'failed', 'cancelled')`;
     const worker = new FakeWorker({ script: [{ status: "running", items: ["Working"] }] });
-    const deps: JobDeps = { sql, worker };
+    const deps: JobDeps = { sql, worker, allowedProjects: TEST_PROJECTS };
     const job = await startJob(sql, {
       requestKey: `config-${++n}`,
       sessionId: `config-session-${n}`,

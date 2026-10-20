@@ -14,6 +14,7 @@ import { pendingPosts } from "../lib/ledger/outbox.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
+import { TEST_PROJECTS } from "./helpers/projects.ts";
 
 const brief: Brief = {
   project: "test-repo",
@@ -58,7 +59,11 @@ describe.skipIf(!hasDatabase)("worker calls", () => {
       });
     }
     const job = await startJob(sql, { requestKey: `wc-${n}`, sessionId, brief });
-    const deps = { sql, worker: new FakeWorker({ script: [{ status: "running" }] }) };
+    const deps = {
+      sql,
+      worker: new FakeWorker({ script: [{ status: "running" }] }),
+      allowedProjects: TEST_PROJECTS,
+    };
     const started = await launchOrAdopt(deps, job.id, "http://127.0.0.1:2000/cb");
     return { sql, job: started, ref: `J-${job.id}` };
   }

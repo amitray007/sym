@@ -104,6 +104,12 @@ export async function latestPost(
   return row && normalize(row);
 }
 
+// The status of one post, for a caller that must tell a person whether a send went out.
+export async function postStatus(sql: Sql, id: number): Promise<OutboxStatus | undefined> {
+  const [row] = await sql<{ status: OutboxStatus }[]>`select status from outbox where id = ${id}`;
+  return row?.status;
+}
+
 // Stops a pending post that no longer matters, for example an outage notice after the outage.
 export async function dropPost(sql: Sql, id: number, reason: string): Promise<void> {
   await sql`

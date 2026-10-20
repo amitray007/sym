@@ -12,6 +12,7 @@ import { migrate } from "../lib/ledger/migrate.ts";
 import { workerMigration } from "../lib/workers/migration.ts";
 import { FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
+import { TEST_PROJECTS } from "./helpers/projects.ts";
 
 const PR = "https://github.com/example/app/pull/12";
 
@@ -91,7 +92,14 @@ describe.skipIf(!hasDatabase)("pull request wakes", () => {
           where job_id = ${job.id} and idempotency_key like ${`${jobRef(job.id)}:prwake:%`}
           order by id`
       ).map((row) => ({ key: row.key, ...row.payload }));
-    return { sql, worker, thread, job, deps: { sql, worker }, posts };
+    return {
+      sql,
+      worker,
+      thread,
+      job,
+      deps: { sql, worker, allowedProjects: TEST_PROJECTS },
+      posts,
+    };
   }
 
   it("asks the worker to watch the PR once", async () => {

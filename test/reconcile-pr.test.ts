@@ -7,6 +7,7 @@ import { recordSessionThread } from "../lib/ledger/threads.ts";
 import type { SlackApi } from "../lib/slack/api.ts";
 import { FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
+import { TEST_PROJECTS } from "./helpers/projects.ts";
 
 const PR = "https://github.com/example/app/pull/12";
 const FINAL = `Done.\n\`\`\`json\n${JSON.stringify({
@@ -48,7 +49,7 @@ describe.skipIf(!hasDatabase)("reconcile follows pull requests", () => {
       userId: "U1",
     });
     const worker = new FakeWorker({ script: [{ status: "completed", items: [FINAL] }] });
-    const deps = { sql, worker, slack };
+    const deps = { sql, worker, allowedProjects: TEST_PROJECTS, slack };
     const job = await startJob(sql, { requestKey: "pr-job", sessionId: "pr-session", brief });
     const launched = await launchOrAdopt(deps, job.id, "http://127.0.0.1/cb");
     await checkJob(deps, job.id, 1000);
@@ -93,7 +94,7 @@ describe.skipIf(!hasDatabase)("reconcile recovers a lost end post", () => {
       userId: "U1",
     });
     const worker = new FakeWorker({ script: [{ status: "running" }] });
-    const deps = { sql, worker, slack };
+    const deps = { sql, worker, allowedProjects: TEST_PROJECTS, slack };
     const job = await startJob(sql, { requestKey: "lost-end", sessionId: "lost-end", brief });
     await launchOrAdopt(deps, job.id, "http://127.0.0.1/cb");
     // A crash after the status moved to done, before the end post was queued.
@@ -122,7 +123,11 @@ describe.skipIf(!hasDatabase)("end presentation marks", () => {
     });
     const worker = new FakeWorker({ script: [{ status: "running" }] });
     const job = await startJob(sql, { requestKey: key, sessionId: key, brief });
-    await launchOrAdopt({ sql, worker }, job.id, "http://127.0.0.1/cb");
+    await launchOrAdopt(
+      { sql, worker, allowedProjects: TEST_PROJECTS },
+      job.id,
+      "http://127.0.0.1/cb",
+    );
     await sql`update jobs set status = 'done', finished_at = now(), last_message = ${FINAL},
       kind = ${String(extra.kind ?? "code-change")}, verdict = ${sql.json(
         (extra.verdict ?? null) as never,
@@ -158,7 +163,7 @@ describe.skipIf(!hasDatabase)("end presentation marks", () => {
     };
     const { sql, worker } = await endedJob("stored-verdict", { verdict });
 
-    await reconcileJobs({ sql, worker, slack });
+    await reconcileJobs({ sql, worker, allowedProjects: TEST_PROJECTS, slack });
     await deliver(sql, slack);
 
     const result = posts.find((text) => text.includes("Added retry"));

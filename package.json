@@ -20,7 +20,7 @@
     "t3:login": "node --env-file-if-exists=.env.local scripts/t3-login.ts",
     "t3:check": "node --env-file-if-exists=.env.local scripts/t3-check.ts",
     "t3:job-smoke": "node --env-file-if-exists=.env.local scripts/t3-job-smoke.ts",
-    "eval": "eve eval",
+    "eval": "SYM_PROJECTS=example-app eve eval",
     "typecheck": "tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",

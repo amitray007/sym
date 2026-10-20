@@ -21,48 +21,21 @@ import { stopJob } from "../../lib/jobs/steer.ts";
 import { recentJobs } from "../../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../../lib/ledger/threads.ts";
 import { isApprovalAction, mayDecideAsOwner } from "../../lib/owner.ts";
-import { isAllowedSlackUser } from "../../lib/pack/policy.ts";
 import { parseSymCommand, slackText, USAGE } from "../../lib/quiet/command.ts";
 import { formatClock, getQuietUntil, setQuietUntil } from "../../lib/quiet/quiet.ts";
 import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
 import { listSchedules } from "../../lib/schedules/rows.ts";
+import { isSlackUserAllowed, sayPrivately } from "../../lib/slack/guard.ts";
 
 // The Slack channel (docs/slack.md). It reads SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET from the
 // environment. A valid signature proves Slack sent the event, not that the sender may use Sym,
 // so every inbound handler checks the allow-list and fails closed.
 
-// The pack's owner and allow-list decide who may use Sym. Without a pack, SYM_SLACK_USERS does:
-// comma-separated Slack user IDs. Nobody is allowed when neither is set.
-function isAllowed(userId: string | undefined): boolean {
-  if (!userId) return false;
-  const adopterPack = pack();
-  if (adopterPack) return isAllowedSlackUser(adopterPack, userId);
-  return (process.env.SYM_SLACK_USERS ?? "")
-    .split(",")
-    .map((id) => id.trim())
-    .includes(userId);
-}
-
-// An ephemeral reply only the person who asked sees. A failed reply is logged, never thrown,
-// because a handler that throws leaves the person with nothing.
-async function sayPrivately(
-  slack: { request(operation: string, body: unknown): Promise<{ ok?: boolean }> },
-  where: { channel: string; user: string; threadTs?: string },
-  text: string,
-): Promise<void> {
-  try {
-    const response = await slack.request("chat.postEphemeral", {
-      channel: where.channel,
-      user: where.user,
-      text,
-      ...(where.threadTs ? { thread_ts: where.threadTs } : {}),
-    });
-    if (response.ok === false) console.warn("Sym could not send an ephemeral reply.");
-  } catch (error) {
-    console.warn("Sym could not send an ephemeral reply.", String(error));
-  }
-}
+// Who may use Sym is decided in lib/slack/guard.ts: the pack's owner and allow-list, else
+// SYM_SLACK_USERS. A drop logs the Slack user ID only.
+const isAllowed = (userId: string | undefined) =>
+  isSlackUserAllowed(pack(), process.env.SYM_SLACK_USERS, userId);
 
 const STATUS_WINDOW_MS = 24 * 60 * 60 * 1000;
 

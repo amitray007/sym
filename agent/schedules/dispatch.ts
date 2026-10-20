@@ -1,5 +1,6 @@
 import { defineSchedule } from "eve/schedules";
-import { ledger } from "../../lib/runtime.ts";
+import { checkProject } from "../../lib/projects/allowed.ts";
+import { allowedFromEnv, ledger } from "../../lib/runtime.ts";
 import { dispatchMessage } from "../../lib/schedules/format.ts";
 import {
   attachSession,
@@ -33,6 +34,14 @@ export default defineSchedule({
               })
             : undefined;
           if (run) {
+            // Decision 042: a schedule whose project left the list does not run. t3_job checks
+            // again, so the brain cannot start it either.
+            const project = (schedule.brief as { project?: unknown } | null)?.project;
+            if (typeof project !== "string" || checkProject(allowedFromEnv(), project)) {
+              await finishRun(sql, run.id, "failed");
+              await completeClaim(sql, schedule, now);
+              continue;
+            }
             try {
               // No root message: a scheduled run posts only when something needs attention, and
               // its first post opens the thread (decision 031).
