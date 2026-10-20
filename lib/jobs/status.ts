@@ -16,7 +16,7 @@ function waitingOn(): Partial<Record<JobStatus, string>> {
   };
 }
 
-const statusWords = (): Record<JobStatus, string> => ({
+export const statusWords = (): Record<JobStatus, string> => ({
   launching: "not started",
   running: "running",
   waiting_input: "waiting for you",
@@ -29,7 +29,7 @@ const statusWords = (): Record<JobStatus, string> => ({
   cancelled: "cancelled",
 });
 
-const STATUS_EMOJI: Record<JobStatus, string> = {
+export const STATUS_EMOJI: Record<JobStatus, string> = {
   launching: "⏳",
   running: "🔄",
   waiting_input: "🙋",

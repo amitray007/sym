@@ -51,7 +51,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Status line | tool `label.start`, `label.delta` | Use | "Launching worker thread", "Tests running" | Cut at 50 characters. Cleared after 2 min idle |
 | Approval routing | `approvalChannel: "direct-message"` | Later | Approvals stay in the job thread for the owner-only allow-list; a DM route comes with team use | Fails closed if the user cannot be resolved |
 | Renderers | `defineSlackRenderer` | Use | Feedback buttons inside each reply, the session's Slack thread, hiding Eve's card for `worker_job` | Clicks arrive in `onInteraction` |
-| Events | `onEvent` | Use | `reaction_added` for feedback. `app_home_opened` comes with the Home tab | |
+| Events | `onEvent` | Use | `reaction_added` for feedback. `app_home_opened` publishes the Home tab (decision 052) | |
 | Slash commands | `onSlashCommand` | Use | `/sym status`, `/sym jobs`, `/sym schedules`, `/sym quiet`, answered ephemerally with `ctx.slack.request` | No model call |
 | Shortcuts | `onShortcut` | Later | "Send to Sym" on any message | `trigger_id` valid about 3 s |
 | Proactive posts | `to(slack, { channelId, threadTs? })` | Use | Schedule threads, recovery sessions, digests | Each fire is a new session unless `threadTs` is set |

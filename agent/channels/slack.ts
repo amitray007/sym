@@ -19,6 +19,8 @@ import {
   kindOfReaction,
   recordFeedback,
 } from "../../lib/feedback/feedback.ts";
+import { publishLiveHome } from "../../lib/home/live.ts";
+import { HOME_REFRESH_ACTION_ID } from "../../lib/home/view.ts";
 import { STOP_ACTION_ID } from "../../lib/jobs/card.ts";
 import { jobListAnswer } from "../../lib/jobs/status.ts";
 import { stopJob } from "../../lib/jobs/steer.ts";
@@ -412,6 +414,11 @@ export default slackChannel({
   // The Stop button on a job card and the feedback buttons. Open PR is a URL button, so its
   // click needs no work. Steer needs a modal and is not a button yet.
   async onInteraction(action, ctx) {
+    // The Home tab's Refresh button (decision 052).
+    if (action.actionId === HOME_REFRESH_ACTION_ID) {
+      await publishLiveHome(ctx.slack, action.user.id);
+      return;
+    }
     if (action.actionId !== STOP_ACTION_ID && action.actionId !== FEEDBACK_ACTION_ID) return;
     if (!isAllowed(action.user.id)) return;
     const { channelId, threadTs } = ctx.slack;
@@ -445,6 +452,13 @@ export default slackChannel({
   },
   // Reactions on Sym's messages are feedback. A reaction on another message is not.
   async onEvent(ctx, event) {
+    // Opening the Home tab publishes the dashboard (decision 052).
+    if (event.type === "app_home_opened") {
+      if (event.tab === "home" && typeof event.user === "string") {
+        await publishLiveHome(ctx.slack, event.user);
+      }
+      return;
+    }
     if (event.type !== "reaction_added") return;
     const user = typeof event.user === "string" ? event.user : undefined;
     const name = typeof event.reaction === "string" ? event.reaction : undefined;

@@ -32,7 +32,8 @@ failure here is about the real services, not Sym's logic.
 
 1. Open `slack/manifest.yaml`, replace `https://sym.example.com` with Sym's public address, and
    create the app from it (api.slack.com/apps, Create New App, From a manifest).
-2. Install it to the workspace. Copy the Bot User OAuth Token and the Signing Secret.
+2. Install it to the workspace. If you created the app from an older manifest, import the new one
+   and reinstall the app: the Home tab needs the `app_home_opened` event. Copy the Bot User OAuth Token and the Signing Secret.
 3. Invite Sym to the test channel. Copy your own member ID (Profile, More, Copy member ID).
 
 ## 4. Settings (owner)
@@ -84,6 +85,8 @@ deployment environment, never in Git or the pack. For this run:
 - No custom emoji in reactions: the app needs `emoji:read`. Add the scope (the manifest has it),
   reinstall the app, and update `SLACK_BOT_TOKEN` if Slack issues a new one. Standard emoji work
   without it.
+- Empty Home tab: the manifest needs `home_tab_enabled` and the `app_home_opened` event; reinstall
+  the app after the change.
 - "The worker is unreachable": check the private network and `T3_MCP_URL` from inside the
   container.
 - No early wake after a job: check that the worker host reaches `SYM_CALLBACK_URL`. Jobs still

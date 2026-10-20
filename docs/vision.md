@@ -53,7 +53,7 @@ an operations group with scheduled checks. One adopter's playbooks never shape t
    memory, feedback buttons, and evals.
 3. Learning. Approved playbooks and rules through `defineDynamic`, the weekly `learn`
    schedule, the trust ladder, and code changes through worker pull requests.
-4. Teams. Per-person scope and policy, shared-channel rules, the App Home dashboard, and more
+4. Teams. Per-person scope and policy, shared-channel rules, and more
    worker adapters.
 5. More sources. GitHub CI events, error trackers, and ticket systems as event channels.
    Untrusted text gets a reading session with no write tools.
