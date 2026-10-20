@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { deliver } from "../lib/delivery/deliver.ts";
 import type { Brief } from "../lib/jobs/brief.ts";
 import { reconcileJobs } from "../lib/jobs/reconcile.ts";
@@ -30,8 +30,25 @@ const brief: Brief = {
 
 describe.skipIf(!hasDatabase)("reconcile follows pull requests", () => {
   const ledger = useLedger();
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("does not watch a PR without SYM_PR_FOLLOW=on", async () => {
+    const sql = ledger.sql();
+    const worker = new FakeWorker({ script: [{ status: "completed", items: [FINAL] }] });
+    const deps = { sql, worker, allowedProjects: TEST_PROJECTS };
+    const job = await startJob(sql, { requestKey: "pr-off", sessionId: "pr-off", brief });
+    await launchOrAdopt(deps, job.id, "http://127.0.0.1/cb");
+    await checkJob(deps, job.id, 1000);
+
+    vi.stubEnv("SYM_PR_FOLLOW", "");
+    await reconcileJobs(deps);
+    expect(worker.watches).toEqual([]);
+  });
 
   it("watches a finished job's PR once and posts each wake once", async () => {
+    vi.stubEnv("SYM_PR_FOLLOW", "on");
     const sql = ledger.sql();
     const posts: string[] = [];
     let ts = 1;

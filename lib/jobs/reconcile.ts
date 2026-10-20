@@ -4,7 +4,13 @@ import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
 import { workerNoun } from "../worker-label.ts";
 import type { WorkerAdapter } from "../workers/types.ts";
 import { parseOutputContract } from "./contract.ts";
-import { checkPrWakes, ensurePrWatched, jobsToWatch, watchedPrJobs } from "./pr-wakes.ts";
+import {
+  checkPrWakes,
+  ensurePrWatched,
+  jobsToWatch,
+  prFollowEnabled,
+  watchedPrJobs,
+} from "./pr-wakes.ts";
 import { presentEnd } from "./present.ts";
 import { checkJob, finishJob, type JobDeps, type LedgerDeps } from "./run.ts";
 import type { ModelCheck } from "./verify.ts";
@@ -135,10 +141,11 @@ const unreachableWorker: WorkerAdapter = {
 
 // A PR outlives its job: the worker watches it and fixes CI failures and review comments, and
 // reconcile reports each wake in the job thread (docs/architecture.md, flow 4 step 5). A failed
-// worker call here waits for the next pass.
+// worker call here waits for the next pass. Off unless SYM_PR_FOLLOW=on (decision 054).
 const PR_FOLLOW_DAYS = 7;
 
 async function followPullRequests(deps: JobDeps): Promise<void> {
+  if (!prFollowEnabled()) return;
   const since = new Date(Date.now() - PR_FOLLOW_DAYS * 86_400_000);
   for (const job of await jobsToWatch(deps, since)) {
     await ensurePrWatched(deps, job).catch(() => "failed");

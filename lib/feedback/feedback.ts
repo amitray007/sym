@@ -1,4 +1,5 @@
 import type { Sql } from "../db.ts";
+import { envSwitch } from "../env-switch.ts";
 
 // Feedback from people (docs/learning.md): feedback buttons under replies, reactions on Sym's
 // messages, and fixes. This module only records rows. Learning reads them later, and a row never
@@ -35,7 +36,7 @@ type Env = Record<string, string | undefined>;
 // `SYM_FEEDBACK=off` (also `false`, `0`, `no`, any case) turns the buttons off. Anything else,
 // including unset, leaves them on. Handlers stay, so clicks on old messages still record.
 export function feedbackEnabled(env: Env = process.env): boolean {
-  return !["off", "false", "0", "no"].includes((env.SYM_FEEDBACK ?? "").trim().toLowerCase());
+  return envSwitch(env.SYM_FEEDBACK, true);
 }
 
 // The buttons under a reply. A `context_actions` block holds Slack's native feedback buttons.

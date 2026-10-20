@@ -20,7 +20,7 @@ import {
   statusLine,
   verifierRequest,
 } from "../../lib/jobs/run.ts";
-import { type ModelCheck, VerifierOutput } from "../../lib/jobs/verify.ts";
+import { type ModelCheck, VerifierOutput, verifierEnabled } from "../../lib/jobs/verify.ts";
 import { getJob, jobRef } from "../../lib/ledger/jobs.ts";
 import { checkProject } from "../../lib/projects/allowed.ts";
 import { allowedFromEnv, ledger, ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
@@ -189,8 +189,8 @@ export default defineWorkflowTool({
         const result = await check(job.id);
         yield { status: statusLine(ref, result.summary) };
 
-        // The worker finished a code job. The `verifier` subagent checks the result before the
-        // one result message posts (flow 4, decision 032).
+        // The worker finished a code job. With SYM_VERIFIER=on, the `verifier` subagent checks
+        // the result before the one result message posts (flow 4, decisions 032 and 054).
         if (result.status === "checking") {
           yield { status: statusLine(ref, "Checking the result") };
           const verdict = await runVerifier(ctx, job.id, stopped, timing.verifierMs);
@@ -370,7 +370,8 @@ async function launch(jobId: number, webhookUrl: string): Promise<string> {
 
 async function check(jobId: number) {
   "use step";
-  return withJobDeps((deps) => checkJob(deps, jobId, WAIT_MS, { verify: true }));
+  // Read here, in the step, so a replay of the body sees the same value.
+  return withJobDeps((deps) => checkJob(deps, jobId, WAIT_MS, { verify: verifierEnabled() }));
 }
 
 async function verifierInput(jobId: number) {

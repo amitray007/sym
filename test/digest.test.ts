@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { digestMessage } from "../lib/digest/format.ts";
-import { digestChannel, queueDigest } from "../lib/digest/post.ts";
+import { digestChannel, digestEnabled, queueDigest } from "../lib/digest/post.ts";
 import { createSchedule, finishRun, recordRun } from "../lib/schedules/rows.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
@@ -104,5 +104,14 @@ describe("digestChannel", () => {
     expect(digestChannel(packWith(), { SYM_DIGEST_CHANNEL: " C0ENV " })).toBe("C0ENV");
     expect(digestChannel(undefined, {})).toBeUndefined();
     expect(digestChannel(undefined, { SYM_DIGEST_CHANNEL: "  " })).toBeUndefined();
+  });
+});
+
+describe("SYM_DIGEST", () => {
+  it("is off unless set to an on value", () => {
+    expect(digestEnabled({})).toBe(false);
+    expect(digestEnabled({ SYM_DIGEST: "off" })).toBe(false);
+    expect(digestEnabled({ SYM_DIGEST: "maybe" })).toBe(false);
+    expect(digestEnabled({ SYM_DIGEST: " On " })).toBe(true);
   });
 });

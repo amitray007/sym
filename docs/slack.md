@@ -93,7 +93,7 @@ one has a persona (decision 044).
   | Block | Holds |
   |---|---|
   | `header` | status emoji, `J-n · title`, duration (150 characters at most) |
-  | `section` | `*tl;dr* ...`, then the verifier line |
+  | `section` | `*tl;dr* ...`, then the verifier line when `SYM_VERIFIER=on` |
   | `section` + `rich_text` | the concerns header, then the concerns as an ordered list |
   | `section` | `*open questions*` as a `☐` checklist |
   | `context` | the tests line and the file count |

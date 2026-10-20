@@ -106,6 +106,8 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
     SYM_WORKER_LABEL: "Builder",
     SYM_JOB_POLL_SECONDS: "2",
     SYM_JOB_POLL_AFTER_CALLBACK_SECONDS: "1",
+    // The scenarios cover the opt-in verifier (decision 054).
+    SYM_VERIFIER: "on",
   };
 
   const harness: Harness = {

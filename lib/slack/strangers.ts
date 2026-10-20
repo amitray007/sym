@@ -1,3 +1,4 @@
+import { envSwitch } from "../env-switch.ts";
 import { type PersonaName, type PersonaSources, personaName, personaSource } from "../persona.ts";
 
 // What Sym says, privately, to someone who is not on the allow-list (decision 053). Pure: the
@@ -46,9 +47,10 @@ export const NO_OWNER_LINE = "Sym only works for people on its allow-list.";
 // A casual or spicy persona picks a spicy line this often; the rest are casual.
 export const SPICY_SHARE = 0.7;
 
-// `SYM_STRANGER_REPLIES=off` turns the unprompted replies off. Anything else leaves them on.
+// `SYM_STRANGER_REPLIES=off` (also `false`, `0`, `no`) turns the unprompted replies off. Anything
+// else leaves them on (decision 054).
 export function strangerRepliesOn(value: string | undefined): boolean {
-  return value?.trim().toLowerCase() !== "off";
+  return envSwitch(value, true);
 }
 
 export interface StrangerLineInput {

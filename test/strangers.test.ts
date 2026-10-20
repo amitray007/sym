@@ -94,11 +94,12 @@ describe("strangerLine", () => {
 });
 
 describe("strangerRepliesOn", () => {
-  it("is off only for the word off", () => {
+  it("is on unless set to an off value", () => {
     expect(strangerRepliesOn(undefined)).toBe(true);
     expect(strangerRepliesOn("")).toBe(true);
     expect(strangerRepliesOn("on")).toBe(true);
     expect(strangerRepliesOn(" OFF ")).toBe(false);
+    expect(strangerRepliesOn("no")).toBe(false);
   });
 });
 
