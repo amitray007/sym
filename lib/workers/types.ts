@@ -147,6 +147,9 @@ export interface WorkerAdapter {
   // Optional: the pull requests linked to the thread, for the result checks (decision 057). It
   // reports no CI status; CI results come only from pull request wakes (decision 034).
   pullRequests?(threadId: string): Promise<PullRequestFacts[]>;
+  // Optional: tidies a finished thread when a person closes its job (decision 056). The thread
+  // stays readable.
+  settle?(threadId: string): Promise<void>;
   // Optional: reachability and sign-in state, for the sign-in expiry notice.
   health?(): Promise<WorkerHealth>;
 }

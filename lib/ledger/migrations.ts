@@ -182,4 +182,19 @@ export const migrations: Migration[] = [
     `,
   },
   repeatSourceMigration,
+  {
+    version: "018_job_followups",
+    sql: `
+      -- A Fix from the result message continues the job's worker thread as a new job
+      -- (decision 056). Close marks a finished job as settled by a person.
+      alter table jobs add column parent_job_id bigint references jobs (id);
+      alter table jobs add column closed_at timestamptz;
+      alter table jobs add column closed_by text;
+      -- A follow-up shares its parent's worker thread, so a thread can hold several jobs. Only
+      -- one of them may be active at a time: their results must not mix.
+      drop index jobs_worker_thread;
+      create unique index jobs_worker_thread_active on jobs (worker, worker_thread_id)
+        where worker_thread_id is not null and status not in ('done', 'failed', 'cancelled');
+    `,
+  },
 ];

@@ -484,7 +484,7 @@ footer p + p { margin-top: 8px; }
                 <li class="todo-row"><span class="ic todo"></span><span>Verify result</span></li>
               </ol>
               <div class="ctxline">Codex · Builder thread 8f2c… · updated 1 min ago <span class="anno quiet">edits: silent</span></div>
-              <div class="btns"><span class="sb">Stop</span></div>
+              <div class="btns"><span class="sb">Steer</span><span class="sb">Stop</span></div>
             </div>
           </div></div>
 
@@ -499,8 +499,7 @@ footer p + p { margin-top: 8px; }
           <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:16</time><span class="anno ping">notifies</span></div>
             <div class="plan collapsed"><div class="plan-title"><span class="ic done">✓</span>[J-142] Billing sync retry · done in 14m · PR #812</div></div>
             <div class="mt" style="margin-top:8px"><p style="font-size:17px;font-weight:700">⚠️ J-142 · Billing sync retry · 14m</p><p><b>tl;dr</b> adds backoff for 429, 5xx, and 408 with max 5 tries.</p><p><b>⚠️ check before merge</b> (85% sure)</p><ol><li>the max wait is 62s per batch, so a full catalog sync can run about 6 minutes longer during an outage</li></ol><p><b>open questions</b><br>☐ cap the wait at 30s?</p><p style="font-size:12px;color:#ababad">tests: 4 new, CI green · 3 files changed</p></div>
-            <div class="btns"><span class="sb">Open PR</span></div>
-            <div class="btns"><span class="sb go">Looks good</span><span class="sb">Fix…</span><span class="sb">Close</span></div>
+            <div class="btns"><span class="sb">Open PR</span><span class="sb go">Looks good</span><span class="sb">Fix…</span><span class="sb">Close</span></div>
             <div class="fb" aria-label="Feedback buttons"><span>👍</span><span>👎</span></div>
           </div></div>
           <div class="compose">Reply…</div>
@@ -519,7 +518,8 @@ footer p + p { margin-top: 8px; }
         <ul>
           <li>You got 4 notifications in 14 minutes: brief, card, question, result.</li>
           <li>The status line under the thread ("Running tests in sync-service…") covers gaps and never notifies.</li>
-          <li>"Fix…" opens a box. Your text goes to the same Builder thread.</li>
+          <li>"Steer" and "Fix…" post a text box in the thread. Press Enter and the text goes to the same Builder thread; a Fix runs as a follow-up job with its own result.</li>
+          <li>"Close" settles the Builder thread and edits the result to "Closed by @you".</li>
         </ul>
       </div>
     </div>

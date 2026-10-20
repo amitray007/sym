@@ -41,7 +41,7 @@ Codex · thread 8f2c… · updated 1 min ago
 | Surface | What Sym shows | Driven by | When |
 |---|---|---|---|
 | Thread status line | "Launching worker thread", "Tests running" | Eve: `label.start`, `label.delta`, task `yield` | Milestone 1 |
-| Job card (`plan` block) | Live steps with Stop and Open PR. Steering is a thread reply | Sym: `chat.update` | Built |
+| Job card (`plan` block) | Live steps with Steer, Stop, and Open PR. Steering also works as a thread reply | Sym: `chat.update` | Built |
 | Eve task card | Short tasks that are not worker jobs | Eve | Milestone 1 |
 | Buttons and selects | Approve a brief, answer worker questions, approve rules | Eve: approvals, `ctx.ask` | Milestone 1 |
 | "Type your answer" modal | Free-text answers | Eve, inside `ctx.ask` | Milestone 1 |
@@ -144,9 +144,17 @@ for people on its allow-list. `SYM_STRANGER_REPLIES=off` restores the silent dro
   wins, and then Sym says so and stores nothing. The owner can also say "be spicy" or "tone it
   down" and the brain calls `sym_persona`. Either way the new persona starts in the next
   conversation (decision 046).
-- The live card has **Stop** (with a confirm step; the worker is interrupted and the job
-  cancelled) and, once a PR is known, **Open PR**. The collapsed card keeps only **Open PR**.
-  Steering is a thread message for now; a modal button comes later.
+- The live card has **Steer**, **Stop** (with a confirm step; the worker is interrupted and the
+  job cancelled), and, once a PR is known, **Open PR**. The collapsed card keeps only **Open PR**.
+- The result has **Looks good**, **Fix…**, and **Close** after **Open PR**; a failure has
+  **Fix…** and **Close** (decision 056). Looks good records a 👍 for the job. Close settles the
+  worker thread, stops PR follow for the job, and edits the result to "Closed by @person".
+  Fix starts a follow-up job on the same worker thread; the result is edited to say so, and the
+  follow-up posts its own card or start line and its own result.
+- **Steer** and **Fix…** post a text box in the job thread, because Eve passes no custom modal
+  submission to Sym. Pressing Enter sends the text: Steer steers the running thread, and Fix sends
+  a follow-up. The box then turns into the person's words and what Sym did. Allowed users can use
+  every job button; answers to a click come privately.
 - Each final reply carries Slack's feedback buttons in the same message, so they add no
   notification. A reply Slack refuses as blocks goes out as plain Markdown or a snippet without
   them. Clicks and reactions on Sym's messages go to the `feedback` table, and Sym uses them only

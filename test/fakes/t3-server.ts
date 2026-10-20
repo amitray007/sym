@@ -55,6 +55,8 @@ export interface FakeT3Thread {
   answers: { requestId: string; answers: Record<string, unknown> }[];
   sends: { message: string; mode: string; clientRequestId: string | undefined }[];
   interrupts: { reason: string | undefined; clientRequestId: string | undefined }[];
+  // Each t3_thread_organize action on the thread, such as "settle".
+  organized: string[];
   launch: Record<string, unknown>;
   // Pull requests linked to the thread, and whether T3 watches each one.
   // The facts `list_thread_pull_requests` reports are optional, so a test sets only what it needs.
@@ -341,6 +343,7 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
           answers: [],
           sends: [],
           interrupts: [],
+          organized: [],
           launch: { ...args },
           pullRequests: [],
         };
@@ -525,6 +528,15 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
       if (!match) throw new Error("This is not a recognised pull request URL.");
       return { host: match[1], repository: match[2], number: Number(match[3]), url };
     };
+
+    tool(
+      "t3_thread_organize",
+      { threadId: z.string(), action: z.string(), snoozedUntil: z.string().optional() },
+      ({ threadId, action }) => {
+        getThread(threadId).organized.push(action);
+        return { threadId, action };
+      },
+    );
 
     tool("link_pull_request", pullRequestTarget, ({ threadId, url }) => {
       const thread = getThread(threadId ?? "");

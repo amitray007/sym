@@ -174,8 +174,9 @@ describe("renderJobCard", () => {
     };
     expect(withoutPr.type).toBe("actions");
     expect(withoutPr.block_id).toBe("job-J-142-actions-v3");
-    expect(withoutPr.elements).toHaveLength(1);
-    expect(withoutPr.elements[0]).toMatchObject({
+    expect(withoutPr.elements.map((e) => e.action_id)).toEqual(["sym_job_steer", "sym_job_stop"]);
+    expect(withoutPr.elements[0]).toMatchObject({ value: "J-142", text: { text: "Steer" } });
+    expect(withoutPr.elements[1]).toMatchObject({
       type: "button",
       action_id: "sym_job_stop",
       style: "danger",
@@ -186,14 +187,18 @@ describe("renderJobCard", () => {
     const withPr = renderJobCard({ ...input, version: 4, prUrl: "https://github.com/o/r/pull/7" })
       .blocks[1] as typeof withoutPr;
     expect(withPr.block_id).toBe("job-J-142-actions-v4");
-    expect(withPr.elements.map((e) => e.action_id)).toEqual(["sym_job_stop", "sym_job_pr"]);
-    expect(withPr.elements[1]).toMatchObject({ url: "https://github.com/o/r/pull/7" });
+    expect(withPr.elements.map((e) => e.action_id)).toEqual([
+      "sym_job_steer",
+      "sym_job_stop",
+      "sym_job_pr",
+    ]);
+    expect(withPr.elements[2]).toMatchObject({ url: "https://github.com/o/r/pull/7" });
   });
 
   it("gives an unsafe PR URL no button, so Slack accepts the card", () => {
     const { blocks } = renderJobCard({ ...input, prUrl: "ftp://example.test/pull/7" });
     const actions = blocks[1] as { elements: unknown[] };
-    expect(actions.elements).toHaveLength(1);
+    expect(actions.elements).toHaveLength(2);
   });
 
   it("escapes control characters in the footer", () => {

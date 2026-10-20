@@ -23,6 +23,9 @@ import type { ModelCheck } from "./verify.ts";
 
 // One reconcile check blocks this long on the worker, so a pass over many jobs stays short.
 const RECONCILE_WAIT_MS = 5_000;
+// Reconcile runs every 3 minutes. Its watch ends before the next pass, so a job only reconcile
+// drives, such as a follow-up (decision 056), is checked on every pass.
+const RECONCILE_LEASE_MS = 2 * 60_000;
 
 export interface ReconcileReport {
   checked: number;
@@ -44,7 +47,9 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
       // or edited, so a notice that never went out does not go out late.
       const { slack: _held, ...holdDelivery } = deps;
       const offline = job.status === "worker_offline";
-      const check = await checkJob(offline ? holdDelivery : deps, job.id, RECONCILE_WAIT_MS);
+      const check = await checkJob(offline ? holdDelivery : deps, job.id, RECONCILE_WAIT_MS, {
+        leaseMs: RECONCILE_LEASE_MS,
+      });
       report.checked++;
       if (offline) await markBack(deps, job);
       if (check.terminal) report.finished++;
