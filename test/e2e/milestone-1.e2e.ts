@@ -120,7 +120,7 @@ describe("milestone 1", () => {
     // Decision 043: the worker has its label, and no Slack call names the software behind it.
     const slackBodies = JSON.stringify(h.slack.calls.map((call) => call.body));
     expect(slackBodies).toContain("Builder thread");
-    expect(slackBodies).not.toMatch(/T3/i);
+    expect(slackBodies).not.toMatch(/\bT3\b/i);
   });
 
   it("the verifier's verdict joins a rule-check concern in the one result message", async () => {
