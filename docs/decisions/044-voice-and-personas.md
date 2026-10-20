@@ -59,8 +59,11 @@ The fixture brain does the same, and a test pins it.
 
 ## Consequences
 
-The brain cannot restate a result it never receives, but a model can still ignore the rule. An
-`eve eval` case with a real model would pin it; the owner runs evals (decision 039).
+The brain cannot restate a result it never receives, but a model can still ignore the rule. Voice
+evals in `evals/voice/` pin it with a real model: the silence after a posted result, the short
+structured shape, no long lines, and two persona floors (`pnpm eval:plain`, `pnpm eval:spicy`).
+They use deterministic checks only. They cannot judge tone or prove that a joke is absent. The
+owner runs them (decision 039).
 
 Rule-check concern text and the model verifier's concerns keep their wording. Only the layout
 changed. A persona file that a pack supplies can undo the casual tone but not the shared Voice
