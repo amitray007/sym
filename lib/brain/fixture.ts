@@ -11,6 +11,7 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A message that asks for an update or status calls jobs_status and repeats its answer.
 // - A message that says "sign in to the worker" calls worker_sign_in.
 // - A message that says "thinking out loud" calls no_reply (side talk, decision 050).
+// - A message with "fixture-react <emoji>" calls slack_react, then ends the turn with no_reply.
 // - A task result, or a tool result with `posted: true`, ends the turn with no_reply.
 // - Anything else gets a one-line echo.
 export function fixtureBrain(): LanguageModel {
@@ -36,6 +37,8 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   if (since.some((message) => message.role === "tool")) {
     const result = request.toolResults.at(-1);
     if (result?.name === "jobs_status") return String(result.output);
+    // A reaction stands in for the reply.
+    if (result?.name === "slack_react") return quiet(request);
     // The worker_job receipt: the job card and the brief speak for Sym while the job runs.
     return { text: "" };
   }
@@ -48,6 +51,8 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   if (brief && schedule)
     return { toolCalls: [{ name: "worker_job", input: { ...brief, schedule } }] };
   if (brief) return { toolCalls: [{ name: "worker_job", input: brief }] };
+  const reaction = /\bfixture-react\s+(\S+)/.exec(message)?.[1];
+  if (reaction) return { toolCalls: [{ name: "slack_react", input: { emoji: reaction } }] };
   if (/\bsign in to the worker\b/i.test(message)) {
     return { toolCalls: [{ name: "worker_sign_in", input: {} }] };
   }

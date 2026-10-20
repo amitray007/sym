@@ -33,6 +33,8 @@ oauth_config:
       - im:history
       - im:read
       - im:write
+      # Custom emoji for reactions (emoji.list, decision 051).
+      - emoji:read
       - files:read
       - files:write
       - reactions:read

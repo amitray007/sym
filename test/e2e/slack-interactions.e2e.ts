@@ -13,6 +13,7 @@ import {
   messageText,
   newConversation,
   OWNER,
+  settle,
   startHarness,
   startJob,
   threadsOf,
@@ -192,5 +193,32 @@ describe("job card buttons", () => {
     await workerAdvance(h, thread, finishedSteps());
     await waitForJobStatus(h.sql, job.id, "done");
     expect(messageText(card)).toContain(ref);
+  });
+});
+
+describe("reactions", () => {
+  it("reacts on the message that started each turn, with no text reply (decision 051)", async () => {
+    const c = newConversation(h);
+    await c.mention("<@UBOT> thanks, fixture-react :tada:");
+    const first = await until(
+      () => h.slack.reactions.find((r) => r.channel === c.channel && r.timestamp === c.rootTs),
+      { label: "the reaction on the first message" },
+    );
+    expect(first.name).toBe("tada");
+
+    await c.reply("<@UBOT> nice, fixture-react 🙌");
+    const reply = await until(
+      () =>
+        h.slack.reactions.find(
+          (r) => r.channel === c.channel && r.timestamp !== c.rootTs && r.name === "raised_hands",
+        ),
+      { label: "the reaction on the reply" },
+    );
+    expect(reply.timestamp).not.toBe(c.rootTs);
+
+    await settle(h);
+    expect(c.botMessages()).toHaveLength(0);
+    const rows = await h.sql`select * from reactions where channel_id = ${c.channel}`;
+    expect(rows).toHaveLength(2);
   });
 });

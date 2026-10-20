@@ -1,0 +1,89 @@
+import type { Sql } from "../db.ts";
+import { getSessionThread } from "../ledger/threads.ts";
+import { type SlackApi, SlackApiError } from "../slack/api.ts";
+import { normalizeEmoji } from "./emoji.ts";
+
+// A reaction on the message that started the turn (decision 051). Code holds the limits, not the
+// prompt: one reaction per message, three per thread per hour. Reactions go only on a person's
+// message, so Sym's own sign-in links, approval prompts, and job cards never get one.
+
+export const THREAD_CAP = 3;
+export const THREAD_WINDOW_MS = 60 * 60 * 1000;
+
+// Remembers the message that started the session's latest turn. The session's thread row must
+// exist, so call it after recordSessionThread.
+export async function recordTurnMessage(
+  sql: Sql,
+  sessionId: string,
+  messageTs: string,
+): Promise<void> {
+  await sql`update session_threads set message_ts = ${messageTs} where session_id = ${sessionId}`;
+}
+
+async function turnMessageTs(sql: Sql, sessionId: string): Promise<string | null> {
+  const [row] = await sql<{ messageTs: string | null }[]>`
+    select message_ts from session_threads where session_id = ${sessionId}
+  `;
+  return row?.messageTs ?? null;
+}
+
+export interface ReactDeps {
+  sql: Sql;
+  // Undefined when the deployment has no bot token.
+  api: SlackApi | undefined;
+  now?: Date;
+}
+
+// Returns a short sentence for the model. It never throws on a Slack refusal.
+export async function reactToTurn(
+  deps: ReactDeps,
+  sessionId: string,
+  emoji: string,
+): Promise<string> {
+  const normalized = normalizeEmoji(emoji);
+  if (!normalized.ok) return normalized.message;
+  if (!deps.api) return "Sym has no Slack access, so it cannot react.";
+
+  const thread = await getSessionThread(deps.sql, sessionId);
+  const messageTs = thread ? await turnMessageTs(deps.sql, sessionId) : null;
+  if (!thread || !messageTs) return "This conversation has no Slack message to react to.";
+  const threadTs = thread.threadTs ?? messageTs;
+  const since = new Date((deps.now ?? new Date()).getTime() - THREAD_WINDOW_MS);
+
+  const [recent] = await deps.sql<{ count: number }[]>`
+    select count(*)::int as count from reactions
+    where channel_id = ${thread.channelId} and thread_ts = ${threadTs} and created_at > ${since}
+  `;
+  if ((recent?.count ?? 0) >= THREAD_CAP) {
+    return "Sym has used its reactions for this thread this hour. Reply in text or stay silent.";
+  }
+  // The row is the claim: the key allows one reaction per message.
+  const claimed = await deps.sql`
+    insert into reactions (channel_id, message_ts, thread_ts, name)
+    values (${thread.channelId}, ${messageTs}, ${threadTs}, ${normalized.name})
+    on conflict do nothing
+    returning message_ts
+  `;
+  if (claimed.length === 0) return "Sym already reacted to this message. Do not react again.";
+
+  try {
+    await deps.api.call("reactions.add", {
+      channel: thread.channelId,
+      timestamp: messageTs,
+      name: normalized.name,
+    });
+    return `Reacted with :${normalized.name}:.`;
+  } catch (error) {
+    const code = error instanceof SlackApiError ? error.code : "request_failed";
+    // The message already carries this reaction. Nothing is wrong.
+    if (code === "already_reacted") return `Already reacted with :${normalized.name}:.`;
+    await deps.sql`
+      delete from reactions where channel_id = ${thread.channelId} and message_ts = ${messageTs}
+    `;
+    console.warn(`Sym could not add a reaction: ${code}`);
+    if (code === "invalid_name") {
+      return `Slack does not know :${normalized.name}:. Call slack_emoji to find a custom emoji, or pick a standard name.`;
+    }
+    return `Slack refused the reaction (${code}). Do not retry.`;
+  }
+}

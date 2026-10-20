@@ -46,7 +46,7 @@ Codex · thread 8f2c… · updated 1 min ago
 | Buttons and selects | Approve a brief, answer worker questions, approve rules | Eve: approvals, `ctx.ask` | Milestone 1 |
 | "Type your answer" modal | Free-text answers | Eve, inside `ctx.ask` | Milestone 1 |
 | Feedback buttons | 👍/👎 inside each final reply | Sym: renderer posts the reply with a `context_actions` block | Built |
-| Status reactions | 👀 picked up, ✅ done, ⚠️ needs you | Sym: `reactions.add` | Later |
+| Reactions | A rare emoji on a person's message: 😂 funny, 💡 good idea, 🙌 good news, 🫡 ack. Never 👀, never on every message (decision 051) | Brain: `slack_react` and `slack_emoji`, limits in code | Built |
 | Ephemeral replies | `/sym status`, private sign-in prompts | Eve | Production |
 | Long output | Over 12,000 characters as an `eve-response.md` snippet | Eve | Production |
 | Modals | "New schedule" form | Sym: `views.open` with the `trigger_id` | Team phase |
@@ -169,7 +169,8 @@ with the public host before you import it.
 | `channels:history`, `groups:history` | Replies in job threads without a mention, and the people in a thread |
 | `files:read`, `files:write` | Logs and screenshots in; long reports out |
 | `assistant:write` | The thread status line (`assistant.threads.setStatus`) |
-| `reactions:read`, `reactions:write` | Feedback reactions in; status reactions out (later) |
+| `reactions:read`, `reactions:write` | Feedback reactions in; Sym's own reactions out |
+| `emoji:read` | The workspace's custom emoji (`emoji.list`), so Sym can pick a fitting one |
 | `commands` | `/sym` |
 | `users:read` | Resolve the approver for DM routing, and display names in a shared thread |
 

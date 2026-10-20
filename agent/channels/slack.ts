@@ -36,6 +36,7 @@ import {
 } from "../../lib/persona-setting.ts";
 import { parseSymCommand, slackText, USAGE } from "../../lib/quiet/command.ts";
 import { formatClock, getQuietUntil, setQuietUntil } from "../../lib/quiet/quiet.ts";
+import { recordTurnMessage } from "../../lib/reactions/react.ts";
 import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
 import { listSchedules } from "../../lib/schedules/rows.ts";
@@ -249,9 +250,16 @@ const symRenderer = defineSlackRenderer({
           threadTs: threadTs ?? null,
           // A quiet turn does not make its sender the person Sym serves.
           userId: quiet ? null : (triggeringUserId ?? null),
-        }).catch((error: unknown) => {
-          console.warn("Sym could not record the Slack thread of a session.", String(error));
-        });
+        })
+          // The first message of the session, for slack_react (decision 051).
+          .then(() =>
+            channel.state.triggeringMessageTs
+              ? recordTurnMessage(ledger(), ctx.session.id, channel.state.triggeringMessageTs)
+              : undefined,
+          )
+          .catch((error: unknown) => {
+            console.warn("Sym could not record the Slack thread of a session.", String(error));
+          });
       }
       // Eve's handler resets the turn state and shows "Thinking...". A quiet turn keeps the
       // reset and skips the status.
