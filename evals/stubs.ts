@@ -9,8 +9,8 @@ const NOTHING_RAN = { note: "Stubbed in an eval. Nothing ran." };
 
 export const writeToolStubs = [
   {
-    id: "t3-job",
-    tool: "t3_job",
+    id: "worker-job",
+    tool: "worker_job",
     outcome: { response: { job: "J-1", status: "running", ...NOTHING_RAN } },
   },
   { id: "schedule-create", tool: "schedule_create", outcome: { response: NOTHING_RAN } },

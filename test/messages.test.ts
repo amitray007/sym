@@ -99,7 +99,7 @@ describe("other messages", () => {
 
   it("words the permission DM", () => {
     expect(permissionBlockMessage("J-142")).toBe(
-      "J-142 is waiting for a permission prompt on the worker. Approve it in T3.",
+      "J-142 is waiting for a permission prompt on the worker. Approve it in the worker.",
     );
   });
 

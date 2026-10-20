@@ -6,8 +6,8 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // behavior: real deployments use a gateway model (decision 018).
 //
 // Script:
-// - A message with a ```brief JSON block calls t3_job with that brief.
-// - A scheduled run message calls t3_job with its brief and its schedule reference.
+// - A message with a ```brief JSON block calls worker_job with that brief.
+// - A scheduled run message calls worker_job with its brief and its schedule reference.
 // - A message that asks for an update or status calls jobs_status and repeats its answer.
 // - A message that says "sign in to the worker" calls worker_sign_in.
 // - A task result, or a tool result that says Sym already posted, ends the turn with no_reply.
@@ -30,7 +30,7 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   if (since.some((message) => message.role === "tool")) {
     const result = request.toolResults.at(-1);
     if (result?.name === "jobs_status") return String(result.output);
-    // The t3_job receipt: the job card and the brief speak for Sym while the job runs.
+    // The worker_job receipt: the job card and the brief speak for Sym while the job runs.
     return { text: "" };
   }
 
@@ -39,8 +39,9 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   const brief = briefIn(message);
   // A dispatch message names the schedule. The brief goes back unchanged, with the reference.
   const schedule = /^Scheduled run of (S-\d+):/m.exec(message)?.[1];
-  if (brief && schedule) return { toolCalls: [{ name: "t3_job", input: { ...brief, schedule } }] };
-  if (brief) return { toolCalls: [{ name: "t3_job", input: brief }] };
+  if (brief && schedule)
+    return { toolCalls: [{ name: "worker_job", input: { ...brief, schedule } }] };
+  if (brief) return { toolCalls: [{ name: "worker_job", input: brief }] };
   if (/\bsign in to the worker\b/i.test(message)) {
     return { toolCalls: [{ name: "worker_sign_in", input: {} }] };
   }

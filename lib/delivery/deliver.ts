@@ -10,7 +10,7 @@ import {
 import { type SlackApi, SlackApiError } from "../slack/api.ts";
 
 // Sends Sym's own Slack posts from the outbox and brings job cards up to date (docs/slack.md).
-// Any process can run it: the t3_job steps right after they enqueue, and a schedule as the
+// Any process can run it: the worker_job steps right after they enqueue, and a schedule as the
 // safety net. Claims keep two senders from sending one post twice.
 
 // The card version a card post shows. It travels in the payload and never reaches Slack.

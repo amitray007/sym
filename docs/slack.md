@@ -30,7 +30,8 @@ Codex · thread 8f2c… · updated 1 min ago
   Slack redraws a plan block only under a new one; the version moves only when the card changes.
 - The job row holds the card Sym wants. Delivery posts it and edits Slack to match (decision 020).
 - Sym fills the steps from the brief's done-when list and the worker activity it reads.
-- Sym's renderer removes `t3_job` rows from Eve's task card, and returns `null` when nothing else
+- Slack text calls the worker by `SYM_WORKER_LABEL` (default `Worker`) and never names the software behind it (decision 043). The mockups show the label `Builder`.
+- Sym's renderer removes `worker_job` rows from Eve's task card, and returns `null` when nothing else
   is left, so the thread has one card.
 - When the job ends, the card collapses to one line, for example "Done in 14m · PR #812", and the
   result posts as text.

@@ -1,4 +1,4 @@
-// The worker adapter contract (docs/workers.md). The `t3_job` tool and reconcile call only these
+// The worker adapter contract (docs/workers.md). The `worker_job` tool and reconcile call only these
 // operations, so another worker can replace T3 Code without changes to the ledger or the loop.
 
 // Every adapter maps its worker's states to these.

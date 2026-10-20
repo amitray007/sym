@@ -101,11 +101,11 @@ describe("readRedirect", () => {
   it("refuses an OAuth error, another issuer, a missing issuer, and a missing code", () => {
     expect(read("state=s1&error=access_denied")).toEqual({
       kind: "refused",
-      reason: "T3 refused the sign-in: access_denied.",
+      reason: "The worker refused the sign-in: access_denied.",
     });
     expect(read("state=s1&error=%3Cscript%3E")).toEqual({
       kind: "refused",
-      reason: "T3 refused the sign-in: unknown error.",
+      reason: "The worker refused the sign-in: unknown error.",
     });
     expect(read("state=s1&code=c1&iss=https%3A%2F%2Fevil.example").kind).toBe("refused");
     expect(read("state=s1&code=c1").kind).toBe("refused");
@@ -180,7 +180,7 @@ describe("the OAuth flow against the fake T3", () => {
     const denied = await beginSignIn({ mcpUrl: t3.url, redirectUrl, state: newState() });
     expect(readRedirect(await approve(denied.authorizationUrl), denied)).toEqual({
       kind: "refused",
-      reason: "T3 refused the sign-in: access_denied.",
+      reason: "The worker refused the sign-in: access_denied.",
     });
 
     t3.oauth.wrongIssuerNext("http://127.0.0.1:1");

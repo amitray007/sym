@@ -18,7 +18,7 @@ export default defineEval({
     );
     t.succeeded();
 
-    const briefs = turn.toolCalls.filter((call) => call.name === "t3_job");
+    const briefs = turn.toolCalls.filter((call) => call.name === "worker_job");
     if (briefs.length === 0) {
       // No job started, so the brain must have asked or declined in words.
       t.check(

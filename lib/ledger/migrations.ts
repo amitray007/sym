@@ -101,7 +101,7 @@ export const migrations: Migration[] = [
       alter table jobs add column started_at timestamptz;
       alter table jobs add column last_activity_at timestamptz;
       alter table jobs add column quiet_noticed_at timestamptz;
-      -- The watcher lease. A t3_job task renews it on each check. Reconcile takes over a job
+      -- The watcher lease. A worker_job task renews it on each check. Reconcile takes over a job
       -- whose lease ran out, for example after the session died.
       alter table jobs add column watch_until timestamptz;
 

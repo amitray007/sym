@@ -32,10 +32,10 @@ const BRIEF = {
 };
 
 describe("respondAsFixture", () => {
-  it("calls t3_job with the JSON of a brief block", () => {
+  it("calls worker_job with the JSON of a brief block", () => {
     const text = `Please do this.\n\`\`\`brief\n${JSON.stringify(BRIEF)}\n\`\`\`\nThanks`;
     expect(respondAsFixture(request(text))).toEqual({
-      toolCalls: [{ name: "t3_job", input: BRIEF }],
+      toolCalls: [{ name: "worker_job", input: BRIEF }],
     });
   });
 
@@ -87,31 +87,34 @@ describe("respondAsFixture", () => {
     expect(result).toBe(answer);
   });
 
-  it("says nothing after a t3_job receipt", () => {
+  it("says nothing after a worker_job receipt", () => {
     const result = respondAsFixture(
       request("go", {
         messages: [
           { role: "user", text: "go" },
           { role: "tool", text: "started" },
         ],
-        toolResults: [{ id: "c1", name: "t3_job", output: "started", isError: false }],
+        toolResults: [{ id: "c1", name: "worker_job", output: "started", isError: false }],
       }),
     );
     expect(result).toEqual({ text: "" });
   });
 
-  it("says nothing after a t3_job receipt that Eve follows with its task list", () => {
+  it("says nothing after a worker_job receipt that Eve follows with its task list", () => {
     const text = `\`\`\`brief\n${JSON.stringify(BRIEF)}\n\`\`\``;
     const result = respondAsFixture(
       request(text, {
         messages: [
           { role: "user", text },
           { role: "assistant", text: "" },
-          { role: "tool", text: "Started task t3_job-1." },
-          { role: "user", text: '[Tasks]\n<tasks><task id="t3_job-1" status="working"/></tasks>' },
+          { role: "tool", text: "Started task worker_job-1." },
+          {
+            role: "user",
+            text: '[Tasks]\n<tasks><task id="worker_job-1" status="working"/></tasks>',
+          },
         ],
         toolResults: [
-          { id: "c1", name: "t3_job", output: "Started task t3_job-1.", isError: false },
+          { id: "c1", name: "worker_job", output: "Started task worker_job-1.", isError: false },
         ],
       }),
     );
@@ -137,7 +140,9 @@ describe("respondAsFixture", () => {
 
   it("answers with empty text for a task result when no_reply is missing", () => {
     expect(
-      respondAsFixture(request('<task_result id="x">done</task_result>', { tools: ["t3_job"] })),
+      respondAsFixture(
+        request('<task_result id="x">done</task_result>', { tools: ["worker_job"] }),
+      ),
     ).toEqual({ text: "" });
   });
 
@@ -147,10 +152,10 @@ describe("respondAsFixture", () => {
 });
 
 describe("respondAsFixture scheduled runs", () => {
-  it("calls t3_job with the stored brief and the schedule reference", () => {
-    const text = `Scheduled run of S-3: On-call check.\n\nCall t3_job.\n\n\`\`\`brief\n${JSON.stringify(BRIEF)}\n\`\`\`\n\nWhen nothing, call no_reply.`;
+  it("calls worker_job with the stored brief and the schedule reference", () => {
+    const text = `Scheduled run of S-3: On-call check.\n\nCall worker_job.\n\n\`\`\`brief\n${JSON.stringify(BRIEF)}\n\`\`\`\n\nWhen nothing, call no_reply.`;
     expect(respondAsFixture(request(text))).toEqual({
-      toolCalls: [{ name: "t3_job", input: { ...BRIEF, schedule: "S-3" } }],
+      toolCalls: [{ name: "worker_job", input: { ...BRIEF, schedule: "S-3" } }],
     });
   });
 });

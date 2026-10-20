@@ -1,4 +1,5 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { workerNoun } from "../../worker-label.ts";
 import type { CallTool } from "./adapter.ts";
 
 // Sym calls T3 from code, not through an Eve connection: the watch loop and reconcile run without
@@ -30,7 +31,7 @@ export async function connectT3(options: T3ConnectOptions): Promise<T3Connection
         options?.timeoutMs ? { timeout: options.timeoutMs } : undefined,
       );
       if (result.isError) {
-        throw new Error(`T3 tool ${name} failed: ${textOf(result.content)}`);
+        throw new Error(`The ${workerNoun()} failed a call (${name}): ${textOf(result.content)}`);
       }
       if (result.structuredContent !== undefined) return result.structuredContent;
       // Tools without an output schema return JSON as text.

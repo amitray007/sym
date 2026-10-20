@@ -19,7 +19,7 @@ export function dispatchMessage(schedule: Schedule): string {
   const ref = scheduleRef(schedule.id);
   return [
     `Scheduled run of ${ref}: ${schedule.title}.`,
-    `The owner approved this brief. Call t3_job with exactly this brief and schedule "${ref}". ` +
+    `The owner approved this brief. Call worker_job with exactly this brief and schedule "${ref}". ` +
       "Do not change the brief.",
     `\`\`\`brief\n${JSON.stringify(schedule.brief, null, 2)}\n\`\`\``,
     "When the check finds nothing that needs attention, call no_reply.",

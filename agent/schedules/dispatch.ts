@@ -34,7 +34,7 @@ export default defineSchedule({
               })
             : undefined;
           if (run) {
-            // Decision 042: a schedule whose project left the list does not run. t3_job checks
+            // Decision 042: a schedule whose project left the list does not run. worker_job checks
             // again, so the brain cannot start it either.
             const project = (schedule.brief as { project?: unknown } | null)?.project;
             if (typeof project !== "string" || checkProject(allowedFromEnv(), project)) {

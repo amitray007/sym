@@ -11,7 +11,7 @@ export const schedulesMigration: Migration = {
       -- Five fields, evaluated in UTC.
       cron text not null check (length(trim(cron)) > 0),
       title text not null,
-      -- A t3_job brief. The owner approved this exact text.
+      -- A worker_job brief. The owner approved this exact text.
       brief jsonb not null check (coalesce(jsonb_typeof(brief) = 'object', false)),
       -- Each fire opens a new thread in this channel.
       channel text not null,

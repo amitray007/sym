@@ -10,7 +10,7 @@
  │ Sym: Eve app (Node 24, one replica)  │ ──────────────▶ │  Claude Code / Codex      │
  │  channels/slack.ts   talk, buttons   │                 │  threads in your repos    │
  │  channels/mcp.ts     workers call in │ ◀────────────── │                           │
- │  tools/t3_job.ts     one job = task  │  callback URL   └───────────────────────────┘
+ │  tools/worker_job.ts     one job = task  │  callback URL   └───────────────────────────┘
  │  schedules/dispatch  owner schedules │
  │  schedules/reconcile safety net      │        Postgres
  │  hooks/ledger.ts     event log       │ ───▶  jobs, schedules, outbox,
@@ -55,7 +55,7 @@ Example: "@sym add retry with backoff to the billing sync in sync-service, open 
 2. The model loads the `task-brief` playbook and writes a brief: project, goal, constraints, a
    done-when list, and an output contract. The contract is a final JSON block with `summary`,
    `pr_url`, `tests`, `files_changed`, and `open_questions`.
-3. The model calls `t3_job`, an Eve task, so the conversation stays open. It writes a `jobs` row
+3. The model calls `worker_job`, an Eve task, so the conversation stays open. It writes a `jobs` row
    with status `launching`, keyed on the tool call ID, and takes the Slack thread of the session.
 4. Code changes need approval. Sym posts the brief with Start and Cancel buttons; typed text
    means "edit" and goes back to the model for a new brief (decision 021). After Start:
@@ -78,7 +78,7 @@ Example: "Every weekday at 09:00, run the on-call check and tell me only what ne
 2. Every minute, `dispatch` claims due rows with a lease, so a row cannot fire twice.
 3. For each due row, `dispatch` starts a session in the schedule's channel with
    `to(slack, { channelId })` and no root message, and records a `schedule_runs` row.
-4. The model calls `t3_job` with the stored brief and the schedule reference. The job skips the
+4. The model calls `worker_job` with the stored brief and the schedule reference. The job skips the
    Start click only when the session came from the dispatcher and the brief equals the approved
    one (decision 024).
 5. The scheduled job posts nothing while it runs. When the check is clean, nothing posts at all,
@@ -119,7 +119,7 @@ update?" cheap and lets a new session continue the job.
 3. Run the deterministic rule checks first (`lib/jobs/verify.ts`): changed files sit inside the
    allowed paths, and a PR opened only when the job allowed one. Checking the PR branch, CI
    status, and production config needs the worker or GitHub and comes later.
-4. The `t3_job` body runs the `verifier` subagent through `ctx.agent` (decision 032). It gets the
+4. The `worker_job` body runs the `verifier` subagent through `ctx.agent` (decision 032). It gets the
    brief, the rule-check concerns, and the worker's claims as untrusted data. It compares the
    done-when list with the claims and returns `pass` or `concerns`, `concerns[]`, and
    `confidence`. It has no tools.

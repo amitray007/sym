@@ -100,6 +100,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
     SYM_SLACK_USERS: OWNER,
     SYM_PROJECTS: "test-repo",
     SYM_WORKER_MODEL: "fake/fake-model",
+    SYM_WORKER_LABEL: "Builder",
     SYM_JOB_POLL_SECONDS: "2",
     SYM_JOB_POLL_AFTER_CALLBACK_SECONDS: "1",
   };

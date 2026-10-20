@@ -1,4 +1,5 @@
 import type { JobStatus } from "../ledger/jobs.ts";
+import { workerLabel, workerNoun } from "../worker-label.ts";
 
 // The job card (docs/slack.md): one Slack `plan` block that Sym owns and edits with chat.update.
 // These functions are pure. The watch loop and reconcile pass in the facts and do the posting.
@@ -47,13 +48,16 @@ function clip(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-const WAITING_NOTE: Partial<Record<JobStatus, string>> = {
-  waiting_input: "Waiting for you: the worker asked a question.",
-  waiting_permission: "Waiting for you: approve a permission prompt on the worker.",
-  quiet: "No new activity for a while.",
-  worker_offline: "The worker is offline.",
-  cancelled: "Cancelled.",
-};
+function waitingNotes(): Partial<Record<JobStatus, string>> {
+  const noun = workerNoun();
+  return {
+    waiting_input: `Waiting for you: the ${noun} asked a question.`,
+    waiting_permission: `Waiting for you: approve a permission prompt on the ${noun}.`,
+    quiet: "No new activity for a while.",
+    worker_offline: `The ${noun} is offline.`,
+    cancelled: "Cancelled.",
+  };
+}
 
 export function jobCardSteps(input: JobCardInput): CardStep[] {
   const { status, threadStarted } = input;
@@ -76,7 +80,7 @@ export function jobCardSteps(input: JobCardInput): CardStep[] {
         ? "in_progress"
         : "pending";
 
-  const note = WAITING_NOTE[status];
+  const note = waitingNotes()[status];
   const summary = input.latestSummary ? clip(input.latestSummary, 300) : null;
 
   const workRow: CardStep = { task_id: "working", title: "Working", status: working };
@@ -85,7 +89,7 @@ export function jobCardSteps(input: JobCardInput): CardStep[] {
 
   const threadRow: CardStep = {
     task_id: "thread",
-    title: "Worker thread started",
+    title: `${workerLabel()} thread started`,
     status: thread,
   };
   if (failedAtThread && note) threadRow.details = richText(note);
@@ -127,18 +131,18 @@ export function formatDuration(ms: number): string {
   return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }
 
-const STATUS_WORD: Record<JobStatus, string> = {
+const statusWords = (): Record<JobStatus, string> => ({
   launching: "launching",
   running: "running",
   waiting_input: "waiting for you",
   waiting_permission: "waiting for you",
   quiet: "quiet",
-  worker_offline: "worker offline",
+  worker_offline: `${workerNoun()} offline`,
   checking: "checking",
   done: "done",
   failed: "failed",
   cancelled: "cancelled",
-};
+});
 
 export interface CardFooter {
   /** For example "Codex" or "Codex · gpt-5". */
@@ -208,7 +212,7 @@ function stopButton(ref: string): Record<string, unknown> {
     value: ref,
     confirm: {
       title: { type: "plain_text", text: `Stop ${ref}?` },
-      text: { type: "plain_text", text: "The worker stops its current work." },
+      text: { type: "plain_text", text: `The ${workerNoun()} stops its current work.` },
       confirm: { type: "plain_text", text: "Stop" },
       deny: { type: "plain_text", text: "Keep going" },
     },
@@ -218,7 +222,7 @@ function stopButton(ref: string): Record<string, unknown> {
 export function renderJobCard(input: RenderCardInput): Rendered {
   const now = ms(input.now);
   const elapsed = formatDuration(now - ms(input.startedAt));
-  const title = `[${input.ref}] ${clip(input.title, 80)} · ${STATUS_WORD[input.status]} ${elapsed}`;
+  const title = `[${input.ref}] ${clip(input.title, 80)} · ${statusWords()[input.status]} ${elapsed}`;
 
   const parts = [escapeText(input.footer.worker)];
   if (input.footer.threadId) parts.push(`thread ${escapeText(input.footer.threadId)}`);

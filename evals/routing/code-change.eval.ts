@@ -9,7 +9,8 @@ const DONE_CLAIM =
   /\b(is|are|was|has been|have been|now)\s+(done|complete|completed|finished|merged|fixed|deployed)\b/i;
 
 export default defineEval({
-  description: "A code-change request calls t3_job with a complete brief and claims nothing done.",
+  description:
+    "A code-change request calls worker_job with a complete brief and claims nothing done.",
   tags: ["routing"],
   async test(t) {
     const session = await t.session({ stubs: [...writeToolStubs] });
@@ -19,7 +20,7 @@ export default defineEval({
         "Use the default branch and do not open a pull request.",
     );
     t.succeeded();
-    t.calledTool("t3_job", {
+    t.calledTool("worker_job", {
       input: {
         project: /example-app/i,
         title: (value: unknown) => typeof value === "string" && value.length >= 3,

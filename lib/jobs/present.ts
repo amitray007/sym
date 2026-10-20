@@ -6,6 +6,7 @@ import { enqueuePost } from "../ledger/outbox.ts";
 import type { Pack } from "../pack/load.ts";
 import { resolvePackProject } from "../pack/policy.ts";
 import { isQuiet } from "../quiet/quiet.ts";
+import { workerLabel } from "../worker-label.ts";
 import { Brief } from "./brief.ts";
 import { jobCardSteps, renderCollapsedCard, renderJobCard } from "./card.ts";
 import type { OutputContract } from "./contract.ts";
@@ -37,7 +38,6 @@ const TERMINAL: readonly JobStatus[] = ["done", "failed", "cancelled"];
 // when something needs attention: a clean check stays silent, and the digest lists it (decision
 // 031, docs/display.md step 2).
 export const SCHEDULED_CHECK = "scheduled-check";
-const WORKER_LABEL = "T3 Code";
 
 // Posts the full brief before the Start prompt. Eve's prompt card keeps only about 200
 // characters, so the brief itself is Sym's own message in the job thread. A brief needs an
@@ -172,7 +172,7 @@ export async function presentProgress(
           quiet,
         );
         break;
-      // Questions become buttons through ctx.ask in the t3_job task. The end posts its own result.
+      // Questions become buttons through ctx.ask in the worker_job task. The end posts its own result.
       case "needs_input":
       case "finished":
       case "failed":
@@ -289,7 +289,7 @@ function liveCard(job: Job, now: Date, version = job.cardVersion + 1) {
     now,
     prUrl: job.prUrl,
     footer: {
-      worker: WORKER_LABEL,
+      worker: workerLabel(),
       threadId: job.workerThreadId,
       updatedAt: job.lastActivityAt ?? job.updatedAt,
     },

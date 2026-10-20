@@ -19,7 +19,7 @@ import {
 
 // Exit criterion 5 (docs/milestone-1.md): after a process restart mid-job, reconcile re-attaches
 // and the job finishes with a correct result message. `eve dev` leaves the runs of an earlier
-// server dormant unless it starts with --resume, so after the restart no t3_job task watches the
+// server dormant unless it starts with --resume, so after the restart no worker_job task watches the
 // job. Only the ledger and reconcile can finish it.
 
 let h: Harness;

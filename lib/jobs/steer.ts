@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { getJobByRef, type Job, jobRef, updateJob } from "../ledger/jobs.ts";
+import { workerNoun } from "../worker-label.ts";
 import type { SendMode } from "../workers/types.ts";
 import { cancelJob, type JobDeps } from "./run.ts";
 
@@ -61,7 +62,7 @@ export async function steerJob(
   const short =
     clean.length <= SUMMARY_TEXT_MAX ? clean : `${clean.slice(0, SUMMARY_TEXT_MAX - 1)}…`;
   await updateJob(deps.sql, job.id, { lastSummary: `Steered: ${short}` });
-  return `Sent to ${name}'s worker: ${short}`;
+  return `Sent to ${name}'s ${workerNoun()}: ${short}`;
 }
 
 export async function stopJob(deps: JobDeps, ref: string): Promise<string> {

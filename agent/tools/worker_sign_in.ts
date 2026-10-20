@@ -7,6 +7,7 @@ import { chooseDisplay } from "../../lib/display.ts";
 import { enqueuePost, postStatus } from "../../lib/ledger/outbox.ts";
 import { ownerUserId } from "../../lib/owner.ts";
 import { ledger, pack, slackFromEnv } from "../../lib/runtime.ts";
+import { workerLabel, workerNoun } from "../../lib/worker-label.ts";
 import { saveCredential } from "../../lib/workers/credentials.ts";
 import { workerTarget } from "../../lib/workers/resolve.ts";
 import { checkSignInCaller, SIGNED_IN_PAGE, signInRedirect } from "../../lib/workers/sign-in.ts";
@@ -45,14 +46,14 @@ type Completed =
 
 export default defineWorkflowTool({
   description:
-    "Sign Sym in to its worker (T3 Code) when the owner asks, or when the sign-in expired. " +
+    "Sign Sym in to its worker when the owner asks, or when the sign-in expired. " +
     "Only the owner can use it. Sym sends the owner a private approval link and waits up to " +
     "10 minutes. Runs as a task: you get a receipt now and the result later. If the status says " +
     "the DM could not be sent yet, say so and do not tell the owner to check their DM. Never " +
     "repeat the link anywhere.",
   inputSchema: z.object({}),
   label: {
-    start: () => "Worker sign-in",
+    start: () => `${workerLabel()} sign-in`,
     delta: (_input, progress: { status: string }) => progress.status,
   },
   async *task(_input, ctx) {
@@ -128,8 +129,7 @@ async function prepare(caller: SessionAuthContext | null): Promise<Prepared> {
   if (!target.mcpUrl) {
     return {
       ok: false,
-      reason:
-        "Sym has no worker URL. Add the worker to the pack, or set T3_MCP_URL (docs/workers.md).",
+      reason: `Sym has no ${workerNoun()} URL. Add the ${workerNoun()} to the pack, or set T3_MCP_URL (docs/workers.md).`,
     };
   }
   return { ok: true, owner: check.owner, worker: { name: target.name, mcpUrl: target.mcpUrl } };
@@ -149,7 +149,10 @@ async function begin(worker: Target, webhookUrl: string): Promise<Begun> {
     return { ok: true, start };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    return { ok: false, reason: `Sym could not start the sign-in with the worker: ${reason}` };
+    return {
+      ok: false,
+      reason: `Sym could not start the sign-in with the ${workerNoun()}: ${reason}`,
+    };
   }
 }
 
@@ -177,7 +180,7 @@ async function sendLink(
     payload: {
       channel: owner,
       text:
-        `Approve Sym on the worker: <${authorizationUrl}|open the T3 sign-in page>. ` +
+        `Approve Sym on the ${workerNoun()}: <${authorizationUrl}|open the sign-in page>. ` +
         "Pick the access level there. The link works for 10 minutes. Do not share it.",
       unfurl_links: false,
       unfurl_media: false,

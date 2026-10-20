@@ -25,12 +25,12 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 |---|---|---|---|---|
 | Plain tools | `defineTool` | Use | `jobs_status`, `worker_projects`, `schedule_*`, memory tools | Not retried. Interrupted steps re-run, so use idempotency keys |
 | Approvals | `approval: never/once/always/policy` | Use | Gate launches with write intent, schedule deletes, merges | Default `never`. Check the clicker in `onInputResponse` |
-| Workflow task | `defineWorkflowTool({ task })` | Use | `t3_job`: one worker thread from launch to checked result | 32 working tasks per session. Result capped at 50 KB |
+| Workflow task | `defineWorkflowTool({ task })` | Use | `worker_job`: one worker thread from launch to checked result | 32 working tasks per session. Result capped at 50 KB |
 | Progress | `async *task` + `yield` | Use | The thread status line | The task card row does not show yields. `serve` tasks cannot yield |
 | Questions | `ctx.ask` | Use | Worker questions become Slack buttons | `unavailable` in Markdown schedule sessions |
 | Durable timer | `sleep()` from `workflow` | Use | Waits between worker checks, no compute | |
 | Callback URL | `createWebhook()` | Use | The worker POSTs its result for instant completion | Race with `sleep()` for the polling fallback |
-| Subagents | `ctx.agent(name).send(msg, { outputSchema })` | Use | `verifier` (`tool: false`, no tools) checks a code result against the brief from the `t3_job` body (decision 032) | Body only, not in a step. Shares the parent's token budget |
+| Subagents | `ctx.agent(name).send(msg, { outputSchema })` | Use | `verifier` (`tool: false`, no tools) checks a code result against the brief from the `worker_job` body (decision 032) | Body only, not in a step. Shares the parent's token budget |
 | Fan-out | `workflow({ maxSubagents })` | Later | Parallel triage | The program cannot call tools |
 | Opt-in tools | `no_reply` | Use | Silence for a clean scheduled check | |
 | Default tools | `bash`, `web_fetch` | Skip most | Workers do repository work. `defaultTools: false` | |
@@ -45,10 +45,10 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Handlers | `onAppMention`, `onDirectMessage`, `onMessage` | Use | Allow-list check, then start work | First matching handler wins |
 | Reply without mention | `onMessage` + `isSubscribed()` | Use | Replies in job threads without `@sym` | Needs `message.channels` and history scopes |
 | Thread context | `threadContext: { since: "thread-root" }` | Use | Sym reads the whole job thread | |
-| Task card | automatic, `taskCard` renderer | Use | Short non-job tasks. Hidden for `t3_job` | Rows show no progress. Schedule sessions get no card |
+| Task card | automatic, `taskCard` renderer | Use | Short non-job tasks. Hidden for `worker_job` | Rows show no progress. Schedule sessions get no card |
 | Status line | tool `label.start`, `label.delta` | Use | "Launching worker thread", "Tests running" | Cut at 50 characters. Cleared after 2 min idle |
 | Approval routing | `approvalChannel: "direct-message"` | Later | Approvals stay in the job thread for the owner-only allow-list; a DM route comes with team use | Fails closed if the user cannot be resolved |
-| Renderers | `defineSlackRenderer` | Use | Feedback buttons inside each reply, the session's Slack thread, hiding Eve's card for `t3_job` | Clicks arrive in `onInteraction` |
+| Renderers | `defineSlackRenderer` | Use | Feedback buttons inside each reply, the session's Slack thread, hiding Eve's card for `worker_job` | Clicks arrive in `onInteraction` |
 | Events | `onEvent` | Use | `reaction_added` for feedback. `app_home_opened` comes with the Home tab | |
 | Slash commands | `onSlashCommand` | Use | `/sym status`, `/sym jobs`, `/sym schedules`, `/sym quiet`, answered ephemerally with `ctx.slack.request` | No model call |
 | Shortcuts | `onShortcut` | Later | "Send to Sym" on any message | `trigger_id` valid about 3 s |
@@ -79,7 +79,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Feature | API | Decision | How Sym uses it | Limits |
 |---|---|---|---|---|
 | Self-modification | `eve/self-modification/remote` | Skip | Code changes go through a worker thread instead (decision 007) | Needs microsandbox when self-hosted |
-| Evals | `evals/**/*.eval.ts`, `eve eval`, tool stubs | Use | Five cases check the brain's routing with a real model: a code change calls `t3_job`, a status question calls `jobs_status`, a recurring request calls `schedule_create`, a production write stays read-only, and injected text calls no write tool (decision 039). Stubs replace the write tools. `pnpm test:e2e` still covers the flows with the fixture brain | Run by the owner, not CI: it spends model tokens. Needs a migrated Postgres for memory. Stubs need the dev-only grant in `agent/channels/eve.ts`. No judge is used, so no judge model is set |
+| Evals | `evals/**/*.eval.ts`, `eve eval`, tool stubs | Use | Five cases check the brain's routing with a real model: a code change calls `worker_job`, a status question calls `jobs_status`, a recurring request calls `schedule_create`, a production write stays read-only, and injected text calls no write tool (decision 039). Stubs replace the write tools. `pnpm test:e2e` still covers the flows with the fixture brain | Run by the owner, not CI: it spends model tokens. Needs a migrated Postgres for memory. Stubs need the dev-only grant in `agent/channels/eve.ts`. No judge is used, so no judge model is set |
 | OpenTelemetry | `agent/instrumentation/*` | Later | Traces to a collector | |
 | Route auth | custom bearer `AuthFn`, `localDev()` | Use | Slack by signature. MCP by `SYM_MCP_TOKEN`, sessions by `SYM_API_TOKEN` (decisions 019, 027). An IP allow-list is later; keep both routes on the private network | `placeholderAuth` blocks production |
 | Self-hosting | `eve build`, `eve start` | Use | Docker service with a volume at `.eve/.workflow-data` | The proxy must pass `/eve/` and `/.well-known/workflow/` unrewritten |
