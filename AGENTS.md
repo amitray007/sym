@@ -53,7 +53,9 @@ Node 24 and pnpm, pinned in `mise.toml`. Run tools through mise, for example
 - `pnpm eval` runs `eve eval` (decision 039). It uses the real brain model and spends tokens, so
   the owner runs it. It needs `AI_GATEWAY_API_KEY`, `SYM_MODEL`, and a migrated `DATABASE_URL`.
   `SYM_MODEL=fixture pnpm eval` proves the wiring with no provider; the routing cases then fail.
-  The script sets `SYM_PROJECTS=example-app`, the project the eval cases use (decision 042).
+  The script sets `SYM_PROJECTS=example-app`, the project the eval cases use (decision 042). It
+  skips the persona cases. `pnpm eval:plain` and `pnpm eval:spicy` run those, each with its
+  `SYM_PERSONA`, because the persona is one setting for the whole run (decision 044).
 - `pnpm db:up` starts only the Postgres 18 service of `compose.yaml`, on `127.0.0.1:55432`. `pnpm db:down` stops
   it. Ledger tests need it and `DATABASE_URL=postgres://sym:sym@localhost:55432/sym`.
 - `pnpm db:migrate` applies pending ledger migrations (`lib/ledger/migrations.ts`).
