@@ -41,7 +41,7 @@ import { recordThreadMessage, recordTurnMessage } from "../../lib/reactions/reac
 import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
 import { listSchedules } from "../../lib/schedules/rows.ts";
-import { threadPeople, triageThreadMessage } from "../../lib/slack/addressing.ts";
+import { namesBot, threadPeople, triageThreadMessage } from "../../lib/slack/addressing.ts";
 import { isSlackUserAllowed, sayPrivately } from "../../lib/slack/guard.ts";
 import {
   MAYBE_NOTE,
@@ -50,6 +50,12 @@ import {
   participantsNote,
   type Role,
 } from "../../lib/slack/participants.ts";
+import {
+  createStrangerCooldown,
+  strangerKey,
+  strangerLine,
+  strangerRepliesOn,
+} from "../../lib/slack/strangers.ts";
 import {
   endQuietTurn,
   isLastPostBoundary,
@@ -146,6 +152,59 @@ function isApprovalSubmission(submission: SlackInputResponseSubmission): boolean
 
 const fromAllowedHuman = (message: SlackMessage) =>
   !message.author?.isBot && isAllowed(message.author?.userId);
+
+// The line for someone off the allow-list (decision 053). Persona and owner come from the same
+// sources as the loading messages. A failed persona read gives the straight line.
+async function strangerText(straight = false): Promise<string> {
+  const ownerId = ownerUserId(pack());
+  let stored: Awaited<ReturnType<typeof storedPersonaOrNone>> = "plain";
+  try {
+    if (!straight) stored = await storedPersonaOrNone(ledger);
+  } catch {
+    // The straight line is the safe answer when the setting cannot be read.
+  }
+  if (straight || stored === "plain")
+    return strangerLine({ sources: { stored: "plain" }, ownerId });
+  return strangerLine({
+    sources: { stored, env: process.env.SYM_PERSONA, pack: pack(), warn: () => {} },
+    ownerId,
+  });
+}
+
+const strangerCooldown = createStrangerCooldown();
+
+// Tells a person off the allow-list, privately, to ask the owner. Only a human who tagged Sym,
+// wrote to it in a direct message, or named it in a thread with a session gets a line, and
+// only one per person and channel per hour. The message never reaches the model. This never throws.
+async function replyToStranger(
+  ctx: SlackInboundMessageContext,
+  message: SlackMessage,
+  trigger: "tag" | "direct" | "thread",
+): Promise<void> {
+  const userId = message.author?.userId;
+  if (!userId || message.author?.isBot) return;
+  try {
+    if (!strangerRepliesOn(process.env.SYM_STRANGER_REPLIES)) return;
+    if (trigger === "thread") {
+      const named = ctx.isBotMentioned() || namesBot(message.text, botName());
+      if (!named || !(await ctx.isSubscribed())) return;
+    }
+    // One line per person and channel an hour, so new threads earn no extra lines. The line
+    // shows in the thread for a reply, and in the channel for a top-level tag.
+    if (!strangerCooldown.claim(strangerKey(userId, message.channelId))) return;
+    const inThread = trigger !== "direct" && message.threadTs !== message.ts;
+    const threadTs = inThread ? message.threadTs : undefined;
+    await sayPrivately(
+      ctx.slack,
+      { channel: message.channelId, user: userId, ...(threadTs ? { threadTs } : {}) },
+      await strangerText(),
+    );
+  } catch (error) {
+    console.warn("Sym could not answer a person off the allow-list.", errorName(error));
+  }
+}
+
+const errorName = (error: unknown) => (error instanceof Error ? error.name : "unknown_error");
 
 // Marks whether the next turn of the message's sender in its thread might not be meant for Sym.
 function setQuiet(message: SlackMessage, quiet: boolean) {
@@ -338,7 +397,10 @@ export default slackChannel({
   // post, because the session already holds the rest (docs/eve.md, decision 050).
   threadContext: { since: isLastPostBoundary },
   async onAppMention(ctx, message) {
-    if (!fromAllowedHuman(message)) return null;
+    if (!fromAllowedHuman(message)) {
+      await replyToStranger(ctx, message, "tag");
+      return null;
+    }
     setQuiet(message, false);
     await noteSession(ctx, message);
     const auth = defaultSlackAuth(message, ctx);
@@ -351,7 +413,10 @@ export default slackChannel({
     return note ? { auth, context: [note] } : { auth };
   },
   async onDirectMessage(ctx, message) {
-    if (!fromAllowedHuman(message)) return null;
+    if (!fromAllowedHuman(message)) {
+      await replyToStranger(ctx, message, "direct");
+      return null;
+    }
     setQuiet(message, false);
     await noteSession(ctx, message);
     return { auth: defaultSlackAuth(message, ctx) };
@@ -359,7 +424,11 @@ export default slackChannel({
   // Replies in a thread that already has a session continue it without a new mention, when they
   // are meant for Sym. Side talk between people starts no turn (decision 050).
   async onMessage(ctx, message) {
-    if (!fromAllowedHuman(message) || !(await ctx.isSubscribed())) return null;
+    if (!fromAllowedHuman(message)) {
+      await replyToStranger(ctx, message, "thread");
+      return null;
+    }
+    if (!(await ctx.isSubscribed())) return null;
     await noteSession(ctx, message, true);
     const senderId = message.author?.userId ?? "";
     const auth = defaultSlackAuth(message, ctx);
@@ -396,7 +465,9 @@ export default slackChannel({
     if (command.command !== "/sym") return;
     const where = { channel: command.channelId, user: command.user.id };
     if (!isAllowed(command.user.id)) {
-      await sayPrivately(ctx.slack, where, "You are not on Sym's allow-list.");
+      // No cooldown: they ran a command. With the switch off, the straight line.
+      const straight = !strangerRepliesOn(process.env.SYM_STRANGER_REPLIES);
+      await sayPrivately(ctx.slack, where, await strangerText(straight));
       return;
     }
     try {

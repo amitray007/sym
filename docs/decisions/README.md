@@ -58,3 +58,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [050](050-shared-threads.md) | In a thread with several people, Sym answers only a message meant for it, with a quiet turn for the unclear ones, a per-thread listen mode, and a lighter thread context |
 | [051](051-reactions.md) | Sym reacts with emoji on a clear trigger through `slack_react` and `slack_emoji`; code caps one per message and three per thread per hour, and never uses 👀 |
 | [052](052-app-home.md) | The App Home tab is a read-only dashboard: jobs, schedules, projects, and owner-only connections; `views.publish` is the one Slack write outside the outbox |
+| [053](053-stranger-replies.md) | A person off the allow-list who tags Sym, writes to it, or names it in a thread gets one private persona line per hour that points to the owner, with no model call and an off switch |
