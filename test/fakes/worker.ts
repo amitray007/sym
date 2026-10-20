@@ -2,6 +2,7 @@ import type {
   Activity,
   ActivityItem,
   LaunchRequest,
+  PullRequestFacts,
   PullRequestWatch,
   SendMode,
   WaitResult,
@@ -56,6 +57,10 @@ export class FakeWorker implements WorkerAdapter {
   readonly answers: { threadId: string; requestId: string; answers: WorkerAnswers }[] = [];
   readonly sends: { threadId: string; text: string; mode: SendMode; requestId: string }[] = [];
   readonly watches: { threadId: string; prUrl: string; requestId: string }[] = [];
+  // The pull requests each thread lists, by thread ID. Set one to script the facts.
+  readonly pullRequestFacts = new Map<string, PullRequestFacts[]>();
+  // Set to make `pullRequests` fail, like a worker that cannot list them.
+  pullRequestsError: string | undefined;
   // Set to make `watchPullRequest` fail, like T3 refusing to watch a merged pull request.
   watchError: string | undefined;
   launches = 0;
@@ -199,6 +204,12 @@ export class FakeWorker implements WorkerAdapter {
     );
     this.watches.push({ threadId, prUrl, requestId });
     return { watching: true, alreadyWatching };
+  }
+
+  async pullRequests(threadId: string): Promise<PullRequestFacts[]> {
+    this.get(threadId);
+    if (this.pullRequestsError) throw new Error(this.pullRequestsError);
+    return structuredClone(this.pullRequestFacts.get(threadId) ?? []);
   }
 
   async health(): Promise<WorkerHealth> {

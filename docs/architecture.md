@@ -120,11 +120,17 @@ update?" cheap and lets a new session continue the job.
    "Check result" in progress. Nothing posts yet.
 2. Read the final message and parse the output contract block.
 3. Run the deterministic rule checks first (`lib/jobs/verify.ts`): changed files sit inside the
-   allowed paths, and a PR opened only when the job allowed one. Checking the PR branch, CI
-   status, and production config needs the worker or GitHub and comes later.
+   allowed paths, and a PR opened only when the job allowed one. When the job ends, one step asks
+   the worker for the thread's pull request facts (`pullRequests`, decision 057) and stores them on
+   the job row, so a re-presented result shows the same checks. The facts add generic checks: the
+   reported PR link is one of the thread's PRs, an open PR the worker did not report (the result
+   then links it), the base branch, the draft rule, a merged or closed PR, and a head branch equal
+   to the base. A worker without the call, or a failed call, skips these checks. CI status is not
+   read here. It arrives only as PR-follow wakes (`SYM_PR_FOLLOW=on`, step 5). Production
+   configuration and data changes are judged by the verifier, not by rules.
 4. With `SYM_VERIFIER=on` (decision 054), the `worker_job` body runs the `verifier` subagent
    through `ctx.agent` (decision 032). It gets the
-   brief, the rule-check concerns, and the worker's claims as untrusted data. It compares the
+   brief, the rule-check concerns, the PR facts, and the worker's claims as untrusted data. It compares the
    done-when list with the claims and returns `pass` or `concerns`, `concerns[]`, and
    `confidence`. It has no tools.
 5. `finishJob` sets `done`, collapses the card, and posts one message in the shape of decision 044: a status

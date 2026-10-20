@@ -23,6 +23,7 @@ Every adapter implements the same operations. The `worker_job` tool and reconcil
 | `interrupt(threadId)` | Stop the thread | Safe to retry |
 | `watchPullRequest(threadId, url)` | Let the worker react to CI and reviews | Optional |
 | `settle(threadId)` | Tidy a finished thread | Optional |
+| `pullRequests(threadId)` | The thread's pull requests: URL, number, state, head and base branch, draft flag (decision 057) | Optional |
 | `health()` | Reachable, signed in, sign-in expiry | Used by reconcile |
 
 Status values that every adapter maps to: `running`, `waiting`, `completed`, `failed`,
@@ -66,6 +67,7 @@ waits until a person approves it in the T3 app. Sym can only tell the owner.
 | `pendingQuestions`, `answer` | `t3_pending_request_list`, `t3_pending_request_read`, `t3_pending_request_respond` | Read / Supervised+ |
 | `send` | `t3_thread_send` (`mode: auto/queue/steer/restart`, `clientRequestId`) | Supervised+ |
 | `interrupt` | `t3_thread_interrupt`, `t3_workflow_stop` | Supervised+ |
+| `pullRequests` | `list_thread_pull_requests` with `{ threadId }`. An entry that does not parse is dropped. It reports no CI status | Above read-only |
 | `watchPullRequest` | `watch_pull_request` (it links the PR first). A wake shows in the worker thread as a `notification` item such as `#12: checks failed`; reconcile posts each once (decision 034). Only with `SYM_PR_FOLLOW=on` (decision 054) | Above read-only |
 | `settle` | `t3_thread_organize(settle)` | Supervised+ |
 

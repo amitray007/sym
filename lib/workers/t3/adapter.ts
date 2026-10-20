@@ -2,6 +2,7 @@ import { z } from "zod";
 import type {
   Activity,
   LaunchRequest,
+  PullRequestFacts,
   PullRequestWatch,
   SendMode,
   WaitResult,
@@ -103,6 +104,19 @@ const PendingRequest = z.object({
 // `watch_pull_request` links the pull request first when needed (T3 PullRequestsToolkit.
 // setWatching), so Sym needs no separate `link_pull_request` call.
 const Watched = z.object({ watching: z.boolean(), wasWatching: z.boolean() });
+
+// `list_thread_pull_requests` lists the pull requests linked to a thread. Each entry parses on its
+// own, so one odd entry does not hide the others. It reports no CI status.
+const LinkedPullRequests = z.object({ pullRequests: z.array(z.unknown()) });
+
+const LinkedPullRequest = z.object({
+  url: z.string().min(1),
+  number: z.number().int(),
+  state: z.string().optional(),
+  headBranch: z.string().nullish(),
+  baseBranch: z.string().nullish(),
+  isDraft: z.boolean().nullish(),
+});
 
 // Stops a cursor loop if the worker keeps returning a cursor.
 const MAX_PROJECT_PAGES = 50;
@@ -314,6 +328,30 @@ export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): Worke
       // text reaches the caller.
       const result = Watched.parse(await call("watch_pull_request", { threadId, url: prUrl }));
       return { watching: result.watching, alreadyWatching: result.wasWatching };
+    },
+
+    async pullRequests(threadId): Promise<PullRequestFacts[]> {
+      const result = LinkedPullRequests.parse(
+        await call("list_thread_pull_requests", { threadId }),
+      );
+      const facts: PullRequestFacts[] = [];
+      for (const entry of result.pullRequests) {
+        const parsed = LinkedPullRequest.safeParse(entry);
+        if (!parsed.success) continue;
+        const pr = parsed.data;
+        facts.push({
+          url: pr.url,
+          number: pr.number,
+          state:
+            pr.state === "open" || pr.state === "merged" || pr.state === "closed"
+              ? pr.state
+              : "unknown",
+          headBranch: pr.headBranch || null,
+          baseBranch: pr.baseBranch || null,
+          isDraft: pr.isDraft ?? null,
+        });
+      }
+      return facts;
     },
 
     async health(): Promise<WorkerHealth> {

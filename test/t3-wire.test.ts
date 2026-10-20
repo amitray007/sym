@@ -216,6 +216,31 @@ describe("t3 pull request watch over the wire", () => {
     expect(t3.threads.get(thread.id)?.pullRequests).toEqual([{ url: prUrl, watching: true }]);
   });
 
+  it("lists the pull requests linked to a thread, with the facts T3 reports", async () => {
+    const thread = await launch("[J-11] Facts");
+    expect(await worker.pullRequests?.(thread.id)).toEqual([]);
+    const linked = t3.threads.get(thread.id);
+    linked?.pullRequests.push({
+      url: prUrl,
+      watching: false,
+      state: "open",
+      headBranch: "feat/x",
+      baseBranch: "main",
+      isDraft: true,
+    });
+
+    expect(await worker.pullRequests?.(thread.id)).toEqual([
+      {
+        url: prUrl,
+        number: 12,
+        state: "open",
+        headBranch: "feat/x",
+        baseBranch: "main",
+        isDraft: true,
+      },
+    ]);
+  });
+
   it("surfaces a T3 refusal", async () => {
     const thread = await launch("[J-10] Merged");
     t3.failNextWatch("The pull request is merged, so there is nothing to watch.");

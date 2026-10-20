@@ -57,7 +57,15 @@ export interface FakeT3Thread {
   interrupts: { reason: string | undefined; clientRequestId: string | undefined }[];
   launch: Record<string, unknown>;
   // Pull requests linked to the thread, and whether T3 watches each one.
-  pullRequests: { url: string; watching: boolean }[];
+  // The facts `list_thread_pull_requests` reports are optional, so a test sets only what it needs.
+  pullRequests: {
+    url: string;
+    watching: boolean;
+    state?: string;
+    headBranch?: string;
+    baseBranch?: string;
+    isDraft?: boolean;
+  }[];
 }
 
 export interface FakeT3Project {
@@ -525,6 +533,27 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
       if (!alreadyLinked) thread.pullRequests.push({ url: target.url, watching: false });
       return { ...target, alreadyLinked };
     });
+
+    tool("list_thread_pull_requests", { threadId: z.string() }, ({ threadId }) => ({
+      pullRequests: getThread(threadId).pullRequests.map((link) => {
+        const target = identity(link.url);
+        return {
+          host: target.host,
+          repository: target.repository,
+          number: target.number,
+          url: link.url,
+          source: "agent",
+          watching: link.watching,
+          state: link.state ?? "open",
+          title: `Pull request ${target.number}`,
+          headBranch: link.headBranch ?? null,
+          baseBranch: link.baseBranch ?? null,
+          isDraft: link.isDraft ?? false,
+          stack: null,
+        };
+      }),
+      chains: [],
+    }));
 
     tool("watch_pull_request", pullRequestTarget, ({ threadId, url }) => {
       const failure = watchFailures.shift();

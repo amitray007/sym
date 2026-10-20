@@ -31,6 +31,7 @@ import {
 import type {
   Activity,
   ActivityItem,
+  PullRequestFacts,
   WorkerAdapter,
   WorkerAnswers,
   WorkerQuestion,
@@ -239,6 +240,12 @@ export async function checkJob(
   const worked = toJobStatus(activity.status, questions.length > 0, job.status);
   const verify = options.verify === true && job.kind !== SCHEDULED_CHECK;
   const status: JobStatus = worked === "done" && verify ? "checking" : worked;
+  // Read once, as the code job ends, and keep it on the row (decision 057). A scheduled check
+  // skips it, like it skips the model check.
+  const prFacts =
+    worked === "done" && job.kind !== SCHEDULED_CHECK
+      ? await readPullRequests(deps.worker, job.workerThreadId)
+      : undefined;
   const at = now(deps);
   const progress = detectEvents(
     {
@@ -269,6 +276,7 @@ export async function checkJob(
       lastSummary: summary.slice(0, SUMMARY_MAX),
       // Kept on the row: the final message can arrive in an earlier check than the final status.
       ...(message ? { lastMessage: message } : {}),
+      ...(prFacts ? { prFacts } : {}),
       ...(progress.state.prUrl ? { prUrl: progress.state.prUrl } : {}),
       ...(activity.items.length > 0 ? { lastActivityAt: at } : {}),
       ...(progress.state.lastQuietPostAt
@@ -299,6 +307,20 @@ export async function checkJob(
   return toCheck(updated, status === "waiting_input" ? questions : []);
 }
 
+// The pull requests the worker lists for the thread, or nothing when it cannot say: the worker
+// has no such call or the call fails. The checks that need them then do not run.
+async function readPullRequests(
+  worker: WorkerAdapter,
+  threadId: string,
+): Promise<PullRequestFacts[] | undefined> {
+  if (!worker.pullRequests) return undefined;
+  try {
+    return await worker.pullRequests(threadId);
+  } catch {
+    return undefined;
+  }
+}
+
 // The input for the `verifier` subagent, or nothing when the job is not waiting on a model
 // check or the worker sent no result block to check.
 export async function verifierRequest(deps: LedgerDeps, jobId: number): Promise<string | null> {
@@ -314,6 +336,7 @@ export async function verifierRequest(deps: LedgerDeps, jobId: number): Promise<
     contract,
     concerns: endConcerns(job, contract, deps.pack),
     workerMessage: job.lastMessage,
+    pullRequests: job.prFacts,
   });
 }
 

@@ -173,4 +173,12 @@ export const migrations: Migration[] = [
     `,
   },
   schedulePackKeyMigration,
+  {
+    version: "019_job_pr_facts",
+    sql: `
+      -- The pull request facts the worker reported when the job ended, kept so a re-presented
+      -- result shows the same checks without another worker call (decision 057).
+      alter table jobs add column pr_facts jsonb;
+    `,
+  },
 ];

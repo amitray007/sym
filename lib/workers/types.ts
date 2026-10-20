@@ -110,6 +110,17 @@ export interface PullRequestWatch {
   alreadyWatching: boolean;
 }
 
+// What the worker knows about one pull request linked to a thread. A field the worker did not
+// report is null, and a check that needs it does not run (decision 057).
+export interface PullRequestFacts {
+  url: string;
+  number: number;
+  state: "open" | "merged" | "closed" | "unknown";
+  headBranch: string | null;
+  baseBranch: string | null;
+  isDraft: boolean | null;
+}
+
 export type SendMode = "auto" | "queue" | "steer";
 
 export interface WorkerAdapter {
@@ -133,6 +144,9 @@ export interface WorkerAdapter {
   // thread and asks the worker to watch it, so the worker agent wakes on CI failures and review
   // comments. A repeat call is safe on T3. `requestId` is for adapters that need a retry key.
   watchPullRequest?(threadId: string, prUrl: string, requestId: string): Promise<PullRequestWatch>;
+  // Optional: the pull requests linked to the thread, for the result checks (decision 057). It
+  // reports no CI status; CI results come only from pull request wakes (decision 034).
+  pullRequests?(threadId: string): Promise<PullRequestFacts[]>;
   // Optional: reachability and sign-in state, for the sign-in expiry notice.
   health?(): Promise<WorkerHealth>;
 }
