@@ -1,7 +1,14 @@
 // Text for connection tools and approval prompts (decision 045). Pure: no I/O.
 import type { SignInState } from "./credentials.ts";
 import type { AuthKind, Connection } from "./rows.ts";
-import { type ConnectionTool, type ToolMode, toolCounts, truncate } from "./tools.ts";
+import {
+  type ConnectionDefault,
+  type ConnectionTool,
+  type ToolMode,
+  toolCounts,
+  toolMode,
+  truncate,
+} from "./tools.ts";
 
 // What the owner approves. The model passes it back from connection_add's result, and
 // connection_approve refuses it when it differs from the stored proposal, so the owner approves
@@ -90,7 +97,26 @@ export function approvalPrompt(review: Review, envVar: string | null): string {
   return lines.join("\n");
 }
 
-export function modePrompt(name: string, tool: string, mode: ToolMode): string {
+// What the owner sets: a mode, or "default" to clear a tool's own mode (or the connection's).
+export type ModeChoice = ToolMode | "default";
+
+// The approval prompt for a mode change. Without a tool it changes the whole connection.
+export function modePrompt(name: string, tool: string | undefined, mode: ModeChoice): string {
+  if (tool === undefined) {
+    const effect: Record<ModeChoice, string> = {
+      auto:
+        `Every tool on ${name}, including tools the server adds later, runs without asking you. ` +
+        "The server's own policy is then the only gate. Tools you set one by one keep their mode.",
+      ask: `Every tool on ${name}, including tools the server adds later, asks you each time.`,
+      hidden: `Sym cannot find or call any tool on ${name}, including tools the server adds later.`,
+      default: "Read tools run freely and write tools ask you each time.",
+    };
+    const what = mode === "default" ? "the default mode" : `the default mode to ${mode}`;
+    return `Set ${what} of "${name}"? ${effect[mode]}`;
+  }
+  if (mode === "default") {
+    return `Clear the own mode of "${tool}" on "${name}"? It follows the connection default again.`;
+  }
   const effect =
     mode === "auto"
       ? "It runs without asking anyone."
@@ -119,9 +145,12 @@ export function credentialNote(
   return undefined;
 }
 
-export function toolsLine(tools: readonly ConnectionTool[]): string {
+export function toolsLine(
+  tools: readonly ConnectionTool[],
+  connectionDefault?: ConnectionDefault,
+): string {
   if (tools.length === 0) return "no tools listed yet";
-  const counts = toolCounts(tools);
+  const counts = toolCounts(tools, connectionDefault);
   return (
     `${tools.length} tools (${counts.read} read, ${counts.write} write; ` +
     `${counts.auto} auto, ${counts.ask} ask, ${counts.hidden} hidden)`
@@ -139,12 +168,21 @@ export function connectionLine(
       : row.authKind === "oauth"
         ? `OAuth sign-in ${state.signIn === "refreshable" ? "valid" : state.signIn}`
         : "no sign-in";
-  return `${row.name}: ${row.status}, ${auth}, ${toolsLine(row.tools)}`;
+  const wide = row.defaultMode ? `default mode ${row.defaultMode}` : "default mode by tool hints";
+  return `${row.name}: ${row.status}, ${auth}, ${wide}, ${toolsLine(row.tools, row.defaultMode)}`;
 }
 
-// The tool rows a person can read: name, read or write, and mode.
-export function toolDetail(tools: readonly ConnectionTool[]): string {
+// The tool rows a person can read: name, read or write, and mode. A tool with its own mode shows
+// "(own mode)"; the others follow the connection default.
+export function toolDetail(
+  tools: readonly ConnectionTool[],
+  connectionDefault?: ConnectionDefault,
+): string {
   return tools
-    .map((tool) => `- ${tool.name}: ${tool.readOnly ? "read" : "write"}, ${tool.mode}`)
+    .map(
+      (tool) =>
+        `- ${tool.name}: ${tool.readOnly ? "read" : "write"}, ${toolMode(tool, connectionDefault)}` +
+        (tool.override ? " (own mode)" : ""),
+    )
     .join("\n");
 }

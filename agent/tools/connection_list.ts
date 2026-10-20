@@ -12,7 +12,7 @@ import { ledger } from "../../lib/runtime.ts";
 export default defineTool({
   description:
     "List the MCP connections: name, status, whether the token or sign-in is present, and " +
-    "tool counts. Give a name to also see each tool with read or write and its mode.",
+    "tool counts and the default mode. Give a name to also see each tool with read or write, its mode, and whether the owner set that mode for the tool alone.",
   inputSchema: z.object({ name: z.string().optional() }),
   label: { start: () => "List connections" },
   async execute({ name }, ctx) {
@@ -38,7 +38,7 @@ export default defineTool({
         const note = row.status === "disabled" ? undefined : credentialNote(row, state);
         const lines = [connectionLine(row, state)];
         if (note) lines.push(`  ${note}`);
-        if (name && row.tools.length > 0) lines.push(toolDetail(row.tools));
+        if (name && row.tools.length > 0) lines.push(toolDetail(row.tools, row.defaultMode));
         return lines.join("\n");
       })
       .join("\n");

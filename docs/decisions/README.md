@@ -54,3 +54,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [046](046-persona-from-slack.md) | The owner switches the persona from Slack, and the status line rotates persona-flavored loading messages |
 | [047](047-blockkit-results.md) | Result and failure posts are Block Kit with a mrkdwn fallback, and the feedback buttons have an off switch |
 | [048](048-mcp-server-instructions.md) | The model reads an MCP server's `initialize` instructions through the connection description; code-mode servers work as ordinary connections |
+| [049](049-connection-default-mode.md) | A connection has a default tool mode: a tool's own mode, then the connection default, then the read-only hint |

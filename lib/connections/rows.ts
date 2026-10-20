@@ -1,6 +1,6 @@
 import type { Sql } from "../db.ts";
 import { json } from "../ledger/jobs.ts";
-import { type ConnectionTool, parseTools, type ToolMode } from "./tools.ts";
+import { type ConnectionDefault, type ConnectionTool, parseTools, type ToolMode } from "./tools.ts";
 
 // Connection rows (decision 045). The owner adds an MCP server from Slack. The row starts as
 // `proposed`, turns `active` when the owner approves it, and turns `disabled` when the owner
@@ -18,6 +18,8 @@ export interface Connection {
   envVar: string | null;
   status: ConnectionStatus;
   tools: ConnectionTool[];
+  // The mode for tools the owner did not set one by one. Null keeps the annotation rule.
+  defaultMode: ConnectionDefault;
   // What the server said in its `initialize` result. Untrusted text, already cleaned.
   serverInstructions: string | null;
   createdBy: string | null;
@@ -40,6 +42,7 @@ export interface NewConnection {
 
 const normalize = (row: Connection): Connection => ({
   ...row,
+  defaultMode: row.defaultMode ?? null,
   id: Number(row.id),
   tools: parseTools(row.tools),
 });
@@ -131,12 +134,13 @@ export async function saveTools(
   return row && normalize(row);
 }
 
-// Sets one tool's mode. Undefined when the row or the tool does not exist.
+// Sets one tool's own mode, or clears it with null so the tool follows the connection default.
+// Undefined when the row or the tool does not exist.
 export async function setToolMode(
   sql: Sql,
   id: number,
   tool: string,
-  mode: ToolMode,
+  mode: ToolMode | null,
 ): Promise<Connection | undefined> {
   return sql.begin(async (tx) => {
     const [row] = await tx<Connection[]>`select * from connections where id = ${id} for update`;
@@ -144,7 +148,8 @@ export async function setToolMode(
     const tools = parseTools(row.tools);
     const target = tools.find((item) => item.name === tool);
     if (!target) return undefined;
-    target.mode = mode;
+    if (mode) target.override = mode;
+    else delete target.override;
     const [saved] = await tx<Connection[]>`
       update connections set tools = ${json(sql, tools)}, updated_at = now()
       where id = ${id}
@@ -152,6 +157,21 @@ export async function setToolMode(
     `;
     return saved && normalize(saved);
   });
+}
+
+// Sets the connection-wide default mode (null keeps the annotation rule). It reaches every tool
+// without its own mode, listed now or later.
+export async function setDefaultMode(
+  sql: Sql,
+  id: number,
+  mode: ConnectionDefault,
+): Promise<Connection | undefined> {
+  const [row] = await sql<Connection[]>`
+    update connections set default_mode = ${mode}, updated_at = now()
+    where id = ${id}
+    returning *
+  `;
+  return row && normalize(row);
 }
 
 // Disables the row and deletes its stored sign-in in one transaction.

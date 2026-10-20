@@ -74,6 +74,8 @@ Eve facts that shape the design (0.81.0):
   worker token does (decision 036).
 - Tool modes rest on the server's annotations, which are hints. A server that marks a write tool
   read-only gets it run without asking. The owner can set that tool to `ask`.
+- A connection can also have a default mode that covers every tool without its own mode, tools
+  added later included (decision 049).
 - A server that hides tools from anonymous callers shows none before the sign-in. The approval
   prompt says so, and the default rule covers the tools that appear later.
 - Sym has not run against a real third-party MCP server. The tests use a fake server that runs
