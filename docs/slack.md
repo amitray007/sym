@@ -47,7 +47,7 @@ Codex · thread 8f2c… · updated 1 min ago
 | "Type your answer" modal | Free-text answers | Eve, inside `ctx.ask` | Milestone 1 |
 | Feedback buttons | 👍/👎 inside each final reply | Sym: renderer posts the reply with a `context_actions` block | Built |
 | Reactions | A rare emoji on a person's message: 😂 funny, 💡 good idea, 🙌 good news, 🫡 ack. Never 👀, never on every message (decision 051) | Brain: `slack_react` and `slack_emoji`, limits in code | Built |
-| Ephemeral replies | `/sym status`, private sign-in prompts | Eve | Production |
+| Ephemeral replies | `/sym status`, private sign-in prompts, stranger lines | Eve, Sym | Production |
 | Long output | Over 12,000 characters as an `eve-response.md` snippet | Eve | Production |
 | Modals | "New schedule" form | Sym: `views.open` with the `trigger_id` | Team phase |
 | App Home tab | Persona and worker state with the sign-in expiry, running and waiting jobs, jobs finished in 24 hours, schedules, the project allow-list; for the owner also MCP connections, persona, and quiet mode (decision 052) | Sym: `app_home_opened` in `onEvent` + `views.publish` on each open | Built (not run on real Slack) |
@@ -121,12 +121,24 @@ friendly, at most one emoji), or `spicy` (playful, may lightly tease the person 
 with hard limits in `agent/personas/spicy.md`). A pack can supply its own persona file. Worker
 threads never get a persona.
 
+## People off the allow-list
+
+Sym never sends a message from a person off the allow-list to the brain. When such a human tags
+Sym, writes to it in a direct message, or tags or names it in a thread that has a session, Sym
+answers with one private (ephemeral) line that points to the owner, in the thread for a thread
+reply. Untagged side talk gets nothing. A person gets at most one line per channel (or direct
+message) per hour. The line follows the persona: casual and spicy personas pick a joke
+(spicy 70 percent of the time), and a plain or pack persona gets "Sym only works for people on
+its allow-list. Ask <owner> for access." With no owner configured, the line only says Sym works
+for people on its allow-list. `SYM_STRANGER_REPLIES=off` restores the silent drop (decision 053).
+
 ## Slash command, card buttons, and feedback
 
 - `/sym status` and `/sym jobs` answer privately (ephemeral) with one line per active job and per
   job finished in the last 24 hours, plus the quiet state. `/sym quiet [minutes|2h]` stays silent
   for that long (default 60 minutes, at most 7 days); `/sym quiet off` ends it. Only allowed
-  users can run it, and no model call is made.
+  users can run it, and no model call is made. Anyone else gets the stranger line above, with
+  no cooldown (the straight line when the switch is off).
 - `/sym persona` shows the brain's persona and the choices. `/sym persona <plain|casual|spicy>`
   sets it. Only the owner can set it; anyone else gets a private refusal. A pack persona file
   wins, and then Sym says so and stores nothing. The owner can also say "be spicy" or "tone it
