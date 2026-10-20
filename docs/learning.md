@@ -11,12 +11,13 @@ decides what to keep.
 
 ## The loop
 
-1. **Signals.** 👍/👎 buttons, reactions, "Fix: ..." replies, edits to a brief before Start, and
-   repeated instructions.
+1. **Signals.** 👍/👎 buttons, the result's Looks good and Fix buttons, reactions, edits to a
+   brief before Start, and repeated instructions.
 2. **Capture.** Every signal goes to the `feedback` table, linked to its job when Sym can tell
    which job: `feedback(job_id?, slack_user, kind, value, channel, message_ts, created_at)`.
-   `kind` is `thumbs_up`, `thumbs_down`, `reaction`, or `fix`. Sources are the feedback buttons
-   and `reaction_added` on Sym's own messages; `+1` and `-1` count as thumbs. One person's same
+   `kind` is `thumbs_up`, `thumbs_down`, `reaction`, or `fix`. Sources are the feedback buttons,
+   Looks good (`thumbs_up`), the Fix box (`fix`, with the person's words), and `reaction_added`
+   on Sym's own messages; `+1` and `-1` count as thumbs. One person's same
    reaction to one message counts once, and people outside the allow-list are never stored.
 3. **Memory.** Sym saves short facts at once (layer 1). The `owner` slot (`agent/memory/owner.ts`)
    scopes memory to the person with Eve's `byPrincipal`, so each Slack person gets their own

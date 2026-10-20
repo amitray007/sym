@@ -28,6 +28,12 @@ const contract: OutputContract = {
 
 type B = { type: string; [key: string]: unknown };
 
+// The action IDs of a post's buttons, in order.
+const actionIds = (blocks: unknown[]) =>
+  (blocks as B[])
+    .filter((b) => b.type === "actions")
+    .flatMap((b) => (b.elements as { action_id?: string }[]).map((e) => e.action_id));
+
 describe("resultPost", () => {
   const post = resultPost(
     job,
@@ -88,8 +94,12 @@ describe("resultPost", () => {
     });
     expect(blocks[6]).toMatchObject({
       type: "actions",
+      block_id: "job-J-142-result",
       elements: [
         { type: "button", url: "https://github.com/o/r/pull/812", text: { text: "Open PR" } },
+        { action_id: "sym_job_ok", value: "J-142", text: { text: "Looks good" } },
+        { action_id: "sym_job_fix", value: "J-142", text: { text: "Fix…" } },
+        { action_id: "sym_job_close", value: "J-142", text: { text: "Close" } },
       ],
     });
   });
@@ -105,13 +115,14 @@ describe("resultPost", () => {
       { ref: "J-1", title: "T" },
       { ...contract, prUrl: null, tests: "", filesChanged: [], openQuestions: [] },
     );
-    expect((bare.blocks as B[]).map((b) => b.type)).toEqual(["header", "section"]);
+    expect((bare.blocks as B[]).map((b) => b.type)).toEqual(["header", "section", "actions"]);
+    expect(actionIds(bare.blocks)).toEqual(["sym_job_ok", "sym_job_fix", "sym_job_close"]);
     expect(bare.text).toContain("*tl;dr*");
   });
 
   it("gives no button for a URL that is not http", () => {
     const odd = resultPost(job, { ...contract, prUrl: "ftp://x.test/pull/1" });
-    expect((odd.blocks as B[]).some((b) => b.type === "actions")).toBe(false);
+    expect(actionIds(odd.blocks)).toEqual(["sym_job_ok", "sym_job_fix", "sym_job_close"]);
   });
 
   it("shows a clean verdict as its own section", () => {
@@ -124,7 +135,7 @@ describe("resultPost", () => {
   it("points at the worker thread when there is no result", () => {
     const none = resultPost(job, null);
     const types = (none.blocks as B[]).map((b) => b.type);
-    expect(types).toEqual(["header", "section", "context"]);
+    expect(types).toEqual(["header", "section", "context", "actions"]);
     expect(JSON.stringify(none.blocks)).toContain("thr_8f2c");
   });
 
@@ -171,13 +182,31 @@ describe("failurePost", () => {
       },
       { type: "section", text: { type: "mrkdwn", text: "Build &lt;broke&gt;" } },
       { type: "context", elements: [{ type: "mrkdwn", text: "Worker thread: `thr_8f2c`" }] },
+      {
+        type: "actions",
+        block_id: "job-J-142-result",
+        elements: [
+          {
+            type: "button",
+            action_id: "sym_job_fix",
+            text: { type: "plain_text", text: "Fix…" },
+            value: "J-142",
+          },
+          {
+            type: "button",
+            action_id: "sym_job_close",
+            text: { type: "plain_text", text: "Close" },
+            value: "J-142",
+          },
+        ],
+      },
     ]);
     expect(post.text).toContain("Build &lt;broke&gt;");
   });
 
   it("has a default reason and no thread line without a thread", () => {
     const post = failurePost({ ref: "J-2", title: "X" });
-    expect((post.blocks as B[]).map((b) => b.type)).toEqual(["header", "section"]);
+    expect((post.blocks as B[]).map((b) => b.type)).toEqual(["header", "section", "actions"]);
     expect(JSON.stringify(post.blocks)).toContain("the worker stopped before it finished.");
   });
 });

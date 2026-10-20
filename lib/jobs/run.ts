@@ -215,6 +215,9 @@ export interface CheckOptions {
   // A finished code job moves to `checking` instead of `done`, so the caller can run the model
   // check (flow 4, decision 032). A scheduled check never does: it stays cheap and silent.
   verify?: boolean;
+  // How long this check holds the job's watch. A task holds it for WATCH_LEASE_MS between its
+  // polls; reconcile holds it for less than its own interval, so its next pass checks again.
+  leaseMs?: number;
 }
 
 // Waits briefly for the worker, reads new activity from the job's cursor, records it, and
@@ -301,7 +304,7 @@ export async function checkJob(
   if (TERMINAL.includes(updated.status)) {
     await presentEnd(deps.sql, updated, parseOutputContract(updated.lastMessage), at, deps.pack);
   } else {
-    await renewWatch(deps.sql, updated.id, WATCH_LEASE_MS);
+    await renewWatch(deps.sql, updated.id, options.leaseMs ?? WATCH_LEASE_MS);
   }
   await deliverNow(deps);
   return toCheck(updated, status === "waiting_input" ? questions : []);
@@ -458,7 +461,7 @@ export async function closeUnlaunched(deps: LedgerDeps, jobId: number, reason: s
   });
 }
 
-async function endWithoutWorker(
+export async function endWithoutWorker(
   deps: LedgerDeps,
   job: Job,
   status: "failed" | "cancelled",
@@ -493,7 +496,7 @@ function toCheck(job: Job, questions: WorkerQuestion[]): JobCheck {
 }
 
 // Delivery failures never fail a job step. The delivery schedule sends what is left.
-async function deliverNow(deps: LedgerDeps): Promise<void> {
+export async function deliverNow(deps: LedgerDeps): Promise<void> {
   if (!deps.slack) return;
   await deliver(deps.sql, deps.slack).catch(() => {});
 }

@@ -7,12 +7,15 @@ import {
   slashCommandRequest,
 } from "../helpers/slack-events.ts";
 import {
+  contractMessage,
   finishedSteps,
   type Harness,
   isCard,
   messageText,
   newConversation,
   OWNER,
+  resultMessage,
+  SAMPLE_CONTRACT,
   settle,
   startHarness,
   startJob,
@@ -90,6 +93,131 @@ describe("slash command", () => {
 });
 
 describe("job card buttons", () => {
+  // A click on one of Sym's buttons, or Enter in one of its text boxes, from the owner.
+  const press = (
+    c: ReturnType<typeof newConversation>,
+    messageTs: string,
+    actionId: string,
+    extra: { value?: string; blockId?: string; actionType?: string } = {},
+  ) =>
+    send(
+      blockActionsRequest({
+        signingSecret: SIGNING_SECRET,
+        channel: c.channel,
+        user: OWNER,
+        messageTs,
+        threadTs: c.rootTs,
+        actionId,
+        ...extra,
+      }),
+    );
+  const textBox = (c: ReturnType<typeof newConversation>, actionId: string) =>
+    until(() => c.botMessages().find((m) => JSON.stringify(m.blocks ?? []).includes(actionId)), {
+      label: `the ${actionId} box`,
+    });
+  const reconcile = async () => {
+    const response = await fetch(`${h.eveUrl()}/eve/v1/dev/schedules/reconcile`, {
+      method: "POST",
+    });
+    if (!response.ok) throw new Error(`reconcile answered ${response.status}`);
+  };
+
+  it("steers from the card, then fixes and closes from the result", async () => {
+    const c = newConversation(h);
+    const { approval, job, ref } = await startJob(h, c, "Fix me");
+    await c.click(approval, "Start");
+    const thread = await until(() => threadsOf(h, ref)[0], { label: `${ref} worker thread` });
+    await workerAdvance(h, thread, [{ status: "running", items: ["Working"] }]);
+    const card = await until(() => c.botMessages().find(isCard), { label: `${ref} job card` });
+
+    // Steer: the button posts a text box, and Enter in it steers the worker thread.
+    await press(c, card.ts, "sym_job_steer", { value: ref });
+    const steerBox = await textBox(c, "sym_job_steer_text");
+    await press(c, steerBox.ts, "sym_job_steer_text", {
+      value: "skip the staging test",
+      blockId: `steer-${ref}`,
+      actionType: "plain_text_input",
+    });
+    await until(() => thread.sends.find((m) => m.mode === "steer"), { label: "the steer send" });
+    expect(thread.sends.at(-1)?.message).toContain("skip the staging test");
+    await until(
+      () => {
+        const now = h.slack.messages.find((m) => m.ts === steerBox.ts);
+        return now && !JSON.stringify(now.blocks).includes("sym_job_steer_text") ? true : undefined;
+      },
+      { label: "the answered steer box" },
+    );
+
+    // The result has Looks good, Fix, and Close.
+    await workerAdvance(h, thread, finishedSteps());
+    await waitForJobStatus(h.sql, job.id, "done");
+    const result = await resultMessage(c, ref);
+    expect(JSON.stringify(result.blocks)).toContain("sym_job_fix");
+    await press(c, result.ts, "sym_job_ok", { value: ref });
+    await until(
+      async () =>
+        (await h.sql`select 1 from feedback where job_id = ${job.id} and value = 'looks_good'`)[0],
+      { label: "the Looks good row" },
+    );
+
+    // Fix: a text box, then a follow-up job on the same worker thread.
+    await press(c, result.ts, "sym_job_fix", { value: ref });
+    const fixBox = await textBox(c, "sym_job_fix_text");
+    await press(c, fixBox.ts, "sym_job_fix_text", {
+      value: "also log each retry",
+      blockId: `fix-${ref}`,
+      actionType: "plain_text_input",
+    });
+    const [child] = await until(
+      async () => {
+        const rows = await h.sql<{ id: number }[]>`
+          select id::int from jobs where parent_job_id = ${job.id}
+        `;
+        return rows.length > 0 ? rows : undefined;
+      },
+      { label: "the follow-up job" },
+    );
+    const childRef = `J-${child?.id}`;
+    expect(thread.sends.at(-1)).toMatchObject({ mode: "auto" });
+    expect(thread.sends.at(-1)?.message).toContain("also log each retry");
+    // The parent's result loses its Fix button.
+    await until(
+      () => {
+        const now = h.slack.messages.find((m) => m.ts === result.ts);
+        return now && !JSON.stringify(now.blocks).includes("sym_job_fix") ? true : undefined;
+      },
+      { label: "the edited parent result" },
+    );
+
+    // No task watches the follow-up; reconcile drives it to its own result once its short
+    // start lease ends. The test ends the lease instead of waiting a minute.
+    await h.sql`update jobs set watch_until = now() - interval '1 second' where id = ${Number(child?.id)}`;
+    thread.steps.push({
+      status: "completed",
+      items: [contractMessage({ ...SAMPLE_CONTRACT, summary: "Logged each retry." })],
+    });
+    await reconcile();
+    await waitForJobStatus(h.sql, Number(child?.id), "done");
+    const childResult = await resultMessage(c, childRef);
+    expect(messageText(childResult)).toContain("Logged each retry.");
+
+    // Close settles the worker thread and removes the result buttons.
+    await press(c, childResult.ts, "sym_job_close", { value: childRef });
+    await until(() => (thread.organized.includes("settle") ? true : undefined), {
+      label: "the settle call",
+    });
+    await until(
+      () => {
+        const now = h.slack.messages.find((m) => m.ts === childResult.ts);
+        const json = JSON.stringify(now?.blocks ?? []);
+        return now && !json.includes("sym_job_close") && json.includes("Closed by")
+          ? true
+          : undefined;
+      },
+      { label: "the closed result" },
+    );
+  });
+
   it("shows Stop on the live card, and Stop cancels the job", async () => {
     const c = newConversation(h);
     const { approval, job, ref } = await startJob(h, c, "Stop me");

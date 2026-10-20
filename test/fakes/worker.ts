@@ -61,6 +61,7 @@ export class FakeWorker implements WorkerAdapter {
   readonly pullRequestFacts = new Map<string, PullRequestFacts[]>();
   // Set to make `pullRequests` fail, like a worker that cannot list them.
   pullRequestsError: string | undefined;
+  readonly settled: string[] = [];
   // Set to make `watchPullRequest` fail, like T3 refusing to watch a merged pull request.
   watchError: string | undefined;
   launches = 0;
@@ -190,6 +191,11 @@ export class FakeWorker implements WorkerAdapter {
   async send(threadId: string, text: string, mode: SendMode, requestId: string): Promise<void> {
     this.get(threadId);
     this.sends.push({ threadId, text, mode, requestId });
+  }
+
+  async settle(threadId: string): Promise<void> {
+    this.get(threadId);
+    this.settled.push(threadId);
   }
 
   async watchPullRequest(

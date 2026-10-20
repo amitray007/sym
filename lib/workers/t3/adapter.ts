@@ -354,6 +354,10 @@ export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): Worke
       return facts;
     },
 
+    async settle(threadId): Promise<void> {
+      await call("t3_thread_organize", { threadId, action: "settle" });
+    },
+
     async health(): Promise<WorkerHealth> {
       const signInExpiresAt = options.signInExpiresAt ?? null;
       try {

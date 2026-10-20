@@ -136,12 +136,15 @@ update?" cheap and lets a new session continue the job.
 5. `finishJob` sets `done`, collapses the card, and posts one message in the shape of decision 044: a status
    emoji and title, a one-line tl;dr, the concerns from both checks without repeats as a numbered
    list under "check before merge" with the verifier's confidence, open questions as a checklist,
-   and a footer with the PR link, tests, and file count. Buttons Looks good, Fix, and Close come later. "Fix" will
-   send the reply to the same worker thread.
+   and a footer with the PR link, tests, and file count, then Open PR, Looks good, Fix, and Close
+   (decision 056). Fix sends the person's words to the same worker thread as a follow-up job:
+   a new ledger row with the parent's thread, cursor, and PR watch. No task watches it, so
+   reconcile drives it to its own result. One job per worker thread is active at a time.
 6. With `SYM_PR_FOLLOW=on` (decision 054), if a PR opened, ask the worker to watch it, so the
    worker agent can fix CI failures and answer review comments. Reconcile reports those wakes in
    the job thread.
-7. When the owner closes the job, settle the worker thread.
+7. When a person clicks Close, Sym records it on the job, settles the worker thread
+   (`t3_thread_organize`), stops following its PR, and edits the result.
 
 The model check is skipped, and the job ends with the rule checks alone, when `SYM_VERIFIER` is
 not on (the result then has no verifier line), when reconcile finishes
@@ -156,8 +159,8 @@ fails while checking, and when the verifier fails or times out. In the last case
 - **In a channel or DM:** `jobs_status()` lists active jobs and today's finished jobs, one line
   each, with links to their threads.
 - **`/sym status`:** the same list as an ephemeral message.
-- **Steering:** "skip the staging test" in a job thread steers the worker thread. "Stop it"
-  interrupts it.
+- **Steering:** "skip the staging test" in a job thread steers the worker thread, and so does the
+  card's Steer box. "Stop it" interrupts it.
 
 ## Proactive updates
 

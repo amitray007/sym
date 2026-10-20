@@ -1,5 +1,12 @@
 import { workerLabel, workerNoun } from "../worker-label.ts";
-import { buttonUrl, openPrButton } from "./card.ts";
+import {
+  buttonUrl,
+  CLOSE_ACTION_ID,
+  FIX_ACTION_ID,
+  jobButton,
+  LOOKS_GOOD_ACTION_ID,
+  openPrButton,
+} from "./card.ts";
 import type { OutputContract } from "./contract.ts";
 import {
   duration,
@@ -117,6 +124,7 @@ export function resultPost(
         section(`*tl;dr* ${view.gist}`),
         view.verdict && section(safeMrkdwn(view.verdict, SECTION_MAX)),
         context([threadContext(job)]),
+        resultActions(job.ref, null, true),
       ]),
     };
   }
@@ -138,8 +146,22 @@ export function resultPost(
       view.concernsHeader !== null && numberedList(view.concerns),
       view.questions.length > 0 && section(checklist("*open questions*", view.questions)),
       context(facts),
-      prUrl && { type: "actions", elements: [openPrButton(prUrl)] },
+      resultActions(job.ref, prUrl, true),
     ]),
+  };
+}
+
+// Open PR, then Looks good, Fix, and Close (decision 056). A failure gets Fix and Close only.
+function resultActions(ref: string, prUrl: string | null, done: boolean): Block {
+  return {
+    type: "actions",
+    block_id: `job-${ref}-result`,
+    elements: [
+      ...(prUrl ? [openPrButton(prUrl)] : []),
+      ...(done ? [jobButton(LOOKS_GOOD_ACTION_ID, "Looks good", ref, "primary")] : []),
+      jobButton(FIX_ACTION_ID, "Fix…", ref),
+      jobButton(CLOSE_ACTION_ID, "Close", ref),
+    ],
   };
 }
 
@@ -155,6 +177,7 @@ export function failurePost(job: JobFacts, reason?: string | null): BlockPost {
           : `the ${workerNoun()} stopped before it finished.`,
       ),
       context([threadContext(job)]),
+      resultActions(job.ref, null, false),
     ]),
   };
 }

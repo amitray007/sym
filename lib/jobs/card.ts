@@ -155,6 +155,16 @@ export interface CardFooter {
 /** Sym's own action IDs. Eve keeps the `eve_input:` prefix for its controls. */
 export const STOP_ACTION_ID = "sym_job_stop";
 export const PR_ACTION_ID = "sym_job_pr";
+// Steer on the live card, and Looks good, Fix, and Close on the result (decision 056). Steer and
+// Fix post a text box in the thread; pressing Enter in it sends one of the *_TEXT actions.
+export const STEER_ACTION_ID = "sym_job_steer";
+export const LOOKS_GOOD_ACTION_ID = "sym_job_ok";
+export const FIX_ACTION_ID = "sym_job_fix";
+export const CLOSE_ACTION_ID = "sym_job_close";
+export const STEER_TEXT_ACTION_ID = "sym_job_steer_text";
+export const FIX_TEXT_ACTION_ID = "sym_job_fix_text";
+// The result buttons a later edit removes. Open PR stays.
+export const RESULT_ACTION_IDS = [LOOKS_GOOD_ACTION_ID, FIX_ACTION_ID, CLOSE_ACTION_ID];
 
 export interface RenderCardInput {
   ref: string;
@@ -203,6 +213,22 @@ export function openPrButton(url: string): Record<string, unknown> {
   };
 }
 
+// A plain button that carries the job reference.
+export function jobButton(
+  actionId: string,
+  label: string,
+  ref: string,
+  style?: "primary" | "danger",
+): Record<string, unknown> {
+  return {
+    type: "button",
+    action_id: actionId,
+    text: { type: "plain_text", text: label },
+    value: ref,
+    ...(style ? { style } : {}),
+  };
+}
+
 function stopButton(ref: string): Record<string, unknown> {
   return {
     type: "button",
@@ -241,7 +267,11 @@ export function renderJobCard(input: RenderCardInput): Rendered {
       {
         type: "actions",
         block_id: `job-${input.ref}-actions-v${input.version}`,
-        elements: [stopButton(input.ref), ...(prUrl ? [openPrButton(prUrl)] : [])],
+        elements: [
+          jobButton(STEER_ACTION_ID, "Steer", input.ref),
+          stopButton(input.ref),
+          ...(prUrl ? [openPrButton(prUrl)] : []),
+        ],
       },
       { type: "context", elements: [{ type: "mrkdwn", text: parts.join(" · ") }] },
     ],

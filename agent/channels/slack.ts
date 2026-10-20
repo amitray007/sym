@@ -20,9 +20,7 @@ import {
   recordFeedback,
 } from "../../lib/feedback/feedback.ts";
 import { publishLiveHome } from "../../lib/home/live.ts";
-import { STOP_ACTION_ID } from "../../lib/jobs/card.ts";
 import { jobListAnswer } from "../../lib/jobs/status.ts";
-import { stopJob } from "../../lib/jobs/steer.ts";
 import { recentJobs } from "../../lib/ledger/jobs.ts";
 import { getListenMode } from "../../lib/ledger/listen.ts";
 import { sentPostTimestamps } from "../../lib/ledger/outbox.ts";
@@ -43,6 +41,7 @@ import { scheduleList } from "../../lib/schedules/format.ts";
 import { listSchedules } from "../../lib/schedules/rows.ts";
 import { namesBot, threadPeople, triageThreadMessage } from "../../lib/slack/addressing.ts";
 import { isSlackUserAllowed, sayPrivately } from "../../lib/slack/guard.ts";
+import { handleJobAction, JOB_ACTION_IDS } from "../../lib/slack/job-actions.ts";
 import {
   MAYBE_NOTE,
   nameOf,
@@ -481,10 +480,11 @@ export default slackChannel({
       await sayPrivately(ctx.slack, where, "Sym could not answer that. Try again in a moment.");
     }
   },
-  // The Stop button on a job card and the feedback buttons. Open PR is a URL button, so its
-  // click needs no work. Steer needs a modal and is not a button yet.
+  // The job buttons and text boxes (lib/slack/job-actions.ts) and the feedback buttons. Open PR
+  // is a URL button, so its click needs no work.
   async onInteraction(action, ctx) {
-    if (action.actionId !== STOP_ACTION_ID && action.actionId !== FEEDBACK_ACTION_ID) return;
+    const jobAction = JOB_ACTION_IDS.includes(action.actionId);
+    if (!jobAction && action.actionId !== FEEDBACK_ACTION_ID) return;
     if (!isAllowed(action.user.id)) return;
     const { channelId, threadTs } = ctx.slack;
     if (action.actionId === FEEDBACK_ACTION_ID) {
@@ -505,14 +505,13 @@ export default slackChannel({
       return;
     }
     const where = { channel: channelId, user: action.user.id, threadTs };
-    const ref = action.value ?? "";
-    if (!/^J-\d+$/.test(ref)) return;
     try {
-      const answer = await withJobDeps((deps) => stopJob(deps, ref));
-      await sayPrivately(ctx.slack, where, slackText(answer));
+      await withJobDeps((deps) =>
+        handleJobAction(deps, action, channelId, (text) => sayPrivately(ctx.slack, where, text)),
+      );
     } catch (error) {
-      console.warn("Sym could not stop a job.", String(error));
-      await sayPrivately(ctx.slack, where, `Sym could not stop ${ref}. Try again in a moment.`);
+      console.warn("Sym could not handle a job button.", String(error));
+      await sayPrivately(ctx.slack, where, "Sym could not do that. Try again in a moment.");
     }
   },
   // Reactions on Sym's messages are feedback. A reaction on another message is not.

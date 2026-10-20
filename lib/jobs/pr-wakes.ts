@@ -152,7 +152,7 @@ export async function jobsToWatch(deps: Pick<JobDeps, "sql">, since: Date, limit
   const rows = await deps.sql<{ id: number }[]>`
     select id from jobs
     where status = 'done' and pr_url is not null and pr_watched_url is distinct from pr_url
-      and finished_at >= ${since}
+      and finished_at >= ${since} and ${followable(deps.sql)}
     order by id desc limit ${limit}
   `;
   const jobs: Job[] = [];
@@ -161,6 +161,15 @@ export async function jobsToWatch(deps: Pick<JobDeps, "sql">, since: Date, limit
     if (job) jobs.push(job);
   }
   return jobs;
+}
+
+// A closed job is not followed (decision 056). Neither is a job whose worker thread a later
+// follow-up took over: the follow-up reports the thread's wakes, so each posts once.
+function followable(sql: JobDeps["sql"]) {
+  return sql`jobs.closed_at is null and not exists (
+    select 1 from jobs later
+    where later.worker_thread_id = jobs.worker_thread_id and later.id > jobs.id
+  )`;
 }
 
 // Jobs whose PR the worker watches and that ended after `since` or still run. Reconcile checks
@@ -174,6 +183,7 @@ export async function watchedPrJobs(
   const rows = await deps.sql<{ id: number }[]>`
     select id from jobs
     where pr_watched_url is not null and (finished_at is null or finished_at >= ${since})
+      and ${followable(deps.sql)}
     order by id desc limit ${limit}
   `;
   const jobs: Job[] = [];
