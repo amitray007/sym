@@ -36,7 +36,7 @@ import {
 } from "../../lib/persona-setting.ts";
 import { parseSymCommand, slackText, USAGE } from "../../lib/quiet/command.ts";
 import { formatClock, getQuietUntil, setQuietUntil } from "../../lib/quiet/quiet.ts";
-import { recordTurnMessage } from "../../lib/reactions/react.ts";
+import { recordThreadMessage, recordTurnMessage } from "../../lib/reactions/react.ts";
 import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
 import { listSchedules } from "../../lib/schedules/rows.ts";
@@ -232,6 +232,17 @@ function stayQuiet<T extends StatusEvent>(): SlackRenderHandler<T> {
 const symRenderer = defineSlackRenderer({
   // Eve's default sets "Thinking..." as soon as a message arrives. The persona's list replaces it.
   async received(message, channel, next) {
+    // Each new message from an allowed person in a known thread becomes the one slack_react
+    // reacts on (decision 051). Eve keeps the first message as the session's trigger, so
+    // turn.started alone would point every later turn at the thread root. A quiet turn records it
+    // too: a reaction can be the whole answer to side talk.
+    if (fromAllowedHuman(message)) {
+      await recordThreadMessage(ledger(), message.channelId, message.threadTs, message.ts).catch(
+        (error: unknown) => {
+          console.warn("Sym could not record the message of a turn.", String(error));
+        },
+      );
+    }
     if (isQuietTurn(threadKey(message.channelId, message.threadTs, message.author?.userId ?? ""))) {
       return;
     }

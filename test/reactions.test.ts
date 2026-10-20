@@ -6,6 +6,7 @@ import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { createEmojiCache, EMOJI_TTL_MS, normalizeEmoji } from "../lib/reactions/emoji.ts";
 import {
   reactToTurn,
+  recordThreadMessage,
   recordTurnMessage,
   THREAD_CAP,
   THREAD_WINDOW_MS,
@@ -133,7 +134,9 @@ describe.skipIf(!hasDatabase)("reactToTurn", () => {
       text: "reply",
       thread_ts: s.root.ts,
     });
-    await recordTurnMessage(ledger.sql(), s.sessionId, reply.ts);
+    await recordThreadMessage(ledger.sql(), s.channel, s.root.ts, reply.ts);
+    // turn.started records Eve's trigger, which stays on the first message. It must not win.
+    await recordTurnMessage(ledger.sql(), s.sessionId, s.root.ts);
     return reply;
   }
 

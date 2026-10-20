@@ -31,10 +31,12 @@ a 😂 for something funny, a 💡 for a good idea, a 🙌 for good news, a 🫡
    - Reactions go only on a person's message, never on Sym's own posts. Sign-in links, approval
      prompts, and job cards are Sym posts, so they cannot get one.
    - Only Slack error codes are logged.
-4. **Which message.** Eve keeps the triggering message in the channel's session state
-   (`triggeringMessageTs`), which tools cannot read. The Slack renderer copies it to
-   `session_threads.message_ts` at `turn.started`, next to the thread (migration `015`). The tool
-   reads it by session id. A session with no Slack row, or no message, gets a refusal.
+4. **Which message.** Tools cannot read Eve's channel state, so Sym keeps the message in
+   `session_threads.message_ts` (migration `015`). Eve's `triggeringMessageTs` stays on the first
+   message of a session, so it only fills an empty column at `turn.started`. Each later message
+   from an allowed person updates the column in the renderer's `received` hook, keyed by channel
+   and thread. The tool reads it by session id. A session with no Slack row, or no message, gets
+   a refusal.
 5. **Names.** The tool accepts `tada`, `:tada:`, or a common unicode emoji (about 30 map to
    Slack names; any other unicode emoji is rejected with a hint to use a name). Slack checks
    standard names itself: `invalid_name` becomes a clear error, so Sym bundles no full list.

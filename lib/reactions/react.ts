@@ -12,12 +12,31 @@ export const THREAD_WINDOW_MS = 60 * 60 * 1000;
 
 // Remembers the message that started the session's latest turn. The session's thread row must
 // exist, so call it after recordSessionThread.
+// Records the newest message of a thread Sym already follows. A thread with no session row yet
+// changes nothing: turn.started records the first message with the row.
+export async function recordThreadMessage(
+  sql: Sql,
+  channelId: string,
+  threadTs: string,
+  messageTs: string,
+): Promise<void> {
+  await sql`
+    update session_threads set message_ts = ${messageTs}
+    where channel_id = ${channelId} and thread_ts = ${threadTs}
+  `;
+}
+
 export async function recordTurnMessage(
   sql: Sql,
   sessionId: string,
   messageTs: string,
 ): Promise<void> {
-  await sql`update session_threads set message_ts = ${messageTs} where session_id = ${sessionId}`;
+  // Only the first message: later ones come from recordThreadMessage, and Eve's trigger stays
+  // on the first message of the session.
+  await sql`
+    update session_threads set message_ts = ${messageTs}
+    where session_id = ${sessionId} and message_ts is null
+  `;
 }
 
 async function turnMessageTs(sql: Sql, sessionId: string): Promise<string | null> {
