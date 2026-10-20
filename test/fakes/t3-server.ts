@@ -118,6 +118,19 @@ export interface FakeT3 {
   close(): Promise<void>;
 }
 
+// A model's reasoning effort option, in the shape of T3 `orchestrator_capabilities`.
+const effortOption = (id: string) => ({
+  id,
+  label: "Effort",
+  type: "select",
+  options: [
+    { id: "low", label: "Low" },
+    { id: "medium", label: "Medium", isDefault: true },
+    { id: "high", label: "High" },
+  ],
+  currentValue: "medium",
+});
+
 const DEFAULT_SCRIPT: FakeT3Step[] = [{ status: "completed", items: ["Done"] }];
 
 const TERMINAL = new Set<FakeT3Status>(["completed", "failed", "interrupted", "cancelled"]);
@@ -220,6 +233,28 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
           driverKind: "fake",
           displayName: "Fake",
           models: [{ id: "fake-model", label: "Fake model", options: [] }],
+          constraints: [],
+        },
+        {
+          providerInstanceId: "claudeAgent",
+          driverKind: "claudeAgent",
+          displayName: "Claude",
+          models: ["claude-sonnet-5-5", "claude-opus-5-5"].map((id) => ({
+            id,
+            label: id,
+            options: [effortOption("effort")],
+          })),
+          constraints: [],
+        },
+        {
+          providerInstanceId: "codex",
+          driverKind: "codex",
+          displayName: "Codex",
+          models: ["gpt-6-luna", "gpt-6.1-sol"].map((id) => ({
+            id,
+            label: id,
+            options: [effortOption("reasoningEffort")],
+          })),
           constraints: [],
         },
       ],

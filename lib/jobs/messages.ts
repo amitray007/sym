@@ -95,7 +95,7 @@ export function quietNotice(job: JobFacts, quietForMs: number): string {
 }
 
 /** The full brief, posted in the job thread above the Start, Edit, and Cancel prompt. */
-export function briefPrompt(brief: Brief, ref?: string): string {
+export function briefPrompt(brief: Brief, ref?: string, modelLine?: string): string {
   const list = (items: string[]) => items.map((item) => `• ${escapeMrkdwn(item)}`).join("\n");
   const delivery = brief.openPullRequest
     ? "Push the branch and open a draft PR."
@@ -107,6 +107,7 @@ export function briefPrompt(brief: Brief, ref?: string): string {
     brief.constraints.length > 0 && `Constraints:\n${list(brief.constraints)}`,
     `Done when:\n${list(brief.doneWhen)}`,
     `Delivery: ${delivery}`,
+    modelLine && escapeMrkdwn(modelLine),
     "Press Start below to run it, Edit to change it, or Cancel.",
   ]);
 }

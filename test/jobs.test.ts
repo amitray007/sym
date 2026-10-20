@@ -145,27 +145,6 @@ describe.skipIf(!hasDatabase)("worker job steps", () => {
       expect(a.workerThreadId).toBe(b.workerThreadId);
     });
 
-    it("launches with the configured worker model after checking the worker offers it", async () => {
-      const worker = new FakeWorker();
-      const job = await newJob("model");
-      const workerModel = { providerId: "fake", model: "fake-model" };
-
-      const launched = await launchOrAdopt({ ...deps(worker), workerModel }, job.id, CALLBACK);
-
-      expect(worker.threads.get(launched.workerThreadId ?? "")?.request.model).toEqual(workerModel);
-    });
-
-    it("refuses a model the worker does not offer", async () => {
-      const worker = new FakeWorker();
-      const job = await newJob("bad-model");
-      const workerModel = { providerId: "fake", model: "missing-model" };
-
-      await expect(
-        launchOrAdopt({ ...deps(worker), workerModel }, job.id, CALLBACK),
-      ).rejects.toThrow("The worker does not offer fake/missing-model.");
-      expect(worker.launches).toBe(0);
-    });
-
     it("refuses a project the worker does not know", async () => {
       const worker = new FakeWorker();
       const job = await createJob(ledger.sql(), {

@@ -31,7 +31,25 @@ describe("t3Adapter.capabilities", () => {
             providerInstanceId: "codex",
             driverKind: "codex",
             displayName: "Codex",
-            models: [{ id: "model-a", label: "Model A", options: [] }],
+            models: [
+              {
+                id: "model-a",
+                label: "Model A",
+                options: [
+                  {
+                    id: "reasoningEffort",
+                    label: "Effort",
+                    type: "select",
+                    options: [
+                      { id: "low", label: "Low" },
+                      { id: "high", label: "High" },
+                    ],
+                    currentValue: "low",
+                  },
+                  { id: "fast", label: "Fast", type: "boolean" },
+                ],
+              },
+            ],
             constraints: [],
           },
           {
@@ -48,8 +66,14 @@ describe("t3Adapter.capabilities", () => {
 
     expect(await t3Adapter(call).capabilities()).toEqual({
       providers: [
-        { id: "codex", name: "Codex", models: ["model-a"], available: true },
-        { id: "other", name: "Other", models: [], available: false },
+        {
+          id: "codex",
+          name: "Codex",
+          models: ["model-a"],
+          modelOptions: { "model-a": [{ id: "reasoningEffort", values: ["low", "high"] }] },
+          available: true,
+        },
+        { id: "other", name: "Other", models: [], modelOptions: {}, available: false },
       ],
     });
   });
@@ -148,7 +172,11 @@ describe("t3Adapter.launch", () => {
       title: "[J-9] Retry",
       message: "brief",
       baseRef: "main",
-      model: { providerId: "codex", model: "model-a" },
+      model: {
+        providerId: "codex",
+        model: "model-a",
+        options: [{ id: "reasoningEffort", value: "low" }],
+      },
     });
 
     expect(thread).toEqual({ id: "t-9", title: "[J-9] Retry", status: "running" });
@@ -157,7 +185,11 @@ describe("t3Adapter.launch", () => {
       title: "[J-9] Retry",
       message: "brief",
       workspaceStrategy: { type: "worktree", baseRef: "main", startFromOrigin: true },
-      modelSelection: { instanceId: "codex", model: "model-a" },
+      modelSelection: {
+        instanceId: "codex",
+        model: "model-a",
+        options: [{ id: "reasoningEffort", value: "low" }],
+      },
     });
   });
 });

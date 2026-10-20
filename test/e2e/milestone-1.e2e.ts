@@ -77,6 +77,12 @@ describe("milestone 1", () => {
     // Exactly one worker thread, and one launch call.
     expect(threadsOf(h, ref)).toHaveLength(1);
     expect(launchesOf(h, ref)).toHaveLength(1);
+    // The launch carries the default model (SYM_WORKER_MODEL), and the job records it.
+    expect(launchesOf(h, ref)[0]?.args.modelSelection).toEqual({
+      instanceId: "fake",
+      model: "fake-model",
+    });
+    expect(done.workerModel).toBe("fake/fake-model");
     // The thread got one new message at the start (the card) and one at the end (the result).
     expect(newSince(c, beforeStart).map((m) => m.ts)).toEqual([card.ts, result.ts]);
     // Card progress went only through chat.update on the card, and the card ends collapsed.

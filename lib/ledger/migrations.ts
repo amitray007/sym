@@ -131,4 +131,11 @@ export const migrations: Migration[] = [
       alter table jobs add column end_presented_at timestamptz;
     `,
   },
+  {
+    version: "011_job_worker_model",
+    sql: `
+      -- The model the worker thread runs, as <provider>/<model> (decision 041).
+      alter table jobs add column worker_model text;
+    `,
+  },
 ];

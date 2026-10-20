@@ -42,10 +42,10 @@ const WORKER_LABEL = "T3 Code";
 // Posts the full brief before the Start prompt. Eve's prompt card keeps only about 200
 // characters, so the brief itself is Sym's own message in the job thread. A brief needs an
 // action, so quiet mode never hides it.
-export async function presentBrief(sql: Sql, job: Job): Promise<void> {
+export async function presentBrief(sql: Sql, job: Job, modelLine?: string): Promise<void> {
   if (!job.slackChannel) return;
   const ref = jobRef(job.id);
-  const text = briefPrompt(Brief.parse(job.brief), ref);
+  const text = briefPrompt(Brief.parse(job.brief), ref, modelLine);
   const display = chooseDisplay({
     kind: job.kind,
     needsAction: true,
@@ -68,7 +68,13 @@ export async function presentBrief(sql: Sql, job: Job): Promise<void> {
 
 // Posts the start of a job: a live card for long jobs with steps, otherwise one line.
 // `pack` supplies the quiet hours. The owner's `/sym quiet` comes from the ledger.
-export async function presentStart(sql: Sql, job: Job, now: Date, pack?: Pack): Promise<Job> {
+export async function presentStart(
+  sql: Sql,
+  job: Job,
+  now: Date,
+  pack?: Pack,
+  modelNote?: string,
+): Promise<Job> {
   if (!job.slackChannel) return job;
   const brief = Brief.parse(job.brief);
   const scheduled = job.kind === SCHEDULED_CHECK;
@@ -108,7 +114,10 @@ export async function presentStart(sql: Sql, job: Job, now: Date, pack?: Pack): 
     idempotencyKey: `${jobRef(job.id)}:start`,
     jobId: job.id,
     method: "chat.postMessage",
-    payload: { ...target(withDisplay), text: `Started ${jobRef(job.id)}: ${job.title}` },
+    payload: {
+      ...target(withDisplay),
+      text: `Started ${jobRef(job.id)}: ${job.title}${modelNote ? `\n${modelNote}` : ""}`,
+    },
     display,
   });
   return withDisplay;

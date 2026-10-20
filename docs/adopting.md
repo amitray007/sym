@@ -43,6 +43,14 @@ workers:
   - name: laptop
     kind: t3
     mcpUrl: https://laptop.example.ts.net/mcp
+    models:                        # optional; replaces the built-in model list
+      - id: claudeAgent/claude-sonnet-5-5
+        use: Routine changes, small fixes, docs
+        effort: medium             # optional
+        default: true              # optional; the first entry is the default when none is marked
+      - id: claudeAgent/claude-opus-5-5
+        use: Hard bugs, migrations, security
+        effort: high
 projects:
   - name: sync-service
     worker: laptop
@@ -51,6 +59,7 @@ projects:
     defaultBaseBranch: main
     prPolicy: draft                # none (default) or draft
     productionData: read-only
+    model: claudeAgent/claude-opus-5-5   # optional; always this model for this project
 instructions: [instructions/tone.md]
 playbooks: [playbooks/release-steps.md]
 ```
@@ -61,6 +70,11 @@ Rules (decision 026):
   credential). `mcpUrl` carries no credentials.
 - `prPolicy` is `none` or `draft`. `productionData` is `read-only`. A pack narrows Sym's rules and
   never widens them.
+- `models` is the list the brain picks from for that worker (decision 041). Each `id` is
+  `<provider>/<model>`, with the T3 provider instance ID as the provider. Duplicate IDs fail, and
+  so do two `default: true` entries. A worker with no `models` uses the built-in list in
+  `lib/workers/models.ts`. A project `model` must be on its worker's list (or the built-in list)
+  and wins over the brief. `SYM_WORKER_MODEL` still sets the default entry.
 - The owner is always allowed; `allowList` adds people.
 - Instruction and playbook files are listed by path and stay inside the pack folder.
 

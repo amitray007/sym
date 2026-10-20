@@ -39,6 +39,20 @@ describe("canSkipStart", () => {
     expect(canSkipStart({ ...ok, brief: { ...brief, constraints: ["x"] } })).toBe(false);
     expect(canSkipStart({ ...ok, brief: "nonsense" })).toBe(false);
   });
+
+  it("pins the model: a changed model needs the click", () => {
+    const pinned = { ...brief, model: "codex/gpt-6-luna", modelReason: "cheap check" };
+    const row = { status: "active" as const, brief: pinned };
+    expect(canSkipStart({ ...ok, schedule: row, brief: pinned })).toBe(true);
+    expect(
+      canSkipStart({
+        ...ok,
+        schedule: row,
+        brief: { ...pinned, model: "claudeAgent/claude-opus-5-5" },
+      }),
+    ).toBe(false);
+    expect(canSkipStart({ ...ok, schedule: row, brief })).toBe(false);
+  });
 });
 
 describe("runOutcome", () => {

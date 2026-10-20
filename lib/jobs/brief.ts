@@ -12,6 +12,15 @@ export const Brief = z.object({
     .string()
     .optional()
     .describe("Branch the new worktree starts from. Defaults to the project's base branch."),
+  model: z
+    .string()
+    .optional()
+    .describe("One model ID from the worker model list. Leave out to use the default."),
+  modelReason: z
+    .string()
+    .max(160)
+    .optional()
+    .describe("Why this model, in a short phrase. Needed when the model is not the default."),
   openPullRequest: z.boolean().default(false).describe("Push the branch and open a draft PR."),
   estimatedMinutes: z
     .number()
