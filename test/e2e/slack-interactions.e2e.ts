@@ -183,8 +183,9 @@ describe("job card buttons", () => {
     );
     await new Promise((r) => setTimeout(r, 2_500));
     const rows = await h.sql<{ slackUser: string; kind: string; value: string }[]>`
-      select slack_user, kind, value from feedback where job_id = ${job.id} order by id`;
-    // The repeated reaction counts once. The outsider's reaction is ignored.
+      select slack_user, kind, value from feedback where job_id = ${job.id} order by kind`;
+    // The repeated reaction counts once. The outsider's reaction is ignored. The click and the
+    // reaction arrive as separate requests, so the order is by kind, not by arrival.
     expect(rows).toEqual([
       { slackUser: OWNER, kind: "thumbs_down", value: "down" },
       { slackUser: OWNER, kind: "thumbs_up", value: "+1" },
