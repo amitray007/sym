@@ -21,6 +21,7 @@ import {
   matchWorkerProject,
 } from "../projects/allowed.ts";
 import type { SlackApi } from "../slack/api.ts";
+import { workerLabel, workerNoun } from "../worker-label.ts";
 import {
   briefModelLine,
   chooseModel,
@@ -48,7 +49,7 @@ import {
 import { detectEvents } from "./progress.ts";
 import { type ModelCheck, VerifierOutput, verifierMessage } from "./verify.ts";
 
-// The worker job steps that `t3_job` and reconcile run (docs/architecture.md, flows 1 and 3).
+// The worker job steps that `worker_job` and reconcile run (docs/architecture.md, flows 1 and 3).
 // They read and write the ledger, so a re-run step or a new session continues from the job row.
 
 export interface WorkerModel {
@@ -88,7 +89,7 @@ const MAX_ACTIVITY_PAGES = 10;
 // With the job ID, the key of the advisory lock that serializes launches of one job.
 const LAUNCH_LOCK = 4_242_002;
 // A watcher holds a job this long after each check. Reconcile takes over when it runs out. It
-// is longer than the t3_job poll interval, so a healthy task keeps its job.
+// is longer than the worker_job poll interval, so a healthy task keeps its job.
 export const WATCH_LEASE_MS = 10 * 60_000;
 
 const TERMINAL: readonly JobStatus[] = ["done", "failed", "cancelled"];
@@ -252,9 +253,9 @@ export async function checkJob(
   const message = latestAssistant(activity.items);
   const summary =
     status === "failed" && activity.status === "interrupted"
-      ? "Worker thread interrupted"
+      ? `${workerLabel()} thread interrupted`
       : status === "waiting_permission"
-        ? "Waiting for a permission prompt on the worker"
+        ? `Waiting for a permission prompt on the ${workerNoun()}`
         : (firstLine(latest) ?? job.lastSummary ?? "Working");
 
   // Two watchers can check one job (a task and reconcile). The update applies only while the
@@ -371,7 +372,7 @@ export async function answerQuestion(
   await deps.worker.answer(job.workerThreadId, requestId, answers);
   await updateJob(deps.sql, job.id, {
     status: "running",
-    lastSummary: "Answer sent to the worker",
+    lastSummary: `Answer sent to the ${workerNoun()}`,
   });
 }
 

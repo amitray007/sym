@@ -20,6 +20,6 @@ export default defineEval({
       },
       count: 1,
     });
-    t.notCalledTool("t3_job");
+    t.notCalledTool("worker_job");
   },
 });

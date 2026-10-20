@@ -6,7 +6,7 @@ ledger, the watch loop, or the display rule.
 
 ## Adapter contract
 
-Every adapter implements the same operations. The `t3_job` tool and reconcile call only these.
+Every adapter implements the same operations. The `worker_job` tool and reconcile call only these.
 
 | Operation | Purpose | Notes |
 |---|---|---|
@@ -138,7 +138,7 @@ model without a matching option launches without effort.
 
 Sym's T3 token can read every project on the worker, so Sym's code is the guard (decision 042).
 Only the pack's `projects`, or `SYM_PROJECTS` without a pack, may run. Everything that reaches the
-brain filters through that list: `t3_job`, `planLaunch`, `schedule_create`, the schedule
+brain filters through that list: `worker_job`, `planLaunch`, `schedule_create`, the schedule
 dispatcher, and the `worker_projects` tool. A refusal names only the allowed projects and reads the
 same whether the asked-for project exists or not. A separate T3 instance for Sym (`T3CODE_HOME` or
 `--base-dir`) or OS-level isolation is the stronger option and is not built.

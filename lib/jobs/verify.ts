@@ -88,7 +88,7 @@ export function matchesGlob(path: string, pattern: string): boolean {
 }
 
 // The model check (docs/architecture.md, flow 4, decision 032). The `verifier` subagent returns
-// this shape. t3_job passes it as the turn's outputSchema, and finishJob parses it again, so a
+// this shape. worker_job passes it as the turn's outputSchema, and finishJob parses it again, so a
 // malformed reply counts as an unavailable check instead of a broken result.
 export const VerifierOutput = z.object({
   verdict: z.enum(["pass", "concerns"]),

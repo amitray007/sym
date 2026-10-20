@@ -1,34 +1,38 @@
 import { type Job, type JobStatus, jobRef } from "../ledger/jobs.ts";
+import { workerNoun } from "../worker-label.ts";
 import { formatDuration } from "./card.ts";
 
 // Answers to "what's the update?" (docs/architecture.md, flow 5): two or three lines for one job,
 // one line per job for a list. Plain text, so Slack, the eve channel, and slash commands share it.
 
-const WAITING_ON: Partial<Record<JobStatus, string>> = {
-  launching: "Waiting for Start on the brief.",
-  waiting_input: "Waiting for your answer to the worker's question.",
-  waiting_permission: "Waiting for a permission prompt on the worker. Approve it in T3.",
-  worker_offline: "Waiting for the worker to come back.",
-  quiet: "No new worker activity for a while.",
-};
+function waitingOn(): Partial<Record<JobStatus, string>> {
+  const noun = workerNoun();
+  return {
+    launching: "Waiting for Start on the brief.",
+    waiting_input: `Waiting for your answer to the ${noun}'s question.`,
+    waiting_permission: `Waiting for a permission prompt on the ${noun}. Approve it in the ${noun}.`,
+    worker_offline: `Waiting for the ${noun} to come back.`,
+    quiet: `No new ${noun} activity for a while.`,
+  };
+}
 
-const STATUS_WORD: Record<JobStatus, string> = {
+const statusWords = (): Record<JobStatus, string> => ({
   launching: "not started",
   running: "running",
   waiting_input: "waiting for you",
   waiting_permission: "blocked on a permission prompt",
   quiet: "quiet",
-  worker_offline: "worker offline",
+  worker_offline: `${workerNoun()} offline`,
   checking: "checking the result",
   done: "done",
   failed: "failed",
   cancelled: "cancelled",
-};
+});
 
 export function jobAnswer(job: Job, now: Date): string {
-  const lines = [`${jobRef(job.id)} ${job.title}: ${STATUS_WORD[job.status]} ${age(job, now)}.`];
+  const lines = [`${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}.`];
   if (job.lastSummary) lines.push(`Last: ${job.lastSummary}`);
-  const waiting = WAITING_ON[job.status];
+  const waiting = waitingOn()[job.status];
   if (waiting) lines.push(waiting);
   if (job.workerModel) lines.push(`Model: ${job.workerModel}`);
   if (job.prUrl) lines.push(`PR: ${job.prUrl}`);
@@ -40,7 +44,7 @@ export function jobListAnswer(jobs: Job[], now: Date): string {
   return jobs
     .map((job) => {
       const summary = job.lastSummary ? ` · ${job.lastSummary}` : "";
-      return `${jobRef(job.id)} ${job.title}: ${STATUS_WORD[job.status]} ${age(job, now)}${summary}`;
+      return `${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}${summary}`;
     })
     .join("\n");
 }

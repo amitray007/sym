@@ -48,3 +48,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [040](040-reference-compose.md) | One compose file runs the local lab and the deployment |
 | [041](041-worker-model-choice.md) | The brain picks a worker model per job from an allow-list with a purpose per model |
 | [042](042-project-allow-list.md) | Sym touches only the projects on its allow-list, and refuses all others in code |
+| [043](043-worker-label.md) | Slack shows the worker under a configurable label, never the software behind it |

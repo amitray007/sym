@@ -13,7 +13,7 @@ worker. No production deployment and no adopter pack beyond a test pack.
    with HTTPS, which the deployment needs.
 3. **Ledger.** Done: `jobs` and `outbox` tables with migrations in `lib/ledger/` (decision 016),
    and a fake worker adapter in `test/fakes/worker.ts`.
-4. **`t3_job` task tool.** Code done (decision 017): the watch loop, `yield` to the status line,
+4. **`worker_job` task tool.** Code done (decision 017): the watch loop, `yield` to the status line,
    the callback URL with a timer fallback, and the duplicate-launch guard by title, tested with
    the fake worker. Live (2026-10-19): `pnpm t3:job-smoke` ran the job steps against a test
    repository. The worker committed the change, called back, and the job ended `done` with the
@@ -33,7 +33,7 @@ worker. No production deployment and no adopter pack beyond a test pack.
 
 - Does a thread started by a handler or schedule get Eve's task card?
 - ~~`plan` block status values and `chat.update` rate limits.~~ `complete`, and Tier 3 (docs/slack.md).
-- ~~A `taskCard` renderer that hides Eve's card for `t3_job` only.~~ Done in `agent/channels/slack.ts`.
+- ~~A `taskCard` renderer that hides Eve's card for `worker_job` only.~~ Done in `agent/channels/slack.ts`.
 - ~~Does `createWebhook` return the public host or the private host?~~ Neither: off Vercel it
   returns `localhost:3000`. Sym rebases it on `SYM_CALLBACK_URL` (decision 028).
 - ~~Does `ctx.send` work from `onSlashCommand`?~~ Not needed: `/sym` answers ephemerally with

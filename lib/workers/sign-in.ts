@@ -1,6 +1,8 @@
 // Pure rules for the in-app worker sign-in (decision 036). No I/O and no Node built-ins, so the
 // `worker_sign_in` workflow body and the tests can use them.
+
 import { callbackFor } from "../jobs/callback.ts";
+import { workerNoun } from "../worker-label.ts";
 
 // Eve's Slack channel gives a person this authenticator, and the Slack user ID in
 // `attributes.user_id` (defaultSlackAuth).
@@ -38,7 +40,7 @@ export function checkSignInCaller(
     caller.principalType !== "user" ||
     userId !== owner
   ) {
-    return { ok: false, reason: "Only the owner can sign Sym in to a worker." };
+    return { ok: false, reason: `Only the owner can sign Sym in to a ${workerNoun()}.` };
   }
   return { ok: true, owner };
 }
@@ -64,7 +66,7 @@ export function signInRedirect(
   return {
     ok: false,
     reason:
-      "T3 needs an https sign-in address. Set SYM_SIGNIN_URL to an https base the owner's " +
+      "The sign-in needs an https address. Set SYM_SIGNIN_URL to an https base the owner's " +
       "browser can reach, such as Sym's Tailscale HTTPS name (docs/self-hosting.md).",
   };
 }

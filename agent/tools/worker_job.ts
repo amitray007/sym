@@ -33,6 +33,7 @@ import {
   getSchedule,
   parseScheduleRef,
 } from "../../lib/schedules/rows.ts";
+import { workerLabel, workerNoun } from "../../lib/worker-label.ts";
 import type { WorkerAnswers, WorkerQuestion } from "../../lib/workers/types.ts";
 
 // One worker job from brief to result (docs/architecture.md, flows 1 and 3, decision 017). It
@@ -69,7 +70,7 @@ export default defineWorkflowTool({
     "a receipt now and the result later. Write a complete brief.",
   inputSchema: ScheduledBrief,
   label: {
-    start: (brief) => `Worker job: ${brief.title}`,
+    start: (brief) => `${workerLabel()} job: ${brief.title}`,
     delta: (_brief, progress: { status: string }) => progress.status,
   },
   async *task(input, ctx) {
@@ -151,7 +152,7 @@ export default defineWorkflowTool({
           job: ref,
           status: "edit_requested",
           edits: edits.text ?? edits.optionId ?? "",
-          next: "Rewrite the brief with these edits and call t3_job again.",
+          next: "Rewrite the brief with these edits and call worker_job again.",
         };
       }
       if (decision.optionId !== "start") {
@@ -159,10 +160,10 @@ export default defineWorkflowTool({
         return { job: ref, status: "cancelled" };
       }
 
-      yield { status: statusLine(ref, "Launching worker thread") };
+      yield { status: statusLine(ref, `Launching ${workerNoun()} thread`) };
       const callback = createWebhook();
       const threadId = await launch(job.id, callback.url);
-      yield { status: statusLine(ref, "Worker thread started") };
+      yield { status: statusLine(ref, `${workerLabel()} thread started`) };
 
       let calledBack = false;
       for (;;) {

@@ -8,6 +8,7 @@
 // level on T3's consent page (decision 009).
 //
 // Nothing here logs. Errors never hold the code, the code verifier, or the token.
+
 import {
   type AuthorizationServerMetadata,
   discoverOAuthServerInfo,
@@ -16,6 +17,7 @@ import {
   registerClient,
   startAuthorization,
 } from "@modelcontextprotocol/client";
+import { workerNoun } from "../../worker-label.ts";
 
 export const T3_SCOPE = "orchestration:read orchestration:operate";
 
@@ -96,7 +98,11 @@ export function readRedirect(
 ): RedirectResult {
   if (params.get("state") !== expected.state) return { kind: "ignore" };
   const error = params.get("error");
-  if (error) return { kind: "refused", reason: `T3 refused the sign-in: ${safeWord(error)}.` };
+  if (error)
+    return {
+      kind: "refused",
+      reason: `The ${workerNoun()} refused the sign-in: ${safeWord(error)}.`,
+    };
   const iss = params.get("iss") ?? undefined;
   const issuer = expected.metadata?.issuer;
   if (issuer !== undefined) {
@@ -132,7 +138,7 @@ export async function finishSignIn(
   } catch (error) {
     // The SDK message names the OAuth error. Keep only its first line, never the request.
     const name = error instanceof Error ? error.name : "Error";
-    throw new Error(`T3 did not issue a token (${name}).`);
+    throw new Error(`The ${workerNoun()} did not issue a token (${name}).`);
   }
   return {
     accessToken: tokens.access_token,

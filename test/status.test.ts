@@ -75,7 +75,7 @@ describe("jobAnswer", () => {
     expect(jobAnswer(job({ status: "waiting_permission", lastSummary: "Needs shell" }), NOW)).toBe(
       "J-12 Billing sync retry: blocked on a permission prompt for 14m.\n" +
         "Last: Needs shell\n" +
-        "Waiting for a permission prompt on the worker. Approve it in T3.",
+        "Waiting for a permission prompt on the worker. Approve it in the worker.",
     );
   });
 

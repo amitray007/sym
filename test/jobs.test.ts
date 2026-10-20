@@ -349,7 +349,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     withThread?: boolean;
   }
 
-  // Starts a job as `t3_job` does, from a recorded Slack thread, and returns its deps.
+  // Starts a job as `worker_job` does, from a recorded Slack thread, and returns its deps.
   async function setup(options: SetupOptions = {}) {
     clock = T0;
     const n = ++keyCounter;

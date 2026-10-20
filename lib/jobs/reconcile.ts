@@ -1,6 +1,7 @@
 import { chooseDisplay } from "../display.ts";
 import { getJob, type Job, jobRef, orphanedJobs, updateJob } from "../ledger/jobs.ts";
 import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
+import { workerNoun } from "../worker-label.ts";
 import type { WorkerAdapter } from "../workers/types.ts";
 import { parseOutputContract } from "./contract.ts";
 import { checkPrWakes, ensurePrWatched, jobsToWatch, watchedPrJobs } from "./pr-wakes.ts";
@@ -9,7 +10,7 @@ import { checkJob, finishJob, type JobDeps, type LedgerDeps } from "./run.ts";
 import type { ModelCheck } from "./verify.ts";
 
 // The safety net (docs/architecture.md, "Proactive updates"). Every few minutes it takes over
-// the jobs no t3_job task watches, for example after a session died or Sym restarted, and runs
+// the jobs no worker_job task watches, for example after a session died or Sym restarted, and runs
 // the same check a task runs. The job then finishes with its card and result message as usual.
 // Reconcile has no workflow body to run the `verifier` subagent, so it finishes a job with the
 // rule checks alone (decision 032). That covers a job found in `checking` whose task stopped.
@@ -150,7 +151,7 @@ async function followPullRequests(deps: JobDeps): Promise<void> {
 async function postQuestion(deps: JobDeps, job: Job, requestId: string, prompt: string) {
   if (!job.slackChannel) return;
   const ref = jobRef(job.id);
-  const text = `${ref} has a question on the worker: ${prompt}\nAnswer it in the worker thread ${job.workerThreadId}.`;
+  const text = `${ref} has a question on the ${workerNoun()}: ${prompt}\nAnswer it in the ${workerNoun()} thread ${job.workerThreadId}.`;
   await enqueuePost(deps.sql, {
     idempotencyKey: `${ref}:question:${requestId}`,
     jobId: job.id,
@@ -179,13 +180,13 @@ async function markOffline(deps: JobDeps, job: Job) {
   if (job.status === "worker_offline") return;
   await updateJob(deps.sql, job.id, {
     status: "worker_offline",
-    lastSummary: "The worker is unreachable",
+    lastSummary: `The ${workerNoun()} is unreachable`,
   });
   await notice(
     deps,
     job,
     `offline:${job.cursor ?? "start"}`,
-    `${jobRef(job.id)}: the worker is unreachable. Sym keeps checking and posts when it is back.`,
+    `${jobRef(job.id)}: the ${workerNoun()} is unreachable. Sym keeps checking and posts when it is back.`,
   );
 }
 
@@ -196,7 +197,7 @@ async function markBack(deps: JobDeps, job: Job) {
   const outage = await latestPost(deps.sql, job.id, `${ref}:offline:`);
   if (!outage) return;
   if (outage.status === "pending") {
-    await dropPost(deps.sql, outage.id, "The worker came back before the notice went out");
+    await dropPost(deps.sql, outage.id, `The ${workerNoun()} came back before the notice went out`);
     return;
   }
   if (outage.status !== "sent" || !outage.slackTs || !job.slackChannel) return;
@@ -207,7 +208,7 @@ async function markBack(deps: JobDeps, job: Job) {
     payload: {
       channel: job.slackChannel,
       ts: outage.slackTs,
-      text: `~${ref}: the worker was unreachable.~ The worker is back, and ${ref} continues.`,
+      text: `~${ref}: the ${workerNoun()} was unreachable.~ The ${workerNoun()} is back, and ${ref} continues.`,
     },
     display: outage.display,
   });

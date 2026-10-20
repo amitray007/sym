@@ -300,7 +300,7 @@ function normalizeRun(row: ScheduleRun): ScheduleRun {
   };
 }
 
-// True when the schedule is active and `brief` is the brief the owner approved. t3_job uses this
+// True when the schedule is active and `brief` is the brief the owner approved. worker_job uses this
 // to skip the Start prompt for a scheduled run, so the model cannot widen an approved brief.
 export async function isApprovedBrief(sql: Sql, id: number, brief: unknown): Promise<boolean> {
   const row = await getSchedule(sql, id);

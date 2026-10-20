@@ -1,4 +1,4 @@
-// True when two JSON values are equal, ignoring key order. t3_job uses it to compare the brief it
+// True when two JSON values are equal, ignoring key order. worker_job uses it to compare the brief it
 // got with the brief the owner approved. Pure code: no Node.js builtins, so a workflow bundle
 // can import it.
 export function sameJson(a: unknown, b: unknown): boolean {

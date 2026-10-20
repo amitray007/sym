@@ -187,7 +187,7 @@ export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): Worke
         if (result.nextCursor === null) return projects;
         cursor = result.nextCursor;
       }
-      throw new Error(`t3_project_list returned more than ${MAX_PROJECT_PAGES} pages`);
+      throw new Error(`The project list had more than ${MAX_PROJECT_PAGES} pages`);
     },
 
     async findByTitle(projectId, titlePrefix) {

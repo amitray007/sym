@@ -1,3 +1,4 @@
+import { workerLabel, workerNoun } from "../worker-label.ts";
 import type { Brief } from "./brief.ts";
 import { formatDuration, prLabel } from "./card.ts";
 import type { OutputContract } from "./contract.ts";
@@ -25,7 +26,9 @@ export interface JobFacts {
 }
 
 function threadLine(job: JobFacts): string | null {
-  return job.workerThreadId ? `Worker thread: \`${escapeMrkdwn(job.workerThreadId)}\`` : null;
+  return job.workerThreadId
+    ? `${workerLabel()} thread: \`${escapeMrkdwn(job.workerThreadId)}\``
+    : null;
 }
 
 function took(job: JobFacts): string {
@@ -48,7 +51,7 @@ export function resultMessage(
   if (!contract) {
     return lines([
       head,
-      "The worker sent no result summary. Open the worker thread to read the result.",
+      `The ${workerNoun()} sent no result summary. Open the ${workerNoun()} thread to read the result.`,
       verdict,
       threadLine(job),
     ]);
@@ -77,14 +80,14 @@ export function resultMessage(
 export function failureMessage(job: JobFacts, reason?: string | null): string {
   return lines([
     `*${job.ref} failed${took(job)}:* ${escapeMrkdwn(job.title)}`,
-    reason ? escapeMrkdwn(reason) : "The worker stopped before it finished.",
+    reason ? escapeMrkdwn(reason) : `The ${workerNoun()} stopped before it finished.`,
     threadLine(job),
   ]);
 }
 
 /** The DM to the owner when the worker waits on a permission prompt. */
 export function permissionBlockMessage(ref: string): string {
-  return `${ref} is waiting for a permission prompt on the worker. Approve it in T3.`;
+  return `${ref} is waiting for a permission prompt on the ${workerNoun()}. Approve it in the ${workerNoun()}.`;
 }
 
 export function quietNotice(job: JobFacts, quietForMs: number): string {

@@ -46,7 +46,7 @@ an operations group with scheduled checks. One adopter's playbooks never shape t
 
 ## Build order
 
-1. Milestone 1, the spike. Prove the parts the design depends on: a `t3_job` task tool, the
+1. Milestone 1, the spike. Prove the parts the design depends on: a `worker_job` task tool, the
    watch loop, the job card, `chooseDisplay`, and recovery after a restart. See
    [milestone-1.md](milestone-1.md).
 2. Single owner in production. Deploy, schedules with the dispatcher, the outbox, the digest,

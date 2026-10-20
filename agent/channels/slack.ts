@@ -113,7 +113,7 @@ const symRenderer = defineSlackRenderer({
     },
   },
   taskCard(view, next) {
-    const tasks = view.tasks.filter((task) => task.name !== "t3_job");
+    const tasks = view.tasks.filter((task) => task.name !== "worker_job");
     if (tasks.length === view.tasks.length) return next(view);
     if (tasks.length === 0) return null;
     return next({ ...view, tasks });

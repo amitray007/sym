@@ -117,6 +117,10 @@ describe("milestone 1", () => {
     // The verifier subagent checked the result before it posted (flow 4, decision 032).
     expect(result.text).toContain("Verdict: the result matches the brief (90% confidence).");
     expect(result.text).not.toContain("Check before you merge");
+    // Decision 043: the worker has its label, and no Slack call names the software behind it.
+    const slackBodies = JSON.stringify(h.slack.calls.map((call) => call.body));
+    expect(slackBodies).toContain("Builder thread");
+    expect(slackBodies).not.toMatch(/T3/i);
   });
 
   it("the verifier's verdict joins a rule-check concern in the one result message", async () => {

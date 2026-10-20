@@ -2,6 +2,7 @@ import type { Sql } from "../db.ts";
 import { chooseDisplay } from "../display.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
 import type { Pack } from "../pack/load.ts";
+import { workerNoun } from "../worker-label.ts";
 
 // Worker sign-in expiry (docs/workers.md, docs/architecture.md "Proactive updates"). The T3
 // sign-in lasts 30 days and has no refresh token. Reconcile calls `queueSignInNotice` every pass.
@@ -55,17 +56,17 @@ export interface SignInNoticeInput {
   target: string | undefined;
 }
 
-// The in-app sign-in (decision 036): the owner asks Sym, and Sym sends the T3 link in a DM.
-export const RENEW_STEP =
-  'To renew it, tell Sym "sign in to the worker" and approve the link Sym sends you in a DM.';
+// The in-app sign-in (decision 036): the owner asks Sym, and Sym sends the sign-in link in a DM.
+export const renewStep = () =>
+  `To renew it, tell Sym "sign in to the ${workerNoun()}" and approve the link Sym sends you in a DM.`;
 
 export function signInText(stage: Exclude<SignInStage, "none">, input: SignInNoticeInput): string {
   const day = (input.expiresAt as Date).toISOString().slice(0, 10);
   const { daysLeft } = signInNotice(input.expiresAt, input.now);
-  const step = RENEW_STEP;
+  const step = renewStep();
   return stage === "warn"
-    ? `The worker sign-in expires in ${daysLeft} ${daysLeft === 1 ? "day" : "days"} (${day}). ${step}`
-    : `The worker sign-in expired on ${day}. Jobs pause until you approve a new one. ${step}`;
+    ? `The ${workerNoun()} sign-in expires in ${daysLeft} ${daysLeft === 1 ? "day" : "days"} (${day}). ${step}`
+    : `The ${workerNoun()} sign-in expired on ${day}. Jobs pause until you approve a new one. ${step}`;
 }
 
 // Queues the due notice. The key holds the expiry date and the stage, so every pass after the

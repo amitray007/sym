@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// The brief the model writes for a worker job (docs/architecture.md, flow 1). It is the `t3_job`
+// The brief the model writes for a worker job (docs/architecture.md, flow 1). It is the `worker_job`
 // tool input and the `brief` column on the job row.
 export const Brief = z.object({
   project: z.string().describe("Worker project ID or title, from the worker's project list."),
