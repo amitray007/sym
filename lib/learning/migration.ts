@@ -29,3 +29,13 @@ export const learningMigration: Migration = {
     create index playbooks_status on playbooks (status, id);
   `,
 };
+
+// Repeated-work proposals (decision 058). Their evidence holds job IDs, not feedback IDs.
+export const repeatSourceMigration: Migration = {
+  version: "020_playbook_repeat_source",
+  sql: `
+    alter table playbooks drop constraint playbooks_source_check;
+    alter table playbooks add constraint playbooks_source_check
+      check (coalesce(source in ('owner', 'learn', 'repeat'), false));
+  `,
+};

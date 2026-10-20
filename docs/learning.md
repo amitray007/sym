@@ -31,6 +31,10 @@ decides what to keep.
    `learn` uses even with the digest off) asking the owner to review
    it. A pattern with a live proposal or approval, or a rejection in the last 28 days, is skipped.
    Changes that need code are layer 3.
+   The weekly `repeat` review (Monday 06:30 UTC, decision 058) looks for repeated work instead of
+   feedback. When at least 3 jobs finished since the last review, the brain reads recent briefs,
+   judges which kinds of work keep coming back, and drafts a playbook for each (source `repeat`,
+   with the job IDs as evidence). Code checks the evidence, and the owner approves the text.
 5. **Change.** For layer 3, Sym launches a worker thread in its own repository. The thread edits
    the code and opens a draft PR. CI runs `eve eval --strict`. A person reviews and merges, and the
    deployment updates. This replaces Eve's remote self-modification extension, which needs
@@ -43,8 +47,8 @@ decides what to keep.
 
 Rows live in `playbooks` (migration 006) with a version history: name, kind (`playbook` or
 `rule`), body (up to 2000 characters), status (`proposed`, `approved`, `rejected`, `retired`),
-source (`owner` or `learn`), and evidence. Only one version of a name is approved at a time, and
-approving a new version retires the old one. The owner proposes with `playbook_propose` and
+source (`owner`, `learn`, or `repeat`), and evidence (feedback IDs, or job IDs for `repeat`).
+Only one version of a name is approved at a time, and approving a new version retires the old one. The owner proposes with `playbook_propose` and
 approves with `playbook_review`, which shows the exact body that will load. `playbook_retire`
 retires a row or rejects a proposal. `agent/instructions/playbooks.ts` loads approved rows as
 system instructions at `session.started`, rules first, at most 8000 characters in total, inside a

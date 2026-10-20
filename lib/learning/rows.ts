@@ -6,7 +6,7 @@ import { json } from "../ledger/jobs.ts";
 
 export type PlaybookKind = "playbook" | "rule";
 export type PlaybookStatus = "proposed" | "approved" | "rejected" | "retired";
-export type PlaybookSource = "owner" | "learn";
+export type PlaybookSource = "owner" | "learn" | "repeat";
 
 export interface Playbook {
   id: number;

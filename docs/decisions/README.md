@@ -62,3 +62,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [054](054-opt-in-proactive-features.md) | The daily digest, the verifier, and PR follow are off unless `SYM_DIGEST`, `SYM_VERIFIER`, or `SYM_PR_FOLLOW` is on |
 | [055](055-pack-schedules.md) | A pack's `schedules.yaml` seeds schedule rows as `pending_approval`; the owner approves each once with `schedule_approve`, a changed brief asks again, and a removed key is deleted |
 | [057](057-pr-fact-checks.md) | A finished code job stores the worker's pull request facts and runs generic rule checks on them; the verifier judges production-touching changes; CI status comes only from PR-follow wakes |
+| [058](058-repeated-work.md) | A weekly review lets the brain find repeated work in recent briefs and draft playbooks for the owner to approve |

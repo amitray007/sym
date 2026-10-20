@@ -12,6 +12,8 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A message that says "sign in to the worker" calls worker_sign_in.
 // - A message that says "thinking out loud" calls no_reply (side talk, decision 050).
 // - A message with "fixture-react <emoji>" calls slack_react, then ends the turn with no_reply.
+// - A repeated-work review calls repeated_work, proposes one playbook for any title seen 3 or more
+//   times, then ends the turn with no_reply.
 // - A task result, or a tool result with `posted: true`, ends the turn with no_reply.
 // - Anything else gets a one-line echo.
 export function fixtureBrain(): LanguageModel {
@@ -39,6 +41,8 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
     if (result?.name === "jobs_status") return String(result.output);
     // A reaction stands in for the reply.
     if (result?.name === "slack_react") return quiet(request);
+    if (result?.name === "repeated_work") return proposeRepeated(request, String(result.output));
+    if (result?.name === "repeated_work_propose") return quiet(request);
     // The worker_job receipt: the job card and the brief speak for Sym while the job runs.
     return { text: "" };
   }
@@ -57,6 +61,9 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
     return { toolCalls: [{ name: "worker_sign_in", input: {} }] };
   }
   if (/\bthinking out loud\b/i.test(message)) return quiet(request);
+  if (/^Repeated-work review\./m.test(message)) {
+    return { toolCalls: [{ name: "repeated_work", input: {} }] };
+  }
   if (/\b(update|status)\b/i.test(message)) {
     const job = /\bJ-\d+\b/.exec(message)?.[0];
     return { toolCalls: [{ name: "jobs_status", input: job ? { job } : {} }] };
@@ -69,6 +76,25 @@ function quiet(request: MockModelRequest): MockModelResponse {
   return canStayQuiet
     ? { toolCalls: [{ name: "no_reply", input: { reason: "Sym posted the job result." } }] }
     : { text: "" };
+}
+
+// Groups the review's job lines by title and proposes the first title seen 3 or more times.
+function proposeRepeated(request: MockModelRequest, output: string): MockModelResponse {
+  const byTitle = new Map<string, string[]>();
+  for (const [, ref, title] of output.matchAll(/^(J-\d+) \[[^\]]*\] (.+)$/gm)) {
+    if (ref && title) byTitle.set(title, [...(byTitle.get(title) ?? []), ref]);
+  }
+  const [title, jobs] = [...byTitle].find(([, refs]) => refs.length >= 3) ?? [];
+  if (!title || !jobs) return quiet(request);
+  const name = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  const body = `Steps for "${title}": write the brief with the same project, goal, and done-when checks.`;
+  return {
+    toolCalls: [{ name: "repeated_work_propose", input: { proposals: [{ name, body, jobs }] } }],
+  };
 }
 
 function briefIn(text: string): Record<string, unknown> | undefined {
