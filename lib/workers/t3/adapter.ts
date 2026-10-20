@@ -30,7 +30,21 @@ const Capabilities = z.object({
     z.object({
       providerInstanceId: z.string(),
       displayName: z.string(),
-      models: z.array(z.object({ id: z.string() })),
+      models: z.array(
+        z.object({
+          id: z.string(),
+          // Select options such as reasoning effort. Other option types are ignored.
+          options: z
+            .array(
+              z.object({
+                id: z.string(),
+                type: z.string().optional(),
+                options: z.array(z.object({ id: z.string() })).optional(),
+              }),
+            )
+            .catch([]),
+        }),
+      ),
       constraints: z.array(z.string()).default([]),
     }),
   ),
@@ -139,6 +153,17 @@ export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): Worke
           id: provider.providerInstanceId,
           name: provider.displayName,
           models: provider.models.map((model) => model.id),
+          modelOptions: Object.fromEntries(
+            provider.models.map((model) => [
+              model.id,
+              model.options
+                .filter((option) => option.type === "select" && option.options)
+                .map((option) => ({
+                  id: option.id,
+                  values: (option.options ?? []).map((value) => value.id),
+                })),
+            ]),
+          ),
           available: provider.constraints.length === 0 && provider.models.length > 0,
         })),
       };
@@ -191,6 +216,7 @@ export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): Worke
                 modelSelection: {
                   instanceId: request.model.providerId,
                   model: request.model.model,
+                  ...(request.model.options?.length ? { options: request.model.options } : {}),
                 },
               }
             : {}),

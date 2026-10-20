@@ -1,4 +1,6 @@
 // Pure rules the job flow applies from the pack. No I/O.
+
+import { type ModelList, modelList } from "../workers/models.ts";
 import type { Pack } from "./load.ts";
 import type { PackProject, PackWorker } from "./schema.ts";
 
@@ -42,4 +44,16 @@ export function briefGuardrails(
 // The owner always counts. An empty allow-list means the owner only.
 export function isAllowedSlackUser(pack: Pack, userId: string): boolean {
   return userId === pack.config.owner.slackUserId || pack.config.allowList.includes(userId);
+}
+
+// The model list for a pack worker (decision 041). `envModel` is SYM_WORKER_MODEL.
+export function workerModelList(
+  pack: Pack | undefined,
+  workerName: string | undefined,
+  envModel?: string,
+): ModelList {
+  const workers = pack?.config.workers ?? [];
+  const worker =
+    workers.find((w) => w.name === workerName) ?? (workers.length === 1 ? workers[0] : undefined);
+  return modelList(worker?.models, envModel);
 }

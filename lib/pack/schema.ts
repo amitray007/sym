@@ -1,6 +1,7 @@
 // The adopter pack manifest (docs/adopting.md). A pack holds adopter specifics only. It never
 // holds secrets, so the schema rejects any field that looks like one.
 import { z } from "zod";
+import { DEFAULT_MODELS, MODEL_ID } from "../workers/models.ts";
 
 const slackUserId = z
   .string()
@@ -8,6 +9,17 @@ const slackUserId = z
 const slackChannelId = z.string().regex(/^[CGD][A-Z0-9]+$/, "must be a Slack channel ID");
 const clock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "must look like HH:MM");
 const relativeFile = z.string().min(1).endsWith(".md", "must be a Markdown file");
+
+const modelId = z.string().regex(MODEL_ID, "must look like <provider>/<model>");
+
+// One model the brain may pick for a worker job (decision 041).
+const workerModelEntry = z.strictObject({
+  id: modelId,
+  // When to pick this model. The brain reads it.
+  use: z.string().min(1),
+  effort: z.string().min(1).optional(),
+  default: z.boolean().optional(),
+});
 
 const worker = z.strictObject({
   name: z.string().min(1),
@@ -17,6 +29,8 @@ const worker = z.strictObject({
     const url = new URL(value);
     return !url.username && !url.password && !url.search && !url.hash;
   }, "must not carry credentials, a query, or a fragment"),
+  // The models the brain may pick. Without any, the built-in list applies.
+  models: z.array(workerModelEntry).optional(),
 });
 
 const project = z.strictObject({
@@ -29,6 +43,8 @@ const project = z.strictObject({
   // "none" means the worker never pushes or opens a pull request.
   prPolicy: z.enum(["none", "draft"]).default("none"),
   productionData: z.literal("read-only").default("read-only"),
+  // Always run this project's jobs on this model. It must be on the worker's list.
+  model: modelId.optional(),
 });
 
 export const packSchema = z
@@ -55,7 +71,35 @@ export const packSchema = z
     if (new Set(projectNames).size !== projectNames.length) {
       ctx.addIssue({ code: "custom", path: ["projects"], message: "project names must be unique" });
     }
+    pack.workers.forEach((w, index) => {
+      const ids = (w.models ?? []).map((m) => m.id);
+      if (new Set(ids).size !== ids.length) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["workers", index, "models"],
+          message: "model ids must be unique",
+        });
+      }
+      if ((w.models ?? []).filter((m) => m.default).length > 1) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["workers", index, "models"],
+          message: "at most one model can set default: true",
+        });
+      }
+    });
     pack.projects.forEach((p, index) => {
+      const worker = pack.workers.find((w) => w.name === p.worker);
+      if (p.model && worker) {
+        const listed = worker.models?.length ? worker.models : DEFAULT_MODELS;
+        if (!listed.some((m) => m.id === p.model)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["projects", index, "model"],
+            message: `"${p.model}" is not in the model list of worker "${worker.name}"`,
+          });
+        }
+      }
       if (!names.has(p.worker)) {
         ctx.addIssue({
           code: "custom",

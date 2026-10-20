@@ -32,6 +32,8 @@ export interface Job {
   worker: string;
   workerProjectId: string | null;
   workerThreadId: string | null;
+  // The model the worker thread runs, as `<provider>/<model>`. Null when the worker's default applies.
+  workerModel: string | null;
   cursor: string | null;
   lastSummary: string | null;
   lastMessage: string | null;
@@ -74,6 +76,7 @@ export type JobUpdate = Partial<
     | "status"
     | "workerThreadId"
     | "workerProjectId"
+    | "workerModel"
     | "cursor"
     | "lastSummary"
     | "lastMessage"

@@ -32,11 +32,24 @@ export function pack(): Pack | undefined {
   return loadedPack.pack;
 }
 
+// SYM_WORKER_MODEL, the default worker model. A malformed value only warns: every ledger step
+// builds these deps, so a typo must not stop delivery or reconcile. Jobs then use the list default.
+function envWorkerModel() {
+  try {
+    return parseWorkerModel(process.env.SYM_WORKER_MODEL);
+  } catch (error) {
+    console.warn(error instanceof Error ? error.message : String(error));
+    return undefined;
+  }
+}
+
 export function ledgerDeps(): LedgerDeps {
   const slack = slackFromEnv();
   const adopterPack = pack();
+  const workerModel = envWorkerModel();
   return {
     sql: ledger(),
+    ...(workerModel ? { workerModel } : {}),
     ...(slack ? { slack } : {}),
     ...(adopterPack ? { pack: adopterPack } : {}),
   };
@@ -68,14 +81,12 @@ export async function withJobDeps<T>(fn: (deps: JobDeps) => Promise<T>): Promise
   const { token } = worker;
   const connection = await connectT3({ url: worker.url, getToken: async () => token });
   try {
-    const workerModel = parseWorkerModel(process.env.SYM_WORKER_MODEL);
     // `workerName` names the worker this connection reaches, so a job for a pack project on
     // another worker is refused instead of running here.
     const deps = {
       ...ledgerDeps(),
       worker: t3Adapter(connection.call, { signInExpiresAt: worker.expiresAt }),
       workerName: worker.name,
-      ...(workerModel ? { workerModel } : {}),
     };
     return await fn(deps);
   } finally {

@@ -12,8 +12,14 @@ import {
 } from "../ledger/jobs.ts";
 import { getSessionThread } from "../ledger/threads.ts";
 import type { Pack } from "../pack/load.ts";
-import { briefGuardrails, resolvePackProject } from "../pack/policy.ts";
+import { briefGuardrails, resolvePackProject, workerModelList } from "../pack/policy.ts";
 import type { SlackApi } from "../slack/api.ts";
+import {
+  briefModelLine,
+  chooseModel,
+  type ModelList,
+  resolveAvailable,
+} from "../workers/models.ts";
 import type {
   Activity,
   ActivityItem,
@@ -46,8 +52,7 @@ export interface WorkerModel {
 export interface JobDeps {
   sql: Sql;
   worker: WorkerAdapter;
-  // The model worker threads run. Without it the worker project's default applies, and T3
-  // refuses a launch in a project that has none.
+  // SYM_WORKER_MODEL: the default entry of the worker's model list (decision 041).
   workerModel?: WorkerModel;
   // Sends Sym's own posts right after a step enqueues them. Without it, posts wait for the
   // delivery schedule.
@@ -60,7 +65,7 @@ export interface JobDeps {
 }
 
 // The ledger and Slack part of JobDeps, for steps that do not call the worker.
-export type LedgerDeps = Pick<JobDeps, "sql" | "slack" | "now" | "pack">;
+export type LedgerDeps = Pick<JobDeps, "sql" | "slack" | "now" | "pack" | "workerModel">;
 
 // The Slack status line shows at most 50 characters (docs/slack.md).
 export const STATUS_LINE_MAX = 50;
@@ -130,6 +135,7 @@ export async function startJob(sql: Sql, input: StartJobInput): Promise<Job> {
 export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: string) {
   const lock = await deps.sql.reserve();
   let launched: Job;
+  let note: string | undefined;
   try {
     await lock`select pg_advisory_lock(${LAUNCH_LOCK}, ${jobId})`;
     // Reads and writes under the lock use the reserved connection. Taking another pooled
@@ -138,7 +144,14 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
     if (job.workerThreadId) return job;
 
     const plan = await planLaunch(deps, Brief.parse(job.brief));
-    if (deps.workerModel) await checkModel(deps.worker, deps.workerModel);
+    const model = resolveAvailable(
+      plan.models,
+      chooseModel(plan.models, {
+        projectModel: plan.projectModel,
+        briefModel: plan.brief.model,
+      }),
+      await deps.worker.capabilities(),
+    );
     const existing = await deps.worker.findByTitle(plan.projectId, `[${jobRef(job.id)}]`);
     const thread =
       existing ??
@@ -147,7 +160,7 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
         title: threadTitle(job),
         message: workerMessage(plan.brief, jobRef(job.id), callbackUrl, plan.guardrails),
         baseRef: plan.baseRef,
-        ...(deps.workerModel ? { model: deps.workerModel } : {}),
+        ...(model.selection ? { model: model.selection } : {}),
       }));
     const projectId = plan.projectId;
 
@@ -155,15 +168,18 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
       status: "running",
       workerProjectId: projectId,
       workerThreadId: thread.id,
+      workerModel: model.entry?.id ?? null,
+      ...(model.note ? { lastSummary: model.note.slice(0, SUMMARY_MAX) } : {}),
       startedAt: job.startedAt ?? now(deps),
     });
+    note = model.note;
   } finally {
     await lock`select pg_advisory_unlock(${LAUNCH_LOCK}, ${jobId})`.catch(() => {});
     lock.release();
   }
 
   await renewWatch(deps.sql, launched.id, WATCH_LEASE_MS);
-  const presented = await presentStart(deps.sql, launched, now(deps), deps.pack);
+  const presented = await presentStart(deps.sql, launched, now(deps), deps.pack, note);
   await deliverNow(deps);
   return presented;
 }
@@ -384,7 +400,14 @@ export async function markScheduledCheck(sql: Sql, jobId: number): Promise<void>
 // Shows the owner the full brief in the job thread before the Start prompt.
 export async function showBrief(deps: LedgerDeps, jobId: number): Promise<void> {
   const job = await mustGetJob(deps.sql, jobId);
-  await presentBrief(deps.sql, job);
+  const brief = Brief.parse(job.brief);
+  const { models, projectModel } = modelsFor(deps, brief.project);
+  const line = briefModelLine(models, {
+    projectModel,
+    briefModel: brief.model,
+    ...(brief.modelReason ? { reason: brief.modelReason } : {}),
+  });
+  await presentBrief(deps.sql, job, line);
   await deliverNow(deps);
 }
 
@@ -495,13 +518,18 @@ interface LaunchPlan {
   // The brief as the worker gets it: a pack can turn a requested PR off.
   brief: Brief;
   guardrails?: string[];
+  // The worker's model list, and the model the pack pins for the project.
+  models: ModelList;
+  projectModel?: string;
 }
 
 // Applies the pack, when there is one: only its projects, its base branch, its PR policy, and
 // its guardrails. A pack narrows what a brief may ask for; it never widens it.
 async function planLaunch(deps: JobDeps, brief: Brief): Promise<LaunchPlan> {
+  const envModel = envModelId(deps);
   if (!deps.pack) {
     return {
+      models: workerModelList(undefined, undefined, envModel),
       projectId: await resolveProject(deps.worker, brief.project),
       baseRef: brief.baseRef ?? "main",
       brief,
@@ -523,12 +551,33 @@ async function planLaunch(deps: JobDeps, brief: Brief): Promise<LaunchPlan> {
   }
   const openPullRequest = brief.openPullRequest && allowed.project.prPolicy === "draft";
   return {
+    models: workerModelList(deps.pack, allowed.worker.name, envModel),
+    ...(allowed.project.model ? { projectModel: allowed.project.model } : {}),
     projectId: await resolveProject(deps.worker, allowed.workerProject),
     baseRef: brief.baseRef ?? allowed.project.defaultBaseBranch,
     brief: { ...brief, openPullRequest },
     guardrails: briefGuardrails(deps.pack, allowed.project, openPullRequest),
   };
 }
+
+// The model list and the pinned model for a project, without the checks a launch makes.
+function modelsFor(
+  deps: Pick<JobDeps, "pack" | "workerModel" | "workerName">,
+  project: string,
+): { models: ModelList; projectModel?: string | undefined } {
+  const envModel = envModelId(deps);
+  const allowed = deps.pack ? resolvePackProject(deps.pack, project) : undefined;
+  if (allowed?.ok) {
+    return {
+      models: workerModelList(deps.pack, allowed.worker.name, envModel),
+      projectModel: allowed.project.model,
+    };
+  }
+  return { models: workerModelList(deps.pack, deps.workerName, envModel) };
+}
+
+const envModelId = (deps: Pick<JobDeps, "workerModel">) =>
+  deps.workerModel && `${deps.workerModel.providerId}/${deps.workerModel.model}`;
 
 async function resolveProject(worker: WorkerAdapter, project: string): Promise<string> {
   const projects = await worker.projects();
@@ -538,17 +587,6 @@ async function resolveProject(worker: WorkerAdapter, project: string): Promise<s
     projects.find((p) => p.title.toLowerCase() === wanted);
   if (!match) throw new JobSetupError(`The worker has no project "${project}".`);
   return match.id;
-}
-
-// The worker reports its providers and models before each launch (docs/workers.md).
-async function checkModel(worker: WorkerAdapter, choice: WorkerModel): Promise<void> {
-  const { providers } = await worker.capabilities();
-  const provider = providers.find((p) => p.id === choice.providerId);
-  if (!provider?.available || !provider.models.includes(choice.model)) {
-    throw new JobSetupError(
-      `The worker does not offer ${choice.providerId}/${choice.model}. Run pnpm t3:check.`,
-    );
-  }
 }
 
 async function mustGetJob(sql: Sql, jobId: number): Promise<Job> {

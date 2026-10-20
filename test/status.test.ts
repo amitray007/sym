@@ -28,6 +28,7 @@ function job(overrides: Partial<Job> = {}): Job {
     worker: "t3",
     workerProjectId: null,
     workerThreadId: "thread-1",
+    workerModel: null,
     cursor: null,
     lastSummary: null,
     lastMessage: null,

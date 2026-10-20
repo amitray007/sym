@@ -48,9 +48,21 @@ const launch = (title: string) =>
 
 describe("t3 over the wire", () => {
   it("reads capabilities", async () => {
-    expect(await worker.capabilities()).toEqual({
-      providers: [{ id: "fake", name: "Fake", models: ["fake-model"], available: true }],
+    const { providers } = await worker.capabilities();
+    expect(providers.map((p) => p.id)).toEqual(["fake", "claudeAgent", "codex"]);
+    expect(providers[0]).toEqual({
+      id: "fake",
+      name: "Fake",
+      models: ["fake-model"],
+      modelOptions: { "fake-model": [] },
+      available: true,
     });
+    expect(providers[1]?.modelOptions?.["claude-opus-5-5"]).toEqual([
+      { id: "effort", values: ["low", "medium", "high"] },
+    ]);
+    expect(providers[2]?.modelOptions?.["gpt-6-luna"]).toEqual([
+      { id: "reasoningEffort", values: ["low", "medium", "high"] },
+    ]);
   });
 
   it("pages through projects", async () => {

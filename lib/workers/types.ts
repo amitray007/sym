@@ -16,10 +16,18 @@ export interface WorkerProject {
   workspaceRoot: string;
 }
 
+// A select option of a model, with the value IDs it accepts.
+export interface WorkerSelectOption {
+  id: string;
+  values: string[];
+}
+
 export interface WorkerProvider {
   id: string;
   name: string;
   models: string[];
+  // Per model ID, the select options the worker offers, such as reasoning effort.
+  modelOptions?: Record<string, WorkerSelectOption[]>;
   // False when the worker reports a constraint, for example a disabled provider.
   available: boolean;
 }
@@ -44,7 +52,8 @@ export interface LaunchRequest {
   // The branch the new worktree starts from.
   baseRef: string;
   branch?: string;
-  model?: { providerId: string; model: string };
+  // Options are `{ id, value }` pairs such as the reasoning effort.
+  model?: { providerId: string; model: string; options?: { id: string; value: string }[] };
 }
 
 export interface WaitResult {

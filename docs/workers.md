@@ -88,8 +88,8 @@ and attachments (10 MiB images, 50 MiB files) for passing Slack files into a thr
   pairing code, and picks the access level there.
 - `t3 auth session issue --subject mcp-client` mints a token without OAuth, but its ceiling is at
   most Supervised. Sym needs the consent flow for Auto (decision 009).
-- An outside client must pass `modelSelection` when the project has no default model. Sym
-  passes `SYM_WORKER_MODEL` and first checks that `orchestrator_capabilities` offers it.
+- An outside client must pass `modelSelection` when the project has no default model. Sym passes
+  the job's model (see Model selection) after checking that `orchestrator_capabilities` offers it.
 - Sym calls T3 from code through `lib/workers/t3/` (decision 015).
 - The owner signs Sym in from Slack (decision 036): "sign in to the worker" runs the
   `worker_sign_in` tool. Sym registers with T3 for a redirect on `SYM_SIGNIN_URL` (else
@@ -101,6 +101,27 @@ and attachments (10 MiB images, 50 MiB files) for passing Slack files into a thr
   OAuth code and saves the token to `.env.local` for local runs.
 - With no URL and token at all, reconcile logs a warning and skips the worker pass. It marks jobs
   `worker_offline` only when a connection fails.
+
+### Model selection
+
+The brain picks one model per job from the worker's list (decision 041). The pack lists the models
+under `workers[].models`; without it a built-in list applies. `SYM_WORKER_MODEL` becomes the
+default entry. Sym resolves the model in code:
+
+1. The pack project's `model`.
+2. The brief's `model`, when it is on the list. An off-list model becomes the default, with a note.
+3. The list default.
+
+Sym then reads `orchestrator_capabilities`. When the worker does not offer the model, Sym takes the
+first available listed model, the default first, and writes the reason to the job summary and the
+start line. When no listed model is available, `t3_thread_launch` gets no `modelSelection` and the
+project default applies. The job row records the launched model in `worker_model`.
+
+Effort: each listed model may set `effort`. The adapter reads each model's select options from
+`orchestrator_capabilities`. It uses the option whose ID is `effort` (Claude), `reasoningEffort`
+(Codex), `reasoning_effort`, or `reasoning`, and only when the option offers the wanted value. It
+then sends `modelSelection.options: [{ id, value }]`, the shape T3 uses for inherited options. A
+model without a matching option launches without effort.
 
 ### Limits
 

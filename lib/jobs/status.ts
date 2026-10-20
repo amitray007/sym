@@ -30,6 +30,7 @@ export function jobAnswer(job: Job, now: Date): string {
   if (job.lastSummary) lines.push(`Last: ${job.lastSummary}`);
   const waiting = WAITING_ON[job.status];
   if (waiting) lines.push(waiting);
+  if (job.workerModel) lines.push(`Model: ${job.workerModel}`);
   if (job.prUrl) lines.push(`PR: ${job.prUrl}`);
   return lines.join("\n");
 }

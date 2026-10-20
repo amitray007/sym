@@ -46,3 +46,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [038](038-second-review-fixes.md) | Fixes from the second independent review |
 | [039](039-evals.md) | Evals check the brain's routing with a real model, with stubbed tools |
 | [040](040-reference-compose.md) | One compose file runs the local lab and the deployment |
+| [041](041-worker-model-choice.md) | The brain picks a worker model per job from an allow-list with a purpose per model |

@@ -40,6 +40,8 @@ export interface FakeWorkerOptions {
   script?: FakeStep[];
   // The next launch creates the thread but throws, like a lost launch response.
   loseNextLaunchResponse?: boolean;
+  // What `capabilities` reports. Defaults: fake, claudeAgent, and codex, all available.
+  capabilities?: WorkerCapabilities;
   // What `health` reports. Defaults: reachable, signed in, no known expiry.
   health?: WorkerHealth;
 }
@@ -66,7 +68,33 @@ export class FakeWorker implements WorkerAdapter {
   }
 
   async capabilities(): Promise<WorkerCapabilities> {
-    return { providers: [{ id: "fake", name: "Fake", models: ["fake-model"], available: true }] };
+    return (
+      this.options.capabilities ?? {
+        providers: [
+          { id: "fake", name: "Fake", models: ["fake-model"], available: true },
+          {
+            id: "claudeAgent",
+            name: "Claude",
+            models: ["claude-sonnet-5-5", "claude-opus-5-5"],
+            modelOptions: {
+              "claude-sonnet-5-5": [{ id: "effort", values: ["low", "medium", "high"] }],
+              "claude-opus-5-5": [{ id: "effort", values: ["low", "medium", "high"] }],
+            },
+            available: true,
+          },
+          {
+            id: "codex",
+            name: "Codex",
+            models: ["gpt-6-luna", "gpt-6.1-sol"],
+            modelOptions: {
+              "gpt-6-luna": [{ id: "reasoningEffort", values: ["low", "medium", "high"] }],
+              "gpt-6.1-sol": [{ id: "reasoningEffort", values: ["low", "medium", "high"] }],
+            },
+            available: true,
+          },
+        ],
+      }
+    );
   }
 
   async projects(): Promise<WorkerProject[]> {

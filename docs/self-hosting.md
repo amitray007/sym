@@ -28,7 +28,7 @@ Tailscale Funnel limited to the Slack path also works.
 | `SLACK_SIGNING_SECRET` | Slack app, Basic Information |
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway, for the brain model |
 | `SYM_MODEL` | Gateway model ID, for example `anthropic/claude-sonnet-5.5`. Optional |
-| `SYM_WORKER_MODEL` | Worker thread model as `<provider>/<model>`, for example `codex/gpt-6-luna`. Needed when a worker project has no default model |
+| `SYM_WORKER_MODEL` | Optional. Overrides the default worker model, as `<provider>/<model>`, for example `codex/gpt-6-luna`. It joins the model list when missing (decision 041) |
 | `DATABASE_URL` | Postgres. `compose.yaml` builds it from `POSTGRES_PASSWORD` |
 | `SYM_PACK_DIR` | Path to the mounted pack |
 | `SYM_MCP_TOKEN` | Bearer for worker threads calling `/eve/v1/mcp`. Unset means the channel rejects every request. Keep it on the private network (decision 027) |
