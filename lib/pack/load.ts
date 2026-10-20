@@ -20,6 +20,7 @@ export interface Pack {
   dir: string;
   config: PackConfig;
   instructions: PackFile[];
+  persona?: PackFile;
   playbooks: PackFile[];
 }
 
@@ -93,10 +94,12 @@ export function loadPack(dir: string): Pack {
   }
 
   const config = parsed.data;
+  const persona = config.persona ? readReferenced(root, [config.persona], "persona")[0] : undefined;
   return {
     dir: root,
     config,
     instructions: readReferenced(root, config.instructions, "instructions"),
+    ...(persona ? { persona } : {}),
     playbooks: readReferenced(root, config.playbooks, "playbooks"),
   };
 }

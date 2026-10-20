@@ -54,7 +54,7 @@ describe("messages with a custom label", () => {
         expect(text).not.toMatch(/T3/i);
       }
       expect(permissionBlockMessage("J-1")).toBe(
-        "J-1 is waiting for a permission prompt on the builder. Approve it in the builder.",
+        "🔒 J-1 is waiting for a permission prompt on the builder. Approve it in the builder.",
       );
     } finally {
       delete process.env.SYM_WORKER_LABEL;

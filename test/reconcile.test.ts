@@ -162,7 +162,7 @@ describe.skipIf(!hasDatabase)("reconcileJobs", () => {
     const posts = textsOf(s.newPosts());
     expect(posts).toHaveLength(1);
     expect(posts[0]).toContain(SUMMARY);
-    expect(posts[0]).not.toContain("Verdict");
+    expect(posts[0]).not.toContain("verifier");
     expect(posts[0]).not.toContain("Model check");
   });
 

@@ -138,6 +138,23 @@ describe("respondAsFixture", () => {
     });
   });
 
+  it("calls no_reply when a tool result says posted: true", () => {
+    const output = '{"job":"J-3","status":"done","posted":true}';
+    const result = respondAsFixture(
+      request("go", {
+        tools: ["no_reply"],
+        messages: [
+          { role: "user", text: "go" },
+          { role: "tool", text: output },
+        ],
+        toolResults: [{ id: "c1", name: "worker_job", output, isError: false }],
+      }),
+    );
+    expect(result).toEqual({
+      toolCalls: [{ name: "no_reply", input: { reason: "Sym posted the job result." } }],
+    });
+  });
+
   it("answers with empty text for a task result when no_reply is missing", () => {
     expect(
       respondAsFixture(

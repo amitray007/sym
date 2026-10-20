@@ -68,8 +68,8 @@ describe("milestone 1", () => {
     expect(job.status).toBe("launching");
     expect(approval.controls.map((control) => control.label)).toEqual(["Start", "Edit", "Cancel"]);
     // Eve's prompt card is short, so the full brief is Sym's own message above it.
-    const brief = c.botMessages().find((m) => messageText(m).includes("Goal: Add retry"));
-    expect(brief && messageText(brief)).toContain("Done when:");
+    const brief = c.botMessages().find((m) => messageText(m).includes("*goal* Add retry"));
+    expect(brief && messageText(brief)).toContain("*done when*");
     const beforeStart = c.botMessages().map((m) => m.ts);
 
     await c.click(approval, "Start");
@@ -115,12 +115,12 @@ describe("milestone 1", () => {
     expect(done.prUrl).toBe(SAMPLE_CONTRACT.pr_url);
     expect(done.lastMessage).toContain(SAMPLE_CONTRACT.summary);
     // The verifier subagent checked the result before it posted (flow 4, decision 032).
-    expect(result.text).toContain("Verdict: the result matches the brief (90% confidence).");
-    expect(result.text).not.toContain("Check before you merge");
+    expect(result.text).toContain("✅ verifier: matches the brief (90% sure)");
+    expect(result.text).not.toContain("check before merge");
     // Decision 043: the worker has its label, and no Slack call names the software behind it.
     const slackBodies = JSON.stringify(h.slack.calls.map((call) => call.body));
     expect(slackBodies).toContain("Builder thread");
-    expect(slackBodies).not.toMatch(/T3/i);
+    expect(slackBodies).not.toMatch(/\bT3\b/i);
   });
 
   it("the verifier's verdict joins a rule-check concern in the one result message", async () => {
@@ -145,8 +145,8 @@ describe("milestone 1", () => {
 
     expect(newSince(c, before).map((m) => m.ts)).toEqual([result.ts]);
     const concern = "The worker opened a pull request the job did not allow.";
-    expect(result.text).toContain("Verdict: check the concerns below (60% confidence).");
-    expect(result.text).toContain(`Check before you merge:\n• ${concern}`);
+    expect(result.text).toContain("*⚠️ check before merge* (60% sure)");
+    expect(result.text).toContain(`*⚠️ check before merge* (60% sure)\n1. ${concern}`);
     // The fixture verifier repeats the rule-check concern; the message lists it once.
     expect(result.text?.split(concern)).toHaveLength(2);
   });

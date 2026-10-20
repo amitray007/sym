@@ -29,22 +29,37 @@ const statusWords = (): Record<JobStatus, string> => ({
   cancelled: "cancelled",
 });
 
+const STATUS_EMOJI: Record<JobStatus, string> = {
+  launching: "⏳",
+  running: "🔄",
+  waiting_input: "🙋",
+  waiting_permission: "🔒",
+  quiet: "💤",
+  worker_offline: "🔌",
+  checking: "🔍",
+  done: "✅",
+  failed: "❌",
+  cancelled: "🚫",
+};
+
 export function jobAnswer(job: Job, now: Date): string {
-  const lines = [`${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}.`];
-  if (job.lastSummary) lines.push(`Last: ${job.lastSummary}`);
+  const lines = [
+    `${STATUS_EMOJI[job.status]} ${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}.`,
+  ];
+  if (job.lastSummary) lines.push(`last: ${job.lastSummary}`);
   const waiting = waitingOn()[job.status];
   if (waiting) lines.push(waiting);
-  if (job.workerModel) lines.push(`Model: ${job.workerModel}`);
-  if (job.prUrl) lines.push(`PR: ${job.prUrl}`);
+  if (job.workerModel) lines.push(`model: ${job.workerModel}`);
+  if (job.prUrl) lines.push(`🔗 ${job.prUrl}`);
   return lines.join("\n");
 }
 
 export function jobListAnswer(jobs: Job[], now: Date): string {
-  if (jobs.length === 0) return "No active jobs, and none finished today.";
+  if (jobs.length === 0) return "no active jobs, and none finished today.";
   return jobs
     .map((job) => {
       const summary = job.lastSummary ? ` · ${job.lastSummary}` : "";
-      return `${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}${summary}`;
+      return `${STATUS_EMOJI[job.status]} ${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}${summary}`;
     })
     .join("\n");
 }

@@ -456,7 +456,9 @@ export function isCard(message: FakeSlackMessage): boolean {
 }
 
 export async function resultMessage(c: Conversation, ref: string): Promise<FakeSlackMessage> {
-  return until(() => c.botMessages().find((m) => (m.text ?? "").startsWith(`*${ref} done`)), {
+  // The result headline is "<status emoji> *J-3 · title* · 1m"; the job card has no emoji prefix.
+  const headline = new RegExp(`^(✅|⚠️) \\*${ref} · `);
+  return until(() => c.botMessages().find((m) => headline.test(m.text ?? "")), {
     label: `${ref} result message`,
   });
 }

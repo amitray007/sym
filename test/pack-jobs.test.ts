@@ -140,7 +140,7 @@ describe.skipIf(!hasDatabase)("jobs under a pack", () => {
     await checkJob(deps, job.id, 1000);
 
     const result = posts.find((text) => text.includes("Added retry"));
-    expect(result).toContain("Check before you merge:");
+    expect(result).toContain("*⚠️ check before merge*");
     expect(result).toContain("Changed files outside the allowed paths: config/prod.yml.");
   });
 });

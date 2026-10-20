@@ -60,6 +60,8 @@ export const packSchema = z
     projects: z.array(project).default([]),
     // Markdown files, relative to the pack folder.
     instructions: z.array(relativeFile).default([]),
+    // The brain's persona, such as personas/dry.md. It wins over SYM_PERSONA (decision 044).
+    persona: relativeFile.optional(),
     playbooks: z.array(relativeFile).default([]),
   })
   .superRefine((pack, ctx) => {
