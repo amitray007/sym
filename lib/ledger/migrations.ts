@@ -140,4 +140,11 @@ export const migrations: Migration[] = [
     `,
   },
   connectionsMigration,
+  {
+    version: "012_settings_updated_by",
+    sql: `
+      -- Who last changed a setting, for the ones set from Slack, such as the persona (decision 046).
+      alter table settings add column if not exists updated_by text;
+    `,
+  },
 ];

@@ -2,6 +2,7 @@ import {
   defaultSlackAuth,
   defineSlackRenderer,
   postCompletedSlackReply,
+  type SlackContext,
   type SlackInputResponseSubmission,
   type SlackMessage,
   slackChannel,
@@ -21,6 +22,13 @@ import { stopJob } from "../../lib/jobs/steer.ts";
 import { recentJobs } from "../../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../../lib/ledger/threads.ts";
 import { isApprovalAction, mayDecideAsOwner } from "../../lib/owner.ts";
+import { loadingMessages } from "../../lib/persona.ts";
+import {
+  changePersona,
+  describePersona,
+  personaStatus,
+  storedPersonaOrNone,
+} from "../../lib/persona-setting.ts";
 import { parseSymCommand, slackText, USAGE } from "../../lib/quiet/command.ts";
 import { formatClock, getQuietUntil, setQuietUntil } from "../../lib/quiet/quiet.ts";
 import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
@@ -40,7 +48,7 @@ const isAllowed = (userId: string | undefined) =>
 const STATUS_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 // `/sym ...` answers from the ledger without a model call (docs/slack.md).
-async function answerSymCommand(text: string, now: Date): Promise<string> {
+async function answerSymCommand(text: string, now: Date, userId: string): Promise<string> {
   const command = parseSymCommand(text);
   const zone = pack()?.config.timeZone;
   switch (command.type) {
@@ -65,8 +73,39 @@ async function answerSymCommand(text: string, now: Date): Promise<string> {
       await setQuietUntil(ledger(), until);
       return `Quiet until ${formatClock(until, zone)}. Questions, approvals, and failures still post.`;
     }
+    case "persona": {
+      // Anyone allowed may read it. Only the owner may change it (decision 046).
+      if (command.name) {
+        return changePersona({ sql: ledger(), pack: pack(), userId, name: command.name });
+      }
+      const stored = await storedPersonaOrNone(ledger);
+      return describePersona(personaStatus(pack(), stored, process.env.SYM_PERSONA));
+    }
     case "usage":
       return USAGE;
+  }
+}
+
+// The status line while the brain works. Eve sets one fixed text; Slack also takes a list to
+// rotate (`loading_messages`), so each persona brings its own (decision 046). A failure here
+// never blocks the turn.
+async function showLoadingMessages(channel: SlackContext): Promise<boolean> {
+  try {
+    const stored = await storedPersonaOrNone(ledger);
+    const sources = { stored, env: process.env.SYM_PERSONA, pack: pack(), warn: () => {} };
+    const messages = loadingMessages(sources);
+    const [status] = messages;
+    if (!status || !channel.slack.threadTs) return false;
+    const response = await channel.slack.request("assistant.threads.setStatus", {
+      channel_id: channel.slack.channelId,
+      thread_ts: channel.slack.threadTs,
+      status,
+      loading_messages: messages,
+    });
+    return response.ok === true;
+  } catch (error) {
+    console.warn("Sym could not set the loading messages.", String(error));
+    return false;
   }
 }
 
@@ -85,6 +124,11 @@ const fromAllowedHuman = (message: SlackMessage) =>
 // thread shows one card. Each turn also records its Slack thread, because tools and schedules
 // cannot read the channel's session state and a job posts to the thread it was asked in.
 const symRenderer = defineSlackRenderer({
+  // Eve's default sets "Thinking..." as soon as a message arrives. The persona's list replaces it.
+  async received(_message, channel, next) {
+    await next();
+    await showLoadingMessages(channel);
+  },
   events: {
     async "turn.started"(event, channel, ctx, next) {
       const { channelId, threadTs, teamId, triggeringUserId } = channel.state;
@@ -100,6 +144,7 @@ const symRenderer = defineSlackRenderer({
         });
       }
       await next(event);
+      await showLoadingMessages(channel);
     },
     // Feedback buttons ride inside each final reply (docs/learning.md), so they add no message
     // and no notification. postCompletedSlackReply keeps Eve's fallbacks: a refused or long
@@ -148,7 +193,11 @@ export default slackChannel({
       return;
     }
     try {
-      await sayPrivately(ctx.slack, where, await answerSymCommand(command.text, new Date()));
+      await sayPrivately(
+        ctx.slack,
+        where,
+        await answerSymCommand(command.text, new Date(), command.user.id),
+      );
     } catch (error) {
       console.warn("Sym could not answer a slash command.", String(error));
       await sayPrivately(ctx.slack, where, "Sym could not answer that. Try again in a moment.");
