@@ -30,8 +30,18 @@ export interface Feedback {
 // onInteraction.
 export const FEEDBACK_ACTION_ID = "sym_feedback";
 
+type Env = Record<string, string | undefined>;
+
+// `SYM_FEEDBACK=off` (also `false`, `0`, `no`, any case) turns the buttons off. Anything else,
+// including unset, leaves them on. Handlers stay, so clicks on old messages still record.
+export function feedbackEnabled(env: Env = process.env): boolean {
+  return !["off", "false", "0", "no"].includes((env.SYM_FEEDBACK ?? "").trim().toLowerCase());
+}
+
 // The buttons under a reply. A `context_actions` block holds Slack's native feedback buttons.
-export function feedbackBlocks(): Record<string, unknown>[] {
+// Empty when the owner turned feedback off.
+export function feedbackBlocks(env: Env = process.env): Record<string, unknown>[] {
+  if (!feedbackEnabled(env)) return [];
   return [
     {
       type: "context_actions",

@@ -21,8 +21,9 @@ Check each done-when item:
 
 You see the worker's claims, not the diff. A claim without evidence is a concern, not a pass.
 
-Write each concern as one short sentence that a person can check before they merge, for example
-"No test covers the retry limit." Do not repeat the rule-check concerns in other words.
+Write each concern as one short, casual sentence in lowercase that a person can check before they
+merge, for example "no test covers the retry limit." Do not repeat the rule-check concerns in
+other words.
 
 Reply with:
 

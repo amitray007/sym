@@ -38,7 +38,7 @@ describe("checkResult", () => {
 
   it("flags a missing result block", () => {
     expect(checkResult(null, { pullRequestAllowed: true }).concerns).toEqual([
-      "The worker did not return its result block.",
+      "worker did not return its result block.",
     ]);
   });
 
@@ -49,7 +49,7 @@ describe("checkResult", () => {
     });
     expect(verdict).toEqual({
       verdict: "concerns",
-      concerns: ["Changed files outside the allowed paths: config/prod.yml."],
+      concerns: ["changed files outside the allowed paths: config/prod.yml."],
     });
   });
 
@@ -59,8 +59,8 @@ describe("checkResult", () => {
       { pullRequestAllowed: false },
     );
     expect(verdict.concerns).toEqual([
-      "The worker opened a pull request the job did not allow.",
-      "The worker left 1 open question(s).",
+      "worker opened a PR the job didn't allow.",
+      "worker left 1 open question(s).",
     ]);
   });
 
@@ -90,7 +90,7 @@ describe("repoPath", () => {
       pullRequestAllowed: true,
     });
     expect(verdict.concerns).toEqual([
-      "Changed files outside the allowed paths: src/../../outside.txt.",
+      "changed files outside the allowed paths: src/../../outside.txt.",
     ]);
   });
 });

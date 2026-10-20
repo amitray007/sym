@@ -189,12 +189,12 @@ function ago(from: number, now: number): string {
 
 // A URL button needs an http(s) URL of at most 3000 characters, and Slack rejects the whole
 // message otherwise. The URL comes from a worker, so anything else gets no button.
-function buttonUrl(url: string | null | undefined): string | null {
+export function buttonUrl(url: string | null | undefined): string | null {
   if (!url || url.length > 3000 || !/^https?:\/\/\S+$/i.test(url)) return null;
   return url;
 }
 
-function openPrButton(url: string): Record<string, unknown> {
+export function openPrButton(url: string): Record<string, unknown> {
   return {
     type: "button",
     action_id: PR_ACTION_ID,

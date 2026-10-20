@@ -36,6 +36,7 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_PERSONA` | Optional. The default voice: `plain`, `casual` (default), or `spicy` (decisions 044, 046). An unknown value warns and uses `casual`. The owner's `/sym persona` setting wins over it, and a pack `persona` file wins over both |
 | `SYM_PROJECTS` | T3 project titles or IDs Sym may work on, comma-separated. Required without a pack: with neither, no job starts (decision 042). Ignored when a pack lists `projects` |
 | `SYM_WORKER_LABEL` | Optional. The name Slack users see for the worker, such as `Builder`. Default `Worker`. Max 30 characters (decision 044) |
+| `SYM_FEEDBACK` | Optional. `on` (default) or `off` (also `false`, `0`, `no`). Off removes the helpful / not helpful buttons from replies. Old buttons still record clicks (decision 047) |
 | `SYM_SLACK_USERS` | Slack user IDs allowed to use Sym, comma-separated |
 | `SYM_CALLBACK_URL` | Base URL a worker uses to call Sym back, such as Sym's private-network address. Without it, jobs wait for the 4-minute poll (decision 028) |
 | `SYM_SIGNIN_URL` | Base URL the owner's browser returns to after the worker sign-in, such as Sym's public HTTPS address. Must be https unless it is loopback. Defaults to `SYM_CALLBACK_URL` (decision 036) |

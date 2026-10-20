@@ -78,7 +78,7 @@ one has a persona (decision 044).
   *tl;dr* Merge PR #7698: the one-line fix is correct.
 
   *⚠️ check before merge* (75% sure)
-  1. The worker opened a pull request the job did not allow.
+  1. worker opened a PR the job didn't allow.
   2. Tests were not run, so fail-before / pass-after is unverified.
 
   *open questions*
@@ -87,6 +87,21 @@ one has a persona (decision 044).
   🔗 <PR #7698> · tests: not run
   ```
 
+  Sym posts this as Block Kit (decision 047), with the text above as the `text` fallback for
+  notifications and screen readers:
+
+  | Block | Holds |
+  |---|---|
+  | `header` | status emoji, `J-n · title`, duration (150 characters at most) |
+  | `section` | `*tl;dr* ...`, then the verifier line |
+  | `section` + `rich_text` | the concerns header, then the concerns as an ordered list |
+  | `section` | `*open questions*` as a `☐` checklist |
+  | `context` | the tests line and the file count |
+  | `actions` | an **Open PR** link button, only when there is a PR |
+
+  A failure is a `header` (`❌ J-n · title · failed in 14m`), a `section` with the reason, and a
+  `context` with the worker thread. Sections stop at 3000 characters, lists at 10 items, and a
+  cut ends with `…`. Worker text is escaped in sections and taken as typed in rich text.
   The emoji is ✅ for a clean result, ⚠️ for concerns, and ❌ for a failure. The tl;dr is the
   summary's first sentence, capped near 160 characters. Concerns repeat nowhere: Sym drops near
   duplicates, and drops an open question that a concern already covers. The footer holds the PR
@@ -123,7 +138,8 @@ threads never get a persona.
 - Each final reply carries Slack's feedback buttons in the same message, so they add no
   notification. A reply Slack refuses as blocks goes out as plain Markdown or a snippet without
   them. Clicks and reactions on Sym's messages go to the `feedback` table, and Sym uses them only
-  after review (docs/learning.md).
+  after review (docs/learning.md). `SYM_FEEDBACK=off` removes the buttons; the handlers stay, so
+  clicks on old messages still record.
 
 ## Connecting a service
 

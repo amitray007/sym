@@ -141,6 +141,6 @@ describe.skipIf(!hasDatabase)("jobs under a pack", () => {
 
     const result = posts.find((text) => text.includes("Added retry"));
     expect(result).toContain("*⚠️ check before merge*");
-    expect(result).toContain("Changed files outside the allowed paths: config/prod.yml.");
+    expect(result).toContain("changed files outside the allowed paths: config/prod.yml.");
   });
 });

@@ -20,7 +20,7 @@ export interface Verdict {
 
 export function checkResult(contract: OutputContract | null, rules: ResultRules): Verdict {
   if (!contract) {
-    return { verdict: "concerns", concerns: ["The worker did not return its result block."] };
+    return { verdict: "concerns", concerns: ["worker did not return its result block."] };
   }
   const concerns: string[] = [];
   if (rules.allowedPaths && rules.allowedPaths.length > 0) {
@@ -31,14 +31,14 @@ export function checkResult(contract: OutputContract | null, rules: ResultRules)
       );
     });
     if (outside.length > 0) {
-      concerns.push(`Changed files outside the allowed paths: ${outside.join(", ")}.`);
+      concerns.push(`changed files outside the allowed paths: ${outside.join(", ")}.`);
     }
   }
   if (contract.prUrl && !rules.pullRequestAllowed) {
-    concerns.push("The worker opened a pull request the job did not allow.");
+    concerns.push("worker opened a PR the job didn't allow.");
   }
   if (contract.openQuestions.length > 0) {
-    concerns.push(`The worker left ${contract.openQuestions.length} open question(s).`);
+    concerns.push(`worker left ${contract.openQuestions.length} open question(s).`);
   }
   return { verdict: concerns.length > 0 ? "concerns" : "pass", concerns };
 }

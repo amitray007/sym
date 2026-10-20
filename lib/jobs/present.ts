@@ -7,17 +7,11 @@ import type { Pack } from "../pack/load.ts";
 import { resolvePackProject } from "../pack/policy.ts";
 import { isQuiet } from "../quiet/quiet.ts";
 import { workerLabel } from "../worker-label.ts";
+import { type BlockPost, failurePost, resultPost } from "./blocks.ts";
 import { Brief } from "./brief.ts";
 import { jobCardSteps, renderCollapsedCard, renderJobCard } from "./card.ts";
 import type { OutputContract } from "./contract.ts";
-import {
-  briefPrompt,
-  failureMessage,
-  type JobFacts,
-  permissionBlockMessage,
-  quietNotice,
-  resultMessage,
-} from "./messages.ts";
+import { briefPrompt, type JobFacts, permissionBlockMessage, quietNotice } from "./messages.ts";
 import type { ProgressEvent } from "./progress.ts";
 import {
   checkResult,
@@ -227,15 +221,24 @@ async function presentEndOnce(
   // A clean scheduled check has nothing new to say (display rule step 2); the digest lists it.
   const clean = job.status === "done" && contract !== null && contract.openQuestions.length === 0;
   if (job.kind === SCHEDULED_CHECK && clean && concerns.length === 0) return;
-  const text =
+  const message: BlockPost =
     job.status === "done"
-      ? resultMessage(facts(job, now), contract, concerns, verdictLine(check, concerns))
+      ? resultPost(facts(job, now), contract, concerns, verdictLine(check, concerns))
       : job.status === "failed"
-        ? failureMessage(facts(job, now), job.lastSummary)
-        : `🚫 ${ref} was cancelled.`;
+        ? failurePost(facts(job, now), job.lastSummary)
+        : { text: `🚫 ${ref} was cancelled.`, blocks: [] };
   // A failure notifies even in quiet mode (docs/display.md).
   const quiet = await isQuiet(sql, pack, now);
-  await post(sql, job, `${ref}:end`, text, false, quiet, job.status === "failed");
+  await post(
+    sql,
+    job,
+    `${ref}:end`,
+    message.text,
+    false,
+    quiet,
+    job.status === "failed",
+    message.blocks,
+  );
 }
 
 // Checks the result against what the job allowed. Open questions and a missing result block
@@ -305,6 +308,7 @@ async function post(
   toOwner: boolean,
   quiet: boolean,
   failed = false,
+  blocks: Record<string, unknown>[] = [],
 ): Promise<void> {
   const display = chooseDisplay({
     kind: job.kind,
@@ -326,6 +330,8 @@ async function post(
     payload: {
       ...(dm ? { channel: job.owner } : target(job)),
       text,
+      // `text` stays as the notification and accessibility fallback.
+      ...(blocks.length > 0 ? { blocks } : {}),
     },
     display: dm ? { ...display, target: "dm" } : display,
   });
