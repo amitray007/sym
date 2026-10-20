@@ -81,6 +81,9 @@ deployment environment, never in Git or the pack. For this run:
 
 - No reply in Slack: check the request URL in Event Subscriptions and the signing secret.
 - No status line: the manifest needs `assistant:write`; reinstall the app after a scope change.
+- No custom emoji in reactions: the app needs `emoji:read`. Add the scope (the manifest has it),
+  reinstall the app, and update `SLACK_BOT_TOKEN` if Slack issues a new one. Standard emoji work
+  without it.
 - "The worker is unreachable": check the private network and `T3_MCP_URL` from inside the
   container.
 - No early wake after a job: check that the worker host reaches `SYM_CALLBACK_URL`. Jobs still

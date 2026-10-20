@@ -2,6 +2,7 @@ import { connect, type Sql } from "./db.ts";
 import { type JobDeps, type LedgerDeps, parseWorkerModel } from "./jobs/run.ts";
 import { type Pack, packFromEnv } from "./pack/load.ts";
 import { type AllowedProject, allowedProjects } from "./projects/allowed.ts";
+import { createEmojiCache, type EmojiCache } from "./reactions/emoji.ts";
 import type { SlackApi } from "./slack/api.ts";
 import { slackApiFromEnv } from "./slack/eve-api.ts";
 import { getCredential } from "./workers/credentials.ts";
@@ -99,6 +100,14 @@ export async function withJobDeps<T>(fn: (deps: JobDeps) => Promise<T>): Promise
   } finally {
     await connection.close();
   }
+}
+
+let emoji: EmojiCache | undefined;
+
+// The workspace's custom emoji, listed at most once an hour per process (decision 051).
+export function emojiCache(): EmojiCache {
+  emoji ??= createEmojiCache(slackFromEnv());
+  return emoji;
 }
 
 export async function withLedger<T>(fn: (sql: Sql) => Promise<T>): Promise<T> {

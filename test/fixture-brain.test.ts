@@ -67,6 +67,23 @@ describe("respondAsFixture", () => {
     });
   });
 
+  it("calls slack_react on the trigger phrase, then stays quiet after the result", () => {
+    expect(respondAsFixture(request("great news fixture-react tada"))).toEqual({
+      toolCalls: [{ name: "slack_react", input: { emoji: "tada" } }],
+    });
+    const messages: Message[] = [
+      { role: "user", text: "fixture-react tada" },
+      { role: "tool", text: "Reacted with :tada:." },
+    ];
+    const toolResults: ToolResult[] = [
+      { id: "c1", name: "slack_react", output: "Reacted with :tada:.", isError: false },
+    ];
+    const answer = respondAsFixture(
+      request("fixture-react tada", { messages, toolResults, tools: ["no_reply"] }),
+    );
+    expect(answer).toMatchObject({ toolCalls: [{ name: "no_reply" }] });
+  });
+
   it("does not match update or status inside another word", () => {
     expect(respondAsFixture(request("statuses and updated"))).toBe(
       "Fixture brain heard: statuses and updated",

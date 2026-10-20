@@ -48,6 +48,8 @@ export interface FakeSlack {
   messages: FakeSlackMessage[];
   ephemerals: FakeSlackMessage[];
   reactions: FakeSlackReaction[];
+  // The workspace's custom emoji for emoji.list: a name to an image URL or `alias:<name>`.
+  customEmoji: Record<string, string>;
   // Each assistant.threads.setStatus call, in order.
   statuses: { channel: string; thread_ts: string; status: string }[];
   views: Record<string, unknown>[];
@@ -112,6 +114,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
   const messages: FakeSlackMessage[] = [];
   const ephemerals: FakeSlackMessage[] = [];
   const reactions: FakeSlackReaction[] = [];
+  const customEmoji: Record<string, string> = {};
   const statuses: FakeSlack["statuses"] = [];
   const views: Record<string, unknown>[] = [];
   const uploads: FakeSlack["uploads"] = [];
@@ -223,6 +226,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
       reactions.push(entry);
       return {};
     },
+    "emoji.list": () => ({ emoji: customEmoji }),
     "reactions.remove": (b) => {
       const index = reactions.findIndex(
         (r) => r.channel === b.channel && r.timestamp === b.timestamp && r.name === b.name,
@@ -366,6 +370,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
     messages,
     ephemerals,
     reactions,
+    customEmoji,
     statuses,
     views,
     uploads,

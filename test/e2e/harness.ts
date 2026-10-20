@@ -66,7 +66,9 @@ export interface Harness {
 }
 
 export async function startHarness(options: HarnessOptions): Promise<Harness> {
-  const databaseUrl = await freshDatabase(options.database);
+  // The process ID keeps two runs apart, such as two worktrees testing at once on one Postgres.
+  const database = `${options.database}_${process.pid}`;
+  const databaseUrl = await freshDatabase(database);
   const sql = connect({ url: databaseUrl });
   await migrate(sql);
 
@@ -161,7 +163,7 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
       await slack.close();
       await t3.close();
       if (!process.env.E2E_KEEP_APP) rmSync(appDir, { recursive: true, force: true });
-      await dropDatabase(options.database);
+      await dropDatabase(database);
     },
   };
   return harness;
