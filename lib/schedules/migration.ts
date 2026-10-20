@@ -50,3 +50,13 @@ export const schedulesMigration: Migration = {
     create index schedule_runs_fired on schedule_runs (fired_at);
   `,
 };
+
+// A schedule seeded from the pack's schedules.yaml keeps its key here (decision 055). Chat-made
+// rows have no key. The unique index lets a seed find its row again.
+export const schedulePackKeyMigration: Migration = {
+  version: "017_schedule_pack_key",
+  sql: `
+    alter table schedules add column pack_key text;
+    create unique index schedules_pack_key on schedules (pack_key) where pack_key is not null;
+  `,
+};

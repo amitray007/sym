@@ -17,3 +17,20 @@ export function canSkipStart(input: {
   if (!approved.success || !given.success) return false;
   return sameJson(approved.data, given.data);
 }
+
+// The approval prompt reads only the tool input, so schedule_approve repeats the cron and the
+// brief, and this check refuses a call whose text differs from the stored row. The owner then
+// approves exactly what will run.
+export function sameAsStored(
+  schedule: Pick<Schedule, "cron" | "brief">,
+  shown: { cron: string; brief: unknown },
+): boolean {
+  const stored = Brief.safeParse(schedule.brief);
+  const given = Brief.safeParse(shown.brief);
+  return (
+    stored.success &&
+    given.success &&
+    schedule.cron === shown.cron.trim() &&
+    sameJson(stored.data, given.data)
+  );
+}

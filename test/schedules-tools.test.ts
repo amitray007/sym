@@ -17,6 +17,7 @@ const row: Schedule = {
   lastFiredAt: null,
   nextFireAt: new Date("2026-10-21T09:00:00Z"),
   createdAt: new Date("2026-10-20T08:00:00Z"),
+  packKey: null,
 };
 
 describe("schedule text", () => {

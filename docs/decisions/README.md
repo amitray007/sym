@@ -60,3 +60,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [052](052-app-home.md) | The App Home tab is a read-only dashboard: jobs, schedules, projects, and owner-only connections; `views.publish` is the one Slack write outside the outbox |
 | [053](053-stranger-replies.md) | A person off the allow-list who tags Sym, writes to it, or names it in a thread gets one private persona line per hour that points to the owner, with no model call and an off switch |
 | [054](054-opt-in-proactive-features.md) | The daily digest, the verifier, and PR follow are off unless `SYM_DIGEST`, `SYM_VERIFIER`, or `SYM_PR_FOLLOW` is on |
+| [055](055-pack-schedules.md) | A pack's `schedules.yaml` seeds schedule rows as `pending_approval`; the owner approves each once with `schedule_approve`, a changed brief asks again, and a removed key is deleted |

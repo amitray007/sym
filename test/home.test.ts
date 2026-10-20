@@ -150,6 +150,7 @@ describe("homeView by role", () => {
       lastFiredAt: null,
       nextFireAt: null,
       createdAt: NOW,
+      packKey: null,
     };
     const text = textOf(
       homeView(

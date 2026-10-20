@@ -25,7 +25,7 @@ my-pack/
   instructions/       extra instruction files (tone, house rules)
   personas/           optional persona file for the brain's voice
   playbooks/          Eve skills, one Markdown file each
-  schedules.yaml      schedules to seed on first start
+  schedules.yaml      schedules to seed at start (optional)
   evals/              eval cases for your playbooks
 ```
 
@@ -87,6 +87,27 @@ Rules (decision 026):
   start from `SYM_PACK_DIR`, so it needs no overlay. It sets the brain's tone only. The shared
   Voice rules in `agent/instructions.md` still apply, and Sym's code-built messages ignore it.
 
+## Seeding schedules
+
+`schedules.yaml` is a list. Unknown fields fail, like `sym.config.yaml`.
+
+```yaml
+- key: weekday-check          # stable ID: lowercase words joined by hyphens
+  title: Weekday check
+  cron: "0 9 * * 1-5"         # five fields, in UTC
+  channel: C0123456789        # optional; default is channels.default
+  brief:                      # the same brief Sym writes for a job
+    project: example-app      # must be one of the pack's projects
+    title: Weekday check
+    goal: Look for failing checks and report each one.
+    doneWhen: ["The report lists every failing check"]
+```
+
+A pack never widens Sym's rules. A seeded row starts as `pending_approval`, and Sym sends the
+owner one DM that lists it. The owner asks Sym to approve it, and approves the call once. If the
+cron, title, channel, or brief changes in the file, the row goes back to `pending_approval`. A key
+that leaves the file is deleted. A deleted key that returns waits for approval again (decision 055).
+
 ## How Sym loads a pack
 
 - **Build time:** `node scripts/pack-overlay.ts <pack-dir> <app-dir>` validates the pack, then
@@ -100,7 +121,8 @@ Rules (decision 026):
   Without it, the image builds with no pack. Mount the pack at `SYM_PACK_DIR` at runtime too,
   because the runtime reads `sym.config.yaml` from there.
 - **Start:** Sym reads `sym.config.yaml` from `SYM_PACK_DIR`, validates it, and refuses to start
-  on an error that names the file and the field. Seeding `schedules.yaml` rows comes later.
+  on an error that names the file and the field. It reads the optional `schedules.yaml` the same
+  way. The first dispatcher tick then seeds its rows (see "Seeding schedules").
 - **Session start:** `defineDynamic` adds approved learning-layer-2 rows from Postgres on top.
 
 Milestone 1 checked this split: Eve 0.81.0 compiles pack instructions and playbooks from the
