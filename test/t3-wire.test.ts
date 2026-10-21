@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { parseOutputContract } from "../lib/jobs/contract.ts";
 import { t3Adapter } from "../lib/workers/t3/adapter.ts";
 import { connectT3, type T3Connection } from "../lib/workers/t3/client.ts";
 import type { WorkerAdapter } from "../lib/workers/types.ts";
@@ -120,6 +121,23 @@ describe("t3 over the wire", () => {
     const rest = await worker.readActivity(thread.id, first.cursor);
     expect(rest.items.map((item) => item.text)).toEqual(["item 100"]);
     expect(rest.hasMore).toBe(false);
+  });
+
+  it("reads the whole last message, so a result block after a long report still parses", async () => {
+    const report = "A long report line.\n".repeat(400);
+    const block = '```json\n{"summary": "Found it", "pr_url": null}\n```';
+    t3.setScript([{ status: "completed", items: ["x".repeat(9000), `${report}${block}`] }]);
+    const thread = await launch("[J-5] Long report");
+    await worker.wait(thread.id, 1000);
+
+    const { items } = await worker.readActivity(thread.id, null);
+    expect(items.map((item) => item.text.length)).toEqual([4000, 4000]);
+    const last = items[1];
+    if (!last?.rest) throw new Error("the last message was not marked as cut");
+    const whole =
+      last.text + (await worker.readRest?.(thread.id, last.rest.itemId, last.rest.offset));
+    expect(whole).toBe(`${report}${block}`);
+    expect(parseOutputContract(whole)?.summary).toBe("Found it");
   });
 
   it("interrupts a running thread once per request ID", async () => {

@@ -392,9 +392,37 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
         afterPosition: z.number().int().optional(),
         limit: z.number().int().optional(),
         maxCharsPerItem: z.number().int().optional(),
+        itemId: z.string().optional(),
+        textOffset: z.number().int().optional(),
       },
-      ({ threadId, afterPosition, limit, maxCharsPerItem }) => {
+      ({ threadId, afterPosition, limit, maxCharsPerItem, itemId, textOffset }) => {
         const thread = getThread(threadId);
+        // Like T3: text is cut at maxCharsPerItem, and itemId with textOffset reads the rest.
+        const cut = (text: string, from: number) => {
+          const end = maxCharsPerItem ? from + maxCharsPerItem : text.length;
+          return {
+            text: text.slice(from, end),
+            textTruncated: end < text.length,
+            nextTextOffset: end < text.length ? end : null,
+          };
+        };
+        if (itemId !== undefined) {
+          const item = thread.items.find((entry) => `item-${entry.position}` === itemId);
+          if (!item) throw new Error(`no item ${itemId}`);
+          return {
+            thread: { threadId, status: thread.status, pendingRequestCount: 0 },
+            items: [
+              {
+                position: item.position,
+                itemId,
+                type: item.type,
+                ...cut(item.text, textOffset ?? 0),
+              },
+            ],
+            nextPosition: item.position,
+            hasMore: false,
+          };
+        }
         const after = afterPosition ?? -1;
         const pending = thread.items.filter((item) => item.position > after);
         const page = pending.slice(0, limit ?? 100);
@@ -414,8 +442,8 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
             type: item.type,
             status: "completed",
             title: null,
-            text: maxCharsPerItem ? item.text.slice(0, maxCharsPerItem) : item.text,
-            textTruncated: maxCharsPerItem ? item.text.length > maxCharsPerItem : false,
+            itemId: `item-${item.position}`,
+            ...cut(item.text, 0),
           })),
           nextPosition: page.at(-1)?.position ?? null,
           hasMore: pending.length > page.length,

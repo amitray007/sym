@@ -45,6 +45,10 @@ export interface FakeWorkerOptions {
   capabilities?: WorkerCapabilities;
   // What `health` reports. Defaults: reachable, signed in, no known expiry.
   health?: WorkerHealth;
+  // Cuts item text at this length, like T3's maxCharsPerItem; `readRest` returns the rest.
+  cutAt?: number;
+  // `readRest` throws, like a failed worker call.
+  failRest?: boolean;
 }
 
 // Thread IDs stay unique across fake workers, like real worker thread IDs.
@@ -155,7 +159,18 @@ export class FakeWorker implements WorkerAdapter {
   async readActivity(threadId: string, cursor: string | null): Promise<Activity> {
     const fake = this.get(threadId);
     const after = cursor === null ? -1 : Number(cursor);
-    const items = fake.items.filter((item) => item.position > after);
+    const cutAt = this.options.cutAt;
+    const items = fake.items
+      .filter((item) => item.position > after)
+      .map((item) =>
+        cutAt === undefined || item.text.length <= cutAt
+          ? item
+          : {
+              ...item,
+              text: item.text.slice(0, cutAt),
+              rest: { itemId: `${threadId}:${item.position}`, offset: cutAt },
+            },
+      );
     const last = fake.items.at(-1);
     return {
       status: fake.thread.status,
@@ -164,6 +179,13 @@ export class FakeWorker implements WorkerAdapter {
       pendingRequests: fake.pendingRequests,
       hasMore: false,
     };
+  }
+
+  async readRest(threadId: string, itemId: string, offset: number): Promise<string> {
+    if (this.options.failRest) throw new Error("fake: item read failed");
+    const position = Number(itemId.slice(threadId.length + 1));
+    const item = this.get(threadId).items.find((entry) => entry.position === position);
+    return item?.text.slice(offset) ?? "";
   }
 
   async interrupt(threadId: string, _reason: string, requestId: string): Promise<void> {

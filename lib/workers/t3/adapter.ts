@@ -78,10 +78,23 @@ const ThreadRead = z.object({
       position: z.number().int(),
       type: z.string(),
       text: z.string().nullable().default(""),
+      itemId: z.string().optional(),
+      textTruncated: z.boolean().default(false),
+      nextTextOffset: z.number().int().nullable().default(null),
     }),
   ),
   nextPosition: z.number().int().nullable(),
   hasMore: z.boolean().default(false),
+});
+
+// One item's text from `textOffset` on. T3 returns the item alone and where its text goes on.
+const ItemRead = z.object({
+  items: z.array(
+    z.object({
+      text: z.string().nullable().default(""),
+      nextTextOffset: z.number().int().nullable().default(null),
+    }),
+  ),
 });
 
 // `t3_pending_request_list` returns IDs only and leaves out approval requests. The questions come
@@ -127,6 +140,9 @@ const REQUEST_MARGIN_MS = 15_000;
 
 // Item text past this length stays on the worker. The job card needs a summary, not a transcript.
 const MAX_ITEM_CHARS = 4000;
+// `readRest` reads a cut item in pieces of REST_CHARS, at most MAX_REST_PIECES of them.
+const REST_CHARS = 50_000;
+const MAX_REST_PIECES = 20;
 
 // T3 thread and run states, mapped to the shared worker states (docs/workers.md).
 const STATUS: Record<string, WorkerStatus> = {
@@ -264,17 +280,43 @@ export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): Worke
           ...(cursor === null ? {} : { afterPosition: Number(cursor) }),
         }),
       );
+      const items = result.items.map((item) => ({
+        position: item.position,
+        type: item.type,
+        text: item.text ?? "",
+        ...(item.textTruncated && item.itemId && item.nextTextOffset !== null
+          ? { rest: { itemId: item.itemId, offset: item.nextTextOffset } }
+          : {}),
+      }));
       return {
         status: toWorkerStatus(result.thread.status),
-        items: result.items.map((item) => ({
-          position: item.position,
-          type: item.type,
-          text: item.text ?? "",
-        })),
+        items,
         cursor: result.nextPosition === null ? cursor : String(result.nextPosition),
         pendingRequests: result.thread.pendingRequestCount,
         hasMore: result.hasMore,
       };
+    },
+
+    async readRest(threadId, itemId, offset) {
+      let rest = "";
+      let next: number | null = offset;
+      for (let piece = 0; next !== null && piece < MAX_REST_PIECES; piece++) {
+        const read = ItemRead.parse(
+          await call("t3_thread_read", {
+            threadId,
+            view: "activity",
+            itemId,
+            textOffset: next,
+            maxCharsPerItem: REST_CHARS,
+          }),
+        );
+        const item = read.items[0];
+        // An empty piece, or one that does not move on, would read the same text again.
+        if (!item?.text || item.nextTextOffset === next) break;
+        rest += item.text;
+        next = item.nextTextOffset;
+      }
+      return rest;
     },
 
     async interrupt(threadId, reason, requestId) {

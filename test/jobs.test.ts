@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type Brief, workerMessage } from "../lib/jobs/brief.ts";
+import { parseOutputContract } from "../lib/jobs/contract.ts";
 import {
   answerQuestion,
   cancelJob,
@@ -210,6 +211,45 @@ describe.skipIf(!hasDatabase)("worker job steps", () => {
 
       expect(last.status).toBe("done");
       expect(last.lastMessage).toContain('"summary": "Added retry"');
+    });
+
+    it("reads the rest of a cut last message, and keeps its end when it is very long", async () => {
+      const block = '```json\n{"summary": "Found it"}\n```';
+      const long = `${"report line\n".repeat(500)}${block}`;
+      const huge = `${"report line\n".repeat(5000)}${block}`;
+      for (const [key, text] of [
+        ["cut-long", long],
+        ["cut-huge", huge],
+      ] as const) {
+        const worker = new FakeWorker({
+          script: [{ status: "completed", items: [text] }],
+          cutAt: 4000,
+        });
+        const job = await newJob(key);
+        await launchOrAdopt(deps(worker), job.id, CALLBACK);
+        const last = await checkJob(deps(worker), job.id, 1000);
+        expect(parseOutputContract(last.lastMessage)?.summary).toBe("Found it");
+        if (text === huge) {
+          expect(last.lastMessage).toHaveLength(20_000);
+          expect(last.lastMessage?.startsWith("…")).toBe(true);
+        } else {
+          expect(last.lastMessage).toBe(long);
+        }
+      }
+    });
+
+    it("keeps the cut text when the rest cannot be read, so the job still ends", async () => {
+      const text = `${"report line\n".repeat(500)}\`\`\`json\n{"summary": "Found it"}\n\`\`\``;
+      const worker = new FakeWorker({
+        script: [{ status: "completed", items: [text] }],
+        cutAt: 4000,
+        failRest: true,
+      });
+      const job = await newJob("cut-fail");
+      await launchOrAdopt(deps(worker), job.id, CALLBACK);
+      const last = await checkJob(deps(worker), job.id, 1000);
+      expect(last.status).toBe("done");
+      expect(last.lastMessage).toBe(text.slice(0, 4000));
     });
 
     it("keeps the last summary when the worker has nothing new", async () => {
