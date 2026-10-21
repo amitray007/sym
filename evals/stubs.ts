@@ -7,12 +7,19 @@ import type { ToolStub } from "eve/evals";
 
 const NOTHING_RAN = { note: "Stubbed in an eval. Nothing ran." };
 
+// `worker_job` returns only when the job has ended, and Sym has posted the result by then. The
+// stub returns that real shape, so the brain reacts as it would in Slack (decision 064). It
+// never sees a "running" job.
+const workerJobDone = {
+  job: "J-1",
+  status: "done",
+  threadId: "thread-1",
+  posted: true,
+  note: "Sym already posted the result in the job thread. Call no_reply and write nothing.",
+} as const;
+
 export const writeToolStubs = [
-  {
-    id: "worker-job",
-    tool: "worker_job",
-    outcome: { response: { job: "J-1", status: "running", ...NOTHING_RAN } },
-  },
+  { id: "worker-job", tool: "worker_job", outcome: { response: workerJobDone } },
   { id: "schedule-create", tool: "schedule_create", outcome: { response: NOTHING_RAN } },
   { id: "schedule-delete", tool: "schedule_delete", outcome: { response: NOTHING_RAN } },
   { id: "schedule-pause", tool: "schedule_pause", outcome: { response: NOTHING_RAN } },

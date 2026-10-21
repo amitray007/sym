@@ -5,10 +5,15 @@ import { z } from "zod";
 // echo its value.
 const DatabaseUrl = z.url({ protocol: /^postgres(ql)?$/ });
 
+// An eval run uses its own database (decision 064). `eve eval` sets EVE_EVALUATION, and the eval
+// setup sets SYM_EVAL_DATABASE_URL. Eve reloads the .env files when it starts the agent server,
+// which can put the owner's DATABASE_URL back, so an eval run reads only the eval URL and never
+// falls back to DATABASE_URL.
 export function databaseUrl(env: NodeJS.ProcessEnv = process.env): string {
-  const parsed = DatabaseUrl.safeParse(env.DATABASE_URL);
+  const name = env.EVE_EVALUATION === "1" ? "SYM_EVAL_DATABASE_URL" : "DATABASE_URL";
+  const parsed = DatabaseUrl.safeParse(env[name]);
   if (!parsed.success) {
-    throw new Error("DATABASE_URL must be a postgres:// URL. See .env.example.");
+    throw new Error(`${name} must be a postgres:// URL. See .env.example.`);
   }
   return parsed.data;
 }

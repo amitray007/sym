@@ -28,6 +28,7 @@ Tailscale Funnel limited to the Slack path also works.
 | `SLACK_SIGNING_SECRET` | Slack app, Basic Information |
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway, for the brain model |
 | `SYM_MODEL` | Gateway model ID, for example `anthropic/claude-sonnet-5.5`. Optional |
+| `SYM_REASONING` | Optional. Replaces the reasoning level of the brain and its subagents: `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. Set `provider-default` for a model without reasoning, because some providers reject any level for it (decision 064). An unknown value warns and is ignored |
 | `SYM_WORKER_MODEL` | Optional. Overrides the default worker model, as `<provider>/<model>`, for example `codex/gpt-6-luna`. It joins the model list when missing (decision 041) |
 | `DATABASE_URL` | Postgres. `compose.yaml` builds it from `POSTGRES_PASSWORD` |
 | `SYM_PACK_DIR` | Path to the mounted pack |

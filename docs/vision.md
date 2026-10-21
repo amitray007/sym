@@ -19,8 +19,8 @@ an operations group with scheduled checks. One adopter's playbooks never shape t
 3. Sym delegates. Workers execute. Sym plans, approves, watches, and checks. It does not edit
    repositories itself.
 4. Writes need a person. Any job that can change code, data, or settings needs an approval
-   until the trust ladder promotes its job class. Production and customer data stay read-only
-   unless the brief grants a write.
+   until the trust ladder promotes its job class. Production and customer data stay read-only:
+   a job can prepare a change to them, and a person runs it.
 5. Quiet by default. Code decides each message's display level. New messages are only for
    "you need to act" and "it is done".
 6. Everything learned is readable. Sym does not train a model. Memory, playbooks, and code are

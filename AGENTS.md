@@ -14,8 +14,8 @@ planning or building anything.
   without a display choice.
 - Sym never edits repositories itself. Workers do, through an adapter.
 - A job that can write code, data, or settings needs an approval until the owner promotes its job
-  class on the trust ladder. Briefs keep production and customer data read-only unless the owner
-  grants a write.
+  class on the trust ladder. Briefs keep production and customer data read-only. A job can
+  prepare a production change; a person runs it (decision 064).
 - Learned behavior is text, rows, or code under review. Layer 2 rows load only after approval.
   Layer 3 changes arrive as draft PRs.
 - Secrets live in the deployment environment. Never commit them, log them, or put them in a pack.
@@ -52,8 +52,12 @@ Node 24 and pnpm, pinned in `mise.toml`. Run tools through mise, for example
 - `pnpm dev` starts `eve dev` with the terminal UI. Agents use `pnpm exec eve dev --no-ui` in a
   background process, then stop it after the check.
 - `pnpm eval` runs `eve eval` (decision 039). It uses the real brain model and spends tokens, so
-  the owner runs it. It needs `AI_GATEWAY_API_KEY`, `SYM_MODEL`, and a migrated `DATABASE_URL`.
-  `SYM_MODEL=fixture pnpm eval` proves the wiring with no provider; the routing cases then fail.
+  the owner runs it. It loads `.env.local` and needs a gateway credential (`AI_GATEWAY_API_KEY`
+  or `eve link`), `SYM_MODEL`, and Postgres. Setup moves the run to its own database,
+  `SYM_EVAL_DATABASE_URL` (default `sym_eval` on the local Postgres), and creates and migrates
+  it (decision 064). `pnpm eval <id>` runs one case. On a free-tier key, add
+  `--max-concurrency 1`. `SYM_MODEL=fixture pnpm eval` proves the wiring with no provider; the
+  routing cases then fail.
   The script sets `SYM_PROJECTS=example-app`, the project the eval cases use (decision 042). It
   skips the persona cases. `pnpm eval:plain` and `pnpm eval:spicy` run those, each with its
   `SYM_PERSONA`, because the persona is one setting for the whole run (decision 044).

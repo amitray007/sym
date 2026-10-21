@@ -16,6 +16,15 @@ describe("databaseUrl", () => {
     expect(() => databaseUrl({})).toThrow("DATABASE_URL must be a postgres:// URL");
   });
 
+  // Decision 064: Eve's .env reload can restore the owner's DATABASE_URL during an eval run.
+  it("uses only the eval database in an eval run", () => {
+    const owner = "postgres://sym:sym@localhost:55432/sym";
+    const evals = "postgres://sym:sym@localhost:55432/sym_eval";
+    const run = { EVE_EVALUATION: "1", DATABASE_URL: owner };
+    expect(databaseUrl({ ...run, SYM_EVAL_DATABASE_URL: evals })).toBe(evals);
+    expect(() => databaseUrl(run)).toThrow("SYM_EVAL_DATABASE_URL must be a postgres:// URL");
+  });
+
   it("rejects another scheme without echoing the value", () => {
     const secret = "mysql://sym:hunter2@localhost/sym";
     expect(() => databaseUrl({ DATABASE_URL: secret })).toThrow(
