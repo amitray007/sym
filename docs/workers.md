@@ -63,7 +63,7 @@ waits until a person approves it in the T3 app. Sym can only tell the owner.
 | `findByTitle` | `t3_thread_list(titleContains)`, then a prefix match on `[J-<id>]` | Read |
 | `launch` | `t3_thread_launch` with `workspaceStrategy: worktree` | Supervised+ |
 | `wait` | `t3_thread_wait` (default 10 min, max 60 min; Sym uses 60 s, and the MCP request gets 15 s more) | Read |
-| `readActivity`, `readMessages` | `t3_thread_read` (`view: activity` or `messages`, `afterPosition`) | Read |
+| `readActivity`, `readMessages` | `t3_thread_read` (`view: activity` or `messages`, `afterPosition`). T3 cuts each item at `maxCharsPerItem` (Sym asks for 4000). The newest assistant message on a page is read whole with `itemId` and `textOffset`, up to 200,000 characters, because its result block comes last | Read |
 | `pendingQuestions`, `answer` | `t3_pending_request_list`, `t3_pending_request_read`, `t3_pending_request_respond` | Read / Supervised+ |
 | `send` | `t3_thread_send` (`mode: auto/queue/steer/restart`, `clientRequestId`) | Supervised+ |
 | `interrupt` | `t3_thread_interrupt`, `t3_workflow_stop` | Supervised+ |
