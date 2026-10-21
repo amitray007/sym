@@ -217,6 +217,35 @@ describe("t3Adapter.readActivity", () => {
     expect(calls[0]?.args).toMatchObject({ threadId: "t-1", view: "activity", afterPosition: 3 });
   });
 
+  it("stops reading a cut message when a piece does not move on", async () => {
+    const { call, calls } = fakeT3({
+      t3_thread_read: (args: Record<string, unknown>) =>
+        args.itemId === undefined
+          ? {
+              thread: { threadId: "t-1", status: "completed", pendingRequestCount: 0 },
+              items: [
+                {
+                  position: 1,
+                  type: "assistant_message",
+                  text: "a",
+                  itemId: "i-1",
+                  textTruncated: true,
+                  nextTextOffset: 1,
+                },
+              ],
+              nextPosition: 1,
+              hasMore: false,
+            }
+          : { items: [{ text: "b", nextTextOffset: args.textOffset }] },
+    });
+
+    const activity = await t3Adapter(call).readActivity("t-1", null);
+
+    expect(activity.items[0]?.text).toBe("a");
+    expect(calls[1]?.args).toMatchObject({ threadId: "t-1", itemId: "i-1", textOffset: 1 });
+    expect(calls).toHaveLength(2);
+  });
+
   it("keeps the old cursor when the worker returns none", async () => {
     const { call } = fakeT3({ t3_thread_read: read(null) });
     expect((await t3Adapter(call).readActivity("t-1", "3")).cursor).toBe("3");
