@@ -211,26 +211,40 @@ function deliveryOf(brief: Brief): string {
     : "commit on the worktree branch, no push, no PR";
 }
 
+function briefHeader(brief: Brief, ref?: string): string {
+  return `📋 *${ref ? `${ref} · ` : ""}${escapeMrkdwn(brief.title)}*`;
+}
+
 /**
  * The short brief, posted in the job thread above the Start, Edit, and Cancel prompt (decision
- * 060). It names the job and what it may write. The Full brief button shows the rest.
+ * 060). It names the job and what it may write. The Full brief button shows the rest. The
+ * brief names the playbook it follows; a trusted playbook's job starts at once, so its brief
+ * says why no one is asked (decision 059).
  */
-export function briefPrompt(brief: Brief, ref?: string, modelLine?: string): string {
+export function briefPrompt(
+  brief: Brief,
+  ref?: string,
+  modelLine?: string,
+  playbook?: { name: string; trusted: boolean },
+): string {
   return lines([
-    `📋 *${ref ? `${ref} · ` : ""}${escapeMrkdwn(brief.title)}*`,
+    briefHeader(brief, ref),
     `*project* ${escapeMrkdwn(brief.project)} · *delivery* ${deliveryOf(brief)}`,
     modelLine && escapeMrkdwn(modelLine),
-    "press *Start* to run it, *Edit* to change it, or *Cancel*.",
+    playbook && !playbook.trusted && `Follows the playbook ${playbook.name}.`,
+    playbook?.trusted
+      ? `Starting without Start: the owner trusts the playbook ${playbook.name}.`
+      : "press *Start* to run it, *Edit* to change it, or *Cancel*. *Full brief* shows the goal and checks.",
   ]);
 }
 
-/** The whole brief, sent privately to the person who presses Full brief. */
+/** The goal, constraints, and done-when list, sent privately to the person who presses Full brief. */
 export function fullBrief(brief: Brief, ref?: string): string {
   const bullets = (items: string[]) => items.map((item) => `• ${escapeMrkdwn(item)}`).join("\n");
   const checks = (items: string[]) => items.map((item) => `☐ ${escapeMrkdwn(item)}`).join("\n");
   return lines([
-    `📋 *${ref ? `${ref} · ` : ""}${escapeMrkdwn(brief.title)}*`,
-    `*project* ${escapeMrkdwn(brief.project)}`,
+    briefHeader(brief, ref),
+    `*project* ${escapeMrkdwn(brief.project)}${brief.baseRef ? ` · *base* ${escapeMrkdwn(brief.baseRef)}` : ""}`,
     `*goal* ${escapeMrkdwn(brief.goal)}`,
     brief.constraints.length > 0 && `*constraints*\n${bullets(brief.constraints)}`,
     `*done when*\n${checks(brief.doneWhen)}`,

@@ -8,7 +8,7 @@ import type { Pack } from "../pack/load.ts";
 import { resolvePackProject } from "../pack/policy.ts";
 import { isQuiet } from "../quiet/quiet.ts";
 import { workerLabel } from "../worker-label.ts";
-import { type BlockPost, failurePost, resultPost } from "./blocks.ts";
+import { type BlockPost, clipText, failurePost, resultPost, SECTION_MAX } from "./blocks.ts";
 import { Brief } from "./brief.ts";
 import {
   BRIEF_ACTION_ID,
@@ -53,14 +53,7 @@ export async function presentBrief(
 ): Promise<void> {
   if (!job.slackChannel) return;
   const ref = jobRef(job.id);
-  const brief = briefPrompt(Brief.parse(job.brief), ref, modelLine);
-  // The brief names the playbook it follows. A trusted playbook's job starts at once, so the
-  // brief also says why no one is asked (decision 059).
-  const text = !playbook
-    ? brief
-    : playbook.trusted
-      ? `${brief}\nStarting without Start: the owner trusts the playbook ${playbook.name}.`
-      : `${brief}\nFollows the playbook ${playbook.name}.`;
+  const text = briefPrompt(Brief.parse(job.brief), ref, modelLine, playbook);
   const display = chooseDisplay({
     kind: job.kind,
     needsAction: true,
@@ -79,7 +72,7 @@ export async function presentBrief(
       ...target(job),
       text,
       blocks: [
-        { type: "section", text: { type: "mrkdwn", text } },
+        { type: "section", text: { type: "mrkdwn", text: clipText(text, SECTION_MAX) } },
         {
           type: "actions",
           block_id: `job-${ref}-brief`,

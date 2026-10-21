@@ -132,7 +132,7 @@ export default defineWorkflowTool({
           ? ({ status: "answered", optionId: "start" } as const)
           : await Promise.race([
               ctx.ask({
-                prompt: `Start ${ref}: ${brief.title}? The brief is above.`,
+                prompt: `Start ${ref}: ${brief.title}? The Full brief button is above.`,
                 display: "confirmation",
                 options: START_OPTIONS,
               }),

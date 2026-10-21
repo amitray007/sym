@@ -17,9 +17,11 @@ worker needs the detail.
    push), the model line, and the playbook line. The delivery stays because it says what the job
    may write.
 2. The post has a **Full brief** button (`sym_job_brief`). A click reads the brief from the
-   ledger and sends the whole brief privately to the person who clicked. The button works
-   before, during, and after the job.
-3. The worker still gets the whole brief. Only the Slack post changes.
+   ledger and sends the goal, constraints, done-when list, base branch, and delivery privately
+   to the person who clicked. It answers only in the job's own channel. The button works
+   before, during, and after the job. The Start prompt points to the button.
+3. A trusted playbook's brief has no Start line, because no Start prompt follows (decision 059).
+4. The worker still gets the whole brief. Only the Slack post changes.
 
 ## Consequences
 
@@ -28,4 +30,5 @@ worker needs the detail.
   the title and delivery carry the decision. A brief the owner wants to change still goes through
   Edit.
 - The answer to a click is ephemeral, so it does not stay in the thread and other people do not
-  see it.
+  see it. Like the other job button answers, it is a private reply to a click, not a post, so it
+  skips the outbox and `chooseDisplay`.

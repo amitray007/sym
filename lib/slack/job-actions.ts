@@ -79,7 +79,8 @@ export async function handleJobAction(
   switch (action.actionId) {
     case BRIEF_ACTION_ID: {
       const job = await getJobByRef(deps.sql, ref);
-      if (!job) return say(`There is no job ${ref}.`);
+      // The brief answers only in the job's own channel, where its button was posted.
+      if (!job || job.slackChannel !== channel) return say(`There is no job ${ref}.`);
       // fullBrief escapes the brief's text itself, so it skips `say`.
       const text = fullBrief(Brief.parse(job.brief), ref);
       await reply(text);

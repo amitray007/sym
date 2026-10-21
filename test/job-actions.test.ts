@@ -111,6 +111,29 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     expect(rows).toEqual([{ kind: "thumbs_up", value: "looks_good" }]);
   });
 
+  it("sends the full brief privately, escaped once, only in the job's channel", async () => {
+    const { deps, job, sql } = await finishedJob("brief", [
+      { status: "completed", items: [result("A")] },
+    ]);
+    const ref = `J-${job.id}`;
+    await sql`update jobs set brief = brief || '{"goal": "Retry 5xx & 429."}' where id = ${job.id}`;
+    const shown = await click(deps, { actionId: "sym_job_brief", value: ref });
+    expect(shown.replies).toHaveLength(1);
+    expect(shown.replies[0]).toContain("*goal* Retry 5xx &amp; 429.");
+    expect(shown.replies[0]).toContain("*done when*\n☐ Tests pass");
+
+    const elsewhere = await handleJobAction(
+      deps,
+      { actionId: "sym_job_brief", value: ref, user: { id: "U1" } },
+      "C-other",
+      async () => {},
+    );
+    expect(elsewhere).toBe(`There is no job ${ref}.`);
+    expect((await click(deps, { actionId: "sym_job_brief", value: "J-99999" })).answer).toBe(
+      "There is no job J-99999.",
+    );
+  });
+
   it("turns a Fix into a follow-up job on the same worker thread, which reconcile finishes", async () => {
     const { deps, worker, job, sql } = await finishedJob("fix", [
       { status: "completed", items: [result("First pass")] },

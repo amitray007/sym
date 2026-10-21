@@ -57,8 +57,9 @@ Example: "@sym add retry with backoff to the billing sync in sync-service, open 
    `pr_url`, `tests`, `files_changed`, and `open_questions`.
 3. The model calls `worker_job`, an Eve task, so the conversation stays open. It writes a `jobs` row
    with status `launching`, keyed on the tool call ID, and takes the Slack thread of the session.
-4. Code changes need approval. Sym posts the brief with Start and Cancel buttons; typed text
-   means "edit" and goes back to the model for a new brief (decision 021). After Start:
+4. Code changes need approval. Sym posts a short brief (title, project, delivery) with a Full
+   brief button, then Start, Edit, and Cancel buttons; typed text means "edit" and goes back to
+   the model for a new brief (decisions 021 and 060). After Start:
    - It looks for a worker thread whose title holds the job ID. If one exists, it adopts it. This
      stops a re-run step from launching twice.
    - It launches the thread: title `[J-142] Billing sync retry`, a new worktree, the model the

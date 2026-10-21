@@ -226,16 +226,25 @@ describe("briefPrompt", () => {
       [
         "📋 *J-142 · Billing sync retry*",
         "*project* sync-service · *delivery* push the branch and open a draft PR",
-        "press *Start* to run it, *Edit* to change it, or *Cancel*.",
+        "press *Start* to run it, *Edit* to change it, or *Cancel*. *Full brief* shows the goal and checks.",
       ].join("\n"),
     );
   });
 
+  it("names the playbook, and drops the Start line when the playbook is trusted", () => {
+    const follows = briefPrompt(brief, "J-142", undefined, { name: "sync-fix", trusted: false });
+    expect(follows).toContain("Follows the playbook sync-fix.");
+    expect(follows).toContain("press *Start*");
+    const trusted = briefPrompt(brief, "J-142", undefined, { name: "sync-fix", trusted: true });
+    expect(trusted).toContain("Starting without Start: the owner trusts the playbook sync-fix.");
+    expect(trusted).not.toContain("press *Start*");
+  });
+
   it("puts the goal, constraints, and done-when list in the full brief", () => {
-    expect(fullBrief(brief, "J-142")).toBe(
+    expect(fullBrief({ ...brief, baseRef: "release" }, "J-142")).toBe(
       [
         "📋 *J-142 · Billing sync retry*",
-        "*project* sync-service",
+        "*project* sync-service · *base* release",
         "*goal* Retry failed syncs &amp; log them.",
         "*constraints*\n• No schema changes",
         "*done when*\n☐ Tests pass\n☐ Retries are capped",
