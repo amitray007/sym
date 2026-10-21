@@ -85,6 +85,8 @@ export type LedgerDeps = Pick<
 // The Slack status line shows at most 50 characters (docs/slack.md).
 export const STATUS_LINE_MAX = 50;
 const SUMMARY_MAX = 200;
+// The stored last message keeps this many characters from its end, where the result block is.
+const MESSAGE_MAX = 20_000;
 // Pages of new activity one check reads before it records progress.
 const MAX_ACTIVITY_PAGES = 10;
 // With the job ID, the key of the advisory lock that serializes launches of one job.
@@ -260,7 +262,11 @@ export async function checkJob(
     { status, newItems: activity.items, now: at.getTime() },
   );
   const latest = latestText(activity.items);
-  const message = latestAssistant(activity.items);
+  const message = await wholeMessage(
+    deps.worker,
+    job.workerThreadId,
+    latestAssistantItem(activity.items),
+  );
   const summary =
     status === "failed" && activity.status === "interrupted"
       ? `${workerLabel()} thread interrupted`
@@ -554,8 +560,29 @@ function toJobStatus(worker: WorkerStatus, hasQuestion: boolean, current: JobSta
 
 const withText = (items: ActivityItem[]) => items.filter((item) => item.text.trim() !== "");
 
+function latestAssistantItem(items: ActivityItem[]): ActivityItem | undefined {
+  return withText(items).findLast((item) => item.type === "assistant_message");
+}
+
 function latestAssistant(items: ActivityItem[]): string | undefined {
-  return withText(items).findLast((item) => item.type === "assistant_message")?.text;
+  return latestAssistantItem(items)?.text;
+}
+
+// The worker's newest message, read whole when the worker cut it: its result block comes last.
+// A long message keeps its end. A failed read keeps the cut text, so the job still moves on.
+async function wholeMessage(
+  worker: WorkerAdapter,
+  threadId: string,
+  item: ActivityItem | undefined,
+): Promise<string | undefined> {
+  if (!item?.rest || !worker.readRest) return item?.text;
+  try {
+    const text = item.text + (await worker.readRest(threadId, item.rest.itemId, item.rest.offset));
+    return text.length <= MESSAGE_MAX ? text : `…${text.slice(-(MESSAGE_MAX - 1))}`;
+  } catch (error) {
+    console.warn("Sym could not read the rest of the worker message.", String(error));
+    return item.text;
+  }
 }
 
 function latestText(items: ActivityItem[]): string | undefined {

@@ -140,10 +140,9 @@ const REQUEST_MARGIN_MS = 15_000;
 
 // Item text past this length stays on the worker. The job card needs a summary, not a transcript.
 const MAX_ITEM_CHARS = 4000;
-// The newest assistant message on a page arrives whole up to this length, in pieces of
-// REST_CHARS: the worker's last message ends with the result block, after the long report.
-const MAX_MESSAGE_CHARS = 200_000;
+// `readRest` reads a cut item in pieces of REST_CHARS, at most MAX_REST_PIECES of them.
 const REST_CHARS = 50_000;
+const MAX_REST_PIECES = 20;
 
 // T3 thread and run states, mapped to the shared worker states (docs/workers.md).
 const STATUS: Record<string, WorkerStatus> = {
@@ -176,34 +175,6 @@ export interface T3AdapterOptions {
 }
 
 export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): WorkerAdapter {
-  // Reads one item's text from `offset` until T3 has no more or the message reaches
-  // MAX_MESSAGE_CHARS. `have` is the length already read.
-  async function restOfItem(
-    threadId: string,
-    itemId: string,
-    offset: number,
-    have: number,
-  ): Promise<string> {
-    let rest = "";
-    let next: number | null = offset;
-    while (next !== null && have + rest.length < MAX_MESSAGE_CHARS) {
-      const read = ItemRead.parse(
-        await call("t3_thread_read", {
-          threadId,
-          itemId,
-          textOffset: next,
-          maxCharsPerItem: REST_CHARS,
-        }),
-      );
-      const piece = read.items[0];
-      // An empty piece would read the same offset again.
-      if (!piece?.text || piece.nextTextOffset === next) break;
-      rest += piece.text;
-      next = piece.nextTextOffset;
-    }
-    return rest;
-  }
-
   return {
     async capabilities(): Promise<WorkerCapabilities> {
       const result = Capabilities.parse(await call("orchestrator_capabilities", {}));
@@ -313,15 +284,10 @@ export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): Worke
         position: item.position,
         type: item.type,
         text: item.text ?? "",
+        ...(item.textTruncated && item.itemId && item.nextTextOffset !== null
+          ? { rest: { itemId: item.itemId, offset: item.nextTextOffset } }
+          : {}),
       }));
-      // T3 cuts each item at MAX_ITEM_CHARS. The newest assistant message may be the one with
-      // the result block at its end, so read the rest of it.
-      const last = result.items.findLastIndex((item) => item.type === "assistant_message");
-      const cut = result.items[last];
-      const shown = items[last];
-      if (cut?.textTruncated && cut.itemId && cut.nextTextOffset !== null && shown) {
-        shown.text += await restOfItem(threadId, cut.itemId, cut.nextTextOffset, shown.text.length);
-      }
       return {
         status: toWorkerStatus(result.thread.status),
         items,
@@ -329,6 +295,28 @@ export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): Worke
         pendingRequests: result.thread.pendingRequestCount,
         hasMore: result.hasMore,
       };
+    },
+
+    async readRest(threadId, itemId, offset) {
+      let rest = "";
+      let next: number | null = offset;
+      for (let piece = 0; next !== null && piece < MAX_REST_PIECES; piece++) {
+        const read = ItemRead.parse(
+          await call("t3_thread_read", {
+            threadId,
+            view: "activity",
+            itemId,
+            textOffset: next,
+            maxCharsPerItem: REST_CHARS,
+          }),
+        );
+        const item = read.items[0];
+        // An empty piece, or one that does not move on, would read the same text again.
+        if (!item?.text || item.nextTextOffset === next) break;
+        rest += item.text;
+        next = item.nextTextOffset;
+      }
+      return rest;
     },
 
     async interrupt(threadId, reason, requestId) {

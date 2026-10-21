@@ -131,10 +131,13 @@ describe("t3 over the wire", () => {
     await worker.wait(thread.id, 1000);
 
     const { items } = await worker.readActivity(thread.id, null);
-    // Only the newest assistant message is read in full; older ones stay cut.
-    expect(items[0]?.text).toHaveLength(4000);
-    expect(items[1]?.text).toBe(`${report}${block}`);
-    expect(parseOutputContract(items[1]?.text ?? null)?.summary).toBe("Found it");
+    expect(items.map((item) => item.text.length)).toEqual([4000, 4000]);
+    const last = items[1];
+    if (!last?.rest) throw new Error("the last message was not marked as cut");
+    const whole =
+      last.text + (await worker.readRest?.(thread.id, last.rest.itemId, last.rest.offset));
+    expect(whole).toBe(`${report}${block}`);
+    expect(parseOutputContract(whole)?.summary).toBe("Found it");
   });
 
   it("interrupts a running thread once per request ID", async () => {

@@ -66,6 +66,8 @@ export interface ActivityItem {
   // The worker's item type, for example `assistant_message` or `tool_call`.
   type: string;
   text: string;
+  // Set when the worker cut the text: `readRest` reads on from `offset`.
+  rest?: { itemId: string; offset: number };
 }
 
 export interface Activity {
@@ -133,6 +135,9 @@ export interface WorkerAdapter {
   // Keep the timeout short (1 to 5 minutes) so HTTP calls do not time out.
   wait(threadId: string, timeoutMs: number): Promise<WaitResult>;
   readActivity(threadId: string, cursor: string | null): Promise<Activity>;
+  // Optional: the text of a cut item from `offset` on. The job reads its last message whole,
+  // because the result block comes at its end.
+  readRest?(threadId: string, itemId: string, offset: number): Promise<string>;
   // Stops the thread's running turn. `requestId` makes a retry safe.
   interrupt(threadId: string, reason: string, requestId: string): Promise<void>;
   // Questions the worker agent asked. Permission prompts are not questions and never appear here.
