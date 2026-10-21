@@ -67,9 +67,12 @@ describe("milestone 1", () => {
     const { approval, job, ref } = await startJob(h, c, "Sync retry");
     expect(job.status).toBe("launching");
     expect(approval.controls.map((control) => control.label)).toEqual(["Start", "Edit", "Cancel"]);
-    // Eve's prompt card is short, so the full brief is Sym's own message above it.
-    const brief = c.botMessages().find((m) => messageText(m).includes("*goal* Add retry"));
-    expect(brief && messageText(brief)).toContain("*done when*");
+    // Eve's prompt card is short, so the brief is Sym's own message above it. It is the short
+    // form: the goal and the done-when list sit behind its Full brief button (decision 060).
+    const brief = c.botMessages().find((m) => messageText(m).startsWith(`📋 *${ref} · `));
+    expect(brief && messageText(brief)).toContain("*delivery*");
+    expect(brief && messageText(brief)).not.toContain("*goal*");
+    expect(JSON.stringify(brief?.blocks)).toContain('"action_id":"sym_job_brief"');
     const beforeStart = c.botMessages().map((m) => m.ts);
 
     await c.click(approval, "Start");

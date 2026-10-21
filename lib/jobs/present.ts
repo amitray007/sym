@@ -10,7 +10,13 @@ import { isQuiet } from "../quiet/quiet.ts";
 import { workerLabel } from "../worker-label.ts";
 import { type BlockPost, failurePost, resultPost } from "./blocks.ts";
 import { Brief } from "./brief.ts";
-import { jobCardSteps, renderCollapsedCard, renderJobCard } from "./card.ts";
+import {
+  BRIEF_ACTION_ID,
+  jobButton,
+  jobCardSteps,
+  renderCollapsedCard,
+  renderJobCard,
+} from "./card.ts";
 import type { OutputContract } from "./contract.ts";
 import { briefPrompt, type JobFacts, permissionBlockMessage, quietNotice } from "./messages.ts";
 import type { ProgressEvent } from "./progress.ts";
@@ -35,9 +41,10 @@ const TERMINAL: readonly JobStatus[] = ["done", "failed", "cancelled"];
 // 031, docs/display.md step 2).
 export const SCHEDULED_CHECK = "scheduled-check";
 
-// Posts the full brief before the Start prompt. Eve's prompt card keeps only about 200
-// characters, so the brief itself is Sym's own message in the job thread. A brief needs an
-// action, so quiet mode never hides it.
+// Posts the short brief before the Start prompt. Eve's prompt card keeps only about 200
+// characters, so the brief is Sym's own message in the job thread. It names the job, the
+// project, and the delivery; its Full brief button shows the goal, constraints, and done-when
+// list (decision 060). A brief needs an action, so quiet mode never hides it.
 export async function presentBrief(
   sql: Sql,
   job: Job,
@@ -68,7 +75,18 @@ export async function presentBrief(
     idempotencyKey: `${ref}:brief`,
     jobId: job.id,
     method: "chat.postMessage",
-    payload: { ...target(job), text },
+    payload: {
+      ...target(job),
+      text,
+      blocks: [
+        { type: "section", text: { type: "mrkdwn", text } },
+        {
+          type: "actions",
+          block_id: `job-${ref}-brief`,
+          elements: [jobButton(BRIEF_ACTION_ID, "Full brief", ref)],
+        },
+      ],
+    },
     // The Start buttons are Eve's prompt below this message, so the brief stays in the thread.
     display: { ...display, target: "thread" },
   });

@@ -65,3 +65,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [057](057-pr-fact-checks.md) | A finished code job stores the worker's pull request facts and runs generic rule checks on them; the verifier judges production-touching changes; CI status comes only from PR-follow wakes |
 | [058](058-repeated-work.md) | A weekly review lets the brain find repeated work in recent briefs and draft playbooks for the owner to approve |
 | [059](059-trust-ladder.md) | An approved playbook is a job class; after clean runs the owner can trust it with `playbook_trust`, its jobs then start without the click, and any concern, 👎, or Fix puts it back to asking |
+| [060](060-short-brief.md) | The brief post shows the title, project, delivery, model, and playbook; a Full brief button sends the goal, constraints, and done-when list privately |

@@ -125,6 +125,19 @@ describe("job card buttons", () => {
   it("steers from the card, then fixes and closes from the result", async () => {
     const c = newConversation(h);
     const { approval, job, ref } = await startJob(h, c, "Fix me");
+    // Full brief answers privately with the whole brief (decision 060).
+    const briefPost = c
+      .botMessages()
+      .find((m) => JSON.stringify(m.blocks ?? []).includes("sym_job_brief"));
+    if (!briefPost) throw new Error(`${ref} has no brief post`);
+    const before = h.slack.ephemerals.length;
+    await press(c, briefPost.ts, "sym_job_brief", { value: ref });
+    const full = await until(() => h.slack.ephemerals.slice(before)[0], {
+      label: "the full brief",
+    });
+    expect(full.target_user).toBe(OWNER);
+    expect(full.text).toContain("*goal*");
+    expect(full.text).toContain("*done when*");
     await c.click(approval, "Start");
     const thread = await until(() => threadsOf(h, ref)[0], { label: `${ref} worker thread` });
     await workerAdvance(h, thread, [{ status: "running", items: ["Working"] }]);

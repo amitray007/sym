@@ -1,5 +1,7 @@
 import { recordFeedback } from "../feedback/feedback.ts";
+import { Brief } from "../jobs/brief.ts";
 import {
+  BRIEF_ACTION_ID,
   CLOSE_ACTION_ID,
   FIX_ACTION_ID,
   FIX_TEXT_ACTION_ID,
@@ -9,17 +11,19 @@ import {
   STOP_ACTION_ID,
 } from "../jobs/card.ts";
 import { answerPrompt, closeJob, postPrompt, startFollowUp } from "../jobs/followup.ts";
+import { fullBrief } from "../jobs/messages.ts";
 import { refOfPrompt } from "../jobs/prompts.ts";
 import type { JobDeps } from "../jobs/run.ts";
 import { steerJob, stopJob } from "../jobs/steer.ts";
 import { getJobByRef } from "../ledger/jobs.ts";
 import { slackText } from "../quiet/command.ts";
 
-// The job buttons and text boxes in Slack (decisions 056 and 005): Steer and Stop on the live
-// card, Looks good, Fix, and Close on the result, and the Steer and Fix text boxes. The channel
+// The job buttons and text boxes in Slack (decisions 056, 060, and 005): Full brief on the brief,
+// Steer and Stop on the live card, Looks good, Fix, and Close on the result, and the Steer and Fix text boxes. The channel
 // checks the allow-list first. Answers go privately to the person who clicked.
 
 export const JOB_ACTION_IDS = [
+  BRIEF_ACTION_ID,
   STOP_ACTION_ID,
   STEER_ACTION_ID,
   LOOKS_GOOD_ACTION_ID,
@@ -73,6 +77,14 @@ export async function handleJobAction(
   const ref = action.value ?? "";
   if (!JOB_REF.test(ref)) return undefined;
   switch (action.actionId) {
+    case BRIEF_ACTION_ID: {
+      const job = await getJobByRef(deps.sql, ref);
+      if (!job) return say(`There is no job ${ref}.`);
+      // fullBrief escapes the brief's text itself, so it skips `say`.
+      const text = fullBrief(Brief.parse(job.brief), ref);
+      await reply(text);
+      return text;
+    }
     case STOP_ACTION_ID:
       return say(await stopJob(deps, ref));
     case STEER_ACTION_ID: {

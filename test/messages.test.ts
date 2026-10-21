@@ -5,6 +5,7 @@ import {
   briefPrompt,
   escapeMrkdwn,
   failureMessage,
+  fullBrief,
   permissionBlockMessage,
   quietNotice,
   resultMessage,
@@ -220,8 +221,18 @@ describe("briefPrompt", () => {
     openPullRequest: true,
   });
 
-  it("shows title, project, goal, constraints, done-when, and delivery", () => {
+  it("shows only the title, project, and delivery", () => {
     expect(briefPrompt(brief, "J-142")).toBe(
+      [
+        "📋 *J-142 · Billing sync retry*",
+        "*project* sync-service · *delivery* push the branch and open a draft PR",
+        "press *Start* to run it, *Edit* to change it, or *Cancel*.",
+      ].join("\n"),
+    );
+  });
+
+  it("puts the goal, constraints, and done-when list in the full brief", () => {
+    expect(fullBrief(brief, "J-142")).toBe(
       [
         "📋 *J-142 · Billing sync retry*",
         "*project* sync-service",
@@ -229,13 +240,12 @@ describe("briefPrompt", () => {
         "*constraints*\n• No schema changes",
         "*done when*\n☐ Tests pass\n☐ Retries are capped",
         "*delivery* push the branch and open a draft PR",
-        "press *Start* to run it, *Edit* to change it, or *Cancel*.",
       ].join("\n"),
     );
   });
 
   it("omits empty constraints and the ref", () => {
-    const text = briefPrompt({ ...brief, constraints: [], openPullRequest: false });
+    const text = fullBrief({ ...brief, constraints: [], openPullRequest: false });
     expect(text).not.toContain("constraints");
     expect(text.startsWith("📋 *Billing sync retry*")).toBe(true);
     expect(text).toContain("no push, no PR");

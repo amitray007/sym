@@ -118,7 +118,7 @@ export default defineWorkflowTool({
         await markScheduled(job.id);
         await linkRun(ctx.session.id, job.id);
       } else {
-        // The full brief is Sym's own post; Eve's prompt card keeps only about 200 characters.
+        // The brief is Sym's own post; Eve's prompt card keeps only about 200 characters.
         await postBrief(job.id, trusted);
       }
       yield {

@@ -205,21 +205,35 @@ export function quietNotice(job: JobFacts, quietForMs: number): string {
   ]);
 }
 
-/** The full brief, posted in the job thread above the Start, Edit, and Cancel prompt. */
-export function briefPrompt(brief: Brief, ref?: string, modelLine?: string): string {
-  const bullets = (items: string[]) => items.map((item) => `• ${escapeMrkdwn(item)}`).join("\n");
-  const checks = (items: string[]) => items.map((item) => `☐ ${escapeMrkdwn(item)}`).join("\n");
-  const delivery = brief.openPullRequest
+function deliveryOf(brief: Brief): string {
+  return brief.openPullRequest
     ? "push the branch and open a draft PR"
     : "commit on the worktree branch, no push, no PR";
+}
+
+/**
+ * The short brief, posted in the job thread above the Start, Edit, and Cancel prompt (decision
+ * 060). It names the job and what it may write. The Full brief button shows the rest.
+ */
+export function briefPrompt(brief: Brief, ref?: string, modelLine?: string): string {
+  return lines([
+    `📋 *${ref ? `${ref} · ` : ""}${escapeMrkdwn(brief.title)}*`,
+    `*project* ${escapeMrkdwn(brief.project)} · *delivery* ${deliveryOf(brief)}`,
+    modelLine && escapeMrkdwn(modelLine),
+    "press *Start* to run it, *Edit* to change it, or *Cancel*.",
+  ]);
+}
+
+/** The whole brief, sent privately to the person who presses Full brief. */
+export function fullBrief(brief: Brief, ref?: string): string {
+  const bullets = (items: string[]) => items.map((item) => `• ${escapeMrkdwn(item)}`).join("\n");
+  const checks = (items: string[]) => items.map((item) => `☐ ${escapeMrkdwn(item)}`).join("\n");
   return lines([
     `📋 *${ref ? `${ref} · ` : ""}${escapeMrkdwn(brief.title)}*`,
     `*project* ${escapeMrkdwn(brief.project)}`,
     `*goal* ${escapeMrkdwn(brief.goal)}`,
     brief.constraints.length > 0 && `*constraints*\n${bullets(brief.constraints)}`,
     `*done when*\n${checks(brief.doneWhen)}`,
-    `*delivery* ${delivery}`,
-    modelLine && escapeMrkdwn(modelLine),
-    "press *Start* to run it, *Edit* to change it, or *Cancel*.",
+    `*delivery* ${deliveryOf(brief)}`,
   ]);
 }
