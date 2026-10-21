@@ -3,16 +3,24 @@ import { connect } from "../lib/db.ts";
 import { migrate } from "../lib/ledger/migrate.ts";
 
 // The eval database (decision 064). Not an eval file. Evals never use the owner's database: an
-// approved connection there would let the brain reach a live server. Setup points DATABASE_URL at
+// approved connection there would let the brain reach a live server. Setup resolves
 // SYM_EVAL_DATABASE_URL, creates that database when it is missing, applies the migrations, and
-// stops when a connection is active. The URL holds a password, so no message echoes it.
+// stops when a connection is active. In the eval run, lib/db.ts reads only that URL. The URL
+// holds a password, so no message echoes it.
 
 const LOCAL = "postgres://sym:sym@localhost:55432/sym_eval";
 const MISSING_DATABASE = "3D000";
 
 export async function prepareEvalDatabase(env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const url = env.SYM_EVAL_DATABASE_URL?.trim() || LOCAL;
-  const name = new URL(url).pathname.slice(1);
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    // The parse error carries the input, password included.
+    throw new Error("SYM_EVAL_DATABASE_URL must be a postgres:// URL. See .env.example.");
+  }
+  const name = parsed.pathname.slice(1);
   if (!/^[a-z_][a-z0-9_]*$/.test(name)) {
     throw new Error("SYM_EVAL_DATABASE_URL must name a database such as sym_eval.");
   }
@@ -21,7 +29,7 @@ export async function prepareEvalDatabase(env: NodeJS.ProcessEnv = process.env):
     await migrated(url);
   } catch (error) {
     if ((error as { code?: string }).code !== MISSING_DATABASE) throw error;
-    const server = new URL(url);
+    const server = new URL(parsed);
     server.pathname = "/postgres";
     const admin = connect({ url: server.href });
     try {
@@ -33,7 +41,7 @@ export async function prepareEvalDatabase(env: NodeJS.ProcessEnv = process.env):
   }
 
   // No log line: `eve eval --json` prints its report on stdout.
-  env.DATABASE_URL = url;
+  env.SYM_EVAL_DATABASE_URL = url;
 }
 
 async function migrated(url: string): Promise<void> {
