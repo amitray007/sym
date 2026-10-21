@@ -81,6 +81,8 @@ const POSTED = {
 export default defineWorkflowTool({
   description:
     "Hand a coding task to a worker agent in a new worktree of a project the worker knows. " +
+    "Use it to change code or files, to run code or tests, or for a long investigation; answer a " +
+    "quick check with your own tools and connections instead. " +
     "The owner sees the brief and presses Start before anything runs. A scheduled run passes " +
     "its stored brief unchanged with its schedule reference, and starts without a click. Runs as a task: you get " +
     "a receipt now and the result later. Write a complete brief.",

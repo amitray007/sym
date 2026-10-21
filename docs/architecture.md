@@ -51,6 +51,11 @@ Job statuses: `launching`, `running`, `waiting_input`, `waiting_permission`, `qu
 
 Example: "@sym add retry with backoff to the billing sync in sync-service, open a draft PR".
 
+Not every request becomes a job (decision 063). The brain answers a quick check itself with its
+own tools and the owner's connections, such as a look at a pull request, its checks, or a
+release. It hands the worker work that changes code or files, needs the repository checked out,
+or is a long investigation. It never changes a repository itself, even through a connection.
+
 1. `onAppMention` checks the sender against the allow-list and starts a session for the thread.
 2. The model loads the `task-brief` playbook and writes a brief: project, goal, constraints, a
    done-when list, and an output contract. The contract is a final JSON block with `summary`,
