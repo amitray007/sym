@@ -8,7 +8,14 @@ import type { Pack } from "../pack/load.ts";
 import { resolvePackProject } from "../pack/policy.ts";
 import { isQuiet } from "../quiet/quiet.ts";
 import { workerLabel } from "../worker-label.ts";
-import { type BlockPost, clipText, failurePost, resultPost, SECTION_MAX } from "./blocks.ts";
+import {
+  type BlockPost,
+  clipText,
+  failurePost,
+  resultPost,
+  SECTION_MAX,
+  writtenPost,
+} from "./blocks.ts";
 import { Brief } from "./brief.ts";
 import {
   BRIEF_ACTION_ID,
@@ -211,8 +218,9 @@ export async function presentEnd(
   now: Date,
   pack?: Pack,
   check?: ModelCheck,
+  written?: string,
 ): Promise<void> {
-  await presentEndOnce(sql, job, contract, now, pack, check);
+  await presentEndOnce(sql, job, contract, now, pack, check, written);
   if (TERMINAL.includes(job.status)) {
     // The trust ladder counts the same checks the result shows (decision 059). It records once,
     // before the end mark, so recovery re-presents a job whose outcome a crash lost.
@@ -233,6 +241,7 @@ async function presentEndOnce(
   now: Date,
   pack?: Pack,
   check?: ModelCheck,
+  written?: string,
 ): Promise<void> {
   if (!job.slackChannel || !TERMINAL.includes(job.status)) return;
   const ref = jobRef(job.id);
@@ -256,12 +265,23 @@ async function presentEndOnce(
   // A clean scheduled check has nothing new to say (display rule step 2); the digest lists it.
   const clean = job.status === "done" && contract !== null && contract.openQuestions.length === 0;
   if (job.kind === SCHEDULED_CHECK && clean && concerns.length === 0) return;
+  // A written result replaces the template (decision 062). It needs the result block: without
+  // one, the template says that the worker sent no summary.
   const message: BlockPost =
-    job.status === "done"
-      ? resultPost(facts(job, now), contract, concerns, verdictLine(check, concerns))
-      : job.status === "failed"
-        ? failurePost(facts(job, now), job.lastSummary)
-        : { text: `🚫 ${ref} was cancelled.`, blocks: [] };
+    job.status === "done" && written && contract
+      ? writtenPost(
+          facts(job, now),
+          contract,
+          concerns,
+          written,
+          contract.prUrl ?? job.prUrl,
+          verdictLine(check, concerns),
+        )
+      : job.status === "done"
+        ? resultPost(facts(job, now), contract, concerns, verdictLine(check, concerns))
+        : job.status === "failed"
+          ? failurePost(facts(job, now), job.lastSummary)
+          : { text: `🚫 ${ref} was cancelled.`, blocks: [] };
   // A failure notifies even in quiet mode (docs/display.md).
   const quiet = await isQuiet(sql, pack, now);
   await post(

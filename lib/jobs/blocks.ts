@@ -16,6 +16,9 @@ import {
   resultMessage,
   resultView,
 } from "./messages.ts";
+import { nearDuplicate } from "./similar.ts";
+import { CONCERNS_HEADER } from "./verify.ts";
+import { WRITTEN_MAX } from "./writer.ts";
 
 // Block Kit for the result and failure posts (decision 047). Each builder returns the blocks and
 // the plain `text` fallback that Slack shows in notifications and to screen readers. The text is
@@ -149,6 +152,54 @@ export function resultPost(
       resultActions(job.ref, prUrl, true),
     ]),
   };
+}
+
+// A result the `writer` subagent wrote (decision 062). The text is the writer's, in Slack's
+// markdown block, with no template. Sym keeps what a person must not miss, because a worker
+// report must not be able to talk the writer out of it: the verifier line, the check concerns,
+// and the open questions. Then a footer with the job, its time, and its facts, and the buttons.
+export function writtenPost(
+  job: JobFacts,
+  contract: OutputContract,
+  concerns: string[],
+  written: string,
+  prUrl: string | null,
+  verdict: string | null = null,
+): BlockPost {
+  const flagged = concerns.length > 0;
+  const emoji = flagged ? "⚠️" : "✅";
+  const time = duration(job);
+  const files = contract.filesChanged.length;
+  const text = defuse(written);
+  const firstLine = text.split("\n").find((line) => line.trim() !== "") ?? "";
+  // A concern that already says what an open question says makes the question redundant.
+  const questions = contract.openQuestions.filter(
+    (question) => !concerns.some((concern) => nearDuplicate(concern, question)),
+  );
+  return {
+    text: clipText(`${emoji} ${job.ref} · ${firstLine}`, HEADER_MAX * 2),
+    blocks: present([
+      { type: "markdown", text: clipText(text, WRITTEN_MAX) },
+      verdict && !verdict.startsWith(CONCERNS_HEADER) && section(safeMrkdwn(verdict, SECTION_MAX)),
+      flagged && section(verdict?.startsWith(CONCERNS_HEADER) ? verdict : CONCERNS_HEADER),
+      flagged && numberedList(concerns),
+      questions.length > 0 && section(checklist("*open questions*", questions)),
+      context([
+        `${emoji} ${job.ref}${time ? ` · ${time}` : ""}`,
+        contract.tests && `tests: ${safeMrkdwn(contract.tests, 200)}`,
+        files > 0 ? `${files} ${files === 1 ? "file" : "files"} changed` : "",
+      ]),
+      resultActions(job.ref, prUrl ? buttonUrl(prUrl) : null, true),
+    ]),
+  };
+}
+
+// Model text shaped by a worker report must not ping anyone: Slack's special tokens, such as
+// <!channel>, <!here>, <@U123>, and <#C123>, lose their angle brackets and stay as plain text.
+export function defuse(text: string): string {
+  return text
+    .replace(/<([!@#][^<>]*)>/g, "$1")
+    .replace(/@(channel|here|everyone)\b/gi, "@\u200b$1");
 }
 
 // Open PR, then Looks good, Fix, and Close (decision 056). A failure gets Fix and Close only.

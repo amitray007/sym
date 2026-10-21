@@ -134,24 +134,30 @@ update?" cheap and lets a new session continue the job.
    brief, the rule-check concerns, the PR facts, and the worker's claims as untrusted data. It compares the
    done-when list with the claims and returns `pass` or `concerns`, `concerns[]`, and
    `confidence`. It has no tools.
-5. `finishJob` sets `done`, collapses the card, and posts one message in the shape of decision 044: a status
-   emoji and title, a one-line tl;dr, the concerns from both checks without repeats as a numbered
+5. With the writer on (`SYM_RESULT_WRITER`, default on), the body then runs the `writer`
+   subagent (decision 062). It gets the persona, the approved playbooks and rules, the job facts,
+   the concerns from both checks, and the worker's result and report as untrusted data, and
+   writes the result text with no template. It has no tools.
+6. `finishJob` sets `done`, collapses the card, and posts one message. A written result is the
+   writer's text, the verifier line, the concerns, the open questions, a footer, and the buttons. Otherwise it is the
+   template of decision 044: a status emoji and title, a one-line tl;dr, the concerns from both checks without repeats as a numbered
    list under "check before merge" with the verifier's confidence, open questions as a checklist,
    and a footer with the PR link, tests, and file count, then Open PR, Looks good, Fix, and Close
    (decision 056). Fix sends the person's words to the same worker thread as a follow-up job:
    a new ledger row with the parent's thread, cursor, and PR watch. No task watches it, so
    reconcile drives it to its own result. One job per worker thread is active at a time.
-6. With `SYM_PR_FOLLOW=on` (decision 054), if a PR opened, ask the worker to watch it, so the
+7. With `SYM_PR_FOLLOW=on` (decision 054), if a PR opened, ask the worker to watch it, so the
    worker agent can fix CI failures and answer review comments. Reconcile reports those wakes in
    the job thread.
-7. When a person clicks Close, Sym records it on the job, settles the worker thread
+8. When a person clicks Close, Sym records it on the job, settles the worker thread
    (`t3_thread_organize`), stops following its PR, and edits the result.
 
 The model check is skipped, and the job ends with the rule checks alone, when `SYM_VERIFIER` is
 not on (the result then has no verifier line), when reconcile finishes
 an orphaned job (including one left in `checking`), for a scheduled check, when the task stops or
 fails while checking, and when the verifier fails or times out. In the last case the result says
-"Model check unavailable".
+"Model check unavailable". The writer is skipped in the same cases, for a Fix follow-up, and when
+it fails or times out; the result then uses the template.
 
 ## Flow 5: "what's the update?"
 

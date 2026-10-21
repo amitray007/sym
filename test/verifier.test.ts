@@ -12,6 +12,7 @@ import {
   launchOrAdopt,
   startJob,
   verifierRequest,
+  writerRequest,
 } from "../lib/jobs/run.ts";
 import {
   type ModelCheck,
@@ -279,6 +280,44 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
       .filter((c) => c.method === "chat.update")
       .at(-1);
     expect(String(collapse?.body.text)).toContain("Done in");
+  });
+
+  it("holds a finished job for the writer and posts its text with Sym's concerns kept", async () => {
+    const s = await launched(finished);
+    const check = await checkJob(s.deps, s.job.id, 1000, { write: true });
+    expect(check.status).toBe("checking");
+
+    const voice = {
+      persona: "Your voice is relaxed.",
+      learned: "### Rule: short-results\nKeep it short.",
+    };
+    const message = await writerRequest(s.deps, s.job.id, voice);
+    expect(message).toContain("<voice>\nYour voice is relaxed.\n</voice>");
+    expect(message).toContain("Keep it short.");
+    expect(message).toContain(PR_NOT_ALLOWED);
+    expect(message).toContain('<worker_result untrusted="true">');
+
+    const written = `hey, ${s.ref} is done: retry is in.`;
+    await finishJob(s.deps, s.job.id, undefined, written);
+
+    const post = s.added().find((c) => c.method === "chat.postMessage");
+    expect(String(post?.body.text)).toBe(`⚠️ ${s.ref} · ${written}`);
+    const blocks = post?.body.blocks as Record<string, unknown>[];
+    expect(blocks[0]).toEqual({ type: "markdown", text: written });
+    // The writer cannot drop a concern: Sym lists it under the text.
+    expect(JSON.stringify(blocks)).toContain(PR_NOT_ALLOWED);
+    expect(JSON.stringify(blocks)).toContain('"action_id":"sym_job_ok"');
+  });
+
+  it("posts the template when the written text is empty", async () => {
+    const s = await launched(finished);
+    await checkJob(s.deps, s.job.id, 1000, { write: true });
+
+    await finishJob(s.deps, s.job.id, undefined, "   ");
+
+    const posts = s.posts();
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toContain(`*${s.ref} · Billing sync retry*`);
   });
 
   it("posts the result with the rule checks when the model check was unavailable", async () => {

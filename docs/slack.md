@@ -67,11 +67,22 @@ Notes:
 
 ## Voice
 
-Sym's messages are short and structured, so they scan in a glance. Two parts make them, and only
-one has a persona (decision 044).
+Two parts make Sym's messages (decisions 044 and 062).
 
-- **Sym's code** builds the brief, the card, the result, failures, and status answers. These are
-  neutral and never joke. The result message has this shape:
+- **Sym's code** builds the brief, the card, failures, status answers, and the template result.
+  These are neutral and never joke.
+- **The `writer` subagent** writes the result of a finished code job in the persona's voice,
+  with no template (decision 062). It gets the persona, the owner's approved playbooks and rules,
+  the job facts, the check concerns, and the worker's report as untrusted data, and picks the
+  length and shape itself. Sym posts its text in a `markdown` block, then the verifier line, the
+  check concerns as a numbered list, and the open questions as a `☐` checklist (so a worker
+  report cannot talk them away), a `context` footer with the status emoji, `J-n`, the duration,
+  the tests line, and the file count, and the result buttons. Mention tokens in the text lose
+  their brackets. The
+  writer runs only in the job's live session: a job that reconcile finishes, a Fix follow-up, a
+  scheduled check, a writer failure or timeout (120 s), and `SYM_RESULT_WRITER=off` all get the
+  template below.
+- **The template result** has this shape:
 
   ```
   ⚠️ *J-3 · Review PR #7698 data:null fix* · 1m
@@ -107,11 +118,10 @@ one has a persona (decision 044).
   duplicates, and drops an open question that a concern already covers. The footer holds the PR
   link, the tests line, and the file count. The worker thread ID shows only when there is no
   result to read, or on a failure.
-- **The brain** writes every other reply: answers, questions, status summaries. It follows the
-  shared Voice rules in `agent/instructions.md`: the answer first in one line, then numbered
-  steps, bullets, or `☐`/`✅` checklists, about 6 lines at most, bold on the key word only. It
-  never repeats a Sym post. A `worker_job` result carries `posted: true`, and the brain then calls
-  `no_reply`.
+- **The brain** writes every other reply: answers, questions, status summaries. The persona sets
+  its voice, and it picks the length and shape that fit (decision 062). The shared Voice rules in
+  `agent/instructions.md` only keep facts, refs, links, and warnings exact, and forbid repeating
+  a Sym post. A `worker_job` result carries `posted: true`, and the brain then calls `no_reply`.
 
 The persona is the pack's persona file, else the owner's `/sym persona` setting, else
 `SYM_PERSONA` (the default), else `casual`. The thinking status line rotates short messages per

@@ -108,6 +108,8 @@ export async function startHarness(options: HarnessOptions): Promise<Harness> {
     SYM_JOB_POLL_AFTER_CALLBACK_SECONDS: "1",
     // The scenarios cover the opt-in verifier (decision 054).
     SYM_VERIFIER: "on",
+    // The scenarios check the template result; written-result.e2e.ts turns the writer on.
+    SYM_RESULT_WRITER: "off",
   };
 
   const harness: Harness = {
