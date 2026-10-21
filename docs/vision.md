@@ -2,8 +2,8 @@
 
 ## What Sym is
 
-Sym is a self-hosted, open-source Slack agent. It turns a Slack request into a tracked job on a
-worker, watches the job, and reports the outcome. A worker is a coding agent that runs somewhere
+Sym is a self-hosted, open-source Slack agent. It answers quick checks itself, turns bigger work
+into a tracked job on a worker, watches the job, and reports the outcome. A worker is a coding agent that runs somewhere
 you control. The first worker is T3 Code, which runs Claude Code and Codex threads on your own
 machine and subscriptions.
 

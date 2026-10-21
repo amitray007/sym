@@ -68,3 +68,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [060](060-short-brief.md) | The brief post shows the title, project, delivery, model, and playbook; a Full brief button sends the goal, constraints, and done-when list privately |
 | [061](061-whole-last-message.md) | The job check reads the worker's last message whole, because its result block comes last; it keeps the last 20,000 characters, and a failed read keeps the cut text |
 | [062](062-written-results.md) | The `writer` subagent writes a finished code job's result in the persona's voice with no template; Sym keeps the concerns list, a footer, and the buttons; the brain's Voice rules drop the fixed shape |
+| [063](063-quick-checks-without-a-job.md) | The brain answers quick checks itself with its tools and connections; only code changes, work that needs the repository checked out, and long investigations become worker jobs |
