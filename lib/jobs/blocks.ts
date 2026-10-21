@@ -16,6 +16,8 @@ import {
   resultMessage,
   resultView,
 } from "./messages.ts";
+import { CONCERNS_HEADER } from "./verify.ts";
+import { WRITTEN_MAX } from "./writer.ts";
 
 // Block Kit for the result and failure posts (decision 047). Each builder returns the blocks and
 // the plain `text` fallback that Slack shows in notifications and to screen readers. The text is
@@ -147,6 +149,38 @@ export function resultPost(
       view.questions.length > 0 && section(checklist("*open questions*", view.questions)),
       context(facts),
       resultActions(job.ref, prUrl, true),
+    ]),
+  };
+}
+
+// A result the `writer` subagent wrote (decision 062). The text is the writer's, in Slack's
+// markdown block, with no template. Sym keeps three things: the check concerns, because a worker
+// report must not be able to talk them away; a footer with the job, its time, and its facts; and
+// the buttons.
+export function writtenPost(
+  job: JobFacts,
+  contract: OutputContract,
+  concerns: string[],
+  written: string,
+  prUrl: string | null,
+): BlockPost {
+  const flagged = concerns.length > 0;
+  const emoji = flagged ? "⚠️" : "✅";
+  const time = duration(job);
+  const files = contract.filesChanged.length;
+  const firstLine = written.split("\n").find((line) => line.trim() !== "") ?? "";
+  return {
+    text: clipText(`${emoji} ${job.ref} · ${firstLine}`, HEADER_MAX * 2),
+    blocks: present([
+      { type: "markdown", text: clipText(written, WRITTEN_MAX) },
+      flagged && section(CONCERNS_HEADER),
+      flagged && numberedList(concerns),
+      context([
+        `${emoji} ${job.ref}${time ? ` · ${time}` : ""}`,
+        contract.tests && `tests: ${safeMrkdwn(contract.tests, 200)}`,
+        files > 0 ? `${files} ${files === 1 ? "file" : "files"} changed` : "",
+      ]),
+      resultActions(job.ref, prUrl ? buttonUrl(prUrl) : null, true),
     ]),
   };
 }

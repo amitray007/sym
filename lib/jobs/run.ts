@@ -38,6 +38,7 @@ import type {
   WorkerStatus,
 } from "../workers/types.ts";
 import { Brief, workerMessage } from "./brief.ts";
+import { formatDuration } from "./card.ts";
 import { parseOutputContract } from "./contract.ts";
 import {
   endConcerns,
@@ -49,6 +50,7 @@ import {
 } from "./present.ts";
 import { detectEvents } from "./progress.ts";
 import { type ModelCheck, VerifierOutput, verifierMessage } from "./verify.ts";
+import { WriterOutput, writerMessage } from "./writer.ts";
 
 // The worker job steps that `worker_job` and reconcile run (docs/architecture.md, flows 1 and 3).
 // They read and write the ledger, so a re-run step or a new session continues from the job row.
@@ -217,6 +219,9 @@ export interface CheckOptions {
   // A finished code job moves to `checking` instead of `done`, so the caller can run the model
   // check (flow 4, decision 032). A scheduled check never does: it stays cheap and silent.
   verify?: boolean;
+  // A finished code job also moves to `checking` so the caller can have the `writer` subagent
+  // write its result (decision 062).
+  write?: boolean;
   // How long this check holds the job's watch. A task holds it for WATCH_LEASE_MS between its
   // polls; reconcile holds it for less than its own interval, so its next pass checks again.
   leaseMs?: number;
@@ -243,8 +248,8 @@ export async function checkJob(
       ? await deps.worker.pendingQuestions(job.workerThreadId).catch(() => [])
       : [];
   const worked = toJobStatus(activity.status, questions.length > 0, job.status);
-  const verify = options.verify === true && job.kind !== SCHEDULED_CHECK;
-  const status: JobStatus = worked === "done" && verify ? "checking" : worked;
+  const hold = (options.verify === true || options.write === true) && job.kind !== SCHEDULED_CHECK;
+  const status: JobStatus = worked === "done" && hold ? "checking" : worked;
   // Read once, as the code job ends, and keep it on the row (decision 057). A scheduled check
   // skips it, like it skips the model check.
   const prFacts =
@@ -349,6 +354,37 @@ export async function verifierRequest(deps: LedgerDeps, jobId: number): Promise<
   });
 }
 
+// The input for the `writer` subagent (decision 062), or nothing when the job is not waiting in
+// `checking` or the worker sent no result block. `voice` is the persona and the learned rows;
+// the caller reads them, because the persona files need Node.js builtins. `check` is the model
+// check, so the writer sees its concerns too.
+export async function writerRequest(
+  deps: LedgerDeps,
+  jobId: number,
+  voice: { persona: string | null; learned: string | null },
+  check?: ModelCheck,
+): Promise<string | null> {
+  const job = await mustGetJob(deps.sql, jobId);
+  if (job.status !== "checking") return null;
+  const contract = parseOutputContract(job.lastMessage);
+  if (!contract) return null;
+  const brief = Brief.parse(job.brief);
+  const started = job.startedAt ?? job.createdAt;
+  return writerMessage({
+    ref: jobRef(job.id),
+    title: job.title,
+    project: brief.project,
+    goal: brief.goal,
+    duration: formatDuration(now(deps).getTime() - started.getTime()),
+    persona: voice.persona,
+    learned: voice.learned,
+    contract,
+    prUrl: contract.prUrl ?? job.prUrl,
+    concerns: endConcerns(job, contract, deps.pack, parseModelCheck(check)),
+    workerMessage: job.lastMessage,
+  });
+}
+
 export interface FinishedJob extends JobCheck {
   // Every concern the result message lists. The schedule run outcome uses the same list.
   concerns: string[];
@@ -356,15 +392,19 @@ export interface FinishedJob extends JobCheck {
 
 // Ends a job in `checking` as done and posts its one result message with the model check's
 // verdict merged in (flow 4, decision 032). `check` is the verifier's reply, an unavailable
-// check, or nothing for the rule checks alone. A job that already ended posts nothing again.
+// check, or nothing for the rule checks alone. `written` is the writer's text (decision 062),
+// or nothing for the template. A job that already ended posts nothing again.
 export async function finishJob(
   deps: LedgerDeps,
   jobId: number,
   check?: ModelCheck,
+  written?: string,
 ): Promise<FinishedJob> {
   const job = await mustGetJob(deps.sql, jobId);
   const contract = parseOutputContract(job.lastMessage);
   const model = parseModelCheck(check);
+  // The text crossed the workflow boundary, so check its shape again; a bad one gets the template.
+  const text = WriterOutput.safeParse({ text: written }).data?.text;
   if (job.status !== "checking") {
     return { ...toCheck(job, []), concerns: endConcerns(job, contract, deps.pack, model) };
   }
@@ -374,7 +414,7 @@ export async function finishJob(
     status: "done",
     ...(model ? { verdict: model } : {}),
   });
-  await presentEnd(deps.sql, ended, contract, now(deps), deps.pack, model);
+  await presentEnd(deps.sql, ended, contract, now(deps), deps.pack, model, text);
   await deliverNow(deps);
   return { ...toCheck(ended, []), concerns: endConcerns(ended, contract, deps.pack, model) };
 }

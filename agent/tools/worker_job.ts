@@ -19,11 +19,17 @@ import {
   startJob,
   statusLine,
   verifierRequest,
+  writerRequest,
 } from "../../lib/jobs/run.ts";
 import { type ModelCheck, VerifierOutput, verifierEnabled } from "../../lib/jobs/verify.ts";
+import { WriterOutput, writerEnabled } from "../../lib/jobs/writer.ts";
+import { sessionInstructions } from "../../lib/learning/format.ts";
+import { approvedForSession } from "../../lib/learning/rows.ts";
 import { linkPlaybook, markAutoStarted, trustedPlaybookOf } from "../../lib/learning/trust.ts";
 import { getJob, jobRef } from "../../lib/ledger/jobs.ts";
 import { slackUserOfPrincipal } from "../../lib/owner.ts";
+import { personaInstructions } from "../../lib/persona.ts";
+import { storedPersonaOrNone } from "../../lib/persona-setting.ts";
 import { checkProject } from "../../lib/projects/allowed.ts";
 import { allowedFromEnv, ledger, ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
 import { canSkipStart } from "../../lib/schedules/approval.ts";
@@ -49,6 +55,9 @@ const POLL_SECONDS = 240;
 const POLL_AFTER_CALLBACK_SECONDS = 30;
 // How long one check blocks on the worker. The adapter gives the MCP request a margin on top.
 const WAIT_MS = 60_000;
+// How long the `writer` subagent may take before the result posts with the template (decision
+// 062). Local end-to-end runs can change it with SYM_WRITER_TIMEOUT_SECONDS.
+const WRITER_SECONDS = 120;
 // How long the `verifier` subagent may take before the result posts with the rule checks alone.
 // It stays well under the watcher lease, so reconcile does not finish the job first. Local
 // end-to-end runs can change it with SYM_VERIFIER_TIMEOUT_SECONDS.
@@ -195,16 +204,27 @@ export default defineWorkflowTool({
         }
         if (woke === "callback") calledBack = true;
 
-        const result = await check(job.id);
+        const result = await check(job.id, timing.verify, timing.write);
         yield { status: statusLine(ref, result.summary) };
 
         // The worker finished a code job. With SYM_VERIFIER=on, the `verifier` subagent checks
-        // the result before the one result message posts (flow 4, decisions 032 and 054).
+        // the result (flow 4, decisions 032 and 054). Then the `writer` subagent writes the one
+        // result message in the persona's voice (decision 062).
         if (result.status === "checking") {
-          yield { status: statusLine(ref, "Checking the result") };
-          const verdict = await runVerifier(ctx, job.id, stopped, timing.verifierMs);
-          // Stopped while checking: the work is done, so it ends as done with the rule checks.
-          const end = await finish(job.id, verdict === "stopped" ? undefined : verdict);
+          let verdict: ModelCheck | undefined | "stopped";
+          if (timing.verify) {
+            yield { status: statusLine(ref, "Checking the result") };
+            verdict = await runVerifier(ctx, job.id, stopped, timing.verifierMs);
+          }
+          const check = verdict === "stopped" ? undefined : verdict;
+          let written: string | undefined | "stopped";
+          if (timing.write && verdict !== "stopped") {
+            yield { status: statusLine(ref, "Writing the result") };
+            written = await runWriter(ctx, job.id, check, stopped, timing.writerMs);
+          }
+          // Stopped while checking or writing: the work is done, so it ends as done with what
+          // is ready, and the template.
+          const end = await finish(job.id, check, written === "stopped" ? undefined : written);
           await endRun(ctx.session.id, job.id, end.status, end.lastMessage, end.concerns);
           return {
             job: ref,
@@ -283,6 +303,39 @@ async function runVerifier(
   }
 }
 
+// Runs the `writer` subagent in the workflow body, like the verifier. A failure, a malformed
+// reply, or a timeout gives nothing, and the result posts with the template.
+async function runWriter(
+  ctx: WorkflowToolContext,
+  jobId: number,
+  check: ModelCheck | undefined,
+  stopped: Promise<"stopped">,
+  timeoutMs: number,
+): Promise<string | undefined | "stopped"> {
+  const message = await writerInput(jobId, check);
+  if (!message) return undefined;
+  const reply = (async () => {
+    const response = await ctx
+      .agent("writer")
+      .send(message, { outputSchema: WriterOutput, signal: ctx.abortSignal });
+    return response.result();
+  })();
+  reply.catch(() => undefined);
+  try {
+    const outcome = await Promise.race([
+      reply,
+      sleep(timeoutMs).then(() => "timeout" as const),
+      stopped,
+    ]);
+    if (outcome === "stopped") return "stopped";
+    if (outcome === "timeout" || outcome.status === "failed") return undefined;
+    // finishJob parses the text again, so a wrong shape gets the template.
+    return (outcome.data as WriterOutput | undefined)?.text;
+  } catch {
+    return undefined;
+  }
+}
+
 function unavailable(reason: string): ModelCheck {
   return { status: "unavailable", reason };
 }
@@ -329,6 +382,9 @@ async function jobTiming() {
     afterCallbackMs:
       seconds("SYM_JOB_POLL_AFTER_CALLBACK_SECONDS", POLL_AFTER_CALLBACK_SECONDS) * 1000,
     verifierMs: seconds("SYM_VERIFIER_TIMEOUT_SECONDS", VERIFIER_SECONDS) * 1000,
+    writerMs: seconds("SYM_WRITER_TIMEOUT_SECONDS", WRITER_SECONDS) * 1000,
+    verify: verifierEnabled(),
+    write: writerEnabled(),
   };
 }
 
@@ -394,10 +450,9 @@ async function launch(jobId: number, webhookUrl: string): Promise<string> {
   }
 }
 
-async function check(jobId: number) {
+async function check(jobId: number, verify: boolean, write: boolean) {
   "use step";
-  // Read here, in the step, so a replay of the body sees the same value.
-  return withJobDeps((deps) => checkJob(deps, jobId, WAIT_MS, { verify: verifierEnabled() }));
+  return withJobDeps((deps) => checkJob(deps, jobId, WAIT_MS, { verify, write }));
 }
 
 async function verifierInput(jobId: number) {
@@ -405,9 +460,23 @@ async function verifierInput(jobId: number) {
   return verifierRequest(ledgerDeps(), jobId);
 }
 
-async function finish(jobId: number, verdict: ModelCheck | undefined) {
+// The persona and the learned rows are read here, in the step, so a replay sees the same text.
+async function writerInput(jobId: number, check: ModelCheck | undefined) {
   "use step";
-  return finishJob(ledgerDeps(), jobId, verdict);
+  const sql = ledger();
+  const stored = await storedPersonaOrNone(ledger).catch(() => undefined);
+  const persona = personaInstructions({
+    ...(stored ? { stored } : {}),
+    env: process.env.SYM_PERSONA,
+    pack: pack(),
+  });
+  const learned = sessionInstructions(await approvedForSession(sql).catch(() => []));
+  return writerRequest(ledgerDeps(), jobId, { persona, learned }, check);
+}
+
+async function finish(jobId: number, verdict: ModelCheck | undefined, written?: string) {
+  "use step";
+  return finishJob(ledgerDeps(), jobId, verdict, written);
 }
 
 async function answer(jobId: number, requestId: string, answers: WorkerAnswers) {

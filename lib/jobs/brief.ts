@@ -66,10 +66,12 @@ ${list([...brief.constraints, "Work only in this worktree.", ...rules])}
 Done when:
 ${list(brief.doneWhen)}
 
-When you finish, end your last message with one JSON block in this shape:
+When you finish, write your report in whatever form suits it. Then end your last message with
+one JSON block in this shape. Sym's code reads it as data, so keep the shape exact:
 \`\`\`json
 {"summary": "", "pr_url": null, "tests": "", "files_changed": [], "open_questions": []}
 \`\`\`
+Put only decisions a person must make in open_questions. Notes and follow-ups go in the summary.
 
 Then tell Sym you are done. Run this exactly once:
 curl -fsS -X POST '${callbackUrl}' -H 'content-type: application/json' -d '{"job":"${ref}"}'

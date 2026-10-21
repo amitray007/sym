@@ -1,6 +1,7 @@
 # 044. The brain has a persona, and Sym's own messages are short, structured, and neutral
 
-Status: accepted
+Status: accepted. Decision 062 drops the fixed shape: the persona sets the voice, the brain and
+the `writer` subagent pick the shape, and the template result is the fallback.
 Date: 2026-10-20
 
 ## Context
