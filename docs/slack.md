@@ -144,6 +144,9 @@ for people on its allow-list. `SYM_STRANGER_REPLIES=off` restores the silent dro
   wins, and then Sym says so and stores nothing. The owner can also say "be spicy" or "tone it
   down" and the brain calls `sym_persona`. Either way the new persona starts in the next
   conversation (decision 046).
+- The brief above the Start prompt is short: the title, the project, the delivery, the model,
+  and the playbook it follows. **Full brief** sends the goal, the constraints, and the done-when
+  list privately to the person who clicks (decision 060).
 - The live card has **Steer**, **Stop** (with a confirm step; the worker is interrupted and the
   job cancelled), and, once a PR is known, **Open PR**. The collapsed card keeps only **Open PR**.
 - The result has **Looks good**, **Fix…**, and **Close** after **Open PR**; a failure has

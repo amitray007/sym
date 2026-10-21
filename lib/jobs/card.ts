@@ -163,6 +163,8 @@ export const FIX_ACTION_ID = "sym_job_fix";
 export const CLOSE_ACTION_ID = "sym_job_close";
 export const STEER_TEXT_ACTION_ID = "sym_job_steer_text";
 export const FIX_TEXT_ACTION_ID = "sym_job_fix_text";
+// Full brief under the short brief post (decision 060). It answers privately with the whole brief.
+export const BRIEF_ACTION_ID = "sym_job_brief";
 // The result buttons a later edit removes. Open PR stays.
 export const RESULT_ACTION_IDS = [LOOKS_GOOD_ACTION_ID, FIX_ACTION_ID, CLOSE_ACTION_ID];
 

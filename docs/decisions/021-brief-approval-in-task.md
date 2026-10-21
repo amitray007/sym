@@ -1,6 +1,6 @@
 # 021. The owner starts each job from the brief
 
-Status: accepted
+Status: accepted. Decision 060 shortens the brief post; the full brief is behind a button.
 Date: 2026-10-20
 
 ## Context

@@ -437,7 +437,7 @@ export async function markScheduledCheck(sql: Sql, jobId: number): Promise<void>
   await sql`update jobs set kind = ${SCHEDULED_CHECK} where id = ${jobId}`;
 }
 
-// Shows the owner the full brief in the job thread before the Start prompt.
+// Shows the owner the short brief in the job thread before the Start prompt (decision 060).
 // `trustedPlaybook` names the trusted playbook when the job starts without the click.
 export async function showBrief(
   deps: LedgerDeps,
