@@ -6,9 +6,40 @@ import type { LanguageModel } from "ai";
 // local end-to-end runs with no provider.
 const DEFAULT_MODEL = "anthropic/claude-sonnet-5.5";
 
-export function stepModel(fixture: () => LanguageModel, reasoning: "low" | "medium") {
-  const model = process.env.SYM_MODEL?.trim() || DEFAULT_MODEL;
+// Eve's reasoning levels. Some providers reject a request that sets any level for a model
+// without reasoning, so SYM_REASONING=provider-default leaves the setting out (decision 064).
+const REASONING = [
+  "provider-default",
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
+type Reasoning = (typeof REASONING)[number];
+
+function isReasoning(value: string): value is Reasoning {
+  return (REASONING as readonly string[]).includes(value);
+}
+
+export function stepModel(
+  fixture: () => LanguageModel,
+  reasoning: "low" | "medium",
+  env: Record<string, string | undefined> = process.env,
+) {
+  const model = env.SYM_MODEL?.trim() || DEFAULT_MODEL;
   // A live model has no gateway catalog entry, so the selection names its window.
   if (model === "fixture") return { model: fixture(), modelContextWindowTokens: 1_000_000 };
+  const override = env.SYM_REASONING?.trim().toLowerCase();
+  if (!override) return { model, reasoning };
+  if (isReasoning(override)) return { model, reasoning: override };
+  if (!warned) {
+    warned = true;
+    console.warn(`model: unknown SYM_REASONING "${override}". Using "${reasoning}".`);
+  }
   return { model, reasoning };
 }
+
+// Steps call stepModel often; one warning is enough.
+let warned = false;
