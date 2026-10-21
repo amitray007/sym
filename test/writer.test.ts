@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fixtureText, writeAsFixture } from "../lib/brain/fixture-writer.ts";
+import { defuse, writtenPost } from "../lib/jobs/blocks.ts";
 import { WriterOutput, writerEnabled, writerMessage } from "../lib/jobs/writer.ts";
 
 // The written result (decision 062).
@@ -72,5 +73,35 @@ describe("fixture writer", () => {
     ).toEqual({
       toolCalls: [{ name: "eve__reply", input: { text: "Written: J-7 - Added retry" } }],
     });
+  });
+});
+
+describe("writtenPost", () => {
+  const job = { ref: "J-7", title: "Retry", workerThreadId: "t-1", durationMs: 6 * 60_000 };
+
+  it("keeps the verifier line and the open questions under the written text", () => {
+    const post = writtenPost(
+      job,
+      request.contract,
+      [],
+      "J-7 is done.",
+      null,
+      "matches the brief (90% sure)",
+    );
+    const json = JSON.stringify(post.blocks);
+    expect(post.blocks[0]).toEqual({ type: "markdown", text: "J-7 is done." });
+    expect(json).toContain("matches the brief (90% sure)");
+    expect(json).toContain("☐ Cap the wait at 30s?");
+    expect(json).toContain("✅ J-7 · 6m");
+    expect(post.text).toBe("✅ J-7 · J-7 is done.");
+  });
+
+  it("defuses mentions the writer copied from a worker report", () => {
+    expect(defuse("ping <!channel> and <@U123>, see <#C9|general>, @here")).toBe(
+      "ping !channel and @U123, see #C9|general, @\u200bhere",
+    );
+    const post = writtenPost(job, request.contract, [], "<!here> done", null);
+    expect(post.text).not.toContain("<!here>");
+    expect(JSON.stringify(post.blocks)).not.toContain("<!here>");
   });
 });

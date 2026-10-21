@@ -19,6 +19,7 @@ import {
   startJob,
   statusLine,
   verifierRequest,
+  WATCH_LEASE_MS,
   writerRequest,
 } from "../../lib/jobs/run.ts";
 import { type ModelCheck, VerifierOutput, verifierEnabled } from "../../lib/jobs/verify.ts";
@@ -59,8 +60,8 @@ const WAIT_MS = 60_000;
 // 062). Local end-to-end runs can change it with SYM_WRITER_TIMEOUT_SECONDS.
 const WRITER_SECONDS = 120;
 // How long the `verifier` subagent may take before the result posts with the rule checks alone.
-// It stays well under the watcher lease, so reconcile does not finish the job first. Local
-// end-to-end runs can change it with SYM_VERIFIER_TIMEOUT_SECONDS.
+// With the writer after it, both stay under the watch lease (see jobTiming). Local end-to-end
+// runs can change it with SYM_VERIFIER_TIMEOUT_SECONDS.
 const VERIFIER_SECONDS = 300;
 
 const START_OPTIONS = [
@@ -204,7 +205,7 @@ export default defineWorkflowTool({
         }
         if (woke === "callback") calledBack = true;
 
-        const result = await check(job.id, timing.verify, timing.write);
+        const result = await check(job.id, timing.verify, timing.write ?? false);
         yield { status: statusLine(ref, result.summary) };
 
         // The worker finished a code job. With SYM_VERIFIER=on, the `verifier` subagent checks
@@ -212,19 +213,21 @@ export default defineWorkflowTool({
         // result message in the persona's voice (decision 062).
         if (result.status === "checking") {
           let verdict: ModelCheck | undefined | "stopped";
-          if (timing.verify) {
+          // A run that started before the writer existed replays a timing with no `verify`; it
+          // held the job in `checking` only for the verifier.
+          if (timing.verify ?? true) {
             yield { status: statusLine(ref, "Checking the result") };
             verdict = await runVerifier(ctx, job.id, stopped, timing.verifierMs);
           }
-          const check = verdict === "stopped" ? undefined : verdict;
+          const modelCheck = verdict === "stopped" ? undefined : verdict;
           let written: string | undefined | "stopped";
-          if (timing.write && verdict !== "stopped") {
+          if (timing.write && timing.writerMs > 0 && verdict !== "stopped") {
             yield { status: statusLine(ref, "Writing the result") };
-            written = await runWriter(ctx, job.id, check, stopped, timing.writerMs);
+            written = await runWriter(ctx, job.id, modelCheck, stopped, timing.writerMs);
           }
           // Stopped while checking or writing: the work is done, so it ends as done with what
           // is ready, and the template.
-          const end = await finish(job.id, check, written === "stopped" ? undefined : written);
+          const end = await finish(job.id, modelCheck, written === "stopped" ? undefined : written);
           await endRun(ctx.session.id, job.id, end.status, end.lastMessage, end.concerns);
           return {
             job: ref,
@@ -312,7 +315,8 @@ async function runWriter(
   stopped: Promise<"stopped">,
   timeoutMs: number,
 ): Promise<string | undefined | "stopped"> {
-  const message = await writerInput(jobId, check);
+  // A failed input read, such as an unreadable persona file, gets the template.
+  const message = await writerInput(jobId, check).catch(() => null);
   if (!message) return undefined;
   const reply = (async () => {
     const response = await ctx
@@ -377,14 +381,22 @@ async function jobTiming() {
     const value = Number(process.env[name]);
     return Number.isFinite(value) && value > 0 ? value : fallback;
   };
+  const verify = verifierEnabled();
+  const verifierMs = seconds("SYM_VERIFIER_TIMEOUT_SECONDS", VERIFIER_SECONDS) * 1000;
+  // The verifier and the writer run one after the other in `checking`. Together they stay under
+  // the watch lease with a minute to spare, so reconcile does not finish the job first.
+  const writerRoom = WATCH_LEASE_MS - 60_000 - (verify ? verifierMs : 0);
   return {
     pollMs: seconds("SYM_JOB_POLL_SECONDS", POLL_SECONDS) * 1000,
     afterCallbackMs:
       seconds("SYM_JOB_POLL_AFTER_CALLBACK_SECONDS", POLL_AFTER_CALLBACK_SECONDS) * 1000,
-    verifierMs: seconds("SYM_VERIFIER_TIMEOUT_SECONDS", VERIFIER_SECONDS) * 1000,
-    writerMs: seconds("SYM_WRITER_TIMEOUT_SECONDS", WRITER_SECONDS) * 1000,
-    verify: verifierEnabled(),
-    write: writerEnabled(),
+    verifierMs,
+    writerMs: Math.max(
+      0,
+      Math.min(seconds("SYM_WRITER_TIMEOUT_SECONDS", WRITER_SECONDS) * 1000, writerRoom),
+    ),
+    verify: verify as boolean | undefined,
+    write: writerEnabled() as boolean | undefined,
   };
 }
 
@@ -450,9 +462,12 @@ async function launch(jobId: number, webhookUrl: string): Promise<string> {
   }
 }
 
-async function check(jobId: number, verify: boolean, write: boolean) {
+// `verify` is undefined for a run that started before the writer existed: read it here then.
+async function check(jobId: number, verify: boolean | undefined, write: boolean) {
   "use step";
-  return withJobDeps((deps) => checkJob(deps, jobId, WAIT_MS, { verify, write }));
+  return withJobDeps((deps) =>
+    checkJob(deps, jobId, WAIT_MS, { verify: verify ?? verifierEnabled(), write }),
+  );
 }
 
 async function verifierInput(jobId: number) {
@@ -464,12 +479,18 @@ async function verifierInput(jobId: number) {
 async function writerInput(jobId: number, check: ModelCheck | undefined) {
   "use step";
   const sql = ledger();
-  const stored = await storedPersonaOrNone(ledger).catch(() => undefined);
-  const persona = personaInstructions({
-    ...(stored ? { stored } : {}),
-    env: process.env.SYM_PERSONA,
-    pack: pack(),
-  });
+  let persona: string | null = null;
+  try {
+    const stored = await storedPersonaOrNone(ledger);
+    persona = personaInstructions({
+      ...(stored ? { stored } : {}),
+      env: process.env.SYM_PERSONA,
+      pack: pack(),
+    });
+  } catch (error) {
+    // Like the brain's persona loader: a failed read writes without a persona.
+    console.warn("writer: could not load the persona", error);
+  }
   const learned = sessionInstructions(await approvedForSession(sql).catch(() => []));
   return writerRequest(ledgerDeps(), jobId, { persona, learned }, check);
 }

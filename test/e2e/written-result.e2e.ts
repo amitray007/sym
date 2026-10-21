@@ -54,8 +54,8 @@ describe("written result", () => {
     // No template headline: the writer's text replaced it.
     expect(blocks).not.toContain("tl;dr");
     // One result only.
-    expect(c.botMessages().filter((m) => (m.text ?? "").includes(`${ref} · Written:`))).toHaveLength(
-      1,
-    );
+    expect(
+      c.botMessages().filter((m) => (m.text ?? "").includes(`${ref} · Written:`)),
+    ).toHaveLength(1);
   });
 });

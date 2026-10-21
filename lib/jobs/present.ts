@@ -269,7 +269,14 @@ async function presentEndOnce(
   // one, the template says that the worker sent no summary.
   const message: BlockPost =
     job.status === "done" && written && contract
-      ? writtenPost(facts(job, now), contract, concerns, written, contract.prUrl ?? job.prUrl)
+      ? writtenPost(
+          facts(job, now),
+          contract,
+          concerns,
+          written,
+          contract.prUrl ?? job.prUrl,
+          verdictLine(check, concerns),
+        )
       : job.status === "done"
         ? resultPost(facts(job, now), contract, concerns, verdictLine(check, concerns))
         : job.status === "failed"

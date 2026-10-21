@@ -42,7 +42,7 @@ export interface WriterRequest {
   workerMessage: string | null;
 }
 
-// JSON that cannot close the tag around it: `<` becomes <.
+// JSON that cannot close the tag around it: every `<` becomes the escape `\u003c`.
 function data(value: unknown): string {
   return JSON.stringify(value, null, 2).replace(/</g, "\\u003c");
 }

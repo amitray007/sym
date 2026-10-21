@@ -74,9 +74,11 @@ Two parts make Sym's messages (decisions 044 and 062).
 - **The `writer` subagent** writes the result of a finished code job in the persona's voice,
   with no template (decision 062). It gets the persona, the owner's approved playbooks and rules,
   the job facts, the check concerns, and the worker's report as untrusted data, and picks the
-  length and shape itself. Sym posts its text in a `markdown` block, then the check concerns as
-  a numbered list (so a worker report cannot talk them away), a `context` footer with the status
-  emoji, `J-n`, the duration, the tests line, and the file count, and the result buttons. The
+  length and shape itself. Sym posts its text in a `markdown` block, then the verifier line, the
+  check concerns as a numbered list, and the open questions as a `☐` checklist (so a worker
+  report cannot talk them away), a `context` footer with the status emoji, `J-n`, the duration,
+  the tests line, and the file count, and the result buttons. Mention tokens in the text lose
+  their brackets. The
   writer runs only in the job's live session: a job that reconcile finishes, a Fix follow-up, a
   scheduled check, a writer failure or timeout (120 s), and `SYM_RESULT_WRITER=off` all get the
   template below.

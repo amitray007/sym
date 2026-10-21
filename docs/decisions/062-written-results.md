@@ -25,13 +25,18 @@ data that Sym's checks read: the PR, the tests, and the changed files.
    instructions set no template. It has no tools and replies through an output schema
    (`{ text }`, at most 6,000 characters).
 2. Sym's code still posts the result through the outbox. The post is the writer's text in a
-   `markdown` block, then the check concerns as a numbered list, a `context` footer (status emoji,
-   `J-n`, duration, tests, file count), and Open PR, Looks good, Fix, and Close. The concerns stay
-   code-owned, so a worker report cannot talk the writer out of a warning.
-3. The template is the fallback: when the writer fails, times out (120 s,
-   `SYM_WRITER_TIMEOUT_SECONDS`), or returns no text; when reconcile finishes the job; for a Fix
+   `markdown` block, then the verifier line, the check concerns as a numbered list, the open
+   questions as a `☐` checklist, a `context` footer (status emoji, `J-n`, duration, tests, file
+   count), and Open PR, Looks good, Fix, and Close. The verifier line, the concerns, and the open
+   questions stay code-owned, so a worker report cannot talk the writer out of a warning or a
+   decision. Slack mention tokens such as `<!channel>` and `<@U123>` in the written text lose
+   their brackets, so copied report text pings no one.
+3. The template is the fallback: when the writer's input cannot be read, the writer fails, times
+   out (120 s, `SYM_WRITER_TIMEOUT_SECONDS`, cut so the verifier and the writer together stay a
+   minute under the 10-minute watch lease), or returns no text; when reconcile finishes the job; for a Fix
    follow-up, which reconcile drives; for a scheduled check; for failures and cancellations; and
-   with `SYM_RESULT_WRITER=off`. The switch is on by default.
+   with `SYM_RESULT_WRITER=off`. The switch is on by default, unlike the paid calls of decision
+   054, because the owner asked for this to be how Sym speaks.
 4. The brain's shared Voice rules keep only what is not style: facts, refs, links, and warnings
    stay exact, and the brain never repeats a Sym post. The persona files drop their structure
    lines. The voice evals that asserted a shape are removed.

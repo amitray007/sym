@@ -139,7 +139,7 @@ update?" cheap and lets a new session continue the job.
    the concerns from both checks, and the worker's result and report as untrusted data, and
    writes the result text with no template. It has no tools.
 6. `finishJob` sets `done`, collapses the card, and posts one message. A written result is the
-   writer's text, the concerns as a numbered list, a footer, and the buttons. Otherwise it is the
+   writer's text, the verifier line, the concerns, the open questions, a footer, and the buttons. Otherwise it is the
    template of decision 044: a status emoji and title, a one-line tl;dr, the concerns from both checks without repeats as a numbered
    list under "check before merge" with the verifier's confidence, open questions as a checklist,
    and a footer with the PR link, tests, and file count, then Open PR, Looks good, Fix, and Close
