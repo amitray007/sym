@@ -247,3 +247,7 @@ Anyone allowed can say "answer only when tagged" and Sym records `mention-only` 
 
 Thread context: the first turn of a session reads the whole thread. Later turns read only what
 came after Sym's last post. Direct messages are unchanged.
+
+A Fix rechecks current project permissions and pack limits before sending work (decision 065).
+If the project or worker changed, or the old worker identity is unknown, Sym refuses it and asks
+for a new job. An allowed user's typed Fix still counts as approval; it needs no new Start.

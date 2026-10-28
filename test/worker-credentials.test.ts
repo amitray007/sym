@@ -6,7 +6,7 @@ import {
   saveCredential,
   type WorkerCredential,
 } from "../lib/workers/credentials.ts";
-import { resolveWorker, workerTarget } from "../lib/workers/resolve.ts";
+import { resolveWorker, workerIdentity, workerTarget } from "../lib/workers/resolve.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
 const TOKEN = "t3-secret-token-value";
@@ -144,5 +144,21 @@ describe("resolveWorker", () => {
       await resolveWorker(undefined, { T3_MCP_URL: env.T3_MCP_URL }, stored()),
     ).toBeUndefined();
     expect(await resolveWorker(undefined, { T3_TOKEN: "x" }, stored())).toBeUndefined();
+  });
+});
+
+describe("worker identity", () => {
+  it("binds the worker name and endpoint without storing URL credentials", () => {
+    expect(workerIdentity("main", "https://worker.example/mcp")).toBe(
+      '["main","https://worker.example/mcp"]',
+    );
+    expect(workerIdentity("other", "https://worker.example/mcp")).not.toBe(
+      workerIdentity("main", "https://worker.example/mcp"),
+    );
+    expect(workerIdentity("main", "https://worker.example/other")).not.toBe(
+      workerIdentity("main", "https://worker.example/mcp"),
+    );
+    expect(workerIdentity("main", "https://user:secret@worker.example/mcp")).toBeUndefined();
+    expect(workerIdentity("main", "https://worker.example/mcp?token=secret")).toBeUndefined();
   });
 });

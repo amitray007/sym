@@ -32,7 +32,7 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_WORKER_MODEL` | Optional. Overrides the default worker model, as `<provider>/<model>`, for example `codex/gpt-6-luna`. It joins the model list when missing (decision 041) |
 | `DATABASE_URL` | Postgres. `compose.yaml` builds it from `POSTGRES_PASSWORD` |
 | `SYM_PACK_DIR` | Path to the mounted pack |
-| `SYM_MCP_TOKEN` | Bearer for worker threads calling `/eve/v1/mcp`. Unset means the channel rejects every request. Keep it on the private network (decision 027) |
+| `SYM_MCP_TOKEN` | Optional shared bearer for status reads at `/eve/v1/mcp`. It cannot post worker progress or questions. New jobs receive separate scoped credentials from the ledger (decision 065). Keep the route private |
 | `SYM_API_TOKEN` | Bearer for scripts, CI, and operators calling `/eve/v1/session`. Unset means production rejects them (decision 019) |
 | `SYM_PERSONA` | Optional. The default voice: `plain`, `casual` (default), or `spicy` (decisions 044, 046). An unknown value warns and uses `casual`. The owner's `/sym persona` setting wins over it, and a pack `persona` file wins over both |
 | `SYM_PROJECTS` | T3 project titles or IDs Sym may work on, comma-separated. Required without a pack: with neither, no job starts (decision 042). Ignored when a pack lists `projects` |

@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { Brief } from "../lib/jobs/brief.ts";
 import { launchOrAdopt, startJob } from "../lib/jobs/run.ts";
 import {
-  askOwner,
   capText,
-  postProgress,
   QUESTION_MAX,
   SUMMARY_MAX,
+  askOwner as scopedAskOwner,
+  postProgress as scopedPostProgress,
   shortHash,
 } from "../lib/jobs/worker-calls.ts";
 import { getJob, updateJob } from "../lib/ledger/jobs.ts";
@@ -175,3 +175,16 @@ describe.skipIf(!hasDatabase)("worker calls", () => {
     });
   });
 });
+
+const asJob = (job: string) => ({
+  principalId: "sym-worker",
+  attributes: { jobId: job.replace(/^J-/i, "") },
+});
+const askOwner = (
+  deps: Parameters<typeof scopedAskOwner>[0],
+  input: Parameters<typeof scopedAskOwner>[1],
+) => scopedAskOwner(deps, input, asJob(input.job));
+const postProgress = (
+  deps: Parameters<typeof scopedPostProgress>[0],
+  input: Parameters<typeof scopedPostProgress>[1],
+) => scopedPostProgress(deps, input, asJob(input.job));

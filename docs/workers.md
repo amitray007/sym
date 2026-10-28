@@ -159,3 +159,16 @@ and any environment the worker host applies to that folder.
 2. Map the worker's states to the shared status values.
 3. Add a fake for tests. Tests never call a real worker.
 4. Record the adapter's limits in this document and its choice in a decision.
+
+## Worker tools and follow-ups
+
+The launch message supplies a private MCP endpoint and an independent bearer for that job
+(decision 065). The worker uses it with `sym_post_progress` and `sym_ask_owner`. Authentication
+binds the credential to the job; changing the tool's job argument cannot target another job. A
+finished job's credential stops working. The shared `SYM_MCP_TOKEN` permits status reads only.
+
+A Fix gets a new job and credential on the same thread. Before sending it, Sym rechecks the
+current project allow-list, pack worker mapping, and project limits. The recorded worker name,
+credential-free endpoint, and project ID must still match. The message keeps the brief constraints
+and replaces earlier project rules with current pack limits. A legacy job without a worker
+identity cannot use Fix; ask for a new job.
