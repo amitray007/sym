@@ -1,3 +1,4 @@
+import { type Caller, workerJobId } from "../callers.ts";
 import type { Sql } from "../db.ts";
 import { deliver } from "../delivery/deliver.ts";
 import { chooseDisplay } from "../display.ts";
@@ -52,9 +53,13 @@ export function shortHash(text: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, "0");
 }
 
-async function activeJob(sql: Sql, ref: string) {
+async function activeJob(sql: Sql, ref: string, caller: Caller) {
+  const bound = workerJobId(caller);
+  if (bound === undefined)
+    return { refusal: "This tool needs a job-scoped worker credential." } as const;
   const job = await getJobByRef(sql, ref);
   if (!job) return { refusal: `There is no job ${capText(ref, 40)}.` } as const;
+  if (bound !== job.id) return { refusal: "This credential cannot update that job." } as const;
   if (TERMINAL.includes(job.status)) {
     return { refusal: `${jobRef(job.id)} already finished (${job.status}).` } as const;
   }
@@ -70,8 +75,9 @@ async function sendNow(deps: WorkerCallDeps): Promise<void> {
 export async function postProgress(
   deps: WorkerCallDeps,
   input: { job: string; summary: string },
+  caller: Caller,
 ): Promise<WorkerCallResult> {
-  const found = await activeJob(deps.sql, input.job);
+  const found = await activeJob(deps.sql, input.job, caller);
   if ("refusal" in found) return { ok: false, message: found.refusal };
   const summary = capText(input.summary, SUMMARY_MAX);
   if (!summary) return { ok: false, message: "The summary is empty." };
@@ -90,8 +96,9 @@ export async function postProgress(
 export async function askOwner(
   deps: WorkerCallDeps,
   input: { job: string; question: string },
+  caller: Caller,
 ): Promise<WorkerCallResult> {
-  const found = await activeJob(deps.sql, input.job);
+  const found = await activeJob(deps.sql, input.job, caller);
   if ("refusal" in found) return { ok: false, message: found.refusal };
   const { job } = found;
   const question = capText(input.question, QUESTION_MAX);

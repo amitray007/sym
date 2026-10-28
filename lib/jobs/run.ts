@@ -50,6 +50,7 @@ import {
 } from "./present.ts";
 import { detectEvents } from "./progress.ts";
 import { type ModelCheck, VerifierOutput, verifierMessage } from "./verify.ts";
+import { workerCallbackInstructions } from "./worker-capabilities.ts";
 import { WriterOutput, writerMessage } from "./writer.ts";
 
 // The worker job steps that `worker_job` and reconcile run (docs/architecture.md, flows 1 and 3).
@@ -72,6 +73,8 @@ export interface JobDeps {
   pack?: Pack;
   // The pack worker this process is connected to. A pack project on another worker is refused.
   workerName?: string;
+  // Name and endpoint of the connected worker, without credentials, for safe thread reuse.
+  workerIdentity?: string | undefined;
   // The projects Sym may touch (decision 042). Without it, the pack's projects apply, and
   // without a pack nothing is allowed.
   allowedProjects?: AllowedProject[];
@@ -162,7 +165,16 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
     const job = await mustGetJob(lock, jobId);
     if (job.workerThreadId) return job;
 
+    if (job.workerIdentity && job.workerIdentity !== deps.workerIdentity) {
+      throw new JobSetupError("The worker changed before this job could start. Ask for a new job.");
+    }
+
     const plan = await planLaunch(deps, Brief.parse(job.brief));
+    if (job.workerProjectId && job.workerProjectId !== plan.projectId) {
+      throw new JobSetupError(
+        "The worker project changed before this job could start. Ask for a new job.",
+      );
+    }
     const model = resolveAvailable(
       plan.models,
       chooseModel(plan.models, {
@@ -172,12 +184,27 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
       await deps.worker.capabilities(),
     );
     const existing = await deps.worker.findByTitle(plan.projectId, `[${jobRef(job.id)}]`);
+    if (existing && deps.workerIdentity && !job.workerIdentity) {
+      throw new JobSetupError("This thread's worker is unknown. Ask for a new job.");
+    }
+    if (!job.workerIdentity && deps.workerIdentity) {
+      // Persist before launch, so recovery can prove which worker owns a lost-response thread.
+      await updateJob(lock, job.id, {
+        workerIdentity: deps.workerIdentity,
+        workerProjectId: plan.projectId,
+      });
+    }
+    const callbackTools = await workerCallbackInstructions(
+      lock,
+      job.id,
+      new URL("/eve/v1/mcp", callbackUrl).href,
+    );
     const thread =
       existing ??
       (await deps.worker.launch({
         projectId: plan.projectId,
         title: threadTitle(job),
-        message: workerMessage(plan.brief, jobRef(job.id), callbackUrl, plan.guardrails),
+        message: `${workerMessage(plan.brief, jobRef(job.id), callbackUrl, plan.guardrails)}\n\n${callbackTools}`,
         baseRef: plan.baseRef,
         ...(model.selection ? { model: model.selection } : {}),
       }));
@@ -646,7 +673,7 @@ interface LaunchPlan {
 
 // Applies the pack, when there is one: only its projects, its base branch, its PR policy, and
 // its guardrails. A pack narrows what a brief may ask for; it never widens it.
-async function planLaunch(deps: JobDeps, brief: Brief): Promise<LaunchPlan> {
+export async function planLaunch(deps: JobDeps, brief: Brief): Promise<LaunchPlan> {
   const envModel = envModelId(deps);
   // Checked again here, so a stored brief or schedule for a removed project fails closed.
   const list = deps.allowedProjects ?? allowedProjects(deps.pack);

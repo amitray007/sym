@@ -23,6 +23,18 @@ export interface ResolvedWorker {
   source: "stored" | "pack" | "env";
 }
 
+// Do not put credentials or query values in the ledger. An unsafe URL cannot identify a
+// follow-up, so the launch remains usable but its thread cannot be resumed through Fix.
+export function workerIdentity(name: string, endpoint: string): string | undefined {
+  try {
+    const url = new URL(endpoint);
+    if (url.username || url.password || url.search || url.hash) return undefined;
+    return JSON.stringify([name, url.href]);
+  } catch {
+    return undefined;
+  }
+}
+
 export function workerTarget(
   pack: Pack | undefined,
   env: Record<string, string | undefined>,

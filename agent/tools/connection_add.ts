@@ -3,8 +3,9 @@ import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { planConnection } from "../../lib/connections/add.ts";
 import { reviewOf } from "../../lib/connections/format.ts";
+import { nameProblem } from "../../lib/connections/names.ts";
 import { probeServer } from "../../lib/connections/probe.ts";
-import { proposeConnection } from "../../lib/connections/rows.ts";
+import { getConnection, proposeConnection } from "../../lib/connections/rows.ts";
 import { mayDecideAsOwner, OWNER_ONLY, slackUserOfPrincipal } from "../../lib/owner.ts";
 import { ledger, pack } from "../../lib/runtime.ts";
 
@@ -34,12 +35,20 @@ export default defineTool({
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
     const caller = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
     if (!mayDecideAsOwner(caller, pack())) return OWNER_ONLY;
+    const name = input.name.trim();
+    const problem = nameProblem(name);
+    if (problem) return problem;
+    const sql = ledger();
+    const existing = await getConnection(sql, name);
+    if (existing?.status === "active") {
+      return `"${name}" is already connected. Remove it first to connect it again.`;
+    }
     const plan = await planConnection(
       { ...input, createdBy: caller ?? null },
       { env: process.env, probe: probeServer },
     );
     if (!plan.ok) return plan.reason;
-    const saved = await proposeConnection(ledger(), plan.connection);
+    const saved = await proposeConnection(sql, plan.connection);
     if (!saved.ok) return saved.reason;
     return [
       `Proposed "${saved.row.name}". Call connection_approve with this review:`,

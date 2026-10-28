@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { relistTools } from "../lib/connections/add.ts";
+import { planConnection, relistTools } from "../lib/connections/add.ts";
 import { connectionToken } from "../lib/connections/auth.ts";
 import {
   getConnectionCredential,
@@ -7,6 +7,7 @@ import {
   signInStates,
   usableAccessToken,
 } from "../lib/connections/credentials.ts";
+import { reviewOf } from "../lib/connections/format.ts";
 import { connectionDefinitions } from "../lib/connections/load.ts";
 import { tokenEnvVar } from "../lib/connections/names.ts";
 import { probeServer } from "../lib/connections/probe.ts";
@@ -403,6 +404,52 @@ describe.skipIf(!hasDatabase)("server instructions in the ledger", () => {
     // A row that is complete is not probed again.
     await refreshStale(fresh ? [fresh] : [], deps("fake-static", t0));
     expect(probes).toHaveLength(1);
+  });
+
+  it("uses the approved endpoint and token reference only after activation", async () => {
+    const sql = ledger.sql();
+    const env = { SYM_MCP_APPROVED_TOKEN: "fake-static" };
+    const probes: { url: string; token: string | undefined }[] = [];
+    const probe: typeof probeServer = (url, options) => {
+      probes.push({ url, token: options?.token });
+      return probeServer(url, options);
+    };
+    const plan = await planConnection(
+      { name: "approved", url: server.url, createdBy: "UOWNER" },
+      { env, probe },
+    );
+    if (!plan.ok) throw new Error(plan.reason);
+    const proposed = await proposeConnection(sql, plan.connection);
+    if (!proposed.ok) throw new Error(proposed.reason);
+    expect(reviewOf(proposed.row)).toMatchObject({
+      name: "approved",
+      url: server.url,
+      auth: "env",
+      tools: [],
+    });
+    expect(proposed.row.envVar).toBe("SYM_MCP_APPROVED_TOKEN");
+    const deps = {
+      sql,
+      probe,
+      token: (row: Connection) => connectionToken(sql, row, env),
+      attempts: new Map<number, number>(),
+      now: new Date(),
+    };
+    await refreshStale([proposed.row], deps);
+    expect(probes).toEqual([{ url: server.url, token: undefined }]);
+    const active = await activateConnection(sql, proposed.row.id, "UOWNER", new Date());
+    if (!active) throw new Error("not active");
+    const [fresh] = await refreshStale([active], deps);
+    expect(probes).toEqual([
+      { url: server.url, token: undefined },
+      { url: server.url, token: "fake-static" },
+    ]);
+    expect(fresh?.tools.map((item) => item.name)).toEqual([
+      "list_items",
+      "create_item",
+      "delete_item",
+    ]);
+    expect(fresh?.serverInstructions).toBe(TEXT);
   });
 
   it("probes a row without instructions at most once per six hours", async () => {

@@ -8,6 +8,8 @@ import { reconcileJobs } from "../lib/jobs/reconcile.ts";
 import { checkJob, type JobDeps, launchOrAdopt, startJob } from "../lib/jobs/run.ts";
 import { getJob, type Job } from "../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
+import type { Pack } from "../lib/pack/load.ts";
+import { packSchema } from "../lib/pack/schema.ts";
 import type { SlackApi } from "../lib/slack/api.ts";
 import { handleJobAction, type JobAction } from "../lib/slack/job-actions.ts";
 import { type FakeStep, FakeWorker } from "./fakes/worker.ts";
@@ -78,7 +80,13 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       userId: "U1",
     });
     const worker = new FakeWorker({ script: steps });
-    const deps: JobDeps = { sql, worker, allowedProjects: TEST_PROJECTS, slack };
+    const deps: JobDeps = {
+      sql,
+      worker,
+      workerIdentity: "worker-one",
+      allowedProjects: TEST_PROJECTS,
+      slack,
+    };
     const job = await startJob(sql, { requestKey: key, sessionId: `s-${key}`, brief });
     await launchOrAdopt(deps, job.id, "http://127.0.0.1/cb");
     await checkJob(deps, job.id, 1000);
@@ -209,6 +217,122 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     const closeParent = await click(deps, { actionId: "sym_job_close", value: ref });
     expect(closeParent.replies).toEqual([`${childRef} continued this thread. Close it instead.`]);
     expect(worker.settled).toEqual([]);
+  });
+
+  it("refuses a Fix when its project has been removed, before creating or sending a job", async () => {
+    const { deps, worker, job, sql } = await finishedJob("revoked", [
+      { status: "completed", items: [result("Done")] },
+    ]);
+    const ref = `J-${job.id}`;
+    const denied = await click(
+      { ...deps, allowedProjects: [] },
+      {
+        actionId: "sym_job_fix_text",
+        blockId: `fix-${ref}`,
+        value: "Change A",
+        messageTs: "2.1",
+      },
+    );
+    expect(denied.answer).toContain("Sym has no projects configured.");
+    expect(await sql`select id from jobs where parent_job_id = ${job.id}`).toEqual([]);
+    expect(worker.sends).toEqual([]);
+  });
+
+  it("refuses a Fix when the allowed name now maps to a different worker project", async () => {
+    const { deps, worker, job, sql } = await finishedJob("remapped", [
+      { status: "completed", items: [result("Done")] },
+    ]);
+    const ref = `J-${job.id}`;
+    const otherWorker = new FakeWorker({
+      projects: [{ id: "other-id", title: "other", workspaceRoot: "/other" }],
+    });
+    const denied = await click(
+      {
+        ...deps,
+        worker: otherWorker,
+        allowedProjects: [{ name: "test-repo", workerProject: "other" }],
+      },
+      {
+        actionId: "sym_job_fix_text",
+        blockId: `fix-${ref}`,
+        value: "Change A",
+        messageTs: "2.2",
+      },
+    );
+    expect(denied.answer).toContain("project has changed");
+    expect(await sql`select id from jobs where parent_job_id = ${job.id}`).toEqual([]);
+    expect(worker.sends).toEqual([]);
+    expect(otherWorker.sends).toEqual([]);
+  });
+
+  it("refuses a Fix when the connected worker changed or the original identity is unknown", async () => {
+    const { deps, worker, job, sql } = await finishedJob("worker-change", [
+      { status: "completed", items: [result("Done")] },
+    ]);
+    const ref = `J-${job.id}`;
+    const action = {
+      actionId: "sym_job_fix_text",
+      blockId: `fix-${ref}`,
+      value: "Change A",
+      messageTs: "8.1",
+    };
+    const changed = await click({ ...deps, workerIdentity: "worker-two" }, action);
+    expect(changed.answer).toContain("worker has changed");
+    await sql`update jobs set worker_identity = null where id = ${job.id}`;
+    const legacy = await click(deps, { ...action, messageTs: "8.2" });
+    expect(legacy.answer).toContain("worker has changed");
+    expect(await sql`select id from jobs where parent_job_id = ${job.id}`).toEqual([]);
+    expect(worker.sends).toEqual([]);
+  });
+
+  it("applies current pack restrictions to a Fix and its stored brief", async () => {
+    const { deps, worker, job, sql } = await finishedJob("pack-change", [
+      { status: "completed", items: [result("Done")] },
+    ]);
+    const pack: Pack = {
+      dir: "fixture",
+      config: packSchema.parse({
+        owner: { slackUserId: "U1" },
+        workers: [{ name: "local", kind: "t3", mcpUrl: "https://worker.example/mcp" }],
+        projects: [
+          { name: "test-repo", worker: "local", allowedPaths: ["docs/**"], prPolicy: "none" },
+        ],
+      }),
+      instructions: [],
+      playbooks: [],
+      schedules: [],
+    };
+    const ref = `J-${job.id}`;
+    await sql`update jobs set brief = jsonb_set(brief, '{constraints}', '["Keep docs clear"]') where id = ${job.id}`;
+    const denied = await click(
+      { ...deps, pack, workerName: "another" },
+      {
+        actionId: "sym_job_fix_text",
+        blockId: `fix-${ref}`,
+        value: "Change A",
+        messageTs: "9.1",
+      },
+    );
+    expect(denied.answer).toContain('runs on worker "local"');
+    expect(await sql`select id from jobs where parent_job_id = ${job.id}`).toEqual([]);
+    expect(worker.sends).toEqual([]);
+    const sent = await click(
+      { ...deps, pack, workerName: "local" },
+      {
+        actionId: "sym_job_fix_text",
+        blockId: `fix-${ref}`,
+        value: "Change A",
+        messageTs: "2.3",
+      },
+    );
+    expect(sent.answer).toContain("Sent to the worker as");
+    expect(worker.sends[0]?.text).toContain("Change only files that match: docs/**.");
+    expect(worker.sends[0]?.text).toContain("Keep docs clear");
+    expect(worker.sends[0]?.text).toContain("Do not push and do not open a pull request.");
+    const [child] = await sql<
+      { brief: Brief }[]
+    >`select brief from jobs where parent_job_id = ${job.id}`;
+    expect(child?.brief.openPullRequest).toBe(false);
   });
 
   it("holds a job for less than reconcile's interval when reconcile checks it", async () => {

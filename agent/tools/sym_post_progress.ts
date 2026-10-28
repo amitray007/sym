@@ -20,7 +20,7 @@ export default defineTool({
   }),
   async execute(input, ctx) {
     if (!isWorkerCaller(ctx.session.auth.current)) return WORKER_ONLY;
-    const result = await postProgress(ledgerDeps(), input);
+    const result = await postProgress(ledgerDeps(), input, ctx.session.auth.current);
     return result.message;
   },
 });

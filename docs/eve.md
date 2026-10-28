@@ -56,7 +56,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Shortcuts | `onShortcut` | Later | "Send to Sym" on any message | `trigger_id` valid about 3 s |
 | Proactive posts | `to(slack, { channelId, threadTs? })` | Use | Schedule threads, recovery sessions, digests | Each fire is a new session unless `threadTs` is set |
 | Plain posts | `callSlackApi`, `ctx.slack.request` | Use | Outbox, job card edits, reactions | |
-| MCP channel | `channels/mcp.ts`, `tools: true` | Use | Worker threads call `sym_post_progress`, `sym_ask_owner` with `SYM_MCP_TOKEN` | HTTPS unless loopback. No tool allow-list: every plain tool is published, so tools check the caller (decision 027). Workflow tools are never published. Approval tools return `approval_required` |
+| MCP channel | `channels/mcp.ts`, `tools: true` | Use | Worker threads call `sym_post_progress`, `sym_ask_owner` with a job-scoped bearer (decision 065); `SYM_MCP_TOKEN` permits status reads | HTTPS unless loopback. No tool allow-list: every plain tool is published, so tools check the caller (decision 027). Workflow tools are never published. Approval tools return `approval_required` |
 | HTTP channel | `/eve/v1/session` | Use | Scripts and CI start a session | Use `operationId` for create-once |
 | GitHub channel | `githubChannel` | Later | CI and PR events instead of polling | Needs a GitHub App |
 | Custom channel | `defineChannel` | Later | Error tracker or ticket webhooks | Verify signatures. Dedupe |
@@ -84,7 +84,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Self-modification | `eve/self-modification/remote` | Skip | Code changes go through a worker thread instead (decision 007) | Needs microsandbox when self-hosted |
 | Evals | `evals/**/*.eval.ts`, `eve eval`, tool stubs | Use | Six routing cases and three voice cases check the brain with a real model (voice: silence after a posted result, and two persona floors run by `pnpm eval:plain` and `pnpm eval:spicy`; decision 062 removed the shape cases). The routing cases: a code change calls `worker_job`, a quick pull request check starts no job (decision 063), a status question calls `jobs_status`, a recurring request calls `schedule_create`, a production write stays read-only, and injected text calls no write tool (decision 039). Stubs replace the write tools. `pnpm test:e2e` still covers the flows with the fixture brain | Run by the owner, not CI: it spends model tokens. Setup moves the run to its own database (`SYM_EVAL_DATABASE_URL`, default `sym_eval`), migrates it, and stops when it has an active connection, so no eval reaches a live server (decision 064). The `worker_job` stub returns the real end result, `posted: true`. Stubs need the dev-only grant in `agent/channels/eve.ts`. No judge is used, so no judge model is set |
 | OpenTelemetry | `agent/instrumentation/*` | Later | Traces to a collector | |
-| Route auth | custom bearer `AuthFn`, `localDev()` | Use | Slack by signature. MCP by `SYM_MCP_TOKEN`, sessions by `SYM_API_TOKEN` (decisions 019, 027). An IP allow-list is later; keep both routes on the private network | `placeholderAuth` blocks production |
+| Route auth | custom bearer `AuthFn`, `localDev()` | Use | Slack by signature. MCP by job capabilities or the status-read `SYM_MCP_TOKEN`, sessions by `SYM_API_TOKEN` (decisions 019, 027, 065). An IP allow-list is later; keep both routes on the private network | `placeholderAuth` blocks production |
 | Self-hosting | `eve build`, `eve start` | Use | Docker service with a volume at `.eve/.workflow-data` | The proxy must pass `/eve/` and `/.well-known/workflow/` unrewritten |
 | CLI | `eve remote connect`, `eve logs`, `eve traces` | Use | Debug the deployed agent | CLI telemetry is on by default |
 
@@ -97,3 +97,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 - Keep running sessions across a self-hosted upgrade.
 - Retry failed tools or deliver exactly once.
 - Document Slack's agent surface or streamed replies. See [slack.md](slack.md).
+
+Connection proposals probe anonymously, including token-backed servers (decision 065). Only after
+owner approval binds the endpoint and token reference does the active-row refresh list
+authenticated tools and server instructions. Active-name conflicts are refused before probing.

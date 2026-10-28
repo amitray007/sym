@@ -1,4 +1,4 @@
-import { nameProblem, readTokenEnv, tokenEnvVar } from "./names.ts";
+import { hasTokenEnv, nameProblem, tokenEnvVar } from "./names.ts";
 import { checkServerUrl, type Probe, type ProbeOptions } from "./probe.ts";
 import type { AuthKind, NewConnection } from "./rows.ts";
 import { type ConnectionTool, recordInstructions, recordTools } from "./tools.ts";
@@ -52,20 +52,13 @@ export async function planConnection(request: AddRequest, deps: AddDeps): Promis
   } else {
     authKind = "env";
     envVar = tokenEnvVar(name);
-    const token = readTokenEnv(envVar, deps.env);
-    if (!token) {
+    if (!hasTokenEnv(envVar, deps.env)) {
       notes.push(
         `The server needs a token. Tell the owner: set ${envVar} in the deployment ` +
           "environment and redeploy. Never ask for the token in chat.",
       );
     } else {
-      const signedIn = await deps.probe(url.url, { token });
-      if (signedIn.kind === "tools") {
-        tools = recordTools(signedIn.tools);
-        serverInstructions = recordInstructions(signedIn.instructions);
-      } else if (signedIn.kind === "unauthorized") {
-        notes.push(`The server refused the token in ${envVar}. The owner sets a new one.`);
-      } else notes.push(signedIn.reason);
+      notes.push("After the owner approves, Sym lists the server's tools with its token.");
     }
   }
 
