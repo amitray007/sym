@@ -8,6 +8,8 @@ import { approvePlaybook, propose } from "../lib/learning/rows.ts";
 import {
   cleanStreak,
   linkPlaybook,
+  markUnclean,
+  promoteIfClean,
   recordOutcome,
   setStartMode,
   trustedPlaybookOf,
@@ -86,6 +88,24 @@ describe.skipIf(!hasDatabase)("the trust ladder", () => {
       select payload from outbox where starts_with(idempotency_key, ${prefix}) order by id
     `;
 
+  it("serializes promotion with a concurrent negative outcome", async () => {
+    vi.stubEnv("SYM_TRUST_RUNS", "2");
+    const sql = ledger.sql();
+    const guide = await approved(sql, "race-guide");
+    const first = await job(sql, "race-first", guide.name);
+    const second = await job(sql, "race-second", guide.name);
+    await end(sql, first.id, true);
+    await end(sql, second.id, true);
+    await Promise.all([
+      promoteIfClean(sql, guide.id, "U0OWNER"),
+      markUnclean(sql, second.id, "negative feedback", undefined),
+    ]);
+    expect((await sql`select start_mode from playbooks where id = ${guide.id}`)[0]?.startMode).toBe(
+      "ask",
+    );
+    expect(await promoteIfClean(sql, guide.id, "U0OWNER")).toBe(false);
+  });
+
   it("links only an approved playbook the brief names", async () => {
     const sql = ledger.sql();
     const deploy = await approved(sql, "deploy-preview");
@@ -158,7 +178,7 @@ describe.skipIf(!hasDatabase)("the trust ladder", () => {
     expect(mode?.startMode).toBe("ask");
     const [notice] = await notices(sql, `trust-off:P-${playbook.id}:`);
     expect(notice?.payload.text).toBe(
-      `P-${playbook.id} rotate-keys asks for Start again: a 👎 on J-${trusted.id}.`,
+      `P-${playbook.id} rotate-keys needs your approval before starting again: a 👎 on J-${trusted.id}.`,
     );
     expect(await trustedPlaybookOf(sql, trusted.id)).toBeUndefined();
   });
