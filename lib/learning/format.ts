@@ -19,8 +19,7 @@ export function sessionInstructions(rows: Playbook[]): string | null {
 }
 
 export function playbookLine(row: Playbook): string {
-  const trust = row.status === "approved" && row.startMode === "auto" ? " - trusted" : "";
-  return `${playbookRef(row.id)}: ${row.name} v${row.version} - ${row.kind} - ${row.status} - ${row.source}${trust}`;
+  return `${playbookRef(row.id)}: ${row.name} v${row.version} - ${row.kind} - ${row.status} - ${row.source}`;
 }
 
 export function playbookDetail(row: Playbook): string {

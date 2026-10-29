@@ -13,7 +13,12 @@ import { createJob, getJob, updateJob } from "../lib/ledger/jobs.ts";
 import { enqueuePost } from "../lib/ledger/outbox.ts";
 import { type JobProposal, propose } from "../lib/ledger/proposals.ts";
 import type { SlackApi } from "../lib/slack/api.ts";
-import { handleJobAction, handleProposal, handleTypedProposal } from "../lib/slack/job-actions.ts";
+import {
+  handleJobAction,
+  handleProposal,
+  handleTypedProposal,
+  retryFollowupProposals,
+} from "../lib/slack/job-actions.ts";
 import { FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 import { TEST_PROJECTS } from "./helpers/projects.ts";
@@ -268,8 +273,97 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
       allowed,
     );
     expect(answer.text).toContain("no projects configured");
+    expect(
+      s.calls.filter((c) => c.method === "chat.postMessage" && c.body.channel === "U1"),
+    ).toEqual([]);
     expect(s.worker.sends).toEqual([]);
     expect(await sql`select id from jobs where parent_job_id = ${original.id}`).toHaveLength(0);
+  });
+
+  it("returns the same child to simultaneous starts with one request key", async () => {
+    const s = setup();
+    const original = await job("same-key");
+    await launchOrAdopt(s.deps, original.id, "http://127.0.0.1/cb");
+    await checkJob(s.deps, original.id, 1);
+    let release = () => {};
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const projects = s.worker.projects.bind(s.worker);
+    let calls = 0;
+    vi.spyOn(s.worker, "projects").mockImplementation(async () => {
+      if (++calls === 2) release();
+      await barrier;
+      return projects();
+    });
+    const results = await Promise.all([
+      startFollowUp(s.deps, `J-${original.id}`, "add a test", "U1", "same-key"),
+      startFollowUp(s.deps, `J-${original.id}`, "add a test", "U1", "same-key"),
+    ]);
+    expect(results[0]?.job?.id).toBeTruthy();
+    expect(results[1]?.job?.id).toBe(results[0]?.job?.id);
+    expect(s.worker.sends).toHaveLength(1);
+  });
+
+  it("keeps one sent child when a live Start races proposal recovery", async () => {
+    vi.stubEnv("SYM_SLACK_USERS", "U1");
+    try {
+      const s = setup();
+      const original = await job("same-proposal-race");
+      const sql = ledger.sql();
+      await launchOrAdopt(s.deps, original.id, "http://127.0.0.1/cb");
+      await checkJob(s.deps, original.id, 1);
+      await proposeFollowUp(s.deps, `J-${original.id}`, "add a test", "same-proposal-race");
+      const [gate] = await sql<
+        JobProposal[]
+      >`select * from job_proposals where job_id = ${original.id}`;
+      if (!gate) throw new Error("missing proposal");
+      let release = () => {};
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let arrived = () => {};
+      const first = new Promise<void>((resolve) => {
+        arrived = resolve;
+      });
+      const projects = s.worker.projects.bind(s.worker);
+      let calls = 0;
+      vi.spyOn(s.worker, "projects").mockImplementation(async () => {
+        if (++calls === 1) arrived();
+        if (calls === 2) release();
+        await barrier;
+        return projects();
+      });
+      const click = handleProposal(
+        s.deps,
+        {
+          id: String(gate.id),
+          by: "U1",
+          channel: "C1",
+          threadTs: "same-proposal-race",
+          start: true,
+        },
+        allowed,
+      );
+      await first;
+      const recovery = retryFollowupProposals(s.deps);
+      await Promise.all([click, recovery]);
+      const children =
+        await sql`select status, followup_sent_at from jobs where parent_job_id = ${original.id}`;
+      expect(children).toHaveLength(1);
+      expect(children[0]?.status).toBe("running");
+      expect(children[0]?.followupSentAt).not.toBeNull();
+      const [proposal] =
+        await sql`select status, executed_at from job_proposals where id = ${gate.id}::bigint`;
+      expect(proposal?.status).toBe("approved");
+      expect(proposal?.executedAt).not.toBeNull();
+      expect(s.worker.sends).toHaveLength(1);
+      expect(
+        s.calls.filter((c) => c.method === "chat.postMessage" && c.body.channel === "U1"),
+      ).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it.each(["project removed", "worker changed", "approver removed"])(

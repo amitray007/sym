@@ -16,6 +16,11 @@ const minutesAgo = (m: number) => new Date(NOW.getTime() - m * 60_000);
 function job(overrides: Partial<Job> = {}): Job {
   return {
     id: 12,
+    parentJobId: null,
+    followupSentAt: null,
+    followupBoundary: null,
+    followupChecks: 0,
+    followupObserved: false,
     requestKey: "k",
     sessionId: null,
     kind: "code-change",

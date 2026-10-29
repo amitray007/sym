@@ -227,7 +227,11 @@ export async function handleTypedProposal(
   );
 }
 
-async function executeFollowupProposal(deps: JobDeps, proposal: JobProposal): Promise<string> {
+async function executeFollowupProposal(
+  deps: JobDeps,
+  proposal: JobProposal,
+  notify = false,
+): Promise<string> {
   const payload = proposal.payload as { change?: unknown };
   if (typeof payload.change !== "string" || !proposal.decidedBy)
     return "I couldn't read that follow-up. Ask me for a new proposal.";
@@ -238,7 +242,7 @@ async function executeFollowupProposal(deps: JobDeps, proposal: JobProposal): Pr
     proposal.decidedBy,
     `proposal:${proposal.id}`,
   );
-  await finishFollowupProposal(deps, proposal, result.answer, Boolean(result.job));
+  await finishFollowupProposal(deps, proposal, result.answer, result.refused === true, notify);
   return result.answer;
 }
 
@@ -254,15 +258,20 @@ export async function retryFollowupProposals(deps: JobDeps): Promise<void> {
         deps,
         row,
         "The approver no longer has access. Ask for a new proposal.",
-        false,
+        true,
+        true,
       );
       continue;
     }
-    await executeFollowupProposal(deps, {
-      ...row,
-      id: String(row.id),
-      jobId: Number(row.jobId),
-    }).catch(() => undefined);
+    await executeFollowupProposal(
+      deps,
+      {
+        ...row,
+        id: String(row.id),
+        jobId: Number(row.jobId),
+      },
+      true,
+    ).catch(() => undefined);
   }
 }
 
@@ -272,26 +281,29 @@ async function finishFollowupProposal(
   deps: JobDeps,
   proposal: JobProposal,
   reason: string,
-  sent: boolean,
+  refused: boolean,
+  notify: boolean,
 ): Promise<void> {
   await deps.sql.begin(async (transaction) => {
     const sql = transaction as unknown as Sql;
     await sql`select id from job_proposals where id = ${proposal.id}::bigint for update`;
     const key = `fix:proposal:${proposal.id}`;
-    if (!sent) {
+    if (refused) {
       await sql`update jobs set status = 'cancelled', finished_at = coalesce(finished_at, now()),
         last_summary = ${reason}, revision = revision + 1
         where request_key = ${key} and followup_sent_at is null and status = 'running'`;
     }
     const [closed] = await sql`update job_proposals set executed_at = now(),
-      status = ${sent ? "approved" : "expired"} where id = ${proposal.id}::bigint
+      status = ${refused ? "expired" : "approved"} where id = ${proposal.id}::bigint
+      and executed_at is null
       and not exists (select 1 from jobs where request_key = ${key}
         and followup_sent_at is null and status = 'running') returning id`;
-    if (!closed) throw new Error("The follow-up is still unsent and running");
+    // A concurrent sender still owns an unsent child. Recovery will finish the proposal.
+    if (!closed) return;
     const { slack: _held, ...rest } = deps;
     const queued = { ...rest, sql };
     await editProposal(queued, proposal, `<@${proposal.decidedBy}> chose: Start. ${reason}`);
-    if (!sent && proposal.decidedBy) {
+    if (refused && notify && proposal.decidedBy) {
       await enqueuePost(sql, {
         idempotencyKey: `proposal:${proposal.id}:refused`,
         jobId: proposal.jobId,

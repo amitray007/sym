@@ -151,11 +151,11 @@ describe.skipIf(!hasDatabase)("conversation recovery regressions", () => {
       items: [
         {
           type: "assistant_message",
-          position: 1,
+          position: 2,
           text: '```json\n{"summary":"new result","tests":"passed"}\n```',
         },
       ],
-      cursor: "1",
+      cursor: "2",
       hasMore: false,
       pendingRequests: 0,
     });

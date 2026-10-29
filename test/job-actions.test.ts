@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Sql } from "../lib/db.ts";
 import { deliver } from "../lib/delivery/deliver.ts";
 import type { Brief } from "../lib/jobs/brief.ts";
@@ -166,7 +166,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       parentJobId: job.id,
       workerThreadId: job.workerThreadId,
       status: "running",
-      cursor: job.cursor,
+      cursor: "1",
     });
     const childRef = `J-${child?.id}`;
     expect(sent.answer).toBe(`Sent to the worker as ${childRef}.`);
@@ -231,6 +231,99 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       expect(end?.payload.text).not.toContain("Parent done");
     },
   );
+
+  it("waits past the echoed follow-up and stale parent completion, then reads the new result", async () => {
+    const { deps, worker, job, sql } = await finishedJob("echo-boundary", [
+      { status: "completed", items: [result("Parent done")] },
+      { status: "completed" },
+      { status: "completed", items: [result("Child done")] },
+    ]);
+    // Activity from the old run that arrived after the parent's last check must stay old.
+    worker.addWake(job.workerThreadId as string, "Old run notification");
+    const child = await startFollowUp(deps, `J-${job.id}`, "add a test", "U1", "echo-boundary");
+    if (!child.job) throw new Error(child.answer);
+    const echo = (await worker.readActivity(job.workerThreadId as string, null)).items.at(-1);
+    expect(echo?.type).toBe("user_message");
+    expect((await checkJob(deps, child.job.id, 1)).status).toBe("running");
+    expect((await getJob(sql, child.job.id))?.lastMessage).toBeNull();
+    expect((await checkJob(deps, child.job.id, 1)).status).toBe("done");
+    expect((await getJob(sql, child.job.id))?.lastMessage).toContain("Child done");
+  });
+
+  it.each(["completed", "failed"] as const)(
+    "bounds empty completed follow-ups after an empty %s parent",
+    async (parentStatus) => {
+      const { deps, job, sql } = await finishedJob(`bounded-${parentStatus}`, [
+        { status: parentStatus },
+        { status: "completed" },
+      ]);
+      const child = await startFollowUp(
+        deps,
+        `J-${job.id}`,
+        "retry",
+        "U1",
+        `bounded-${parentStatus}`,
+      );
+      if (!child.job) throw new Error(child.answer);
+      for (let check = 0; check < 3; check++) {
+        expect((await checkJob({ ...deps }, child.job.id, 1)).status).toBe("running");
+      }
+      expect((await checkJob({ ...deps }, child.job.id, 1)).status).toBe("done");
+      expect((await getJob(sql, child.job.id))?.lastMessage).toBeNull();
+      const [end] = await outbox(sql, `J-${child.job.id}:end`);
+      expect(end?.payload.text).toContain("without a result summary");
+    },
+  );
+
+  it("expires empty completion grace after five minutes even on the first check", async () => {
+    const { deps, job } = await finishedJob("grace-time", [
+      { status: "completed" },
+      { status: "completed" },
+    ]);
+    const child = await startFollowUp(deps, `J-${job.id}`, "retry", "U1", "grace-time");
+    if (!child.job) throw new Error(child.answer);
+    const late = { ...deps, now: () => new Date(Date.now() + 301_000) };
+    expect((await checkJob(late, child.job.id, 1)).status).toBe("done");
+  });
+
+  it.each([
+    ["completed", "failed"],
+    ["completed", "interrupted"],
+    ["failed", "failed"],
+    ["failed", "interrupted"],
+  ] as const)("ends an empty %s parent's follow-up on %s", async (parentStatus, outcome) => {
+    const key = `empty-${parentStatus}-${outcome}`;
+    const { deps, worker, job, sql } = await finishedJob(key, [
+      { status: parentStatus },
+      { status: outcome },
+    ]);
+    const child = await startFollowUp(deps, `J-${job.id}`, "retry", "U1", key);
+    if (!child.job) throw new Error(child.answer);
+    // The server can report the new failure before returning any activity (even the echo).
+    vi.spyOn(worker, "readActivity").mockResolvedValue({
+      status: outcome,
+      items: [],
+      cursor: null,
+      pendingRequests: 0,
+      hasMore: false,
+    });
+    expect((await checkJob(deps, child.job.id, 1)).status).toBe("failed");
+    expect((await getJob(sql, child.job.id))?.lastMessage).toBeNull();
+    expect(await outbox(sql, `J-${child.job.id}:end`)).toHaveLength(1);
+  });
+
+  it("accepts completion after a worker item even without an assistant summary", async () => {
+    const { deps, worker, job } = await finishedJob("worker-observed", [
+      { status: "completed" },
+      { status: "running" },
+      { status: "completed" },
+    ]);
+    const child = await startFollowUp(deps, `J-${job.id}`, "retry", "U1", "worker-observed");
+    if (!child.job) throw new Error(child.answer);
+    worker.addWake(job.workerThreadId as string, "New run notification");
+    expect((await checkJob(deps, child.job.id, 1)).status).toBe("running");
+    expect((await checkJob(deps, child.job.id, 1)).status).toBe("done");
+  });
 
   it("closes a job without claiming a PR watch it never had", async () => {
     const { deps, job, sql } = await finishedJob("no-watch", [

@@ -239,6 +239,15 @@ describe("writtenPost", () => {
     "the test suite is passing",
     "all green",
     "CI is green",
+    "All 32 tests succeeded",
+    "CI succeeded",
+    "The test run was a success",
+    "Tests are ok",
+    "CI reports success",
+    "The tests are passing",
+    "All tests passed",
+    "Tests are green",
+    "I added a test for the retry that failed before",
   ])("keeps outcome claims in code-owned tokens: %s", (claim) => {
     for (const testsStatus of ["failed", "unknown", "not_run"] as const) {
       const post = writtenPost(

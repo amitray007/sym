@@ -1,7 +1,7 @@
 import type { Sql } from "../db.ts";
 import { chooseDisplay } from "../display.ts";
 import { recordFeedback } from "../feedback/feedback.ts";
-import { getJobByRef, type Job, jobRef, json } from "../ledger/jobs.ts";
+import { getJob, getJobByRef, type Job, jobRef, json } from "../ledger/jobs.ts";
 import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
 import { proposalBlocks, propose } from "../ledger/proposals.ts";
 import { archiveCodeChannel, setChannelStatus } from "../slack/code-channel.ts";
@@ -22,10 +22,13 @@ import { workerCallbackInstructions, workerCapabilityEndpoint } from "./worker-c
 const FIXABLE = new Set(["done", "failed"]);
 const TERMINAL = ["done", "failed", "cancelled"];
 const TITLE_MAX = 80;
+// Serialize one child's idempotent send and boundary write.
+const FOLLOWUP_SEND_LOCK = 4_242_003;
 
 export interface FollowUpResult {
   answer: string;
   job?: Job;
+  refused?: true;
 }
 
 // The message the worker thread gets. The person's words are data, so Sym cleans them, and the
@@ -66,41 +69,37 @@ export async function startFollowUp(
   requestId: string,
 ): Promise<FollowUpResult> {
   const parent = await getJobByRef(deps.sql, parentRef);
-  if (!parent) return { answer: `There is no job ${parentRef}.` };
+  if (!parent) return { refused: true, answer: `There is no job ${parentRef}.` };
   const name = jobRef(parent.id);
   if (!FIXABLE.has(parent.status)) {
     return {
+      refused: true,
       answer:
         parent.status === "cancelled"
           ? `${name} was cancelled. Ask for a new job instead.`
           : `${name} is still running. Steer it instead.`,
     };
   }
-  if (!parent.workerThreadId) return { answer: `${name} never reached the ${workerNoun()}.` };
-  if (await isClosed(deps.sql, parent.id)) return { answer: `${name} is closed.` };
+  if (!parent.workerThreadId)
+    return { refused: true, answer: `${name} never reached the ${workerNoun()}.` };
+  if (await isClosed(deps.sql, parent.id)) return { refused: true, answer: `${name} is closed.` };
   const clean = cleanSteerText(text);
-  if (!clean) return { answer: "Nothing to send. Say what should change." };
+  if (!clean) return { refused: true, answer: "Nothing to send. Say what should change." };
 
   const requestKey = `fix:${requestId}`;
-  const [earlier] = await deps.sql<{ id: number; followupSentAt: Date | null }[]>`
-    select id, followup_sent_at from jobs where request_key = ${requestKey}
-  `;
+  const [earlier] = await deps.sql<Job[]>`select * from jobs where request_key = ${requestKey}`;
   if (earlier) {
-    if (earlier.followupSentAt) {
-      const sent = await getJobByRef(deps.sql, jobRef(Number(earlier.id)));
-      return {
-        answer: `Already sent as ${jobRef(Number(earlier.id))}.`,
-        ...(sent ? { job: sent } : {}),
-      };
+    const existing = await getJob(deps.sql, Number(earlier.id));
+    if (existing?.followupSentAt) {
+      return { answer: `Already sent as ${jobRef(existing.id)}.`, job: existing };
     }
-    const existing = await getJobByRef(deps.sql, jobRef(Number(earlier.id)));
     if (existing?.status === "cancelled")
-      return { answer: existing.lastSummary ?? "That follow-up was cancelled." };
+      return { refused: true, answer: existing.lastSummary ?? "That follow-up was cancelled." };
     let plan: Awaited<ReturnType<typeof planLaunch>>;
     try {
       plan = await planLaunch(deps, Brief.parse(parent.brief));
     } catch (error) {
-      if (error instanceof JobSetupError) return { answer: error.message };
+      if (error instanceof JobSetupError) return { refused: true, answer: error.message };
       throw error;
     }
     if (
@@ -109,37 +108,59 @@ export async function startFollowUp(
       parent.workerIdentity !== deps.workerIdentity ||
       parent.workerProjectId !== plan.projectId
     )
-      return { answer: "The worker or project changed. Ask for a new job." };
+      return { refused: true, answer: "The worker or project changed. Ask for a new job." };
     return sendFollowUp(deps, parent, existing, clean, by, requestKey, plan.brief, plan.guardrails);
   }
   // One job reads a worker thread at a time, so their results do not mix.
-  const [busy] = await deps.sql<{ id: number }[]>`
-    select id from jobs
+  const [busy] = await deps.sql<Job[]>`
+    select * from jobs
     where worker_thread_id = ${parent.workerThreadId} and status not in ${deps.sql(TERMINAL)}
     limit 1
   `;
+  if (busy?.requestKey === requestKey) {
+    return {
+      answer: `Already recorded as ${jobRef(Number(busy.id))}.`,
+      job: { ...busy, id: Number(busy.id) },
+    };
+  }
   if (busy) {
     return {
+      refused: true,
       answer: `${jobRef(Number(busy.id))} is still working in this thread. Steer it instead.`,
     };
   }
 
   const later = await laterJob(deps.sql, parent);
-  if (later) return { answer: `${later} continued this thread. Use that job.` };
+  if (later) {
+    // The same request may have inserted its child after our earlier request-key lookup.
+    const [same] = await deps.sql<Job[]>`select * from jobs where request_key = ${requestKey}`;
+    if (same)
+      return {
+        answer: `Already recorded as ${jobRef(Number(same.id))}.`,
+        job: { ...same, id: Number(same.id) },
+      };
+    return { refused: true, answer: `${later} continued this thread. Use that job.` };
+  }
 
   const brief = Brief.parse(parent.brief);
   if (!parent.workerIdentity || parent.workerIdentity !== deps.workerIdentity) {
-    return { answer: `${name}'s worker has changed or is unknown. Ask for a new job instead.` };
+    return {
+      refused: true,
+      answer: `${name}'s worker has changed or is unknown. Ask for a new job instead.`,
+    };
   }
   let plan: Awaited<ReturnType<typeof planLaunch>>;
   try {
     plan = await planLaunch(deps, brief);
   } catch (error) {
-    if (error instanceof JobSetupError) return { answer: error.message };
+    if (error instanceof JobSetupError) return { refused: true, answer: error.message };
     throw error;
   }
   if (!parent.workerProjectId || parent.workerProjectId !== plan.projectId) {
-    return { answer: `${name}'s worker project has changed. Ask for a new job instead.` };
+    return {
+      refused: true,
+      answer: `${name}'s worker project has changed. Ask for a new job instead.`,
+    };
   }
   const title = clip(`Fix: ${parent.title}`, TITLE_MAX);
   let job: Job;
@@ -150,14 +171,17 @@ export async function startFollowUp(
       goal: `${brief.goal}\n\nFollow-up: ${clean}`,
     });
   } catch (error) {
+    if (error instanceof JobSetupError) return { refused: true, answer: error.message };
     if ((error as { code?: string }).code !== "23505") throw error;
     // The same Enter twice at once collides on the request key; two Fixes at once collide on
     // the index of active jobs per thread. Either way only one job starts.
-    const [same] = await deps.sql<{ id: number }[]>`
-      select id from jobs where request_key = ${requestKey}
-    `;
-    if (same) return { answer: `Already sent as ${jobRef(Number(same.id))}.` };
-    return { answer: "Another job just started in this thread. Steer it instead." };
+    const [same] = await deps.sql<Job[]>`select * from jobs where request_key = ${requestKey}`;
+    if (same)
+      return {
+        answer: `Already recorded as ${jobRef(Number(same.id))}.`,
+        job: { ...same, id: Number(same.id) },
+      };
+    return { refused: true, answer: "Another job just started in this thread. Steer it instead." };
   }
   return sendFollowUp(deps, parent, job, clean, by, requestKey, plan.brief, plan.guardrails);
 }
@@ -172,24 +196,83 @@ async function sendFollowUp(
   brief: Brief,
   guardrails?: string[],
 ): Promise<FollowUpResult> {
+  const lock = await deps.sql.reserve();
+  try {
+    await lock`select pg_advisory_lock(${FOLLOWUP_SEND_LOCK}, ${job.id})`;
+    const current = await getJob(lock, job.id);
+    if (current?.status === "cancelled")
+      return {
+        refused: true,
+        answer: current.lastSummary ?? "That follow-up was cancelled.",
+      };
+    if (current?.followupSentAt)
+      return {
+        answer: `Already sent as ${jobRef(current.id)}.`,
+        job: current,
+      };
+    return await sendFollowUpOnce(
+      { ...deps, sql: lock },
+      parent,
+      job,
+      clean,
+      by,
+      requestKey,
+      brief,
+      guardrails,
+    );
+  } finally {
+    await lock`select pg_advisory_unlock(${FOLLOWUP_SEND_LOCK}, ${job.id})`.catch(() => {});
+    lock.release();
+  }
+}
+
+async function sendFollowUpOnce(
+  deps: JobDeps,
+  parent: Job,
+  job: Job,
+  clean: string,
+  by: string,
+  requestKey: string,
+  brief: Brief,
+  guardrails?: string[],
+): Promise<FollowUpResult> {
   const name = jobRef(parent.id);
   const ref = jobRef(job.id);
   try {
     const endpoint = await workerCapabilityEndpoint(deps.sql, parent.id);
     const tools = endpoint ? await workerCallbackInstructions(deps.sql, job.id, endpoint) : "";
-    await deps.worker.send(
-      parent.workerThreadId as string,
-      `${followUpMessage(ref, name, clean, brief, guardrails)}\n\n${tools}`,
-      "auto",
-      requestKey,
-    );
+    const message = `${followUpMessage(ref, name, clean, brief, guardrails)}\n\n${tools}`;
+    await deps.worker.send(parent.workerThreadId as string, message, "auto", requestKey);
+    const at = deps.now?.() ?? new Date();
+    // Use this send's echo, not activity or status left by the parent's run. A fast worker
+    // may already have replied after the echo; leave those items for checkJob.
+    let cursor = parent.cursor;
+    let boundary: string | null = null;
+    for (let page = 0; page < 10; page++) {
+      const activity = await deps.worker.readActivity(parent.workerThreadId as string, cursor);
+      const echo = activity.items.find(
+        (item) =>
+          item.type === "user_message" &&
+          (item.text === message || (item.rest && message.startsWith(item.text))),
+      );
+      if (echo) {
+        boundary = String(echo.position);
+        break;
+      }
+      cursor = activity.cursor;
+      if (!activity.hasMore) {
+        boundary = cursor;
+        break;
+      }
+      if (page === 9) throw new Error("Could not locate the follow-up run boundary.");
+    }
+    await deps.sql`update jobs set followup_sent_at = ${at}, followup_boundary = ${boundary},
+      cursor = ${boundary}, revision = revision + 1 where id = ${job.id} and followup_sent_at is null`;
   } catch (error) {
     const reason = `The ${workerNoun()} did not take the follow-up: ${(error as Error).message}`;
     await deps.sql`update jobs set last_summary = 'The follow-up could not be sent yet.', watch_until = now() + interval '1 minute' where id = ${job.id}`;
     throw new Error(`${ref} could not start. ${reason}`);
   }
-
-  await deps.sql`update jobs set followup_sent_at = now() where id = ${job.id}`;
 
   // A fix is feedback on the parent job: the weekly learn pass groups repeated fixes.
   await recordFeedback(
@@ -209,10 +292,13 @@ async function sendFollowUp(
   await setChannelStatus(deps, job, "processing");
   await editEndPost(deps.sql, parent, `I sent the follow-up as ${ref} on the same branch.`);
   await deliverNow(deps);
-  return { answer: `Sent to the ${workerNoun()} as ${ref}.`, job };
+  return {
+    answer: `Sent to the ${workerNoun()} as ${ref}.`,
+    job: (await getJob(deps.sql, job.id)) ?? job,
+  };
 }
 
-// The follow-up starts on the parent's thread, after the parent's last read. No task watches it:
+// The child starts on the parent's thread. Send records its own run boundary. No task watches it:
 // a one-minute lease keeps reconcile away until the send lands, and then reconcile takes it
 // over. It also takes over the parent's pull request watch, so a later wake posts once, under
 // the follow-up.
@@ -220,6 +306,8 @@ async function insertFollowUp(sql: Sql, parent: Job, requestKey: string, brief: 
   return sql.begin(async (transaction) => {
     const tx = transaction as unknown as Sql;
     await tx`select id from jobs where id = ${parent.id} for update`;
+    const [same] = await tx<Job[]>`select * from jobs where request_key = ${requestKey}`;
+    if (same) return { ...same, id: Number(same.id) };
     const current = await getJobByRef(tx, jobRef(parent.id));
     if (!current || current.closedAt || (await laterJob(tx, current)))
       throw new JobSetupError("This job was closed or continued. Ask for a new proposal.");

@@ -173,6 +173,13 @@ credential-free endpoint, and project ID must still match. The message keeps the
 and replaces earlier project rules with current pack limits. A legacy job without a worker
 identity cannot use a follow-up; ask for a new job.
 
+After sending a follow-up, Sym records its echoed user message position and send time. Adapters
+without an echo use the cursor read after send. Checks ignore user messages and earlier items.
+Any later worker item establishes the new run. Without one, failure or interruption ends the job
+immediately. Empty completion waits at most three checks or five minutes, then posts the
+no-summary result. The boundary, check count, and observed flag survive watcher restarts
+(decision 072). Both worker fakes echo sent user messages.
+
 ## Human report and facts
 
 The final worker message contains a human report plus the machine-readable result block.

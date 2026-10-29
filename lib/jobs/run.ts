@@ -269,28 +269,35 @@ export async function checkJob(
   // A job in `checking` has nothing more to read from the worker.
   if (TERMINAL.includes(job.status) || job.status === "checking") return toCheck(job, []);
 
-  const [followup] = await deps.sql<{ sent: boolean; parentStatus: string }[]>`
-    select child.followup_sent_at is not null as sent, parent.status as parent_status
-    from jobs child join jobs parent on parent.id = child.parent_job_id where child.id = ${job.id}
-  `;
-  // An unsent follow-up still sees its parent's completed thread. Retry the send through the
-  // proposal recovery path; do not consume that thread's status or cursor yet.
-  if (followup && !followup.sent) return toCheck(job, []);
+  const followup = job.parentJobId !== null;
+  // Recovery sends an unsent child before its watcher can consume the parent's state.
+  if (followup && !job.followupSentAt) return toCheck(job, []);
 
   await deps.worker.wait(job.workerThreadId, waitMs);
   const activity = await readNewActivity(deps.worker, job.workerThreadId, job.cursor);
-  // A waiting worker asks a question or waits on a permission prompt. Only questions are listed.
+  if (followup) {
+    activity.items = activity.items.filter(
+      (item) =>
+        item.type !== "user_message" &&
+        (job.followupBoundary === null || item.position > Number(job.followupBoundary)),
+    );
+  }
+  const observed = job.followupObserved || activity.items.length > 0;
+  const at = now(deps);
+  // Completion without evidence of this run gets at most three checks or five minutes.
+  // Send starts a run on a terminal thread, so failure/interruption needs no activity evidence.
+  const completionGrace =
+    followup &&
+    !observed &&
+    activity.status === "completed" &&
+    job.followupChecks < 3 &&
+    job.followupSentAt !== null &&
+    at.getTime() - job.followupSentAt.getTime() < 5 * 60_000;
   const questions =
     activity.status === "waiting" ? await deps.worker.pendingQuestions(job.workerThreadId) : [];
-  const awaitingReply = followup && !job.lastMessage && !latestAssistantItem(activity.items);
-  const staleTerminal =
-    followup?.parentStatus === "done"
-      ? activity.status === "completed"
-      : ["failed", "interrupted"].includes(activity.status);
-  const worked =
-    awaitingReply && !job.lastActivityAt && activity.items.length === 0 && staleTerminal
-      ? "running"
-      : toJobStatus(activity.status, questions.length > 0, job.status);
+  const worked = completionGrace
+    ? "running"
+    : toJobStatus(activity.status, questions.length > 0, job.status);
   const hold = (options.verify === true || options.write === true) && job.kind !== SCHEDULED_CHECK;
   const status: JobStatus = worked === "done" && hold ? "checking" : worked;
   // Read once, as the code job ends, and keep it on the row (decision 057). A scheduled check
@@ -299,7 +306,6 @@ export async function checkJob(
     worked === "done" && job.kind !== SCHEDULED_CHECK
       ? await readPullRequests(deps.worker, job.workerThreadId)
       : undefined;
-  const at = now(deps);
   const progress = detectEvents(
     {
       status: job.status,
@@ -335,10 +341,8 @@ export async function checkJob(
       ...(message ? { lastMessage: message } : {}),
       ...(prFacts ? { prFacts } : {}),
       ...(progress.state.prUrl ? { prUrl: progress.state.prUrl } : {}),
-      ...(activity.items.length > 0 ||
-      (followup && ["running", "waiting"].includes(activity.status))
-        ? { lastActivityAt: at }
-        : {}),
+      ...(activity.items.length > 0 ? { lastActivityAt: at } : {}),
+      ...(followup ? { followupChecks: job.followupChecks + 1, followupObserved: observed } : {}),
       ...(progress.state.lastQuietPostAt
         ? { quietNoticedAt: new Date(progress.state.lastQuietPostAt) }
         : {}),

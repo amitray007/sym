@@ -76,3 +76,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [068](068-capabilities-and-code-channel-tool.md) | A dynamic instruction tells the brain which opt-in features are on; with code channels on, a `code_channel` tool moves a conversation into a code channel, and a job started there adopts it |
 | [070](070-conversational-jobs.md) | Conversational jobs: working notes, human results, stored choices, follow-up proposals, and recoverable closure |
 | [071](071-voice-and-builder-consent.md) | One colleague voice and explicit consent before Builder work, including investigations |
+| [072](072-followup-run-boundaries.md) | Follow-ups store a run boundary, bound empty completion, and preserve same-key children |

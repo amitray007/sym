@@ -47,6 +47,11 @@ export interface Job {
   // The model the worker thread runs, as `<provider>/<model>`. Null when the worker's default applies.
   workerModel: string | null;
   cursor: string | null;
+  parentJobId: number | null;
+  followupSentAt: Date | null;
+  followupBoundary: string | null;
+  followupChecks: number;
+  followupObserved: boolean;
   lastSummary: string | null;
   skipping: string | null;
   lastMessage: string | null;
@@ -99,6 +104,8 @@ export type JobUpdate = Partial<
     | "workerIdentity"
     | "workerModel"
     | "cursor"
+    | "followupChecks"
+    | "followupObserved"
     | "lastSummary"
     | "skipping"
     | "lastMessage"

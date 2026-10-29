@@ -127,7 +127,7 @@ export function hasOutcomeClaim(text: string): boolean {
     .some(
       (sentence) =>
         (/\b(tests?|suite|ci|checks?)\b/i.test(sentence) &&
-          /\b(pass(?:ed|ing)?|fail(?:ed|ing|ure)?|green|red|run|ran|executed|skipped|unknown|pending)\b/i.test(
+          /\b(pass(?:ed|ing)?|succeed(?:ed|ing)?|success(?:ful(?:ly)?)?|ok(?:ay)?|fail(?:ed|ing|ure)?|green|red|run|ran|executed|skipped|unknown|pending)\b/i.test(
             sentence,
           )) ||
         /\ball\s+green\b|\b\d+\s+passed\b/i.test(sentence),

@@ -22,9 +22,11 @@ fit. {{ci}} and {{files}} hold CI and file-count facts when available. Code expa
 the exact code-owned sentence or fact. IDs alone never count as coverage. Code appends missing
 concerns and open decisions as short sentences, then any missing PR, test, CI, and file facts
 as separate sentences. Facts already present do not repeat. The job reference and duration live in the muted context line. A test or CI outcome sentence outside a code-owned token,
-including "the test suite is passing" or "all green", rejects the written result and uses the plain fallback. These facts appear in the
+including "the test suite is passing", "All 32 tests succeeded", or "CI succeeded", rejects the written result and uses the plain fallback. These facts appear in the
 full notification text. Test outcomes distinguish passed, failed, not run, unknown, and explicitly
-no applicable tests. Result controls are PR and CI links,
+no applicable tests. A sentence with a test or CI subject and an outcome word outside a fact token uses the plain
+fallback. This can include descriptive text such as "I added a test for the retry that failed
+before" (decision 072). Result controls are PR and CI links,
 conversation choices, and optional native feedback. Chat replies have no feedback controls.
 Reactions still record feedback. The explicit stream A requirement retains native result feedback.
 
@@ -45,7 +47,10 @@ reads the ledger again before launching. Twelve five-minute fallback waits bound
 events, and reconcile handles approved Starts after the task ends.
 `job_followup` proposes a specific change on a finished job's thread and branch. Start rechecks
 the stored revision, actor, project mapping, worker identity, and current pack restrictions.
-A follow-up gets a new job row and scoped worker credential. `job_close` requests settlement,
+A follow-up gets a new job row and scoped worker credential. It records its own send boundary
+and bounds completion without worker activity (decision 072). Same-key execution returns the
+existing child; only explicit permanent refusal cancels an unsent child. Refusal DMs belong to
+recovery; a live click gets its direct answer and the proposal edit. `job_close` requests settlement,
 stops PR following, and archives the code channel. Stop remains owner-confirmed.
 
 Worker questions are ledger-backed and posted in the job's current conversation, including code

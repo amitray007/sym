@@ -279,4 +279,12 @@ export const migrations: Migration[] = [
     sql: `alter table outbox drop constraint outbox_method_check;
       alter table outbox add constraint outbox_method_check check (method in ('chat.postMessage', 'chat.update', 'sym.document'));`,
   },
+  {
+    version: "031_followup_run_boundary",
+    sql: `alter table jobs add column followup_boundary text;
+      alter table jobs add column followup_checks int not null default 0;
+      alter table jobs add column followup_observed boolean not null default false;
+      -- Existing sent children have no echo boundary. Their current cursor is the safe fallback.
+      update jobs set followup_boundary = cursor where followup_sent_at is not null;`,
+  },
 ];
