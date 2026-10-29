@@ -197,6 +197,7 @@ async function sendFollowUp(
   guardrails?: string[],
 ): Promise<FollowUpResult> {
   const lock = await deps.sql.reserve();
+  let result: FollowUpResult;
   try {
     await lock`select pg_advisory_lock(${FOLLOWUP_SEND_LOCK}, ${job.id})`;
     const current = await getJob(lock, job.id);
@@ -210,7 +211,7 @@ async function sendFollowUp(
         answer: `Already sent as ${jobRef(current.id)}.`,
         job: current,
       };
-    return await sendFollowUpOnce(
+    result = await sendFollowUpOnce(
       { ...deps, sql: lock },
       parent,
       job,
@@ -224,6 +225,9 @@ async function sendFollowUp(
     await lock`select pg_advisory_unlock(${FOLLOWUP_SEND_LOCK}, ${job.id})`.catch(() => {});
     lock.release();
   }
+  // Deliver on the pooled client: a reserved connection has no `begin` for card edits.
+  await deliverNow(deps);
+  return result;
 }
 
 async function sendFollowUpOnce(
@@ -253,7 +257,8 @@ async function sendFollowUpOnce(
       const echo = activity.items.find(
         (item) =>
           item.type === "user_message" &&
-          (item.text === message || (item.rest && message.startsWith(item.text))),
+          (item.text.trim() === message.trim() ||
+            (item.rest && message.trimStart().startsWith(item.text.trimStart()))),
       );
       if (echo) {
         boundary = String(echo.position);
@@ -291,7 +296,6 @@ async function sendFollowUpOnce(
   // A follow-up in a code channel shows it is working again. Reconcile sets it back at the end.
   await setChannelStatus(deps, job, "processing");
   await editEndPost(deps.sql, parent, `I sent the follow-up as ${ref} on the same branch.`);
-  await deliverNow(deps);
   return {
     answer: `Sent to the ${workerNoun()} as ${ref}.`,
     job: (await getJob(deps.sql, job.id)) ?? job,
