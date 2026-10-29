@@ -1,8 +1,9 @@
 import type { Sql } from "../db.ts";
 import { chooseDisplay } from "../display.ts";
+import { envSwitch } from "../env-switch.ts";
 import { getJob, type Job, jobRef, updateJob } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
-import type { SlackApi } from "./api.ts";
+import { type SlackApi, SlackApiError } from "./api.ts";
 
 // Slack code channels for worker jobs (decision 067, docs/slack-code.md). With SYM_CODE_CHANNELS
 // on, a job that a person starts moves from its thread into its own code channel. The channel
@@ -12,7 +13,7 @@ import type { SlackApi } from "./api.ts";
 // error code only.
 
 export function codeChannelsOn(env: Record<string, string | undefined> = process.env): boolean {
-  return /^(1|on|true|yes)$/i.test(env.SYM_CODE_CHANNELS?.trim() ?? "");
+  return envSwitch(env.SYM_CODE_CHANNELS, false);
 }
 
 export type SessionStatus = "active" | "processing" | "suspended" | "closed";
@@ -179,11 +180,13 @@ export async function archiveCodeChannel(
   job: Job,
   summaryTs: string | null,
 ): Promise<void> {
-  if (!job.codeChannel || !job.slackChannel || !deps.slack) return;
+  const slack = deps.slack;
+  const channel = job.slackChannel;
+  if (!job.codeChannel || !channel || !slack) return;
   await setChannelStatus(deps, job, "closed");
   const archive = (summary: string | null) =>
-    deps.slack?.call("agents.conversations.archive", {
-      channel_id: job.slackChannel,
+    slack.call("agents.conversations.archive", {
+      channel_id: channel,
       ...(summary ? { summary_message_ts: summary } : {}),
     });
   try {
@@ -192,7 +195,7 @@ export async function archiveCodeChannel(
     const code = slackCode(error);
     if (code === "already_archived") return;
     if (summaryTs && (code === "no_origin_link" || code === "summary_message_not_found")) {
-      await archive(null)?.catch((retry: unknown) => {
+      await archive(null).catch((retry: unknown) => {
         console.warn(`Sym could not archive the channel of ${jobRef(job.id)}.`, slackCode(retry));
       });
       return;
@@ -216,8 +219,6 @@ function projectOf(job: Job): string | undefined {
 }
 
 function slackCode(error: unknown): string {
-  if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {
-    return error.code;
-  }
+  if (error instanceof SlackApiError) return error.code;
   return error instanceof Error ? error.name : "unknown_error";
 }

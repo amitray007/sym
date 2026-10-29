@@ -291,6 +291,7 @@ function stayQuiet<T extends StatusEvent>(): SlackRenderHandler<T> {
 // Eve names a content part's kind on its first delta only, so the renderer remembers it. A part
 // ends with its content.completed, which removes it.
 const partKinds = new Map<string, string>();
+const PART_KINDS_MAX = 1000;
 
 // Eve's defaults keep this bookkeeping in the channel state: turn.started resets the first two,
 // and a reply clears the saved status so a later step does not show it again. Eve 0.87 took the
@@ -372,7 +373,11 @@ const symRenderer = defineSlackRenderer({
     // Reasoning keeps a quiet turn quiet. Reply text that is not blank ends it.
     async "content.delta"(event, ctx, next) {
       const { partId, kind, delta } = event.data;
-      if (kind) partKinds.set(partId, kind);
+      if (kind) {
+        // A part that never completes, such as one a cancel cut off, leaves its entry behind.
+        if (partKinds.size >= PART_KINDS_MAX) partKinds.clear();
+        partKinds.set(partId, kind);
+      }
       const key = quietKey(ctx.channel);
       if (isQuietTurn(key)) {
         if (partKinds.get(partId) !== "text" || delta.trim() === "") return;

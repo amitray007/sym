@@ -42,7 +42,7 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
         await finishJob(deps, job.id);
         report.checked++;
         report.finished++;
-        await settleChannel(deps, job.id);
+        await settleChannel(deps, job);
         continue;
       }
       // For a job coming back from an outage, hold delivery until the outage notice is dropped
@@ -56,7 +56,7 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
       if (offline) await markBack(deps, job);
       if (check.terminal) {
         report.finished++;
-        await settleChannel(deps, job.id);
+        await settleChannel(deps, job);
       }
       // No task is here to turn a question into buttons, so tell the thread once per question.
       for (const question of check.questions) {
@@ -167,9 +167,8 @@ async function followPullRequests(deps: JobDeps): Promise<void> {
 
 // A job reconcile finished, such as a follow-up or one whose session died, sets its code channel
 // back to active (decision 067). No-op for a job in a thread.
-async function settleChannel(deps: JobDeps, jobId: number): Promise<void> {
-  const job = await getJob(deps.sql, jobId);
-  if (job?.codeChannel) await setChannelStatus(deps, job, "active");
+async function settleChannel(deps: JobDeps, job: Job): Promise<void> {
+  if (job.codeChannel) await setChannelStatus(deps, job, "active");
 }
 
 async function postQuestion(deps: JobDeps, job: Job, requestId: string, prompt: string) {
