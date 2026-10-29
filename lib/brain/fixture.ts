@@ -11,6 +11,7 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A message that asks for an update or status calls jobs_status and repeats its answer.
 // - A message that says "sign in to the worker" calls worker_sign_in.
 // - A message that says "thinking out loud" calls no_reply (side talk, decision 050).
+// - A message that says "move this to a code channel" calls code_channel, then answers in one line.
 // - A message with "fixture-react <emoji>" calls slack_react, then ends the turn with no_reply.
 // - A repeated-work review calls repeated_work, proposes one playbook for any title seen 3 or more
 //   times, then ends the turn with no_reply.
@@ -43,6 +44,8 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
     if (result?.name === "slack_react") return quiet(request);
     if (result?.name === "repeated_work") return proposeRepeated(request, String(result.output));
     if (result?.name === "repeated_work_propose") return quiet(request);
+    if (result?.name === "code_channel")
+      return `Code channel: ${String(result.output).slice(0, 200)}`;
     // The worker_job receipt: the job card and the brief speak for Sym while the job runs.
     return { text: "" };
   }
@@ -61,6 +64,13 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
     return { toolCalls: [{ name: "worker_sign_in", input: {} }] };
   }
   if (/\bthinking out loud\b/i.test(message)) return quiet(request);
+  if (/\bmove this to a code channel\b/i.test(message)) {
+    return {
+      toolCalls: [
+        { name: "code_channel", input: { message: "Continue here.", name: "Fixture work" } },
+      ],
+    };
+  }
   if (/^Repeated-work review\./m.test(message)) {
     return { toolCalls: [{ name: "repeated_work", input: {} }] };
   }

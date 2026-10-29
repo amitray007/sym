@@ -134,7 +134,7 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
     }
   });
 
-  it("does not open a code channel from inside a code channel", async () => {
+  it("adopts the code channel a job starts in instead of opening another", async () => {
     vi.stubEnv("SYM_CODE_CHANNELS", "on");
     const sql = ledger.sql();
     const outer = await moveToCodeChannel({ sql, slack: api }, await newJob());
@@ -143,7 +143,12 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
       { sql, slack: api },
       await newJob(outer.slackChannel ?? ""),
     );
-    expect(inner.codeChannel).toBe(false);
+    expect(inner).toMatchObject({
+      codeChannel: true,
+      slackChannel: outer.slackChannel,
+      slackThreadTs: null,
+      originChannel: null,
+    });
     expect(slack.codeChannels).toHaveLength(before);
   });
 

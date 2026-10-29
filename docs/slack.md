@@ -236,6 +236,10 @@ follows the job. Everything said in the channel reaches Sym with no tag and is a
 Close archives the channel and shares the result in the original thread. A scheduled check, a job
 in a DM, and any job Slack refuses stay in their thread.
 
+A person can also ask Sym to move a conversation into a code channel. The brain's `code_channel`
+tool opens one through Eve, copies the conversation, and continues there (decision 068). A job
+started inside a code channel uses that channel instead of opening another.
+
 ## Threads with several people
 
 Decision 050. A reply in a thread with a session no longer starts a turn by default. Code in

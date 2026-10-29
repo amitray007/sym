@@ -81,6 +81,7 @@ Sym keeps the job in its thread when that happens.
 | Privacy | A private thread asks for a private channel; a public result is archived and the job stays put |
 | `archive` | On Close, with the result post as the summary |
 | Eve `codeChannels` | Eve serves the channel as one session, so messages need no tag |
+| Eve `openCodeChannel()` | The brain's `code_channel` tool moves a conversation into a channel on request (decision 068) |
 
 Not used yet: view tabs (a diff needs the worker's diff), canvases, per-channel slash commands,
 and Stop on the session (Eve stops the brain's turn, not the worker job).

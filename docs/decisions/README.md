@@ -73,3 +73,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [065](065-security-boundaries.md) | Proposals stay anonymous, Fix rechecks current policy, and worker callbacks use job-scoped credentials |
 | [066](066-eve-088.md) | Eve 0.88.0, for Slack code channels: dynamic capabilities with `ctx.memo`, the `sessionUsage` limit, a v27 Slack renderer, and `onAnswers`; free-text answers go through Eve's answer box |
 | [067](067-code-channels.md) | With `SYM_CODE_CHANNELS` on, a started job moves into its own Slack code channel with a status and context bar; Close archives it; a Slack refusal keeps the job in its thread |
+| [068](068-capabilities-and-code-channel-tool.md) | A dynamic instruction tells the brain which opt-in features are on; with code channels on, a `code_channel` tool moves a conversation into a code channel, and a job started there adopts it |
