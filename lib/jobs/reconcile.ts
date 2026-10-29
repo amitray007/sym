@@ -1,9 +1,11 @@
 import { getJob, type Job, jobRef, orphanedJobs, updateJob } from "../ledger/jobs.ts";
 import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
-import { setChannelStatus } from "../slack/code-channel.ts";
+import { moveToCodeChannel, setChannelStatus } from "../slack/code-channel.ts";
+import { isSlackUserAllowed } from "../slack/guard.ts";
 import { retryFollowupProposals } from "../slack/job-actions.ts";
 import { workerNoun } from "../worker-label.ts";
 import type { WorkerAdapter } from "../workers/types.ts";
+import { callbackFor } from "./callback.ts";
 import { parseOutputContract } from "./contract.ts";
 import { retryClosures } from "./followup.ts";
 import {
@@ -14,7 +16,7 @@ import {
   watchedPrJobs,
 } from "./pr-wakes.ts";
 import { presentEnd, presentProgress } from "./present.ts";
-import { checkJob, finishJob, type JobDeps, type LedgerDeps } from "./run.ts";
+import { checkJob, finishJob, type JobDeps, type LedgerDeps, launchOrAdopt } from "./run.ts";
 import type { ModelCheck } from "./verify.ts";
 
 // The safety net (docs/architecture.md, "Proactive updates"). Every few minutes it takes over
@@ -36,6 +38,7 @@ export interface ReconcileReport {
 }
 
 export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
+  await recoverAcceptedStarts(deps);
   await retryClosures(deps);
   await retryFollowupProposals(deps);
   const report: ReconcileReport = { checked: 0, finished: 0, offline: 0 };
@@ -69,6 +72,35 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
   await followPullRequests(deps);
   await presentMissingEnds(deps);
   return report;
+}
+
+// An accepted Start can outlive its Eve task before the worker exists. Keep the callback and
+// approval in the ledger, then use the same launch lock and title adoption as a live task.
+async function recoverAcceptedStarts(deps: JobDeps): Promise<void> {
+  await deps.sql`with expired as (
+    update job_proposals set status = 'expired' where status = 'pending' and expires_at <= now() returning job_id, kind
+  ) update jobs set status = 'cancelled', finished_at = now() from expired
+    where jobs.id = expired.job_id and expired.kind = 'start' and jobs.status = 'launching' and jobs.worker_thread_id is null`;
+  const rows = await deps.sql<{ id: number; decidedBy: string; callbackUrl: string }[]>`
+    select j.id, p.decided_by, c.callback_url from jobs j
+    join job_proposals p on p.job_id = j.id and p.kind = 'start' and p.status = 'approved'
+    join job_start_callbacks c on c.job_id = j.id
+    where j.worker_thread_id is null and j.status = 'launching' and j.closed_at is null
+      and j.brief = p.payload and p.created_at < now() - interval '1 minute'
+    order by j.id limit 20
+  `;
+  for (const row of rows) {
+    if (!isSlackUserAllowed(deps.pack, process.env.SYM_SLACK_USERS, row.decidedBy)) continue;
+    try {
+      const job = await getJob(deps.sql, Number(row.id));
+      if (!job) continue;
+      await moveToCodeChannel(deps, job);
+      await launchOrAdopt(deps, job.id, callbackFor(row.callbackUrl, process.env.SYM_CALLBACK_URL));
+      await deps.sql`update jobs set watch_until = now() + interval '2 minutes' where id = ${job.id}`;
+    } catch {
+      /* The next pass rechecks policy and retries the same stored job. */
+    }
+  }
 }
 
 // A crash between a job's terminal status and its end post would lose the result message, and

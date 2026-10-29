@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { takeChoice } from "../lib/delivery/choices.ts";
 import { deliver } from "../lib/delivery/deliver.ts";
 import { chooseDisplay } from "../lib/display.ts";
 import { Brief } from "../lib/jobs/brief.ts";
 import { proposeFollowUp } from "../lib/jobs/followup.ts";
 import { presentBrief } from "../lib/jobs/present.ts";
+import { reconcileJobs } from "../lib/jobs/reconcile.ts";
 import { checkJob, type JobDeps, launchOrAdopt } from "../lib/jobs/run.ts";
 import { steerJob } from "../lib/jobs/steer.ts";
 import { choiceBlocks, storeChoices } from "../lib/ledger/choices.ts";
@@ -147,6 +148,15 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
         throw new Error("lost receipt");
       }),
     ).rejects.toThrow("lost receipt");
+    expect(
+      await takeChoice(
+        { sql, slack: s.slack, allowed },
+        { ...input, value: `${stored.id}:1` },
+        async () => {
+          throw new Error("A stale button changed the selected label.");
+        },
+      ),
+    ).toBe(false);
     await takeChoice({ sql, slack: s.slack, allowed }, input, async (_text, key) => {
       keys.push(key);
     });
@@ -287,6 +297,68 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
       },
     ]);
     expect(worker.sends).toEqual([]);
+  });
+
+  it("recovers an accepted Start after its task dies before launch", async () => {
+    vi.stubEnv("SYM_SLACK_USERS", "U1");
+    try {
+      const s = setup();
+      const sql = ledger.sql();
+      const original = await job("dead-before-launch");
+      await presentBrief(sql, original);
+      await deliver(sql, s.slack);
+      await handleTypedProposal(
+        s.deps,
+        { text: "start", by: "U1", channel: "C1", threadTs: "dead-before-launch" },
+        allowed,
+      );
+      await sql`insert into job_start_callbacks (job_id, callback_url) values (${original.id}, 'http://127.0.0.1/cb')`;
+      await sql`update job_proposals set created_at = now() - interval '2 minutes' where job_id = ${original.id}`;
+      expect(s.worker.launches).toBe(0);
+      await reconcileJobs(s.deps);
+      expect(s.worker.launches).toBe(1);
+      expect((await getJob(sql, original.id))?.status).toBe("running");
+      await reconcileJobs(s.deps);
+      expect(s.worker.launches).toBe(1);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("waits for the choice edit to reach Slack before dispatching a turn", async () => {
+    const sql = ledger.sql();
+    const stored = await storeChoices(sql, {
+      key: "edit-failure",
+      channel: "C1",
+      threadTs: null,
+      message: "Pick",
+      choices: ["Explain", "Wait"],
+    });
+    await sql`update conversation_choices set message_ts = '8.1' where id = ${stored.id}::bigint`;
+    const input = { value: `${stored.id}:0`, user: "U1", channel: "C1", messageTs: "8.1" };
+    let sent = false;
+    await expect(
+      takeChoice(
+        {
+          sql,
+          slack: {
+            async call() {
+              throw new Error("offline");
+            },
+          },
+          allowed,
+        },
+        input,
+        async () => {
+          sent = true;
+        },
+      ),
+    ).rejects.toThrow("could not be recorded");
+    expect(sent).toBe(false);
+    expect(
+      (await sql`select chosen_by from conversation_choices where id = ${stored.id}::bigint`)[0]
+        ?.chosenBy,
+    ).toBe("U1");
   });
 
   it("keeps old Fix buttons conversational and turns old text submissions into proposals", async () => {

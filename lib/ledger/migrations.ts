@@ -270,4 +270,13 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    version: "029_job_start_callback",
+    sql: `create table job_start_callbacks (job_id bigint primary key references jobs(id), callback_url text not null);`,
+  },
+  {
+    version: "030_outbox_documents",
+    sql: `alter table outbox drop constraint outbox_method_check;
+      alter table outbox add constraint outbox_method_check check (method in ('chat.postMessage', 'chat.update', 'sym.document'));`,
+  },
 ];

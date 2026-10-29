@@ -418,7 +418,9 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
     const upload = /^\/upload\/(F\d+)$/.exec(path);
     if (upload) {
       const fileId = upload[1] as string;
-      if (!authorized || !pendingUploads.has(fileId)) {
+      // The returned upload URL authorizes this request. Slack's raw-byte POST needs no
+      // bearer header: https://docs.slack.dev/messaging/working-with-files/
+      if (!pendingUploads.has(fileId)) {
         res.writeHead(403).end("denied");
         return;
       }

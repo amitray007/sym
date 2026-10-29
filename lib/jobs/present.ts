@@ -66,6 +66,7 @@ export async function presentBrief(
     estMinutes: 0,
     steps: 0,
     lines: text.split("\n").length,
+    characters: text.length,
     surface: surfaceOf(job.slackChannel),
     quiet: false,
   });
@@ -318,8 +319,8 @@ async function presentEndOnce(
 // A result that names no PR gets the thread's open PR from the worker's facts, so the message
 // still links it (decision 057). The missing report shows as a concern.
 function withFactsPr(job: Job, contract: OutputContract | null): OutputContract | null {
-  if (!contract || contract.prUrl || job.prUrl) return contract;
-  const url = openPrUrl(job.prFacts);
+  if (!contract || contract.prUrl) return contract;
+  const url = job.prUrl ?? openPrUrl(job.prFacts);
   return url ? { ...contract, prUrl: url } : contract;
 }
 
@@ -397,6 +398,7 @@ async function post(
     estMinutes: 0,
     steps: 0,
     lines: text.split("\n").length,
+    characters: text.length,
     surface: surfaceOf(job.slackChannel ?? ""),
     quiet,
   });

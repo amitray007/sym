@@ -395,6 +395,26 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     expect(fix.replies).toEqual([`${ref} is closed.`]);
   });
 
+  it("never settles an active follow-up when Close races its Start", async () => {
+    const { deps, worker, job, sql } = await finishedJob("close-followup-race", [
+      { status: "completed", items: [result("Done")] },
+      { status: "running", items: [] },
+    ]);
+    await Promise.allSettled([
+      startFollowUp(deps, `J-${job.id}`, "add a test", "U1", "close-race"),
+      closeJob(deps, `J-${job.id}`, "U1"),
+    ]);
+    const children = await sql`select id from jobs where parent_job_id = ${job.id}`;
+    const current = await getJob(sql, job.id);
+    if (children.length) {
+      expect(current?.closedAt).toBeNull();
+      expect(worker.settled).toEqual([]);
+    } else {
+      expect(current?.closedAt).not.toBeNull();
+      expect(worker.settled).toEqual([job.workerThreadId]);
+    }
+  });
+
   it("retries a failed archive after restart without settling twice or claiming success", async () => {
     const { deps, worker, job, sql } = await finishedJob("archive-recovery", [
       { status: "completed", items: [result("Done")] },

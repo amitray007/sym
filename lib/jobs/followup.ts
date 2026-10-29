@@ -234,14 +234,24 @@ export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<
   if (!job) return `There is no job ${ref}.`;
   const name = jobRef(job.id);
   if (!TERMINAL.includes(job.status)) return `${name} is still running. Stop it first.`;
-  // Settling a thread that a follow-up continued would settle the follow-up's work too.
-  const later = await laterJob(deps.sql, job);
-  if (later) return `${later} continued this thread. Close it instead.`;
-  await deps.sql`
-    update jobs set closed_at = coalesce(closed_at, now()), closed_by = coalesce(closed_by, ${by}),
-      archive_state = case when code_channel and archive_state = 'none' then 'pending' else archive_state end
-    where id = ${job.id}
-  `;
+  const refusal = await deps.sql.begin(async (transaction) => {
+    const sql = transaction as unknown as Sql;
+    // Follow-up insertion takes this same parent lock. Closing cannot settle a child that
+    // started between the latest-job check and close acceptance.
+    await sql`select id from jobs where id = ${job.id} for update`;
+    const current = await getJobByRef(sql, ref);
+    if (!current || !TERMINAL.includes(current.status))
+      return `${name} is still running. Stop it first.`;
+    const later = await laterJob(sql, current);
+    if (later) return `${later} continued this thread. Close it instead.`;
+    await sql`
+      update jobs set closed_at = coalesce(closed_at, now()), closed_by = coalesce(closed_by, ${by}),
+        archive_state = case when code_channel and archive_state = 'none' then 'pending' else archive_state end
+      where id = ${job.id}
+    `;
+    return undefined;
+  });
+  if (refusal) return refusal;
   const answer = await completeClosure(deps, job.id);
   await deliverNow(deps);
   return answer;
@@ -399,7 +409,7 @@ export async function editEndPost(sql: Sql, job: Job, note: string): Promise<voi
   `;
   if (!post?.payload.channel) return;
   // A second note, such as Close after a Fix, keeps the first: start from the latest edit.
-  const [edited] = await sql<{ payload: { blocks?: Record<string, unknown>[] } }[]>`
+  const [edited] = await sql<{ payload: { text?: string; blocks?: Record<string, unknown>[] } }[]>`
     select payload from outbox
     where job_id = ${job.id} and starts_with(idempotency_key, ${`${ref}:end-edit:`})
     order by id desc limit 1
@@ -415,7 +425,7 @@ export async function editEndPost(sql: Sql, job: Job, note: string): Promise<voi
     payload: {
       channel: post.payload.channel,
       ts: post.slackTs,
-      text: post.payload.text ?? "",
+      text: `${edited?.payload.text ?? post.payload.text ?? ""}\n${note}`,
       blocks,
     },
     display: post.display,

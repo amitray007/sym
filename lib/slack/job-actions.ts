@@ -150,7 +150,7 @@ export async function handleProposal(
     const sql = transaction as unknown as Sql;
     const [row] = await sql<
       JobProposal[]
-    >`select * from job_proposals where id = ${input.id}::bigint for update`;
+    >`select * from job_proposals where id = ${input.id}::bigint`;
     if (
       !row ||
       row.channel !== input.channel ||

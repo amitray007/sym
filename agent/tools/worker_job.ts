@@ -111,6 +111,8 @@ export default defineWorkflowTool({
     });
 
     try {
+      const callback = createWebhook();
+      await rememberCallback(job.id, callback.url);
       // Decision 024: only an approved schedule run skips the click. The step checks the
       // session's initiator, the schedule row, and the brief, so the model cannot widen it.
       const preApproved = await isPreApproved(
@@ -147,7 +149,6 @@ export default defineWorkflowTool({
       // A scheduled check stays quiet in its thread.
       const inChannel = preApproved ? false : await toCodeChannel(job.id);
       yield { status: statusLine(ref, `Launching ${workerNoun()} thread`) };
-      const callback = createWebhook();
       const threadId = await launch(job.id, callback.url);
       yield { status: statusLine(ref, `${workerLabel()} thread started`) };
 
@@ -343,6 +344,12 @@ async function jobTiming() {
     verify: verify as boolean | undefined,
     write: writerEnabled() as boolean | undefined,
   };
+}
+
+async function rememberCallback(jobId: number, webhookUrl: string) {
+  "use step";
+  const callbackUrl = callbackFor(webhookUrl, process.env.SYM_CALLBACK_URL);
+  await ledger()`insert into job_start_callbacks (job_id, callback_url) values (${jobId}, ${callbackUrl}) on conflict do nothing`;
 }
 
 async function projectRefusal(project: string): Promise<string | undefined> {

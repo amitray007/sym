@@ -29,6 +29,16 @@ describe("working note", () => {
     expect(post.blocks.map((b) => b.type)).toEqual(["section", "context"]);
     expect(JSON.stringify(post.blocks)).not.toMatch(/plan|actions|Stop|Steer/);
   });
+  it("keeps the note to three sentences including what it leaves alone", () => {
+    const post = renderJobCard({
+      ...input,
+      latestSummary: "Found the loop. Adding backoff. Then tests. More detail.",
+    });
+    expect(post.text).toContain(
+      "Found the loop. Adding backoff. I'm leaving the webhook path alone.",
+    );
+    expect(post.text).not.toContain("Then tests");
+  });
   it("uses the real phase while checking, blocked, or offline", () => {
     expect(renderJobCard({ ...input, status: "checking" }).text).toContain(
       "I'm checking the result.",

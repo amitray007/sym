@@ -1,7 +1,6 @@
 import {
   defaultSlackAuth,
   defineSlackRenderer,
-  postCompletedSlackReply,
   type SlackAnswerSubmission,
   type SlackContext,
   type SlackEventContext,
@@ -11,6 +10,7 @@ import {
   slackChannel,
 } from "eve/channels/slack";
 import { takeChoice } from "../../lib/delivery/choices.ts";
+import { queueReply } from "../../lib/delivery/replies.ts";
 import {
   FEEDBACK_ACTION_ID,
   jobIdOfMessage,
@@ -44,6 +44,7 @@ import { ledger, pack, slackFromEnv, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
 import { listSchedules } from "../../lib/schedules/rows.ts";
 import { namesBot, threadPeople, triageThreadMessage } from "../../lib/slack/addressing.ts";
+import { SlackApiError } from "../../lib/slack/api.ts";
 import {
   codeChannelsOn,
   jobOfCodeChannel,
@@ -312,6 +313,7 @@ type TurnBookkeeping = {
   pendingTaskResults?: unknown;
   pendingToolCallMessage?: unknown;
   threadStatus?: unknown;
+  postedInThread?: boolean;
 };
 
 const symRenderer = defineSlackRenderer({
@@ -408,9 +410,8 @@ const symRenderer = defineSlackRenderer({
         await restoreJobStatus(ctx.channel.state.channelId);
       }
     },
-    // Feedback buttons ride inside each final reply (docs/learning.md), so they add no message
-    // and no notification. postCompletedSlackReply keeps Eve's fallbacks: a refused or long
-    // reply still goes out as plain Markdown or a snippet, without the buttons.
+    // Conversation replies use the durable outbox. Feedback controls belong to job results.
+    // A refused block falls back to text; long replies use a document.
     async "content.completed"(event, ctx, next) {
       const { partId, kind, phase, value } = event.data;
       partKinds.delete(partId);
@@ -420,10 +421,24 @@ const symRenderer = defineSlackRenderer({
       }
       endQuietTurn(quietKey(ctx.channel));
       (ctx.channel.state as TurnBookkeeping).threadStatus = null;
-      await postCompletedSlackReply(ctx.channel, {
-        blocks: [{ type: "markdown", text: value }] as never,
-        markdown: value,
+      const slack = {
+        async call(method: string, body: Record<string, unknown>) {
+          const response = await ctx.channel.slack.request(method, body);
+          if (response.ok === false)
+            throw new SlackApiError(
+              method,
+              typeof response.error === "string" ? response.error : "unknown_error",
+            );
+          return response as Record<string, unknown>;
+        },
+      };
+      const posted = await queueReply(ledger(), slack, {
+        key: `reply:${ctx.session.id}:${ctx.session.turn.id}:${partId}`,
+        channel: ctx.channel.slack.channelId,
+        threadTs: ctx.channel.slack.threadTs || null,
+        text: value,
       });
+      if (posted) (ctx.channel.state as TurnBookkeeping).postedInThread = true;
     },
   },
   taskCard(card, next) {
@@ -502,6 +517,13 @@ async function typedDecision(
     ),
   );
   if (answer === undefined) return false;
+  if (/^(There are several|That proposal|I couldn't)/.test(answer)) {
+    await sayPrivately(
+      ctx.slack,
+      { channel: message.channelId, user: by, threadTs: message.threadTs },
+      answer,
+    );
+  }
   // The proposal's edit is the visible acknowledgement; no second notifying post.
   return true;
 }
@@ -650,8 +672,8 @@ export default slackChannel({
             (text, idempotencyKey) =>
               ctx.send(text, { idempotencyKey, ...(note ? { context: [note] } : {}) }),
           );
-        } else if (proposal && action.value) {
-          await withJobDeps((deps) =>
+        } else if (proposal && action.value && action.messageTs) {
+          const outcome = await withJobDeps((deps) =>
             handleProposal(
               deps,
               {
@@ -665,6 +687,12 @@ export default slackChannel({
               isAllowed,
             ),
           );
+          if (/^(That proposal|I couldn't|There are several)/.test(outcome))
+            await sayPrivately(
+              ctx.slack,
+              { channel: channelId, user: action.user.id, threadTs },
+              outcome,
+            );
         }
       } catch (error) {
         console.warn("Sym couldn't handle a conversation choice.", String(error));

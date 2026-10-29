@@ -3,6 +3,7 @@ import { CHOICE_ACTION_ID } from "../ledger/choices.ts";
 import { getJob, jobsWithStaleCards, markCardSent, type SlackCard } from "../ledger/jobs.ts";
 import {
   claimPosts,
+  dropPost,
   markCardPostSent,
   markPostFailed,
   markPostSent,
@@ -17,6 +18,7 @@ import { type SlackApi, SlackApiError } from "../slack/api.ts";
 
 // The card version a card post shows. It travels in the payload and never reaches Slack.
 export const CARD_VERSION_FIELD = "sym_card_version";
+export const ROOT_GUARD_FIELD = "sym_thread_reply";
 
 const CLAIM_MS = 60_000;
 
@@ -72,12 +74,56 @@ async function updateCard(sql: Sql, slack: SlackApi, jobId: number): Promise<boo
 }
 
 async function sendPost(sql: Sql, slack: SlackApi, post: OutboxPost): Promise<void> {
-  const { [CARD_VERSION_FIELD]: cardVersion, ...payload } = post.payload as Record<string, unknown>;
+  const {
+    [CARD_VERSION_FIELD]: cardVersion,
+    [ROOT_GUARD_FIELD]: protectRoot,
+    ...payload
+  } = post.payload as Record<string, unknown>;
   const body =
     post.method === "chat.postMessage"
       ? { unfurl_links: false, unfurl_media: false, ...payload }
       : payload;
-  const response = await slack.call(post.method, body);
+  if (protectRoot && payload.thread_ts) {
+    try {
+      const root = await slack.call("chat.getPermalink", {
+        channel: payload.channel,
+        message_ts: payload.thread_ts,
+      });
+      if (root.ok === false)
+        throw new SlackApiError("chat.getPermalink", String(root.error ?? "unknown_error"));
+    } catch (error) {
+      if (error instanceof SlackApiError && error.code === "message_not_found")
+        await dropPost(sql, post.id, "The reply's thread was deleted");
+      throw error;
+    }
+  }
+  if (
+    post.method === "sym.document" ||
+    (post.method === "chat.postMessage" &&
+      typeof body.text === "string" &&
+      body.text.length > 12000)
+  ) {
+    await sendDocument(slack, body);
+    await markPostSent(sql, post.id, null);
+    return;
+  }
+  let response: Record<string, unknown>;
+  try {
+    response = await slack.call(post.method, body);
+  } catch (error) {
+    if (
+      !(error instanceof SlackApiError) ||
+      ![
+        "invalid_blocks",
+        "invalid_blocks_format",
+        "msg_blocks_too_long",
+        "msg_blocks_too_many",
+      ].includes(error.code)
+    )
+      throw error;
+    const { blocks: _blocks, ...plain } = body;
+    response = await slack.call(post.method, plain);
+  }
   const ts = typeof response.ts === "string" ? response.ts : (payload.ts as string | undefined);
   if (!ts) throw new Error(`Slack ${post.method} returned no ts`);
 
@@ -119,4 +165,27 @@ function cardBody(channel: string, ts: string, card: SlackCard) {
 function errorCode(error: unknown): string {
   if (error instanceof SlackApiError) return error.code;
   return error instanceof Error ? error.message.slice(0, 200) : String(error);
+}
+
+async function sendDocument(slack: SlackApi, payload: Record<string, unknown>): Promise<void> {
+  const text = String(payload.text ?? "");
+  const bytes = new TextEncoder().encode(text);
+  const upload = await slack.call("files.getUploadURLExternal", {
+    filename: "sym-response.md",
+    length: bytes.length,
+  });
+  if (typeof upload.upload_url !== "string" || typeof upload.file_id !== "string")
+    throw new Error("Slack returned no upload target");
+  const response = await fetch(upload.upload_url, {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: bytes,
+  });
+  if (!response.ok) throw new Error("Slack refused the document upload");
+  await slack.call("files.completeUploadExternal", {
+    files: [{ id: upload.file_id, title: "Full reply" }],
+    channel_id: payload.channel,
+    ...(payload.thread_ts ? { thread_ts: payload.thread_ts } : {}),
+    initial_comment: "That's a long reply. I've attached the details.",
+  });
 }

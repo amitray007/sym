@@ -50,9 +50,11 @@ export function jobAnswer(job: Job, now: Date): string {
   if (job.prUrl) lines.push(job.prUrl);
   if (job.closedAt)
     lines.push(
-      job.codeChannel && job.archiveState !== "archived"
-        ? "I stopped following the PR. The channel still needs to be archived."
-        : "I've closed this job.",
+      !job.workerSettledAt
+        ? "I stopped following the PR. The worker thread still needs to be settled."
+        : job.codeChannel && job.archiveState !== "archived"
+          ? "I stopped following the PR. The channel still needs to be archived."
+          : "I've closed this job.",
     );
   if (job.archiveState === "repair")
     lines.push("The saved channel or Slack connection needs repair.");
@@ -107,5 +109,6 @@ export async function freshJobStatus(
     answer: `${freshRead === "failed" ? "I couldn't refresh the worker. This is the last saved update.\n" : ""}${jobAnswer(job, now)}`,
     brief: job.brief,
     archiveState: job.archiveState,
+    archiveError: job.archiveError,
   };
 }

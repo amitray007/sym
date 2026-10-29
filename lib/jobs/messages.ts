@@ -1,7 +1,7 @@
 import { workerLabel, workerNoun } from "../worker-label.ts";
 import type { Brief } from "./brief.ts";
 import { formatDuration, prLabel } from "./card.ts";
-import { type OutputContract, safeHttpUrl, testStatus } from "./contract.ts";
+import { contradictsTestReport, type OutputContract, safeHttpUrl, testStatus } from "./contract.ts";
 
 // Text for Sym's own Slack messages. Short, and the result comes first. Worker text is
 // untrusted, so every piece of it goes through escapeMrkdwn.
@@ -71,6 +71,12 @@ export function testSentence(contract: OutputContract): string {
   const status =
     inferred === "failed" || inferred === "not_run" ? inferred : (contract.testsStatus ?? inferred);
   const note = contract.tests.trim();
+  if (
+    inferred === "unknown" &&
+    /\bpass(?:ed|ing)?\b/i.test(note) &&
+    /not run|skipped|didn['’]t run/i.test(note)
+  )
+    return `Test report: ${escapeMrkdwn(note)}`;
   const truth = {
     passed: "Tests passed.",
     failed: "Tests failed.",
@@ -116,7 +122,7 @@ export function resultMessage(
     ]);
   const required = [...new Set([...concerns, ...contract.openQuestions])];
   return sections([
-    `${job.ref} is done. ${escapeMrkdwn(tldr(contract.summary))}`,
+    `${job.ref} is done. ${escapeMrkdwn(contradictsTestReport(contract.summary, contract) ? "The worker returned a result." : tldr(contract.summary))}`,
     resultFacts(contract).join(" "),
     ...required.map(escapeMrkdwn),
     limitation && !required.includes(limitation) ? limitation : null,

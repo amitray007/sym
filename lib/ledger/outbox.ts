@@ -6,7 +6,7 @@ import { json } from "./jobs.ts";
 // enqueues it once. Each post carries its chooseDisplay result, and the outbox refuses a post
 // without one (AGENTS.md invariant). A database check backs up this rule.
 
-export type OutboxMethod = "chat.postMessage" | "chat.update";
+export type OutboxMethod = "chat.postMessage" | "chat.update" | "sym.document";
 // A `card` post is a job card. Its Slack ts is saved on the job row, so later edits find it.
 export type OutboxPurpose = "message" | "card";
 export type OutboxStatus = "pending" | "sent" | "failed";
@@ -118,7 +118,7 @@ export async function dropPost(sql: Sql, id: number, reason: string): Promise<vo
   `;
 }
 
-export async function markPostSent(sql: Sql, id: number, slackTs: string): Promise<void> {
+export async function markPostSent(sql: Sql, id: number, slackTs: string | null): Promise<void> {
   await sql`
     update outbox set status = 'sent', slack_ts = ${slackTs}, sent_at = now(),
       attempts = attempts + 1

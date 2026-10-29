@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { fixtureText, writeAsFixture } from "../lib/brain/fixture-writer.ts";
 import { defuse, writtenPost } from "../lib/jobs/blocks.ts";
 import { WriterOutput, writerEnabled, writerMessage } from "../lib/jobs/writer.ts";
@@ -54,6 +55,10 @@ describe("writerEnabled", () => {
 });
 
 describe("WriterOutput", () => {
+  it("accepts older text-only fixture replies at the wire boundary with no claimed coverage", () => {
+    expect(z.toJSONSchema(WriterOutput).required).not.toContain("coveredConcernIds");
+    expect(WriterOutput.parse({ text: "Done." }).coveredConcernIds).toEqual([]);
+  });
   it("refuses empty and overlong text", () => {
     expect(WriterOutput.safeParse({ text: "  " }).success).toBe(false);
     expect(WriterOutput.safeParse({ text: "y".repeat(6_001) }).success).toBe(false);
@@ -107,6 +112,36 @@ describe("writtenPost", () => {
     );
     expect(post.text).not.toContain("No limit test.");
     expect(post.text).toContain("Cap the wait at 30s?");
+  });
+
+  it("cannot turn not-run or unknown testing into passed testing", () => {
+    for (const tests of ["not run", "4 new tests", "1 failed"]) {
+      const post = writtenPost(
+        job,
+        { ...request.contract, tests },
+        [],
+        "J-7 is done. Tests passed.",
+        null,
+      );
+      expect(post.text).not.toContain("Tests passed.");
+      expect(post.text).toContain(tests);
+    }
+  });
+
+  it("does not let passed prose override a failed or unrun machine test status", () => {
+    for (const testsStatus of ["failed", "not_run"] as const) {
+      const post = writtenPost(
+        job,
+        { ...request.contract, testsStatus },
+        [],
+        "J-7 is done. Tests passed.",
+        null,
+      );
+      expect(post.text).not.toContain("Tests passed.");
+      expect(post.text).toContain(
+        testsStatus === "failed" ? "Tests failed." : "Tests did not run.",
+      );
+    }
   });
 
   it("defuses mentions the writer copied from a worker report", () => {

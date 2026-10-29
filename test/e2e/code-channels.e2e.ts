@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { CLOSE_ACTION_ID } from "../../lib/jobs/card.ts";
 import {
   BOT,
   briefMention,
@@ -21,94 +20,83 @@ import {
   workerAdvance,
 } from "./harness.ts";
 
-// Code channels end to end (decision 067): with SYM_CODE_CHANNELS on, a started job moves from its
-// thread into its own Slack code channel, posts its card and result there, and Close archives the
-// channel with the result as its summary.
-
 let h: Harness;
-
 beforeAll(async () => {
   h = await startHarness({ database: "sym_e2e_code_channels", env: { SYM_CODE_CHANNELS: "on" } });
   await h.startEve();
 });
-
 afterAll(async () => {
   h?.writeReport();
   await h?.close();
 });
+const reconcile = async () => {
+  const response = await fetch(`${h.eveUrl()}/eve/v1/dev/schedules/reconcile`, { method: "POST" });
+  expect(response.ok).toBe(true);
+};
 
-describe("code channels", () => {
-  it("runs a started job in its own channel and archives it on Close", async () => {
+describe("code channel conversations", () => {
+  async function running(title: string) {
     const c = newConversation(h);
-    const { approval, job, ref } = await startJob(h, c, "Channel job");
+    const { approval, job, ref } = await startJob(h, c, title);
     await c.click(approval, "Start");
-
     const channel = await until(
       () => h.slack.codeChannels.find((cc) => cc.sessionId === `sym-${ref}`),
-      {
-        label: `${ref} code channel`,
-      },
+      { label: "the code channel" },
     );
-    expect(channel.originChannel).toBe(c.channel);
-    expect(channel.contextBar).toContainEqual({ key: "job", label: ref, icon: "code" });
-
-    const thread = await until(() => threadsOf(h, ref)[0], { label: `${ref} worker thread` });
-    await workerAdvance(h, thread, finishedSteps());
-    const done = await waitForJobStatus(h.sql, job.id, "done");
-    expect(done).toMatchObject({
-      slackChannel: channel.id,
-      slackThreadTs: null,
-      codeChannel: true,
-    });
-
-    const headline = new RegExp(`^(✅|⚠️) \\*${ref} · `);
-    const result = await until(
-      () => h.slack.messages.find((m) => m.channel === channel.id && headline.test(m.text ?? "")),
-      { label: `${ref} result in the code channel` },
+    const thread = await until(() => threadsOf(h, ref)[0], { label: "the worker" });
+    return { c, job, ref, channel, thread };
+  }
+  const resultIn = (channel: string, ref: string) =>
+    until(
+      () =>
+        h.slack.messages.find(
+          (m) => m.channel === channel && (m.text ?? "").startsWith(`${ref} is done.`),
+        ),
+      { label: `${ref} result` },
     );
-    // The result is a top-level post: the channel is the job's whole conversation.
-    expect(result.thread_ts).toBeUndefined();
-    await until(() => (channel.statuses.at(-1) === "active" ? true : undefined), {
-      label: `${ref} channel status active`,
-    });
-    expect(channel.statuses[0]).toBe("processing");
-
-    // Anything said in the channel reaches Sym with no tag, about this job.
-    const asked = await sayInChannel(h, channel.id, "what's the update?");
-    const answer = await until(
+  const proposalIn = (channel: string) =>
+    until(
       () =>
         h.slack.messages.find(
           (m) =>
-            m.channel === channel.id &&
-            m.user === "UBOT" &&
-            Number(m.ts) > Number(asked.ts) &&
-            (m.text ?? m.markdown_text ?? JSON.stringify(m.blocks ?? "")).includes(ref),
+            m.channel === channel &&
+            (m.text ?? "").includes("same branch") &&
+            hitlControls(m.blocks ?? []).length > 0,
         ),
-      { label: "Sym's answer in the code channel", timeoutMs: 60_000 },
+      { label: "follow-up Start" },
     );
-    expect(answer).toBeDefined();
 
-    await clickButton(h, result, CLOSE_ACTION_ID, ref);
-    await until(() => (channel.archived ? true : undefined), { label: `${ref} archived` });
+  it("keeps progress and results in the channel and confirms archive before reporting it", async () => {
+    const { c, job, ref, channel, thread } = await running("Channel job");
+    expect(channel.originChannel).toBe(c.channel);
+    expect(channel.contextBar).toContainEqual({ key: "job", label: ref, icon: "code" });
+    await workerAdvance(h, thread, finishedSteps());
+    await waitForJobStatus(h.sql, job.id, "done");
+    const result = await resultIn(channel.id, ref);
+    expect(result.thread_ts).toBeUndefined();
+    await sayInChannel(h, channel.id, "what's the update?");
+    await until(
+      () =>
+        h.slack.messages.find(
+          (m) => m.channel === channel.id && messageText(m).includes(`${ref} Channel job`),
+        ),
+      { label: "channel status answer" },
+    );
+    await sayInChannel(h, channel.id, `fixture-close ${ref}`);
+    await until(() => (channel.archived ? true : undefined), { label: "confirmed archive" });
     expect(channel.summaryTs).toBe(result.ts);
-    await settle(h);
-    // Nothing about the job posted in the old thread after Start.
-    expect(c.botMessages().some((m) => headline.test(m.text ?? ""))).toBe(false);
+    expect(
+      (await h.sql`select archive_state from jobs where id = ${job.id}`)[0]?.archiveState,
+    ).toBe("archived");
+    expect(c.botMessages().some((m) => (m.text ?? "").startsWith(`${ref} is done.`))).toBe(false);
   });
 
-  it("links a worker question from the channel to the thread where Eve asks it", async () => {
-    const c = newConversation(h);
-    const { approval, job, ref } = await startJob(h, c, "Question in channel");
-    await c.click(approval, "Start");
-    const channel = await until(
-      () => h.slack.codeChannels.find((cc) => cc.sessionId === `sym-${ref}`),
-      { label: `${ref} code channel` },
-    );
-    const thread = await until(() => threadsOf(h, ref)[0], { label: `${ref} worker thread` });
+  it("asks locally and accepts a typed answer through a normal brain turn", async () => {
+    const { c, job, ref, channel, thread } = await running("Question here");
     await workerAdvance(h, thread, [
       {
         status: "waiting",
-        items: ["I need to know the target."],
+        items: ["I need the target."],
         questions: [
           {
             requestId: "req-env",
@@ -118,8 +106,8 @@ describe("code channels", () => {
                 header: "Target",
                 question: "Which environment?",
                 options: [
-                  { label: "staging", description: "Safe" },
-                  { label: "production", description: "Careful" },
+                  { label: "staging", description: "Test environment" },
+                  { label: "production", description: "Production environment" },
                 ],
               },
             ],
@@ -127,191 +115,123 @@ describe("code channels", () => {
         ],
       },
     ]);
-
-    // The channel says where to answer, and its status waits on a person.
-    await until(
+    const question = await until(
       () =>
         h.slack.messages.find(
-          (m) =>
-            m.channel === channel.id &&
-            (m.text ?? "").includes(`${ref} has a question: Which environment?`),
+          (m) => m.channel === channel.id && messageText(m).includes("Which environment?"),
         ),
-      { label: "the question link in the channel" },
+      { label: "local question" },
     );
-    await until(() => (channel.statuses.includes("suspended") ? true : undefined), {
-      label: "status suspended",
-    });
-
-    // A message in the channel runs a brain turn; the channel still waits on the question after it.
-    const asked = await sayInChannel(h, channel.id, "what is it waiting on?");
-    await until(
-      () =>
-        h.slack.messages.find(
-          (m) => m.channel === channel.id && m.user === "UBOT" && Number(m.ts) > Number(asked.ts),
-        ),
-      { label: "Sym's answer in the channel" },
-    );
-    await settle(h);
-    await until(() => (channel.statuses.at(-1) === "suspended" ? true : undefined), {
-      label: "status still suspended after the brain's turn",
-    });
-
-    // Eve asks in the thread where the job started; the answer reaches the worker.
-    const question = await c.waitForControls(/Which environment\?/);
-    await c.click(question, "staging");
-    await until(() => thread.answers[0], { label: "the answer on the worker thread" });
-    await until(() => (channel.statuses.at(-1) === "processing" ? true : undefined), {
-      label: "status back to processing",
-    });
-
+    expect(hitlControls(question.blocks ?? []).map((control) => control.label)).toEqual([
+      "staging",
+      "production",
+    ]);
+    expect(c.botMessages().some((m) => messageText(m).includes("Which environment?"))).toBe(false);
+    await waitForJobStatus(h.sql, job.id, "waiting_input");
+    await sayInChannel(h, channel.id, "staging");
+    await until(() => thread.answers[0], { label: "typed answer at the worker" });
+    expect(thread.answers).toEqual([{ requestId: "req-env", answers: { "q-env": "staging" } }]);
     await workerAdvance(h, thread, finishedSteps());
     await waitForJobStatus(h.sql, job.id, "done");
+    await resultIn(channel.id, ref);
   });
 
-  it("keeps the old thread's buttons working, runs a Fix in the channel, and retries Close", async () => {
-    const reconcile = async () => {
-      const response = await fetch(`${h.eveUrl()}/eve/v1/dev/schedules/reconcile`, {
-        method: "POST",
-      });
-      if (!response.ok) throw new Error(`reconcile answered ${response.status}`);
-    };
-    const c = newConversation(h);
-    const { approval, job, ref } = await startJob(h, c, "Fix in channel");
-    const briefPost = c
-      .botMessages()
-      .find((m) => JSON.stringify(m.blocks ?? []).includes("sym_job_brief"));
-    if (!briefPost) throw new Error(`${ref} has no brief post`);
-    await c.click(approval, "Start");
-    const channel = await until(
-      () => h.slack.codeChannels.find((cc) => cc.sessionId === `sym-${ref}`),
-      { label: `${ref} code channel` },
-    );
-
-    // Full brief still answers in the thread the job moved out of.
-    const before = h.slack.ephemerals.length;
-    await clickButton(h, briefPost, "sym_job_brief", ref);
-    const brief = await until(() => h.slack.ephemerals.slice(before)[0], {
-      label: "the full brief",
-    });
-    expect(messageText(brief)).not.toContain("There is no job");
-    expect(messageText(brief)).toContain(ref);
-
-    const thread = await until(() => threadsOf(h, ref)[0], { label: `${ref} worker thread` });
+  it("starts follow-ups only after approval and retries archives after a restart", async () => {
+    const { job, ref, channel, thread } = await running("Follow-up here");
     await workerAdvance(h, thread, finishedSteps());
     await waitForJobStatus(h.sql, job.id, "done");
-    const inChannel = (pattern: RegExp) =>
-      until(
-        () => h.slack.messages.find((m) => m.channel === channel.id && pattern.test(m.text ?? "")),
-        { label: `a channel post matching ${pattern}` },
-      );
-    const result = await inChannel(new RegExp(`^(✅|⚠️) \\*${ref} · `));
-
-    // Fix: the text box posts in the channel, and the follow-up shares it.
-    await clickButton(h, result, "sym_job_fix", ref);
-    const fixBox = await until(
-      () =>
-        h.slack.messages.find(
-          (m) =>
-            m.channel === channel.id && JSON.stringify(m.blocks ?? []).includes("sym_job_fix_text"),
-        ),
-      { label: "the Fix box" },
+    await resultIn(channel.id, ref);
+    await sayInChannel(h, channel.id, `fixture-followup ${ref}: log each retry`);
+    const proposal = await proposalIn(channel.id);
+    expect(thread.sends).toHaveLength(0);
+    const start = hitlControls(proposal.blocks ?? []).find((c) => c.label === "Start");
+    if (!start?.value) throw new Error("missing Start");
+    await clickButton(h, proposal, start.actionId, start.value);
+    const child = await until(
+      async () =>
+        (
+          await h.sql<{ id: number }[]>`select id::int from jobs where parent_job_id = ${job.id}`
+        )[0],
+      { label: "the follow-up" },
     );
-    await clickButton(h, fixBox, "sym_job_fix_text", "also log each retry", {
-      blockId: `fix-${ref}`,
-      actionType: "plain_text_input",
-    });
-    const [child] = await until(
-      async () => {
-        const rows = await h.sql<{ id: number; codeChannel: boolean; slackChannel: string }[]>`
-          select id::int, code_channel, slack_channel from jobs where parent_job_id = ${job.id}
-        `;
-        return rows.length > 0 ? rows : undefined;
-      },
-      { label: "the follow-up job" },
-    );
-    expect(child).toMatchObject({ codeChannel: true, slackChannel: channel.id });
-    const childRef = `J-${child?.id}`;
-    await until(() => (channel.statuses.at(-1) === "processing" ? true : undefined), {
-      label: "the channel working on the follow-up",
-    });
-
-    // Reconcile drives the follow-up to its result and sets the channel back to active.
-    await h.sql`update jobs set watch_until = now() - interval '1 second' where id = ${Number(child?.id)}`;
+    await until(() => thread.sends[0], { label: "the approved send" });
+    expect(
+      (await h.sql`select slack_channel, code_channel from jobs where id = ${child.id}`)[0],
+    ).toMatchObject({ slackChannel: channel.id, codeChannel: true });
     thread.steps.push({
       status: "completed",
       items: [contractMessage({ ...SAMPLE_CONTRACT, summary: "Logged each retry." })],
     });
+    await h.sql`update jobs set watch_until = null where id = ${child.id}`;
     await reconcile();
-    await waitForJobStatus(h.sql, Number(child?.id), "done");
-    const childResult = await inChannel(new RegExp(`^(✅|⚠️) \\*${childRef} · `));
-    await until(() => (channel.statuses.at(-1) === "active" ? true : undefined), {
-      label: "the channel active after the follow-up",
-    });
-
-    // A failed archive on Close is retried by the next Close, with the result as the summary.
+    await waitForJobStatus(h.sql, child.id, "done");
+    const result = await resultIn(channel.id, `J-${child.id}`);
     h.slack.failNext("agents.conversations.archive", "internal_error");
-    await clickButton(h, childResult, "sym_job_close", childRef);
+    await sayInChannel(h, channel.id, `fixture-close J-${child.id}`);
     await until(
       async () =>
-        (
-          await h.sql`select 1 from jobs where id = ${Number(child?.id)} and closed_at is not null`
-        )[0],
-      { label: "the closed follow-up" },
+        (await h.sql`select 1 from jobs where id = ${child.id} and archive_state = 'pending'`)[0],
+      { label: "pending archive" },
     );
-    await settle(h);
+    const notice = await until(
+      () =>
+        h.slack.messages.find(
+          (m) =>
+            m.channel === channel.id && (m.text ?? "").includes("couldn't archive this channel"),
+        ),
+      { label: "honest retry notice" },
+    );
     expect(channel.archived).toBe(false);
-    // Close took its button off the result, so Sym posts a new one to try again.
-    const retry = await inChannel(/could not archive this channel/);
-    expect(JSON.stringify(retry.blocks)).toContain("sym_job_close");
-    await clickButton(h, retry, "sym_job_close", childRef);
-    await until(() => (channel.archived ? true : undefined), { label: "the retried archive" });
-    expect(channel.summaryTs).toBe(childResult.ts);
+    expect(messageText(notice)).not.toContain("Closed");
+    expect(JSON.stringify(notice.blocks ?? [])).not.toContain("sym_job_close");
+    await h.stopEve();
+    await h.startEve();
+    await reconcile();
+    await until(() => (channel.archived ? true : undefined), {
+      label: "archive recovered after restart",
+    });
+    await settle(h);
+    expect(channel.summaryTs).toBe(result.ts);
+    expect(thread.organized.filter((action) => action === "settle")).toHaveLength(1);
+    expect(messageText(notice)).toContain("I've archived");
+    const archives = h.slack.callsTo("agents.conversations.archive");
+    expect(archives.at(-1)?.body).toMatchObject({
+      channel_id: channel.id,
+      summary_message_ts: result.ts,
+    });
   });
 
-  it("moves a conversation into a code channel on request, and a job there adopts it", async () => {
+  it("adopts an existing conversation channel for a new job", async () => {
     const c = newConversation(h);
     const before = h.slack.codeChannels.length;
     await c.mention(`<@${BOT}> move this to a code channel`);
     const channel = await until(() => h.slack.codeChannels[before], {
-      label: "the conversation's code channel",
+      label: "conversation channel",
     });
-    expect(channel.originChannel).toBe(c.channel);
-    // The brain's session continues in the channel and answers there.
-    await until(() => h.slack.messages.find((m) => m.channel === channel.id && m.user === BOT), {
-      label: "Sym's first post in the channel",
-    });
-
-    // A job started inside the channel takes it over instead of opening another.
-    // No tag: in a code channel every message reaches Sym.
-    await sayInChannel(
-      h,
-      channel.id,
-      briefMention("Job in a code channel").replace(`<@${BOT}> `, ""),
+    await sayInChannel(h, channel.id, briefMention("Adopted job").replace(`<@${BOT}> `, ""));
+    const proposal = await until(
+      () =>
+        h.slack.messages.find(
+          (m) => m.channel === channel.id && /Want me to start/.test(messageText(m)),
+        ),
+      { label: "Start in channel" },
     );
-    const start = await until(
-      () => {
-        for (const m of h.slack.messages) {
-          if (m.channel !== channel.id || m.user !== BOT) continue;
-          const controls = hitlControls(m.blocks ?? []);
-          if (controls.length > 0 && /Start J-\d+:/.test(messageText(m))) return { m, controls };
-        }
-        return undefined;
-      },
-      { label: "the Start prompt in the channel" },
+    const start = hitlControls(proposal.blocks ?? []).find((c) => c.label === "Start");
+    if (!start?.value) throw new Error("missing Start");
+    await clickButton(h, proposal, start.actionId, start.value);
+    const job = await until(
+      async () =>
+        (
+          await h.sql<
+            { id: number }[]
+          >`select id::int from jobs where slack_channel = ${channel.id} and code_channel`
+        )[0],
+      { label: "adopted job" },
     );
-    const startControl = start.controls.find((control) => control.label === "Start");
-    if (!startControl?.value) throw new Error("no Start control");
-    await clickButton(h, start.m, startControl.actionId, startControl.value);
-    const [job] = await until(
-      async () => {
-        const rows = await h.sql<{ id: number; codeChannel: boolean }[]>`
-          select id::int, code_channel from jobs where slack_channel = ${channel.id}
-        `;
-        return rows[0]?.codeChannel ? rows : undefined;
-      },
-      { label: "the adopted job" },
-    );
-    expect(job?.codeChannel).toBe(true);
+    const ref = `J-${job.id}`;
+    const thread = await until(() => threadsOf(h, ref)[0], { label: "adopted worker" });
+    await workerAdvance(h, thread, finishedSteps());
+    await waitForJobStatus(h.sql, job.id, "done");
     expect(h.slack.codeChannels).toHaveLength(before + 1);
   });
 });

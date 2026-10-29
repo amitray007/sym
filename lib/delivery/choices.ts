@@ -2,7 +2,7 @@ import type { Sql } from "../db.ts";
 import { chooseDisplay } from "../display.ts";
 import { escapeMrkdwn } from "../jobs/messages.ts";
 import type { StoredChoices } from "../ledger/choices.ts";
-import { enqueuePost } from "../ledger/outbox.ts";
+import { enqueuePost, postStatus } from "../ledger/outbox.ts";
 import type { SlackApi } from "../slack/api.ts";
 import { deliver } from "./deliver.ts";
 
@@ -29,7 +29,7 @@ export async function takeChoice(
   if (!deps.allowed(input.user)) return false;
   const match = /^([1-9][0-9]*):([0-2])$/.exec(input.value);
   if (!match) return false;
-  return deps.sql.begin(async (transaction) => {
+  const choice = await deps.sql.begin(async (transaction) => {
     const sql = transaction as unknown as Sql;
     const [row] = await sql<ChoiceRow[]>`
       select *, expires_at > now() as valid from conversation_choices where id = ${match[1] ?? "0"}::bigint for update
@@ -51,7 +51,7 @@ export async function takeChoice(
       return false;
     await sql`update conversation_choices set chosen_by = ${input.user}, chosen_index = ${index} where id = ${match[1] ?? "0"}::bigint`;
     const visible = `${row.message}\n\n<@${input.user}> chose: ${escapeMrkdwn(text)}`;
-    await enqueuePost(sql, {
+    const post = await enqueuePost(sql, {
       idempotencyKey: `choice:${row.id}:picked`,
       method: "chat.update",
       payload: {
@@ -71,11 +71,24 @@ export async function takeChoice(
         quiet: false,
       }),
     });
-    await deliver(sql, deps.slack);
+    return { id: row.id, text, postId: post.id };
+  });
+  if (!choice) return false;
+  // Commit the actor and label before any external effect. A lost dispatch receipt must not
+  // let a replay bind another label to the edit that Slack already accepted.
+  await deliver(deps.sql, deps.slack);
+  if ((await postStatus(deps.sql, choice.postId)) !== "sent")
+    throw new Error("The choice could not be recorded in the conversation.");
+  return deps.sql.begin(async (transaction) => {
+    const sql = transaction as unknown as Sql;
+    const [row] = await sql<ChoiceRow[]>`
+      select *, expires_at > now() as valid from conversation_choices where id = ${choice.id}::bigint for update
+    `;
+    if (!row?.valid || row.dispatchedAt || !deps.allowed(input.user)) return false;
     // Eve's inbound interaction context binds this send to this thread and this Slack user.
     // Its idempotency key makes a retry after a lost receipt safe.
-    await send(text, `choice:${row.id}:turn`);
-    await sql`update conversation_choices set dispatched_at = now() where id = ${match[1] ?? "0"}::bigint`;
+    await send(choice.text, `choice:${row.id}:turn`);
+    await sql`update conversation_choices set dispatched_at = now() where id = ${choice.id}::bigint`;
     return true;
   });
 }

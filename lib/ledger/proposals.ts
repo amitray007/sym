@@ -105,10 +105,15 @@ export async function decideProposal(
   start: boolean,
 ): Promise<JobProposal | undefined> {
   const [row] = await sql<JobProposal[]>`
-    select * from job_proposals where id = ${id}::bigint for update
+    select * from job_proposals where id = ${id}::bigint
   `;
   if (row?.status !== "pending") return undefined;
-  const proposal = normalize(row);
+  await sql`select pg_advisory_xact_lock(hashtext(current_schema()), hashtext(${`${row.channel}:${row.threadTs ?? ""}`}))`;
+  const [locked] = await sql<
+    JobProposal[]
+  >`select * from job_proposals where id = ${id}::bigint for update`;
+  if (locked?.status !== "pending") return undefined;
+  const proposal = normalize(locked);
   await sql`select id from jobs where id = ${proposal.jobId} for update`;
   const job = await getJob(sql, proposal.jobId);
   const valid =

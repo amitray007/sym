@@ -52,7 +52,7 @@ describe("trusted playbooks", () => {
 
     const thread = await until(() => threadsOf(h, ref)[0], { label: `${ref} worker thread` });
     const brief = await until(
-      () => c.botMessages().find((m) => (m.text ?? "").includes("Starting without Start")),
+      () => c.botMessages().find((m) => (m.text ?? "").includes("trusted playbook")),
       { label: "the trusted brief" },
     );
     expect(brief.text).toContain("sync-retry");

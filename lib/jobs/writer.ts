@@ -16,7 +16,9 @@ const MAX_REPORT = 12_000;
 
 export const WriterOutput = z.object({
   text: z.string().trim().min(1).max(WRITTEN_MAX),
-  coveredConcernIds: z.array(z.string()).default([]),
+  // Older fixture writers return only text. The wire schema accepts that input and the
+  // parser supplies no coverage, so code appends every required concern.
+  coveredConcernIds: z.array(z.string()).default([]).optional(),
   choices: ChoiceLabels.optional(),
 });
 export type WriterOutput = z.input<typeof WriterOutput>;

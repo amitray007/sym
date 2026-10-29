@@ -149,7 +149,7 @@ describe("scheduled runs", () => {
     expect(posts).toHaveLength(1);
     const text = posts[0] ? messageText(posts[0]) : "";
     expect(text).toContain("The error rate doubled");
-    expect(text).toContain(`*${ref} · `);
+    expect(text).toContain(`${ref} is done.`);
   });
 
   // The model cannot widen a schedule. The dispatcher always sends the stored brief, so these
@@ -166,6 +166,6 @@ describe("scheduled runs", () => {
       `<@${BOT}> Scheduled run of S-${schedule.id}: On-call check.\n` +
         `\`\`\`brief\n${JSON.stringify({ ...BRIEF, ...change })}\n\`\`\``,
     );
-    await c.waitForControls(/Start J-\d+:/);
+    await c.waitForControls(/Want me to start\?/);
   });
 });

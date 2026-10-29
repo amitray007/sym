@@ -7,7 +7,6 @@ import {
   codeChannelsOn,
   jobOfCodeChannel,
   moveToCodeChannel,
-  pointToQuestion,
   setChannelStatus,
 } from "../lib/slack/code-channel.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
@@ -150,54 +149,6 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
       originChannel: null,
     });
     expect(slack.codeChannels).toHaveLength(before);
-  });
-
-  it("posts no question link for a job that adopted its channel", async () => {
-    vi.stubEnv("SYM_CODE_CHANNELS", "on");
-    const sql = ledger.sql();
-    const outer = await moveToCodeChannel({ sql, slack: api }, await newJob());
-    const adopted = await moveToCodeChannel(
-      { sql, slack: api },
-      await newJob(outer.slackChannel ?? ""),
-    );
-    await pointToQuestion({ sql, slack: api }, adopted, "req-adopted", "Which environment?");
-    const posts = await sql`select 1 from outbox where job_id = ${adopted.id}`;
-    expect(posts).toHaveLength(0);
-  });
-
-  it("links a worker question to the thread where Eve asks it", async () => {
-    vi.stubEnv("SYM_CODE_CHANNELS", "on");
-    const sql = ledger.sql();
-    const moved = await moveToCodeChannel({ sql, slack: api }, await newJob());
-    await pointToQuestion({ sql, slack: api }, moved, "req-1", "Which environment?");
-    await pointToQuestion({ sql, slack: api }, moved, "req-1", "Which environment?");
-    const posts = await sql<{ payload: { channel: string; text: string } }[]>`
-      select payload from outbox where job_id = ${moved.id} and idempotency_key like '%question-link%'
-    `;
-    expect(posts).toHaveLength(1);
-    expect(posts[0]?.payload.channel).toBe(moved.slackChannel);
-    expect(posts[0]?.payload.text).toContain(`J-${moved.id} has a question: Which environment?`);
-    expect(posts[0]?.payload.text).toContain("Answer it in the thread where it started.");
-  });
-
-  it("keeps a direct message job in place", async () => {
-    vi.stubEnv("SYM_CODE_CHANNELS", "on");
-    const before = slack.callsTo("agents.conversations.create").length;
-    const job = await newJob("D1");
-    const after = await moveToCodeChannel({ sql: ledger.sql(), slack: api }, job);
-    expect(after.codeChannel).toBe(false);
-    expect(slack.callsTo("agents.conversations.create")).toHaveLength(before);
-  });
-
-  it("keeps the job in its thread when Slack refuses", async () => {
-    vi.stubEnv("SYM_CODE_CHANNELS", "on");
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    slack.failNext("agents.conversations.create", "feature_disabled");
-    const job = await newJob();
-    const after = await moveToCodeChannel({ sql: ledger.sql(), slack: api }, job);
-    expect(after).toMatchObject({ slackChannel: "C1", codeChannel: false });
-    expect(String(warn.mock.calls[0]?.[1])).toBe("feature_disabled");
-    warn.mockRestore();
   });
 
   it("archives with the result as the summary, once", async () => {

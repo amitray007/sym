@@ -50,7 +50,7 @@ describe("milestone 1", () => {
     // A later allowed brief proves the server handled the refused one first.
     const allowed = newConversation(h);
     await allowed.mention(briefMention("Allowed work"));
-    await allowed.waitForControls(/Start J-\d+:/);
+    await allowed.waitForControls(/Want me to start\?/);
     await settle(h);
 
     const jobs = await h.sql<{ title: string }[]>`select title from jobs order by id`;
@@ -66,13 +66,10 @@ describe("milestone 1", () => {
     const c = newConversation(h);
     const { approval, job, ref } = await startJob(h, c, "Sync retry");
     expect(job.status).toBe("launching");
-    expect(approval.controls.map((control) => control.label)).toEqual(["Start", "Edit", "Cancel"]);
-    // Eve's prompt card is short, so the brief is Sym's own message above it. It is the short
-    // form: the goal and the done-when list sit behind its Full brief button (decision 060).
-    const brief = c.botMessages().find((m) => messageText(m).startsWith(`📋 *${ref} · `));
-    expect(brief && messageText(brief)).toContain("*delivery*");
-    expect(brief && messageText(brief)).not.toContain("*goal*");
-    expect(JSON.stringify(brief?.blocks)).toContain('"action_id":"sym_job_brief"');
+    expect(approval.controls.map((control) => control.label)).toEqual(["Start", "Not now"]);
+    expect(messageText(approval.message)).toContain("Want me to start?");
+    expect(messageText(approval.message)).toContain("read-only");
+    expect(JSON.stringify(approval.message.blocks)).not.toContain("sym_job_brief");
     const beforeStart = c.botMessages().map((m) => m.ts);
 
     await c.click(approval, "Start");
@@ -118,18 +115,18 @@ describe("milestone 1", () => {
     expect(done.prUrl).toBe(SAMPLE_CONTRACT.pr_url);
     expect(done.lastMessage).toContain(SAMPLE_CONTRACT.summary);
     // The verifier subagent checked the result before it posted (flow 4, decision 032).
-    expect(result.text).toContain("✅ verifier: matches the brief (90% sure)");
+    expect(result.text).not.toContain("% sure");
     expect(result.text).not.toContain("check before merge");
     // The result is Block Kit with the text above as its fallback (decision 047).
     const blocks = (result.blocks ?? []) as { type: string; elements?: { url?: string }[] }[];
-    expect(blocks[0]?.type).toBe("header");
+    expect(blocks[0]?.type).toBe("markdown");
     expect(JSON.stringify(blocks)).toContain(SAMPLE_CONTRACT.summary);
     expect(blocks.find((block) => block.type === "actions")?.elements?.[0]?.url).toBe(
       SAMPLE_CONTRACT.pr_url,
     );
     // Decision 043: the worker has its label, and no Slack call names the software behind it.
     const slackBodies = JSON.stringify(h.slack.calls.map((call) => call.body));
-    expect(slackBodies).toContain("Builder thread");
+    expect(slackBodies).toContain("Builder");
     expect(slackBodies).not.toMatch(/\bT3\b/i);
   });
 
@@ -137,7 +134,7 @@ describe("milestone 1", () => {
     const c = newConversation(h);
     // The brief allows no pull request, and the worker opens one anyway.
     await c.mention(briefMention("No PR job", { openPullRequest: false }));
-    const approval = await c.waitForControls(/Start J-\d+:/);
+    const approval = await c.waitForControls(/Want me to start\?/);
     const job = await jobInThread(h.sql, c.channel, c.rootTs);
     const ref = `J-${job.id}`;
     await c.click(approval, "Start");
@@ -155,11 +152,11 @@ describe("milestone 1", () => {
 
     expect(newSince(c, before).map((m) => m.ts)).toEqual([result.ts]);
     const concern = "worker opened a PR the job didn't allow.";
-    expect(result.text).toContain("*⚠️ check before merge* (60% sure)");
-    expect(result.text).toContain(`*⚠️ check before merge* (60% sure)\n1. ${concern}`);
+    expect(result.text).not.toContain("% sure");
+    expect(result.text).toContain(concern);
     // The fixture verifier repeats the rule-check concern; the message lists it once.
     expect(result.text?.split(concern)).toHaveLength(2);
-    expect(JSON.stringify(result.blocks)).toContain('"style":"ordered"');
+    expect(JSON.stringify(result.blocks)).not.toContain('"style":"ordered"');
     expect(JSON.stringify(result.blocks)?.split(concern)).toHaveLength(2);
   });
 
@@ -256,7 +253,7 @@ describe("milestone 1", () => {
       timeoutMs: 30_000,
     });
     expect(dms()).toHaveLength(1);
-    expect(dms()[0]?.text).toContain("permission prompt");
+    expect(dms()[0]?.text).toContain("needs permission");
     expect(c.botMessages().some((m) => (m.text ?? "").includes("permission prompt"))).toBe(false);
 
     await workerAdvance(h, thread, finishedSteps());
@@ -294,17 +291,14 @@ describe("milestone 1", () => {
     await resultMessage(c, ref);
   });
 
-  it("Edit asks for the changes and hands them back without launching", async () => {
+  it("a revised brief replaces the old proposal without launching it", async () => {
     const c = newConversation(h);
-    const { approval, job, ref } = await startJob(h, c, "Edited job");
-
-    await c.click(approval, "Edit");
-    const ask = await c.waitForPrompt(new RegExp(`What should change in ${ref}`));
-    await c.typeAnswer(ask, "Only touch the retry module, and keep the batch size.");
-    const closed = await waitForJobStatus(h.sql, job.id, "cancelled");
-
-    expect(closed.lastSummary).toBe("Brief edited");
-    expect(launchesOf(h, ref)).toHaveLength(0);
+    const first = await startJob(h, c, "Edited job");
+    await c.reply(briefMention("Revised job", { goal: "Only touch the retry module." }));
+    const ask = await c.waitForControls(/Only touch the retry module/);
+    await waitForJobStatus(h.sql, first.job.id, "cancelled");
+    expect(launchesOf(h, first.ref)).toHaveLength(0);
+    await c.click(ask, "Not now");
   });
 
   it("Cancel before start launches nothing and posts no card", async () => {
@@ -312,7 +306,7 @@ describe("milestone 1", () => {
     const { approval, job, ref } = await startJob(h, c, "Cancelled job");
     const before = c.botMessages().map((m) => m.ts);
 
-    await c.click(approval, "Cancel");
+    await c.click(approval, "Not now");
     const cancelled = await waitForJobStatus(h.sql, job.id, "cancelled");
     await settle(h);
 

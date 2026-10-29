@@ -19,7 +19,7 @@ export interface ProgressState {
   prUrl?: string | null;
   /** Epoch ms of the latest worker activity, which starts the current quiet stretch. */
   quietSince?: number;
-  /** Epoch ms of the last quiet post. Limits the post rate to once an hour. */
+  /** Epoch ms of the one long-silence post. A job asks at most once. */
   lastQuietPostAt?: number;
 }
 

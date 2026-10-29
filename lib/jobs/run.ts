@@ -49,7 +49,7 @@ import {
   SCHEDULED_CHECK,
 } from "./present.ts";
 import { detectEvents } from "./progress.ts";
-import { presentQuestions } from "./questions.ts";
+import { finishQuestionPresentation, presentQuestions } from "./questions.ts";
 import { type ModelCheck, VerifierOutput, verifierMessage } from "./verify.ts";
 import { workerCallbackInstructions } from "./worker-capabilities.ts";
 import { WriterOutput, writerMessage } from "./writer.ts";
@@ -165,6 +165,7 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
     // connection while holding this one could deadlock the pool under concurrent launches.
     const job = await mustGetJob(lock, jobId);
     if (job.workerThreadId) return job;
+    if (TERMINAL.includes(job.status)) throw new JobSetupError("This job already ended.");
 
     if (job.workerIdentity && job.workerIdentity !== deps.workerIdentity) {
       throw new JobSetupError("The worker changed before this job could start. Ask for a new job.");
@@ -465,7 +466,7 @@ export async function answerQuestion(
   requestId: string,
   answers: WorkerAnswers,
 ): Promise<boolean> {
-  return deps.sql.begin(async (transaction) => {
+  const sent = await deps.sql.begin(async (transaction) => {
     const sql = transaction as unknown as Sql;
     await sql`select id from jobs where id = ${jobId} for update`;
     const job = await mustGetJob(sql, jobId);
@@ -488,12 +489,15 @@ export async function answerQuestion(
     }
     await deps.worker.answer(job.workerThreadId, requestId, answers);
     await sql`update job_questions set answered_at = now() where job_id = ${jobId} and request_id = ${requestId}`;
+    await finishQuestionPresentation(sql, job, requestId);
     await updateJob(sql, jobId, {
       status: "running",
       lastSummary: `I passed your answer to the ${workerNoun()}.`,
     });
     return true;
   });
+  if (sent) await deliverNow(deps);
+  return sent;
 }
 
 // Stops the worker thread and records the job as cancelled. A job in `checking` already has its
@@ -553,7 +557,10 @@ export async function showBrief(
   await presentBrief(
     deps.sql,
     job,
-    line,
+    brief.modelReason &&
+      chooseModel(models, { projectModel, briefModel: brief.model }).entry.id !== models.defaultId
+      ? line
+      : undefined,
     linked ? { name: linked.name, trusted: trustedPlaybook === linked.name } : undefined,
   );
   await deliverNow(deps);

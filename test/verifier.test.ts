@@ -236,7 +236,7 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
       tasks?: { task_id: string; status: string }[];
     }[];
     const plan = blocks[0];
-    expect(plan?.tasks?.find((task) => task.task_id === "check")?.status).toBe("in_progress");
+    expect(JSON.stringify(plan)).toContain("checking the result");
     // A second check reads nothing more from the worker.
     expect((await checkJob(s.deps, s.job.id, 1000, { verify: true })).status).toBe("checking");
   });

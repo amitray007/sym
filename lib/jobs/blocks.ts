@@ -1,6 +1,6 @@
 import { feedbackBlocks } from "../feedback/feedback.ts";
 import { buttonUrl, openPrButton } from "./card.ts";
-import type { OutputContract } from "./contract.ts";
+import { contradictsTestReport, type OutputContract } from "./contract.ts";
 import {
   duration,
   escapeMrkdwn,
@@ -25,8 +25,6 @@ export interface BlockPost {
 
 // Slack's limits: 3000 characters in a section, 150 in a header, 50 blocks in a message.
 export const SECTION_MAX = 3000;
-export const HEADER_MAX = 150;
-export const MAX_BLOCKS = 50;
 /** Cuts plain text to `max` characters and marks the cut with an ellipsis. */
 export function clipText(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
@@ -114,6 +112,7 @@ export function writtenPost(
   const required = requiredConcerns(contract, concerns);
   const uncovered = required.filter((c) => !(output.coveredConcernIds ?? []).includes(c.id));
   const body = defuse(output.text.slice(0, WRITTEN_MAX));
+  if (contradictsTestReport(body, contract)) return resultPost(job, contract, concerns, limitation);
   const additions = [
     ...(!body.includes(job.ref) ? [job.ref] : []),
     // Test and PR truth remain code-owned, including when the writer claims coverage.

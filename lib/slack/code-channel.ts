@@ -1,8 +1,6 @@
 import type { Sql } from "../db.ts";
-import { chooseDisplay } from "../display.ts";
 import { envSwitch } from "../env-switch.ts";
 import { getJob, type Job, jobRef, updateJob } from "../ledger/jobs.ts";
-import { enqueuePost } from "../ledger/outbox.ts";
 import { type SlackApi, SlackApiError } from "./api.ts";
 
 // Slack code channels for worker jobs (decision 067, docs/slack-code.md). With SYM_CODE_CHANNELS
@@ -123,44 +121,6 @@ function isCodeChannel(info: ConversationInfo): boolean {
   return info.properties?.record_channel?.record_type === "agent_channel";
 }
 
-// Eve asks a moved job's questions in the thread it came from, because the job's task runs in that
-// thread's session. The channel shows the question with a link there, so people find it. A job
-// that adopted its channel has no origin: Eve asks in the channel itself, so there is no link.
-export async function pointToQuestion(
-  deps: Deps,
-  job: Job,
-  requestId: string,
-  prompt: string,
-): Promise<void> {
-  if (!job.codeChannel || !job.slackChannel || !job.originChannel) return;
-  const ref = jobRef(job.id);
-  let link: string | undefined;
-  if (deps.slack && job.originChannel && job.originThreadTs) {
-    const permalink = await deps.slack
-      .call("chat.getPermalink", { channel: job.originChannel, message_ts: job.originThreadTs })
-      .catch(() => undefined);
-    if (typeof permalink?.permalink === "string") link = permalink.permalink;
-  }
-  const where = link ? `<${link}|the thread where it started>` : "the thread where it started";
-  const text = `${ref} has a question: ${prompt.slice(0, 500)}\nAnswer it in ${where}.`;
-  await enqueuePost(deps.sql, {
-    idempotencyKey: `${ref}:question-link:${requestId}`,
-    jobId: job.id,
-    method: "chat.postMessage",
-    payload: { channel: job.slackChannel, text },
-    display: chooseDisplay({
-      kind: job.kind,
-      needsAction: true,
-      isNew: true,
-      estMinutes: 0,
-      steps: 0,
-      lines: 2,
-      surface: "channel",
-      quiet: false,
-    }),
-  });
-}
-
 // The context bar: the job, its project, and its pull request once there is one. Slack keeps at
 // most five items and replaces the whole bar on each call.
 export async function setContextBar(deps: Deps, job: Job, project?: string): Promise<void> {
@@ -222,7 +182,11 @@ export async function archiveCodeChannel(
           await setChannelStatus(deps, job, "closed");
           return true;
         },
-        (retry: unknown) => {
+        async (retry: unknown) => {
+          if (slackCode(retry) === "already_archived") {
+            await setChannelStatus(deps, job, "closed");
+            return true;
+          }
           console.warn(`Sym could not archive the channel of ${jobRef(job.id)}.`, slackCode(retry));
           return false;
         },

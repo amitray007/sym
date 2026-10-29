@@ -134,6 +134,21 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
     expect(s.posts().some((p) => String(p.body.text).includes("was cancelled"))).toBe(false);
   });
 
+  it("keeps a concurrently finished result when Stop reaches a stale running row", async () => {
+    const s = setup();
+    const sql = ledger.sql();
+    const job = await newJob("stop-race");
+    await launchOrAdopt(s.deps, job.id, CALLBACK);
+    s.worker.interrupt = async () => {
+      await updateJob(sql, job.id, { status: "done", lastSummary: "Finished and checked" });
+    };
+    expect(await stopJob(s.deps, `J-${job.id}`)).toContain("finished before I could stop it");
+    expect(await getJob(sql, job.id)).toMatchObject({
+      status: "done",
+      lastSummary: "Finished and checked",
+    });
+  });
+
   it("stops a running job: one interrupt and one cancel post", async () => {
     const s = setup();
     const job = await newJob("stop");

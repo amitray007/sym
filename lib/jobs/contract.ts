@@ -57,9 +57,12 @@ export function parseOutputContract(message: string | null): OutputContract | nu
 
 // Legacy reports remain readable. Counts of new tests do not establish that tests ran.
 export function testStatus(tests: string): NonNullable<OutputContract["testsStatus"]> {
-  if (/\b(not run|didn['’]t run|not executed|skipped)\b/i.test(tests)) return "not_run";
+  const skipped = /\b(not run|didn['’]t run|not executed|skipped)\b/i.test(tests);
+  const passed = /\b(passed|passing|pass)\b/i.test(tests);
   if (/\b(failed|failing|fail)\b/i.test(tests)) return "failed";
-  if (/\b(passed|passing|pass)\b/i.test(tests)) return "passed";
+  if (skipped && passed) return "unknown";
+  if (skipped) return "not_run";
+  if (passed) return "passed";
   if (/^none[.!]?$/i.test(tests.trim())) return "none";
   return "unknown";
 }
@@ -76,4 +79,23 @@ export function safeHttpUrl(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+// A rewritten report cannot turn absent or failed testing into a success claim.
+export function contradictsTestReport(text: string, contract: OutputContract): boolean {
+  const inferred = testStatus(contract.tests);
+  const mixed =
+    inferred === "unknown" &&
+    /\bpass(?:ed|ing)?\b/i.test(contract.tests) &&
+    /not run|skipped|didn['’]t run/i.test(contract.tests);
+  const actual = mixed
+    ? "unknown"
+    : inferred === "failed" || inferred === "not_run"
+      ? inferred
+      : (contract.testsStatus ?? inferred);
+  const claimsPass =
+    /\btests?\s+(?:all\s+)?(?:pass(?:ed|ing)?|are green)\b|\b\d+\s+(?:tests?\s+)?passed\b/i.test(
+      text,
+    );
+  return claimsPass && actual !== "passed";
 }

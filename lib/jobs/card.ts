@@ -1,7 +1,7 @@
 import type { JobStatus } from "../ledger/jobs.ts";
 import { workerNoun } from "../worker-label.ts";
 
-// The job card (docs/slack.md): one Slack `plan` block that Sym owns and edits with chat.update.
+// The working note: explicit worker progress and a muted meta line, edited with chat.update.
 // These functions are pure. The watch loop and reconcile pass in the facts and do the posting.
 
 function clip(text: string, max: number): string {
@@ -23,15 +23,14 @@ export function formatDuration(ms: number): string {
 /** Sym's own action IDs. Eve keeps the `eve_input:` prefix for its controls. */
 export const STOP_ACTION_ID = "sym_job_stop";
 export const PR_ACTION_ID = "sym_job_pr";
-// Steer on the live card, and Looks good, Fix, and Close on the result (decision 056). Steer and
-// Fix post a text box in the thread; pressing Enter in it sends one of the *_TEXT actions.
+// Legacy controls remain routable on messages sent before conversational jobs.
 export const STEER_ACTION_ID = "sym_job_steer";
 export const LOOKS_GOOD_ACTION_ID = "sym_job_ok";
 export const FIX_ACTION_ID = "sym_job_fix";
 export const CLOSE_ACTION_ID = "sym_job_close";
 export const STEER_TEXT_ACTION_ID = "sym_job_steer_text";
 export const FIX_TEXT_ACTION_ID = "sym_job_fix_text";
-// Full brief under the short brief post (decision 060). It answers privately with the whole brief.
+// Legacy Full brief controls still answer privately with the stored brief.
 export const BRIEF_ACTION_ID = "sym_job_brief";
 // The result buttons a later edit removes. Open PR stays.
 export const RESULT_ACTION_IDS = [LOOKS_GOOD_ACTION_ID, FIX_ACTION_ID, CLOSE_ACTION_ID];
@@ -78,22 +77,6 @@ export function openPrButton(url: string): Record<string, unknown> {
   };
 }
 
-// A plain button that carries the job reference.
-export function jobButton(
-  actionId: string,
-  label: string,
-  ref: string,
-  style?: "primary" | "danger",
-): Record<string, unknown> {
-  return {
-    type: "button",
-    action_id: actionId,
-    text: { type: "plain_text", text: label },
-    value: ref,
-    ...(style ? { style } : {}),
-  };
-}
-
 export function renderJobCard(input: RenderCardInput): Rendered {
   const elapsed = formatDuration(ms(input.now) - ms(input.startedAt));
   const quietFor = ms(input.now) - ms(input.lastActivityAt ?? input.startedAt);
@@ -115,7 +98,13 @@ export function renderJobCard(input: RenderCardInput): Rendered {
     fallback[input.status] ??
     silence ??
     (input.latestSummary
-      ? clip(input.latestSummary, 600)
+      ? clip(
+          input.latestSummary
+            .split(/(?<=[.!?])\s+/)
+            .slice(0, input.skipping ? 2 : 3)
+            .join(" "),
+          600,
+        )
       : `I'm waiting for an update from the ${workerNoun()}.`);
   const text = [
     escapeText(note),
