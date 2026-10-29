@@ -663,6 +663,20 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     });
   });
 
+  it("shows a repair notice instead of routing permission instructions to a thread without an owner", async () => {
+    const s = await launched({ script: [{ status: "waiting" }] });
+    await s.sql`update jobs set owner = null where id = ${s.job.id}`;
+    const before = s.slack.posts().length;
+    await checkJob(s.deps, s.job.id, 1000);
+    const notice = s.slack.posts().slice(before);
+    expect(notice).toHaveLength(1);
+    expect(notice[0]?.body.channel).toBe(CHANNEL);
+    expect(notice[0]?.body.text).toBe(
+      `I need an owner configured before I can route ${s.ref}'s permission request privately.`,
+    );
+    expect(String(notice[0]?.body.text)).not.toContain("Approve it in");
+  });
+
   describe("quiet", () => {
     it("edits quietly at 20 minutes and asks once after 45 minutes", async () => {
       const s = await launched({
@@ -728,8 +742,8 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       await failJob(s.deps, s.job.id, "The task crashed");
 
       expect((await getJob(s.deps.sql, s.job.id))?.status).toBe("failed");
-      // It never posted a card or a brief here, so it posts nothing.
-      expect(s.slack.posts()).toEqual([]);
+      expect(s.slack.posts()).toHaveLength(1);
+      expect(String(s.slack.posts()[0]?.body.text)).toContain("stopped before finishing");
     });
 
     it("posts nothing when it closes a job that never launched", async () => {

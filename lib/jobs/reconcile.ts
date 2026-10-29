@@ -186,6 +186,8 @@ async function markOffline(deps: JobDeps, job: Job) {
 // edited later"). A notice that never went out is dropped instead.
 async function markBack(deps: JobDeps, job: Job) {
   const ref = jobRef(job.id);
+  const current = await getJob(deps.sql, job.id);
+  const state = current?.status ?? job.status;
   const outage = await latestPost(deps.sql, job.id, `${ref}:offline:`);
   if (!outage) return;
   if (outage.status === "pending") {
@@ -200,7 +202,7 @@ async function markBack(deps: JobDeps, job: Job) {
     payload: {
       channel: job.slackChannel,
       ts: outage.slackTs,
-      text: `~${ref}: the ${workerNoun()} was unreachable.~ The ${workerNoun()} is back, I checked ${ref}'s latest state.`,
+      text: `The ${workerNoun()} is back. I checked ${ref}: ${state}.`,
     },
     display: outage.display,
   });

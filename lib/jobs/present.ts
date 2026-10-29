@@ -6,6 +6,7 @@ import { choiceBlocks, storeChoices } from "../ledger/choices.ts";
 import { type Job, type JobStatus, jobRef, setJobCard, updateJob } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
 import { proposalBlocks, propose } from "../ledger/proposals.ts";
+import { ownerUserId } from "../owner.ts";
 import type { Pack } from "../pack/load.ts";
 import { resolvePackProject } from "../pack/policy.ts";
 import { isQuiet } from "../quiet/quiet.ts";
@@ -173,7 +174,19 @@ export async function presentProgress(
       case "needs_permission":
         // A permission prompt blocks until a person approves it on the worker. Only the owner
         // can do that, so the notice goes to the owner's DM.
-        await post(sql, job, `${ref}:permission:${step}`, permissionBlockMessage(ref), true, quiet);
+        {
+          const owner = job.owner ?? ownerUserId(pack) ?? null;
+          await post(
+            sql,
+            { ...job, owner },
+            `${ref}:permission:${step}`,
+            owner
+              ? permissionBlockMessage(ref)
+              : `I need an owner configured before I can route ${ref}'s permission request privately.`,
+            true,
+            quiet,
+          );
+        }
         break;
       case "quiet":
         if (scheduled) break;

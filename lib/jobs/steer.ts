@@ -91,6 +91,10 @@ export async function stopJob(deps: JobDeps, ref: string): Promise<string> {
   const found = await findActive(deps, ref);
   if ("answer" in found) return found.answer;
   const name = jobRef(found.job.id);
-  await cancelJob(deps, found.job.id);
-  return `Stopped ${name}.`;
+  const outcome = await cancelJob(deps, found.job.id);
+  return outcome.status === "cancelled"
+    ? `Stopped ${name}.`
+    : outcome.status === "done"
+      ? `${name} finished before I could stop it. I kept its result.`
+      : `${name} ended as ${outcome.status}.`;
 }

@@ -118,6 +118,22 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
     expect(s.worker.interrupts).toEqual([]);
   });
 
+  it("reports completion instead of cancellation while checking", async () => {
+    const s = setup();
+    const job = await newJob("stop-checking");
+    await launchOrAdopt(s.deps, job.id, CALLBACK);
+    await updateJob(ledger.sql(), job.id, {
+      status: "checking",
+      lastMessage: '```json\n{"summary":"Finished work","tests":"passed"}\n```',
+    });
+    expect(await stopJob(s.deps, `J-${job.id}`)).toBe(
+      `J-${job.id} finished before I could stop it. I kept its result.`,
+    );
+    expect((await getJob(ledger.sql(), job.id))?.status).toBe("done");
+    expect(s.worker.interrupts).toEqual([]);
+    expect(s.posts().some((p) => String(p.body.text).includes("was cancelled"))).toBe(false);
+  });
+
   it("stops a running job: one interrupt and one cancel post", async () => {
     const s = setup();
     const job = await newJob("stop");

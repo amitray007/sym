@@ -162,10 +162,10 @@ export default defineWorkflowTool({
           ...(calledBack ? [] : [callback.then(() => "callback" as const)]),
         ]);
         if (woke === "stopped") {
-          await cancel(job.id);
-          await endRun(ctx.session.id, job.id, "cancelled", null);
+          const outcome = await cancel(job.id);
+          await endRun(ctx.session.id, job.id, outcome.status, outcome.lastMessage);
           if (inChannel) await channelStatus(job.id, "active");
-          return { job: ref, status: "cancelled", threadId, ...POSTED };
+          return { job: ref, status: outcome.status, threadId, ...POSTED };
         }
         if (woke === "callback") calledBack = true;
 
@@ -465,7 +465,7 @@ async function finish(jobId: number, verdict: ModelCheck | undefined, written?: 
 
 async function cancel(jobId: number) {
   "use step";
-  await withJobDeps((deps) => cancelJob(deps, jobId));
+  return withJobDeps((deps) => cancelJob(deps, jobId));
 }
 
 async function closeBeforeStart(jobId: number, reason: string) {

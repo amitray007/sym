@@ -576,11 +576,20 @@ export async function endWithoutWorker(
   reason: string,
 ): Promise<JobCheck> {
   const wasRunning = !TERMINAL.includes(job.status);
-  const ended = await updateJob(deps.sql, job.id, {
-    status,
-    lastSummary: reason.slice(0, SUMMARY_MAX),
-  });
-  if (wasRunning && ended.workerThreadId) {
+  if (!wasRunning) return toCheck(job, []);
+  let ended: Job;
+  try {
+    ended = await updateJob(
+      deps.sql,
+      job.id,
+      { status, lastSummary: reason.slice(0, SUMMARY_MAX) },
+      { revision: job.revision },
+    );
+  } catch (error) {
+    if (!(error instanceof StaleJobError)) throw error;
+    return endWithoutWorker(deps, await mustGetJob(deps.sql, job.id), status, reason);
+  }
+  if (wasRunning && ended.slackChannel) {
     await presentEnd(deps.sql, ended, null, now(deps), deps.pack);
     await deliverNow(deps);
   }

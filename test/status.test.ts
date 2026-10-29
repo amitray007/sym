@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jobAnswer, jobListAnswer } from "../lib/jobs/status.ts";
+import { freshJobStatus, jobAnswer, jobListAnswer } from "../lib/jobs/status.ts";
 import {
   createJob,
   getJobByRef,
@@ -163,6 +163,26 @@ describe.skipIf(!hasDatabase)("job lookups", () => {
       brief: {},
       worker: "t3",
     });
+
+  it("labels a failed refresh as last-known data without changing saved facts", async () => {
+    const sql = ledger.sql();
+    const created = await make("refresh-failed");
+    const running = await updateJob(sql, created.id, {
+      status: "running",
+      workerThreadId: "thread-refresh",
+      lastSummary: "Running tests",
+    });
+    const status = await freshJobStatus(sql, `J-${created.id}`, NOW, async () => {
+      throw new Error("offline");
+    });
+    expect(status).toMatchObject({
+      freshRead: "failed",
+      ledgerStatus: "running",
+      updatedAt: running.updatedAt.toISOString(),
+    });
+    expect(status?.answer).toContain("last saved update");
+    expect((await getJobByRef(sql, `J-${created.id}`))?.updatedAt).toEqual(running.updatedAt);
+  });
 
   describe("getJobByRef", () => {
     it("finds a job by J-n, n, and a lowercase reference", async () => {

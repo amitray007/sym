@@ -1,4 +1,4 @@
-import { type Job, type JobStatus, jobRef } from "../ledger/jobs.ts";
+import { getJobByRef, type Job, type JobStatus, jobRef } from "../ledger/jobs.ts";
 import { workerNoun } from "../worker-label.ts";
 import { formatDuration } from "./card.ts";
 
@@ -74,4 +74,38 @@ function age(job: Job, now: Date): string {
   if (job.finishedAt) return `${formatDuration(now.getTime() - job.finishedAt.getTime())} ago`;
   const since = job.startedAt ?? job.createdAt;
   return `for ${formatDuration(now.getTime() - since.getTime())}`;
+}
+
+// A failed refresh must remain separate from the saved ledger facts. The brain can report the
+// last known state without presenting it as a fresh worker read.
+export async function freshJobStatus(
+  sql: import("../db.ts").Sql,
+  ref: string,
+  now: Date,
+  refresh: (jobId: number) => Promise<unknown>,
+) {
+  const before = await getJobByRef(sql, ref);
+  if (!before) return null;
+  const active =
+    !["done", "failed", "cancelled", "checking"].includes(before.status) &&
+    Boolean(before.workerThreadId);
+  let freshRead: "ok" | "failed" | "not_needed" = "not_needed";
+  if (active) {
+    try {
+      await refresh(before.id);
+      freshRead = "ok";
+    } catch {
+      freshRead = "failed";
+    }
+  }
+  const job = (await getJobByRef(sql, ref)) ?? before;
+  return {
+    job: jobRef(job.id),
+    ledgerStatus: job.status,
+    updatedAt: job.updatedAt.toISOString(),
+    freshRead,
+    answer: `${freshRead === "failed" ? "I couldn't refresh the worker. This is the last saved update.\n" : ""}${jobAnswer(job, now)}`,
+    brief: job.brief,
+    archiveState: job.archiveState,
+  };
 }
