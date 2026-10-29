@@ -179,10 +179,10 @@ export async function archiveCodeChannel(
   deps: Deps,
   job: Job,
   summaryTs: string | null,
-): Promise<void> {
+): Promise<boolean> {
   const slack = deps.slack;
   const channel = job.slackChannel;
-  if (!job.codeChannel || !channel || !slack) return;
+  if (!job.codeChannel || !channel || !slack) return false;
   await setChannelStatus(deps, job, "closed");
   const archive = (summary: string | null) =>
     slack.call("agents.conversations.archive", {
@@ -191,17 +191,33 @@ export async function archiveCodeChannel(
     });
   try {
     await archive(summaryTs);
+    return true;
   } catch (error) {
     const code = slackCode(error);
-    if (code === "already_archived") return;
+    if (code === "already_archived") return true;
     if (summaryTs && (code === "no_origin_link" || code === "summary_message_not_found")) {
-      await archive(null).catch((retry: unknown) => {
-        console.warn(`Sym could not archive the channel of ${jobRef(job.id)}.`, slackCode(retry));
-      });
-      return;
+      return archive(null).then(
+        () => true,
+        (retry: unknown) => {
+          console.warn(`Sym could not archive the channel of ${jobRef(job.id)}.`, slackCode(retry));
+          return false;
+        },
+      );
     }
     console.warn(`Sym could not archive the channel of ${jobRef(job.id)}.`, code);
+    return false;
   }
+}
+
+// The session status that matches a job: working, waiting on a person, or done. Undefined for a
+// job with no session to show.
+export function jobSessionStatus(job: Job): SessionStatus | undefined {
+  if (!job.codeChannel) return undefined;
+  if (job.status === "waiting_input" || job.status === "waiting_permission") return "suspended";
+  if (job.status === "done" || job.status === "failed" || job.status === "cancelled") {
+    return "active";
+  }
+  return "processing";
 }
 
 // The newest job whose code channel this is. Every message in the channel belongs to it.

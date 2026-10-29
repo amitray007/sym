@@ -36,11 +36,16 @@ import {
 import { parseSymCommand, slackText, USAGE } from "../../lib/quiet/command.ts";
 import { formatClock, getQuietUntil, setQuietUntil } from "../../lib/quiet/quiet.ts";
 import { recordThreadMessage, recordTurnMessage } from "../../lib/reactions/react.ts";
-import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
+import { ledger, pack, slackFromEnv, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
 import { listSchedules } from "../../lib/schedules/rows.ts";
 import { namesBot, threadPeople, triageThreadMessage } from "../../lib/slack/addressing.ts";
-import { codeChannelsOn, jobOfCodeChannel } from "../../lib/slack/code-channel.ts";
+import {
+  codeChannelsOn,
+  jobOfCodeChannel,
+  jobSessionStatus,
+  setChannelStatus,
+} from "../../lib/slack/code-channel.ts";
 import { isSlackUserAllowed, sayPrivately } from "../../lib/slack/guard.ts";
 import { handleJobAction, JOB_ACTION_IDS } from "../../lib/slack/job-actions.ts";
 import {
@@ -390,6 +395,11 @@ const symRenderer = defineSlackRenderer({
       endQuietTurn(quietKey(ctx.channel));
       // A failed or cancelled quiet turn still gets Eve's notice.
       if (!quiet || event.data.outcome !== "completed") await next(event);
+      // Eve sets a code channel back to active when the brain's turn ends. The channel shows its
+      // job, so Sym sets the job's own status again, such as suspended while a question waits.
+      if (ctx.channel.state.codeChannel && ctx.channel.state.channelId) {
+        await restoreJobStatus(ctx.channel.state.channelId);
+      }
     },
     // Feedback buttons ride inside each final reply (docs/learning.md), so they add no message
     // and no notification. postCompletedSlackReply keeps Eve's fallbacks: a refused or long
@@ -416,6 +426,17 @@ const symRenderer = defineSlackRenderer({
     return next({ ...card, calls });
   },
 });
+
+async function restoreJobStatus(channelId: string): Promise<void> {
+  try {
+    const job = await jobOfCodeChannel(ledger(), channelId);
+    const status = job && jobSessionStatus(job);
+    const slack = slackFromEnv();
+    if (job && status && slack) await setChannelStatus({ sql: ledger(), slack }, job, status);
+  } catch (error) {
+    console.warn("Sym could not restore a code channel's status.", String(error));
+  }
+}
 
 // A code channel belongs to one job (decision 067). Each turn there tells the brain which one, so
 // "how is it going" or "also fix the docs" acts on that job. A failed lookup adds nothing.

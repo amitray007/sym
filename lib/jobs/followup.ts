@@ -6,7 +6,7 @@ import { enqueuePost } from "../ledger/outbox.ts";
 import { archiveCodeChannel, setChannelStatus } from "../slack/code-channel.ts";
 import { workerNoun } from "../worker-label.ts";
 import { Brief } from "./brief.ts";
-import { RESULT_ACTION_IDS } from "./card.ts";
+import { CLOSE_ACTION_ID, jobButton, RESULT_ACTION_IDS } from "./card.ts";
 import { presentStart } from "./present.ts";
 import { answeredPrompt, type PromptKind, promptPost } from "./prompts.ts";
 import { deliverNow, endWithoutWorker, type JobDeps, JobSetupError, planLaunch } from "./run.ts";
@@ -226,13 +226,41 @@ export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<
 
 // A job in its own code channel archives it on Close; the result post is the summary Slack shares
 // in the thread the job came from (decision 067). Only the sent result itself qualifies, not the
-// edits that later rows of the same key prefix make to it.
+// edits that later rows of the same key prefix make to it. Close took its button off the result,
+// so a failed archive posts a new Close button to try again.
 async function archiveJobChannel(deps: JobDeps, job: Job): Promise<void> {
+  const ref = jobRef(job.id);
   const [end] = await deps.sql<{ slackTs: string | null }[]>`
     select slack_ts from outbox
-    where job_id = ${job.id} and idempotency_key = ${`${jobRef(job.id)}:end`} and status = 'sent'
+    where job_id = ${job.id} and idempotency_key = ${`${ref}:end`} and status = 'sent'
   `;
-  await archiveCodeChannel(deps, job, end?.slackTs ?? null);
+  if (await archiveCodeChannel(deps, job, end?.slackTs ?? null)) return;
+  if (!job.slackChannel) return;
+  const text = `Sym could not archive this channel. Close it again to retry.`;
+  await enqueuePost(deps.sql, {
+    idempotencyKey: `${ref}:archive-retry`,
+    jobId: job.id,
+    method: "chat.postMessage",
+    payload: {
+      channel: job.slackChannel,
+      text,
+      blocks: [
+        { type: "section", text: { type: "mrkdwn", text } },
+        { type: "actions", elements: [jobButton(CLOSE_ACTION_ID, "Close", ref)] },
+      ],
+    },
+    display: chooseDisplay({
+      kind: job.kind,
+      needsAction: true,
+      isNew: true,
+      estMinutes: 0,
+      steps: 0,
+      lines: 1,
+      surface: "channel",
+      quiet: false,
+    }),
+  });
+  await deliverNow(deps);
 }
 
 // The newest later job on the same worker thread, such as a follow-up, as a reference.

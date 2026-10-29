@@ -139,6 +139,20 @@ describe("code channels", () => {
       label: "status suspended",
     });
 
+    // A message in the channel runs a brain turn; the channel still waits on the question after it.
+    const asked = await sayInChannel(h, channel.id, "what is it waiting on?");
+    await until(
+      () =>
+        h.slack.messages.find(
+          (m) => m.channel === channel.id && m.user === "UBOT" && Number(m.ts) > Number(asked.ts),
+        ),
+      { label: "Sym's answer in the channel" },
+    );
+    await settle(h);
+    await until(() => (channel.statuses.at(-1) === "suspended" ? true : undefined), {
+      label: "status still suspended after the brain's turn",
+    });
+
     // Eve asks in the thread where the job started; the answer reaches the worker.
     const question = await c.waitForControls(/Which environment\?/);
     await c.click(question, "staging");
@@ -243,7 +257,10 @@ describe("code channels", () => {
     );
     await settle(h);
     expect(channel.archived).toBe(false);
-    await clickButton(h, childResult, "sym_job_close", childRef);
+    // Close took its button off the result, so Sym posts a new one to try again.
+    const retry = await inChannel(/could not archive this channel/);
+    expect(JSON.stringify(retry.blocks)).toContain("sym_job_close");
+    await clickButton(h, retry, "sym_job_close", childRef);
     await until(() => (channel.archived ? true : undefined), { label: "the retried archive" });
     expect(channel.summaryTs).toBe(childResult.ts);
   });
