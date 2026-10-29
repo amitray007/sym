@@ -46,6 +46,7 @@ function job(id: number, overrides: Partial<Job> = {}): Job {
     workerModel: null,
     cursor: null,
     lastSummary: null,
+    skipping: null,
     lastMessage: null,
     cardTs: null,
     card: null,

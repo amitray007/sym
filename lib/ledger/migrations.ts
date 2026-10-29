@@ -238,4 +238,5 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  { version: "027_job_skipping", sql: "alter table jobs add column skipping text;" },
 ];

@@ -79,9 +79,9 @@ describe("detectEvents", () => {
       items = [] as ReturnType<typeof item>[],
     ) => detectEvents(prev, { status: "running", newItems: items, now: T0 + minutes * MIN });
 
-    it("waits for 20 minutes without items", () => {
-      expect(at(19).events).toEqual([]);
-      expect(at(20).events).toEqual([{ type: "quiet" }]);
+    it("waits for 45 minutes without items", () => {
+      expect(at(44).events).toEqual([]);
+      expect(at(45).events).toEqual([{ type: "quiet" }]);
     });
 
     it("resets on new items", () => {
@@ -89,15 +89,15 @@ describe("detectEvents", () => {
       expect(active.events).toEqual([]);
       expect(active.state.quietSince).toBe(T0 + 19 * MIN);
       expect(at(30, active.state).events).toEqual([]);
-      expect(at(39, active.state).events).toEqual([{ type: "quiet" }]);
+      expect(at(64, active.state).events).toEqual([{ type: "quiet" }]);
     });
 
-    it("posts at most once an hour", () => {
-      const first = at(20);
-      expect(first.state.lastQuietPostAt).toBe(T0 + 20 * MIN);
+    it("posts once per job", () => {
+      const first = at(45);
+      expect(first.state.lastQuietPostAt).toBe(T0 + 45 * MIN);
       const quiet: ProgressState = { ...first.state, status: "quiet" };
       expect(at(60, quiet).events).toEqual([]);
-      expect(at(80, quiet).events).toEqual([{ type: "quiet" }]);
+      expect(at(180, quiet).events).toEqual([]);
     });
 
     it("starts counting at the first look when quietSince is unknown", () => {

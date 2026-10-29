@@ -18,13 +18,7 @@ import {
   writtenPost,
 } from "./blocks.ts";
 import { Brief } from "./brief.ts";
-import {
-  BRIEF_ACTION_ID,
-  jobButton,
-  jobCardSteps,
-  renderCollapsedCard,
-  renderJobCard,
-} from "./card.ts";
+import { BRIEF_ACTION_ID, jobButton, renderCollapsedCard, renderJobCard } from "./card.ts";
 import type { OutputContract } from "./contract.ts";
 import { briefPrompt, type JobFacts, permissionBlockMessage, quietNotice } from "./messages.ts";
 import type { ProgressEvent } from "./progress.ts";
@@ -170,19 +164,7 @@ export async function presentProgress(
   for (const event of events) {
     switch (event.type) {
       case "pr_opened":
-        // At the end the result message carries the PR, so the thread gets one end message. A
-        // job in `checking` has ended its work, and its result message follows. A scheduled run
-        // reports only at its end.
-        if (!ended && job.status !== "checking" && !scheduled) {
-          await post(
-            sql,
-            job,
-            `${ref}:pr`,
-            `${ref} opened a pull request: <${event.url}>`,
-            false,
-            quiet,
-          );
-        }
+        // PR progress belongs in the note. The result carries its external link.
         break;
       case "needs_permission":
         // A permission prompt blocks until a person approves it on the worker. Only the owner
@@ -194,9 +176,9 @@ export async function presentProgress(
         await post(
           sql,
           job,
-          `${ref}:quiet:${step}`,
+          `${ref}:quiet`,
           quietNotice(facts(job, now), quietFor(job, now)),
-          false,
+          true,
           quiet,
         );
         break;
@@ -365,25 +347,17 @@ async function refreshCard(sql: Sql, job: Job, now: Date): Promise<void> {
 }
 
 function liveCard(job: Job, now: Date, version = job.cardVersion + 1) {
-  const brief = Brief.parse(job.brief);
   return renderJobCard({
     ref: jobRef(job.id),
     title: job.title,
     status: job.status,
-    steps: jobCardSteps({
-      status: job.status,
-      threadStarted: job.workerThreadId !== null,
-      doneWhen: brief.doneWhen,
-      latestSummary: job.lastSummary,
-    }),
+    latestSummary: job.lastSummary,
+    skipping: job.skipping,
     startedAt: job.startedAt ?? job.createdAt,
+    lastActivityAt: job.lastActivityAt ?? job.startedAt ?? job.createdAt,
     now,
     prUrl: job.prUrl,
-    footer: {
-      worker: workerLabel(),
-      threadId: job.workerThreadId,
-      updatedAt: job.lastActivityAt ?? job.updatedAt,
-    },
+    worker: workerLabel(),
     version,
   });
 }
@@ -410,7 +384,7 @@ async function post(
     quiet,
   });
   if (display.level === 0) return;
-  const dm = toOwner && job.owner !== null;
+  const dm = toOwner && !key.endsWith(":quiet") && job.owner !== null;
   await enqueuePost(sql, {
     idempotencyKey: key,
     jobId: job.id,

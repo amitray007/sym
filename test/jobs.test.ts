@@ -471,8 +471,8 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     const post = slack.posts()[0]?.body;
     expect(post).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });
     const blocks = post?.blocks as { type: string; title: string }[];
-    expect(blocks[0]?.type).toBe("plan");
-    expect(blocks[0]?.title).toContain(`[${ref}] Billing sync retry`);
+    expect(blocks[0]?.type).toBe("section");
+    expect(String(post?.text)).toContain(`${ref} ·`);
     const stored = await getJob(sql, job.id);
     expect(stored?.cardTs).toBe("1700000000.1");
     expect(stored?.display?.level).toBe(3);
@@ -614,7 +614,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     }
 
     const added = s.slack.posts().slice(before);
-    expect(texts(added)).toEqual([`${s.ref} opened a pull request: <${PR_URL}>`]);
+    expect(texts(added)).toEqual([]);
     expect((await getJob(s.sql, s.job.id))?.prUrl).toBe(PR_URL);
   });
 
@@ -663,7 +663,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
   });
 
   describe("quiet", () => {
-    it("posts one notice after 20 minutes without activity, then rests", async () => {
+    it("edits quietly at 20 minutes and asks once after 45 minutes", async () => {
       const s = await launched({
         script: [
           { status: "running", items: ["Starting"] },
@@ -680,15 +680,15 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       await checkJob(s.deps, s.job.id, 1000);
       expect(s.slack.posts().length).toBe(before);
 
-      clock = minutes(22);
+      clock = minutes(46);
       await checkJob(s.deps, s.job.id, 1000);
       const afterQuiet = s.slack.posts().slice(before);
       expect(afterQuiet).toHaveLength(1);
       expect(String(afterQuiet[0]?.body.text)).toContain(
-        `I haven't heard from the worker on ${s.ref} for 21m. Want me to stop it?`,
+        `I haven't heard from the worker on ${s.ref} for 45m. Want me to stop it?`,
       );
 
-      clock = minutes(25);
+      clock = minutes(150);
       await checkJob(s.deps, s.job.id, 1000);
       expect(s.slack.posts().slice(before)).toHaveLength(1);
     });

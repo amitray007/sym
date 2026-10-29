@@ -293,7 +293,7 @@ export async function checkJob(
     },
     { status, newItems: activity.items, now: at.getTime() },
   );
-  const latest = latestText(activity.items);
+  const latest = latestAssistant(activity.items);
   const message = await wholeMessage(
     deps.worker,
     job.workerThreadId,
@@ -577,7 +577,7 @@ function toCheck(job: Job, questions: WorkerQuestion[]): JobCheck {
   const terminal = TERMINAL.includes(job.status);
   return {
     status: job.status,
-    summary: job.lastSummary ?? "",
+    summary: job.status === "checking" ? "Checking the result" : (job.lastSummary ?? ""),
     terminal,
     lastMessage: terminal || job.status === "checking" ? job.lastMessage : null,
     questions,
@@ -652,10 +652,6 @@ async function wholeMessage(
     console.warn("Sym could not read the rest of the worker message.", String(error));
     return item.text;
   }
-}
-
-function latestText(items: ActivityItem[]): string | undefined {
-  return latestAssistant(items) ?? withText(items).at(-1)?.text;
 }
 
 function firstLine(text: string | undefined): string | undefined {

@@ -48,6 +48,7 @@ export interface Job {
   workerModel: string | null;
   cursor: string | null;
   lastSummary: string | null;
+  skipping: string | null;
   lastMessage: string | null;
   cardTs: string | null;
   // The card Sym wants Slack to show, and the versions wanted and shown.
@@ -99,6 +100,7 @@ export type JobUpdate = Partial<
     | "workerModel"
     | "cursor"
     | "lastSummary"
+    | "skipping"
     | "lastMessage"
     | "cardTs"
     | "display"

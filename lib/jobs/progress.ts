@@ -3,8 +3,7 @@ import type { JobStatus } from "../ledger/jobs.ts";
 // The `progress` rule set (docs/architecture.md, flow 3). It decides which changes post a NEW
 // message. Everything else edits the job card. No model call, no clock: the caller passes `now`.
 
-export const QUIET_AFTER_MS = 20 * 60_000;
-export const QUIET_REPEAT_MS = 60 * 60_000;
+export const QUIET_AFTER_MS = 45 * 60_000;
 
 export type ProgressEvent =
   | { type: "pr_opened"; url: string }
@@ -85,8 +84,7 @@ export function detectEvents(previous: ProgressState, current: ProgressInput): P
 
   const watching = current.status === "running" || current.status === "quiet";
   const longQuiet = !active && now - quietSince >= QUIET_AFTER_MS;
-  const rested =
-    previous.lastQuietPostAt === undefined || now - previous.lastQuietPostAt >= QUIET_REPEAT_MS;
+  const rested = previous.lastQuietPostAt === undefined;
   if (watching && longQuiet && rested) {
     events.push({ type: "quiet" });
     state.lastQuietPostAt = now;

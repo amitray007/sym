@@ -13,7 +13,7 @@ import {
   prFollowEnabled,
   watchedPrJobs,
 } from "./pr-wakes.ts";
-import { presentEnd } from "./present.ts";
+import { presentEnd, presentProgress } from "./present.ts";
 import { checkJob, finishJob, type JobDeps, type LedgerDeps } from "./run.ts";
 import type { ModelCheck } from "./verify.ts";
 
@@ -204,16 +204,11 @@ async function postQuestion(deps: JobDeps, job: Job, requestId: string, prompt: 
 // back to running.
 async function markOffline(deps: JobDeps, job: Job) {
   if (job.status === "worker_offline") return;
-  await updateJob(deps.sql, job.id, {
+  const offline = await updateJob(deps.sql, job.id, {
     status: "worker_offline",
-    lastSummary: `The ${workerNoun()} is unreachable`,
+    lastSummary: `I can't reach the ${workerNoun()}. I'll keep checking.`,
   });
-  await notice(
-    deps,
-    job,
-    `offline:${job.cursor ?? "start"}`,
-    `${jobRef(job.id)}: the ${workerNoun()} is unreachable. Sym keeps checking and posts when it is back.`,
-  );
+  await presentProgress(deps.sql, offline, [], "offline", deps.now?.() ?? new Date(), deps.pack);
 }
 
 // The outage notice turns into a silent edit when the worker is back (docs/mockups: "one post,
@@ -234,34 +229,8 @@ async function markBack(deps: JobDeps, job: Job) {
     payload: {
       channel: job.slackChannel,
       ts: outage.slackTs,
-      text: `~${ref}: the ${workerNoun()} was unreachable.~ The ${workerNoun()} is back, and ${ref} continues.`,
+      text: `~${ref}: the ${workerNoun()} was unreachable.~ The ${workerNoun()} is back, I checked ${ref}'s latest state.`,
     },
     display: outage.display,
-  });
-}
-
-async function notice(deps: JobDeps, job: Job, key: string, text: string) {
-  if (!job.slackChannel) return;
-  await enqueuePost(deps.sql, {
-    idempotencyKey: `${jobRef(job.id)}:${key}`,
-    jobId: job.id,
-    method: "chat.postMessage",
-    payload: {
-      channel: job.slackChannel,
-      ...(job.slackThreadTs ? { thread_ts: job.slackThreadTs } : {}),
-      text,
-    },
-    display: chooseDisplay({
-      kind: job.kind,
-      needsAction: false,
-      isNew: true,
-      // Outages post even in quiet mode, like failures (docs/architecture.md).
-      failed: true,
-      estMinutes: 0,
-      steps: 0,
-      lines: 1,
-      surface: "channel",
-      quiet: false,
-    }),
   });
 }
