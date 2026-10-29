@@ -152,6 +152,19 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
     expect(slack.codeChannels).toHaveLength(before);
   });
 
+  it("posts no question link for a job that adopted its channel", async () => {
+    vi.stubEnv("SYM_CODE_CHANNELS", "on");
+    const sql = ledger.sql();
+    const outer = await moveToCodeChannel({ sql, slack: api }, await newJob());
+    const adopted = await moveToCodeChannel(
+      { sql, slack: api },
+      await newJob(outer.slackChannel ?? ""),
+    );
+    await pointToQuestion({ sql, slack: api }, adopted, "req-adopted", "Which environment?");
+    const posts = await sql`select 1 from outbox where job_id = ${adopted.id}`;
+    expect(posts).toHaveLength(0);
+  });
+
   it("links a worker question to the thread where Eve asks it", async () => {
     vi.stubEnv("SYM_CODE_CHANNELS", "on");
     const sql = ledger.sql();

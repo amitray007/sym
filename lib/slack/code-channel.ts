@@ -124,14 +124,15 @@ function isCodeChannel(info: ConversationInfo): boolean {
 }
 
 // Eve asks a moved job's questions in the thread it came from, because the job's task runs in that
-// thread's session. The channel shows the question with a link there, so people find it.
+// thread's session. The channel shows the question with a link there, so people find it. A job
+// that adopted its channel has no origin: Eve asks in the channel itself, so there is no link.
 export async function pointToQuestion(
   deps: Deps,
   job: Job,
   requestId: string,
   prompt: string,
 ): Promise<void> {
-  if (!job.codeChannel || !job.slackChannel) return;
+  if (!job.codeChannel || !job.slackChannel || !job.originChannel) return;
   const ref = jobRef(job.id);
   let link: string | undefined;
   if (deps.slack && job.originChannel && job.originThreadTs) {
