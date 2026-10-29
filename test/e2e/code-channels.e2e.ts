@@ -89,4 +89,62 @@ describe("code channels", () => {
     // Nothing about the job posted in the old thread after Start.
     expect(c.botMessages().some((m) => headline.test(m.text ?? ""))).toBe(false);
   });
+
+  it("links a worker question from the channel to the thread where Eve asks it", async () => {
+    const c = newConversation(h);
+    const { approval, job, ref } = await startJob(h, c, "Question in channel");
+    await c.click(approval, "Start");
+    const channel = await until(
+      () => h.slack.codeChannels.find((cc) => cc.sessionId === `sym-${ref}`),
+      { label: `${ref} code channel` },
+    );
+    const thread = await until(() => threadsOf(h, ref)[0], { label: `${ref} worker thread` });
+    await workerAdvance(h, thread, [
+      {
+        status: "waiting",
+        items: ["I need to know the target."],
+        questions: [
+          {
+            requestId: "req-env",
+            questions: [
+              {
+                id: "q-env",
+                header: "Target",
+                question: "Which environment?",
+                options: [
+                  { label: "staging", description: "Safe" },
+                  { label: "production", description: "Careful" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+
+    // The channel says where to answer, and its status waits on a person.
+    await until(
+      () =>
+        h.slack.messages.find(
+          (m) =>
+            m.channel === channel.id &&
+            (m.text ?? "").includes(`${ref} has a question: Which environment?`),
+        ),
+      { label: "the question link in the channel" },
+    );
+    await until(() => (channel.statuses.includes("suspended") ? true : undefined), {
+      label: "status suspended",
+    });
+
+    // Eve asks in the thread where the job started; the answer reaches the worker.
+    const question = await c.waitForControls(/Which environment\?/);
+    await c.click(question, "staging");
+    await until(() => thread.answers[0], { label: "the answer on the worker thread" });
+    await until(() => (channel.statuses.at(-1) === "processing" ? true : undefined), {
+      label: "status back to processing",
+    });
+
+    await workerAdvance(h, thread, finishedSteps());
+    await waitForJobStatus(h.sql, job.id, "done");
+  });
 });

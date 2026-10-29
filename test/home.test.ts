@@ -32,6 +32,8 @@ function job(id: number, overrides: Partial<Job> = {}): Job {
     slackChannel: "C1",
     slackThreadTs: "1700000000.000100",
     codeChannel: false,
+    originChannel: null,
+    originThreadTs: null,
     brief: {},
     worker: "t3",
     workerIdentity: null,

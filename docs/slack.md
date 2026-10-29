@@ -230,8 +230,8 @@ launches need approval.
 
 With `SYM_CODE_CHANNELS` on, a job a person starts moves from its thread into its own Slack code
 channel (decision 067, [slack-code.md](slack-code.md)). The brief and Start stay in the thread;
-Slack links the new channel there. The card, questions, result, and buttons post top-level in the
-channel. The channel's context bar shows the job, its project, and its pull request, and its status
+Slack links the new channel there. The card, result, and buttons post top-level in the channel.
+Worker questions stay in the thread, where Eve asks them; the channel links to them. The channel's context bar shows the job, its project, and its pull request, and its status
 follows the job. Everything said in the channel reaches Sym with no tag and is about that job.
 Close archives the channel and shares the result in the original thread. A scheduled check, a job
 in a DM, and any job Slack refuses stay in their thread.

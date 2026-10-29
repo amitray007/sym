@@ -31,6 +31,9 @@ export interface Job {
   slackThreadTs: string | null;
   // True when the job moved into its own Slack code channel (decision 067).
   codeChannel: boolean;
+  // The thread a moved job came from. Null for a job that never moved.
+  originChannel: string | null;
+  originThreadTs: string | null;
   brief: unknown;
   worker: string;
   // The configured worker name and endpoint at launch; null for legacy jobs.
@@ -84,6 +87,8 @@ export type JobUpdate = Partial<
     | "slackChannel"
     | "slackThreadTs"
     | "codeChannel"
+    | "originChannel"
+    | "originThreadTs"
     | "workerThreadId"
     | "workerProjectId"
     | "workerIdentity"

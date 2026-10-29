@@ -78,6 +78,7 @@ Sym keeps the job in its thread when that happens.
 | `create` | On Start, with the person's message as the origin and `sym-J-<id>` as `session_id` |
 | Context bar | The job, its project, and its pull request |
 | Status | `processing` while the worker runs, `suspended` while a question waits, `active` when the job ends, `closed` before archive |
+| Privacy | A private thread asks for a private channel; a public result is archived and the job stays put |
 | `archive` | On Close, with the result post as the summary |
 | Eve `codeChannels` | Eve serves the channel as one session, so messages need no tag |
 

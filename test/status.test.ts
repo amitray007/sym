@@ -25,6 +25,8 @@ function job(overrides: Partial<Job> = {}): Job {
     slackChannel: null,
     slackThreadTs: null,
     codeChannel: false,
+    originChannel: null,
+    originThreadTs: null,
     brief: {},
     worker: "t3",
     workerIdentity: null,

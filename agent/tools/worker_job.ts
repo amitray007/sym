@@ -11,6 +11,7 @@ import {
   cancelJob,
   checkJob,
   closeUnlaunched,
+  deliverNow,
   failJob,
   finishJob,
   launchOrAdopt,
@@ -44,6 +45,7 @@ import {
 } from "../../lib/schedules/rows.ts";
 import {
   moveToCodeChannel,
+  pointToQuestion,
   type SessionStatus,
   setChannelStatus,
   setContextBar,
@@ -211,6 +213,7 @@ export default defineWorkflowTool({
         if (woke === "stopped") {
           await cancel(job.id);
           await endRun(ctx.session.id, job.id, "cancelled", null);
+          await channelStatus(job.id, "active");
           return { job: ref, status: "cancelled", threadId, ...POSTED };
         }
         if (woke === "callback") calledBack = true;
@@ -250,16 +253,18 @@ export default defineWorkflowTool({
 
         if (result.questions.length > 0) await channelStatus(job.id, "suspended");
         for (const question of result.questions) {
+          await linkQuestion(job.id, question);
           const answers = await askQuestion(ctx.ask, ref, question, stopped);
           if (answers === "stopped") {
             await cancel(job.id);
+            await channelStatus(job.id, "active");
             return { job: ref, status: "cancelled", threadId, ...POSTED };
           }
           if (answers) await answer(job.id, question.requestId, answers);
         }
-        if (result.questions.length > 0 && !result.terminal) {
-          await channelStatus(job.id, "processing");
-        }
+        // Eve sets the channel's status for each brain turn there, so the job sets its own again
+        // after every check.
+        if (!result.terminal) await channelStatus(job.id, "processing");
 
         if (result.terminal) {
           await endRun(ctx.session.id, job.id, result.status, result.lastMessage);
@@ -279,6 +284,7 @@ export default defineWorkflowTool({
         error instanceof Error ? error.message : String(error),
       );
       await endRun(ctx.session.id, job.id, status, null);
+      await channelStatus(job.id, "active").catch(() => {});
       throw error;
     }
   },
@@ -516,6 +522,15 @@ async function toCodeChannel(jobId: number) {
   const deps = ledgerDeps();
   const job = await getJob(deps.sql, jobId);
   if (job) await moveToCodeChannel(deps, job);
+}
+
+async function linkQuestion(jobId: number, question: WorkerQuestion) {
+  "use step";
+  const deps = ledgerDeps();
+  const job = await getJob(deps.sql, jobId);
+  if (!job?.codeChannel) return;
+  await pointToQuestion(deps, job, question.requestId, question.questions[0]?.prompt ?? "");
+  await deliverNow(deps);
 }
 
 // The code channel's status follows the job; at the end the context bar gains the pull request.

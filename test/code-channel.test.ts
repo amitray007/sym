@@ -6,6 +6,7 @@ import {
   codeChannelsOn,
   jobOfCodeChannel,
   moveToCodeChannel,
+  pointToQuestion,
   setChannelStatus,
 } from "../lib/slack/code-channel.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
@@ -29,7 +30,7 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
   let counter = 0;
 
   beforeAll(async () => {
-    slack = await startFakeSlack();
+    slack = await startFakeSlack({ channels: { CPRIV: { is_private: true } } });
     api = slackApiFromEnv({
       SLACK_BOT_TOKEN: "xoxb-fake-token",
       SLACK_API_BASE_URL: slack.apiBaseUrl,
@@ -93,12 +94,71 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
       { key: "project", label: "example-app", icon: "folder" },
     ]);
     expect(channel?.statuses).toEqual(["processing"]);
+    expect(moved).toMatchObject({ originChannel: "C1", originThreadTs: "1700000000.000100" });
     expect((await jobOfCodeChannel(sql, channel?.id ?? ""))?.id).toBe(job.id);
+  });
 
-    // A retried move reaches the same channel and changes nothing.
-    const again = await moveToCodeChannel({ sql, slack: api }, (await getJob(sql, job.id)) ?? job);
-    expect(again.slackChannel).toBe(moved.slackChannel);
-    expect(slack.codeChannels.filter((c) => c.id === moved.slackChannel)).toHaveLength(1);
+  it("reaches the same channel when a step replays with the job as it was", async () => {
+    vi.stubEnv("SYM_CODE_CHANNELS", "on");
+    const sql = ledger.sql();
+    const job = await newJob();
+    const first = await moveToCodeChannel({ sql, slack: api }, job);
+    // A replay before the ledger write was seen passes the unmoved job again.
+    const replay = await moveToCodeChannel({ sql, slack: api }, job);
+    expect(replay.slackChannel).toBe(first.slackChannel);
+    expect(slack.codeChannels.filter((c) => c.sessionId === `sym-J-${job.id}`)).toHaveLength(1);
+    expect((await getJob(sql, job.id))?.slackChannel).toBe(first.slackChannel);
+  });
+
+  it("opens a private channel for a private thread", async () => {
+    vi.stubEnv("SYM_CODE_CHANNELS", "on");
+    const moved = await moveToCodeChannel({ sql: ledger.sql(), slack: api }, await newJob("CPRIV"));
+    const channel = slack.codeChannels.find((c) => c.id === moved.slackChannel);
+    expect(channel?.isPrivate).toBe(true);
+    expect(moved.codeChannel).toBe(true);
+  });
+
+  it("archives a public channel Slack opened for a private thread and stays put", async () => {
+    vi.stubEnv("SYM_CODE_CHANNELS", "on");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    slack.codeChannelsPublic = true;
+    try {
+      const job = await newJob("CPRIV");
+      const after = await moveToCodeChannel({ sql: ledger.sql(), slack: api }, job);
+      expect(after).toMatchObject({ slackChannel: "CPRIV", codeChannel: false });
+      expect(slack.codeChannels.at(-1)).toMatchObject({ isPrivate: false, archived: true });
+    } finally {
+      slack.codeChannelsPublic = false;
+      warn.mockRestore();
+    }
+  });
+
+  it("does not open a code channel from inside a code channel", async () => {
+    vi.stubEnv("SYM_CODE_CHANNELS", "on");
+    const sql = ledger.sql();
+    const outer = await moveToCodeChannel({ sql, slack: api }, await newJob());
+    const before = slack.codeChannels.length;
+    const inner = await moveToCodeChannel(
+      { sql, slack: api },
+      await newJob(outer.slackChannel ?? ""),
+    );
+    expect(inner.codeChannel).toBe(false);
+    expect(slack.codeChannels).toHaveLength(before);
+  });
+
+  it("links a worker question to the thread where Eve asks it", async () => {
+    vi.stubEnv("SYM_CODE_CHANNELS", "on");
+    const sql = ledger.sql();
+    const moved = await moveToCodeChannel({ sql, slack: api }, await newJob());
+    await pointToQuestion({ sql, slack: api }, moved, "req-1", "Which environment?");
+    await pointToQuestion({ sql, slack: api }, moved, "req-1", "Which environment?");
+    const posts = await sql<{ payload: { channel: string; text: string } }[]>`
+      select payload from outbox where job_id = ${moved.id} and idempotency_key like '%question-link%'
+    `;
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.payload.channel).toBe(moved.slackChannel);
+    expect(posts[0]?.payload.text).toContain(`J-${moved.id} has a question: Which environment?`);
+    expect(posts[0]?.payload.text).toContain("Answer it in the thread where it started.");
   });
 
   it("keeps a direct message job in place", async () => {

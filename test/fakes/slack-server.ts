@@ -52,12 +52,15 @@ export interface FakeCodeChannel {
   statuses: string[];
   archived: boolean;
   summaryTs: string | undefined;
+  isPrivate: boolean;
 }
 
 export interface FakeSlack {
   apiBaseUrl: string;
   // Code channels by channel ID, in creation order.
   codeChannels: FakeCodeChannel[];
+  // When true, the fake opens every code channel as public, even when asked for a private one.
+  codeChannelsPublic: boolean;
   calls: FakeSlackCall[];
   messages: FakeSlackMessage[];
   ephemerals: FakeSlackMessage[];
@@ -136,6 +139,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
   const homeViews: Record<string, Record<string, unknown>> = {};
   const uploads: FakeSlack["uploads"] = [];
   const codeChannels: FakeCodeChannel[] = [];
+  const flags = { codeChannelsPublic: false };
   const codeChannel = (id: unknown) => {
     const found = codeChannels.find((c) => c.id === String(id));
     if (!found) throw "not_agent_channel";
@@ -296,6 +300,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
         statuses: [],
         archived: false,
         summaryTs: undefined,
+        isPrivate: String(b.is_private) === "true" && !flags.codeChannelsPublic,
       });
       changed();
       return { channel_id: id };
@@ -324,12 +329,13 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
     },
     "conversations.info": (b) => {
       const channel = String(b.channel);
-      if (codeChannels.some((c) => c.id === channel)) {
+      const code = codeChannels.find((c) => c.id === channel);
+      if (code) {
         return {
           channel: {
             id: channel,
             is_channel: true,
-            is_private: false,
+            is_private: code.isPrivate,
             properties: { record_channel: { record_type: "agent_channel" } },
           },
         };
@@ -447,6 +453,12 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
   return {
     apiBaseUrl: `${origin}/api/`,
     codeChannels,
+    get codeChannelsPublic() {
+      return flags.codeChannelsPublic;
+    },
+    set codeChannelsPublic(value: boolean) {
+      flags.codeChannelsPublic = value;
+    },
     calls,
     messages,
     ephemerals,

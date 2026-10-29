@@ -1,12 +1,15 @@
 import type { Sql } from "../db.ts";
+import { chooseDisplay } from "../display.ts";
 import { getJob, type Job, jobRef, updateJob } from "../ledger/jobs.ts";
+import { enqueuePost } from "../ledger/outbox.ts";
 import type { SlackApi } from "./api.ts";
 
 // Slack code channels for worker jobs (decision 067, docs/slack-code.md). With SYM_CODE_CHANNELS
 // on, a job that a person starts moves from its thread into its own code channel. The channel
 // shows the job's status and a context bar, and Close archives it with the result as its summary.
-// These calls manage the channel; they post no message, so they skip the outbox. Every call fails
-// soft: a refusal leaves the job where it is and logs the Slack error code only.
+// The channel calls post no message, so they skip the outbox; the one post here, a question link,
+// goes through it. Slack refusals fail soft: the job stays where it is, and Sym logs the Slack
+// error code only.
 
 export function codeChannelsOn(env: Record<string, string | undefined> = process.env): boolean {
   return /^(1|on|true|yes)$/i.test(env.SYM_CODE_CHANNELS?.trim() ?? "");
@@ -35,37 +38,108 @@ async function originOf(sql: Sql, job: Job): Promise<string | null> {
   return job.slackThreadTs;
 }
 
-// Moves a started job into a new code channel. Returns the updated job, or the job unchanged
-// when the feature is off, Slack is not configured, the job is already moved, the job lives in a
-// direct message, or Slack refuses. A retried call finds the same channel through session_id.
+// Moves a started job into a new code channel. Returns the updated job, or the job unchanged when
+// the feature is off, Slack is not configured, the job is already moved, or the thread is a direct
+// message, a Slack Connect channel, or a code channel itself. Any Slack refusal also keeps the job
+// in its thread. A private thread gets a private channel; one Slack opens as public anyway is
+// archived, as Eve does. A failed ledger write throws, so the step retries, and the retry reaches
+// the same channel through session_id.
 export async function moveToCodeChannel(deps: Deps, job: Job): Promise<Job> {
   if (!codeChannelsOn() || !deps.slack || job.codeChannel) return job;
+  const slack = deps.slack;
   const channel = job.slackChannel;
-  // Slack refuses a direct message or group DM as the origin.
-  if (!channel || /^[DG]/.test(channel)) return job;
+  if (!channel) return job;
   const origin = await originOf(deps.sql, job);
   if (!origin) return job;
+  let channelId: string;
   try {
-    const created = await deps.slack.call("agents.conversations.create", {
+    const from = await conversation(slack, channel);
+    if (from.is_im || from.is_mpim || from.is_ext_shared || isCodeChannel(from)) return job;
+    const isPrivate = from.is_private === true;
+    const created = await slack.call("agents.conversations.create", {
       name: codeChannelName(job),
       session_id: `sym-${jobRef(job.id)}`,
       origin_channel_id: channel,
       origin_message_ts: origin,
+      ...(isPrivate ? { is_private: true } : {}),
     });
-    const channelId = typeof created.channel_id === "string" ? created.channel_id : undefined;
-    if (!channelId) return job;
-    const moved = await updateJob(deps.sql, job.id, {
-      slackChannel: channelId,
-      slackThreadTs: null,
-      codeChannel: true,
-    });
-    await setContextBar(deps, moved);
-    await setChannelStatus(deps, moved, "processing");
-    return moved;
+    if (typeof created.channel_id !== "string" || !created.channel_id) return job;
+    channelId = created.channel_id;
+    if (isPrivate && (await conversation(slack, channelId)).is_private !== true) {
+      await slack.call("agents.conversations.archive", { channel_id: channelId }).catch(() => {});
+      console.warn(
+        `Sym kept ${jobRef(job.id)} in its private thread: Slack opened a public channel.`,
+      );
+      return job;
+    }
   } catch (error) {
     console.warn(`Sym kept ${jobRef(job.id)} in its thread.`, slackCode(error));
     return job;
   }
+  const moved = await updateJob(deps.sql, job.id, {
+    slackChannel: channelId,
+    slackThreadTs: null,
+    codeChannel: true,
+    originChannel: channel,
+    originThreadTs: job.slackThreadTs ?? origin,
+  });
+  await setContextBar(deps, moved);
+  await setChannelStatus(deps, moved, "processing");
+  return moved;
+}
+
+interface ConversationInfo {
+  is_private?: boolean;
+  is_im?: boolean;
+  is_mpim?: boolean;
+  is_ext_shared?: boolean;
+  properties?: { record_channel?: { record_type?: string } };
+}
+
+async function conversation(slack: SlackApi, channel: string): Promise<ConversationInfo> {
+  const info = await slack.call("conversations.info", { channel });
+  return (info.channel ?? {}) as ConversationInfo;
+}
+
+function isCodeChannel(info: ConversationInfo): boolean {
+  return info.properties?.record_channel?.record_type === "agent_channel";
+}
+
+// Eve asks a moved job's questions in the thread it came from, because the job's task runs in that
+// thread's session. The channel shows the question with a link there, so people find it.
+export async function pointToQuestion(
+  deps: Deps,
+  job: Job,
+  requestId: string,
+  prompt: string,
+): Promise<void> {
+  if (!job.codeChannel || !job.slackChannel) return;
+  const ref = jobRef(job.id);
+  let link: string | undefined;
+  if (deps.slack && job.originChannel && job.originThreadTs) {
+    const permalink = await deps.slack
+      .call("chat.getPermalink", { channel: job.originChannel, message_ts: job.originThreadTs })
+      .catch(() => undefined);
+    if (typeof permalink?.permalink === "string") link = permalink.permalink;
+  }
+  const where = link ? `<${link}|the thread where it started>` : "the thread where it started";
+  const text = `${ref} has a question: ${prompt.slice(0, 500)}\nAnswer it in ${where}.`;
+  await enqueuePost(deps.sql, {
+    idempotencyKey: `${ref}:question-link:${requestId}`,
+    jobId: job.id,
+    method: "chat.postMessage",
+    payload: { channel: job.slackChannel, text },
+    display: chooseDisplay({
+      kind: job.kind,
+      needsAction: true,
+      isNew: true,
+      estMinutes: 0,
+      steps: 0,
+      lines: 2,
+      surface: "channel",
+      quiet: false,
+    }),
+  });
 }
 
 // The context bar: the job, its project, and its pull request once there is one. Slack keeps at

@@ -20,20 +20,28 @@ create call can fail with `feature_disabled`.
 2. When a person starts a job, Sym creates a code channel before the worker launches. The origin
    is the person's latest message in the thread, else the thread root. `session_id` is
    `sym-J-<id>`, so a retried step reaches the same channel. The job row then names the channel,
-   with no thread, and `code_channel` is true. The brief and the Start buttons stay in the thread;
-   the card, questions, and result post in the channel.
-3. A scheduled check never moves. A job in a direct message never moves, because Slack refuses a
-   DM origin.
-4. Any Slack refusal keeps the job in its thread. Sym logs the Slack error code only.
-5. The context bar shows the job, its project, and its pull request once there is one. The status
-   follows the job: `processing`, `suspended` while a worker question waits, `active` at the end.
-6. Close archives the channel, with the result post as the summary Slack shares in the origin
+   with no thread, `code_channel` is true, and the origin columns keep the thread. The brief and
+   the Start buttons stay in the thread; the card and result post in the channel.
+3. Worker questions stay in the thread too. `worker_job` runs in the thread's Eve session, and
+   Eve asks there. The channel posts the question with a link to the thread and shows
+   `suspended` until it is answered.
+4. A scheduled check never moves. Neither does a job in a direct message, a group DM, a Slack
+   Connect channel, or a code channel, because Slack refuses those origins or would nest channels.
+5. A private thread gets a private channel. If Slack opens it as public anyway, Sym archives it
+   and keeps the job in its thread, as Eve does.
+6. Any Slack refusal keeps the job in its thread. Sym logs the Slack error code only. A failed
+   ledger write after the channel exists retries the step, which reaches the same channel.
+7. The context bar shows the job, its project, and its pull request once there is one. The status
+   follows the job: `processing`, `suspended` while a worker question waits, `active` at the end
+   and when the job stops or fails. Eve also sets the status for each brain turn in the channel,
+   so the job sets `processing` again after each check.
+8. Close archives the channel, with the result post as the summary Slack shares in the origin
    thread. Looks good stays feedback, so Fix still works in the open channel. A Fix follow-up job
    shares its parent's channel.
-7. Every message in a code channel reaches the brain with no tag, triage, or listen mode. Each turn
+9. Every message in a code channel reaches the brain with no tag, triage, or listen mode. Each turn
    gets a note naming the channel's job, so the brain steers that job instead of starting another.
-8. These calls manage the channel and post no message, so they skip the outbox. Every Slack post
-   still goes through `chooseDisplay`.
+10. The channel calls post no message, so they skip the outbox. The question link goes through
+    the outbox and `chooseDisplay` like every Slack post.
 
 ## Consequences
 
@@ -41,6 +49,8 @@ create call can fail with `feature_disabled`.
   `groups:read`, `mpim:read`, and `agent_session_stopped`. The owner reinstalls the app.
 - The status and context bar update from the job's own task. A job that reconcile finishes after
   its session died keeps its last status until Close.
+- A person answers a worker question in the original thread, not in the channel. Answering in
+  the channel needs the job's task to run in the channel's session, which Eve 0.88 cannot move.
 - Slack's Stop button on the channel stops the brain's turn, not the worker job. The card's Stop
   button still stops the job.
 - Not used yet: view tabs, canvases, per-channel slash commands. A diff tab needs the worker's
