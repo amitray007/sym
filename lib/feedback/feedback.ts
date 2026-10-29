@@ -41,7 +41,7 @@ export function feedbackEnabled(env: Env = process.env): boolean {
   return envSwitch(env.SYM_FEEDBACK, true);
 }
 
-// The buttons under a reply. A `context_actions` block holds Slack's native feedback buttons.
+// The buttons under a job result. Chat replies do not use this helper. A `context_actions` block holds Slack's native feedback buttons.
 // Empty when the owner turned feedback off.
 export function feedbackBlocks(env: Env = process.env): Record<string, unknown>[] {
   if (!feedbackEnabled(env)) return [];

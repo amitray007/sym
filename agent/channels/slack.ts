@@ -13,7 +13,6 @@ import {
 import { takeChoice } from "../../lib/delivery/choices.ts";
 import {
   FEEDBACK_ACTION_ID,
-  feedbackBlocks,
   jobIdOfMessage,
   jobIdOfThread,
   kindOfButton,
@@ -422,7 +421,7 @@ const symRenderer = defineSlackRenderer({
       endQuietTurn(quietKey(ctx.channel));
       (ctx.channel.state as TurnBookkeeping).threadStatus = null;
       await postCompletedSlackReply(ctx.channel, {
-        blocks: [{ type: "markdown", text: value }, ...feedbackBlocks()] as never,
+        blocks: [{ type: "markdown", text: value }] as never,
         markdown: value,
       });
     },

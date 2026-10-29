@@ -1,3 +1,4 @@
+import { feedbackBlocks } from "../feedback/feedback.ts";
 import { buttonUrl, openPrButton } from "./card.ts";
 import type { OutputContract } from "./contract.ts";
 import {
@@ -96,6 +97,7 @@ export function resultPost(
       ...textBlocks(text),
       meta(job),
       ...resultActions(contract?.prUrl ?? null, contract?.ciUrl),
+      ...feedbackBlocks(),
     ],
   };
 }
@@ -122,7 +124,12 @@ export function writtenPost(
   const text = [body, ...additions].filter(Boolean).join("\n\n");
   return {
     text,
-    blocks: [...textBlocks(text), meta(job), ...resultActions(prUrl, contract.ciUrl)],
+    blocks: [
+      ...textBlocks(text),
+      meta(job),
+      ...resultActions(prUrl, contract.ciUrl),
+      ...feedbackBlocks(),
+    ],
   };
 }
 
@@ -136,5 +143,5 @@ export function defuse(text: string): string {
 
 export function failurePost(job: JobFacts, reason?: string | null): BlockPost {
   const text = failureMessage(job, reason);
-  return { text, blocks: [...textBlocks(text), meta(job)] };
+  return { text, blocks: [...textBlocks(text), meta(job), ...feedbackBlocks()] };
 }

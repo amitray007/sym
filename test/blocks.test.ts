@@ -26,7 +26,12 @@ describe("conversational results", () => {
       expect(text).toContain("PR #812");
       expect(text).not.toMatch(/tl;dr|check before merge|☐|% sure|open questions/);
     }
-    expect(post.blocks.map((b) => b.type)).toEqual(["markdown", "context", "actions"]);
+    expect(post.blocks.map((b) => b.type)).toEqual([
+      "markdown",
+      "context",
+      "actions",
+      "context_actions",
+    ]);
     expect(JSON.stringify(post.blocks)).not.toMatch(/sym_job_(ok|fix|close|steer)/);
   });
   it("offers only validated PR and CI links", () => {
@@ -43,7 +48,11 @@ describe("conversational results", () => {
   });
   it("gives no action controls on failures or missing results", () => {
     expect(failurePost(job, "Build <broke>").text).toContain("Build &lt;broke&gt;");
-    expect(failurePost(job).blocks.map((b) => b.type)).toEqual(["markdown", "context"]);
+    expect(failurePost(job).blocks.map((b) => b.type)).toEqual([
+      "markdown",
+      "context",
+      "context_actions",
+    ]);
     expect(resultPost(job, null).text).toContain("can't say what changed");
     expect(resultPost(job, null).text).toContain("thr_8f2c");
   });
