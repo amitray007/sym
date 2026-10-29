@@ -10,7 +10,7 @@ export function capabilityInstructions(env: Record<string, string | undefined> =
   const codeChannels = codeChannelsOn(env)
     ? [
         "- Code channels are on. When a person clicks Start on a worker job brief, Sym moves the job into its own Slack code channel. The brief stays in the thread, and Slack links the channel there. A worker's questions are still asked in the thread where the job started.",
-        "- The `code_channel` tool moves the current conversation into a new code channel. Use it when a person asks for one, or for multi-step work that is not a worker job. Do not use it to start a worker job: Start moves the job. It does nothing inside a code channel.",
+        "- The `code_channel` tool moves the current conversation into a new code channel. Use it only when a person explicitly asks for a code channel. Never use it on your own, not even for long or multi-step work. Coding work goes through `worker_job`, and Start moves the job. It does nothing inside a code channel.",
         "- Sym cannot create, rename, or archive any other Slack channel.",
       ]
     : [

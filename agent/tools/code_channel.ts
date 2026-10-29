@@ -13,8 +13,8 @@ export default defineDynamic((ctx) => {
   if (!codeChannelsOn() || isWorkerCaller(ctx.session.auth.current)) return null;
   return defineTool({
     description: [
-      "Move this Slack conversation into a new code channel, when a person asks for one or for multi-step work that is not a worker job.",
-      "Do not use it to start a worker job: clicking Start moves a job into its own channel.",
+      "Move this Slack conversation into a new code channel. Use it only when the person explicitly asks for a code channel.",
+      "Never use it on your own, not even for long or multi-step work. Coding work goes through worker_job: clicking Start moves the job into its own channel.",
       "Call it once per request. Slack links the new channel here, so afterward reply in one short sentence at most.",
       "If it returns unavailable or refused, say why in the thread; do not retry.",
     ].join(" "),

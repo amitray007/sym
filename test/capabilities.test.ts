@@ -6,6 +6,8 @@ describe("capabilityInstructions", () => {
     const on = capabilityInstructions({ SYM_CODE_CHANNELS: "on" });
     expect(on).toContain("Code channels are on.");
     expect(on).toContain("`code_channel` tool");
+    expect(on).toContain("only when a person explicitly asks");
+    expect(on).not.toMatch(/use it[^.]*for multi-step work/i);
     const off = capabilityInstructions({});
     expect(off).toContain("Code channels are off. Sym cannot create Slack channels.");
     expect(off).not.toContain("`code_channel`");

@@ -10,8 +10,8 @@ brain said no. Its instructions never named the feature, because the move to a c
 happens in code when a person clicks Start (decision 067). A brain that does not know a feature
 denies it. It can also offer features that are off.
 
-A person may also want a code channel for work that is not a worker job, such as a long
-investigation. Eve 0.88 provides `openCodeChannel()` for that.
+A person may also ask for a code channel outside a worker job. Eve 0.88 provides
+`openCodeChannel()` for that.
 
 ## Decision
 
@@ -20,7 +20,9 @@ investigation. Eve 0.88 provides `openCodeChannel()` for that.
    Each line reads the same switch as the code, so it is never stale. The lines describe what a
    person sees, not how the code does it. Worker threads get none.
 2. With `SYM_CODE_CHANNELS` on, the brain has a `code_channel` tool. It moves the current
-   conversation into a new code channel through Eve's `openCodeChannel()`. Eve copies the
+   conversation into a new code channel through Eve's `openCodeChannel()`. A code channel opens in
+   two cases only: a person explicitly asks for one, or a person starts a worker job. The brain
+   never opens one on its own, not even for long or multi-step work. Eve copies the
    conversation, matches the thread's privacy, and continues the session there. The tool returns
    Slack's refusal as text, and the brain answers in the thread. With the switch off, the tool does
    not exist.
