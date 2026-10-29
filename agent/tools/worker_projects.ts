@@ -10,6 +10,7 @@ import type { WorkerProject } from "../../lib/workers/types.ts";
 
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "List the projects Sym works on, each with its worker title and whether the worker has it. " +
     "Use it to resolve a project name before a brief. It never lists other projects.",
   inputSchema: z.object({}),

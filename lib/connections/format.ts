@@ -107,15 +107,16 @@ export function modePrompt(name: string, tool: string | undefined, mode: ModeCho
       auto:
         `Every tool on ${name}, including tools the server adds later, runs without asking you. ` +
         "The server's own policy is then the only gate. Tools you set one by one keep their mode.",
-      ask: `Every tool on ${name}, including tools the server adds later, asks you each time.`,
-      hidden: `Sym cannot find or call any tool on ${name}, including tools the server adds later.`,
-      default: "Read tools run freely and write tools ask you each time.",
+      ask: `Every tool on ${name}, including tools the server adds later, asks you each time. Individual tool settings still apply.`,
+      hidden: `Sym cannot find or call any tool on ${name}, including tools the server adds later. Individual tool settings still apply.`,
+      default:
+        "Tools marked read-only by the server run freely; other tools ask you each time. Individual tool settings still apply.",
     };
     const what = mode === "default" ? "the default mode" : `the default mode to ${mode}`;
     return `Set ${what} of "${name}"? ${effect[mode]}`;
   }
   if (mode === "default") {
-    return `Clear the own mode of "${tool}" on "${name}"? It follows the connection default again.`;
+    return `Remove the special setting of "${tool}" on "${name}"? It follows the connection default again.`;
   }
   const effect =
     mode === "auto"

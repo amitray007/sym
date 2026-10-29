@@ -14,6 +14,7 @@ import { ledger, pack } from "../../lib/runtime.ts";
 // token field on purpose: tokens live in the deployment environment or come from a sign-in.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Connect an MCP server when the owner asks. Give a short name and the server's URL. Sym " +
     "checks the server and saves a proposal. Then call connection_approve with the review in " +
     "the result, so the owner can approve it. Never ask anyone for a token or a password.",

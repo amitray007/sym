@@ -25,6 +25,7 @@ import { ledger, pack } from "../../lib/runtime.ts";
 // for one tool or, without a tool, for the connection default.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Change how an MCP connection's tools run, when the owner asks: auto runs without asking, " +
     "ask needs the owner's approval for every call, hidden removes it, default clears a mode. " +
     "Give a tool to change that tool. Leave tool out to change every tool on the connection " +

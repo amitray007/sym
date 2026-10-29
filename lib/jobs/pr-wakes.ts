@@ -2,7 +2,6 @@ import { chooseDisplay } from "../display.ts";
 import { envSwitch } from "../env-switch.ts";
 import { getJob, type Job, jobRef } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
-import { workerNoun } from "../worker-label.ts";
 import type { Activity, ActivityItem } from "../workers/types.ts";
 import type { JobDeps } from "./run.ts";
 
@@ -78,8 +77,7 @@ export function wakeText(job: Pick<Job, "id" | "prUrl">, wake: Wake): string {
   if (/stopped watching/.test(wake.summary)) {
     return `${ref}: ${pr} is no longer watched (${wake.summary}). Check it yourself.`;
   }
-  const acting = /checks failed|merge conflict|new comments/.test(wake.summary);
-  return `${ref}: ${pr}: ${wake.summary}.${acting ? ` The ${workerNoun()} is looking into it.` : ""}`;
+  return `${ref}: ${pr}: ${wake.summary}.`;
 }
 
 // Posts one short message per wake in the activity, in the job thread. The key holds the item

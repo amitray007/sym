@@ -46,6 +46,7 @@ type Completed =
 
 export default defineWorkflowTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Sign Sym in to an OAuth MCP connection after the owner approved it, or when its sign-in " +
     "expired. Only the owner can use it. Sym sends the owner a private sign-in link and waits " +
     "up to 10 minutes. Runs as a task: you get a receipt now and the result later. If the " +

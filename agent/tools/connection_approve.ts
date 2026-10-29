@@ -19,6 +19,7 @@ import { ledger, pack } from "../../lib/runtime.ts";
 // when it differs from the stored proposal. The owner approves exactly what loads.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Ask the owner to approve a proposed MCP connection. Pass the review from connection_add " +
     "unchanged. Approval makes the connection's tools available from the next message.",
   inputSchema: z.object({

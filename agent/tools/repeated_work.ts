@@ -11,6 +11,7 @@ import { ledger, pack } from "../../lib/runtime.ts";
 // read. The weekly `repeat` schedule calls it as the app principal; the owner can ask for it too.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Read the briefs of recent finished jobs to find work people ask for again and again. Use " +
     "it for the weekly repeated-work review, or when the owner asks what work keeps coming back. " +
     "Then propose a playbook for each real pattern with repeated_work_propose.",

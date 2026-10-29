@@ -6,6 +6,7 @@ import { NAME_PATTERN, playbookRef } from "../../lib/learning/rows.ts";
 import {
   approvedPlaybook,
   cleanStreak,
+  promoteIfClean,
   setStartMode,
   trustRuns,
 } from "../../lib/learning/trust.ts";
@@ -24,6 +25,7 @@ import { ledger, pack } from "../../lib/runtime.ts";
 // asking always works. The owner approves the call, and only the owner can.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Change whether jobs that follow an approved playbook ask for Start. Use mode 'auto' when " +
     "the owner asks to trust a playbook, usually after Sym said its last jobs ended clean, and " +
     "'ask' when the owner wants the Start click back.",
@@ -38,7 +40,7 @@ export default defineTool({
       input.mode === "auto"
         ? [
             `Trust the playbook ${input.name}?`,
-            "Jobs whose brief follows it will start without the Start click. A 👎, a Fix, or a run",
+            "Jobs whose brief follows it will start automatically only on projects where it has already run clean. A 👎, a Fix, or a run",
             "with concerns puts it back to asking. Production and customer data stay read-only.",
           ].join("\n")
         : `Make jobs that follow the playbook ${input.name} ask for Start again?`,
@@ -60,13 +62,13 @@ export default defineTool({
       if (streak.length < needed) {
         return `${ref} ${playbook.name} has ${streak.length} clean runs in a row; trust needs ${needed}.`;
       }
-      const changed = await setStartMode(sql, playbook.id, "auto", thread.userId);
+      const changed = await promoteIfClean(sql, playbook.id, thread.userId);
       return changed
-        ? `${ref} ${playbook.name} is trusted. Its jobs start without the Start click (clean runs: ${streak
+        ? `${ref} ${playbook.name} is trusted. Its jobs start automatically on projects where it has already run clean (clean runs: ${streak
             .slice(0, needed)
             .map(jobRef)
             .join(", ")}).`
-        : `${ref} ${playbook.name} is already trusted.`;
+        : `${ref} ${playbook.name} was not changed. Check its current trust and clean runs before trying again.`;
     }
     const changed = await setStartMode(sql, playbook.id, "ask", thread.userId);
     return changed

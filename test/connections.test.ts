@@ -348,8 +348,15 @@ describe("approval text", () => {
       "Every tool on example-gateway, including tools the server adds later, runs without asking you.",
     );
     expect(auto).toContain("the only gate");
+    for (const mode of ["ask", "hidden", "default"] as const) {
+      expect(modePrompt("example-gateway", undefined, mode)).toContain(
+        "Individual tool settings still apply",
+      );
+    }
     expect(modePrompt("example-gateway", undefined, "hidden")).toContain("cannot find or call any");
-    expect(modePrompt("example-gateway", undefined, "default")).toContain("Read tools run freely");
+    expect(modePrompt("example-gateway", undefined, "default")).toContain(
+      "marked read-only by the server",
+    );
     expect(modePrompt("example-gateway", "execute", "default")).toContain(
       "follows the connection default",
     );

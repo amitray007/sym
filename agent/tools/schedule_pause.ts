@@ -7,6 +7,7 @@ import { parseScheduleRef, pauseSchedule, resumeSchedule } from "../../lib/sched
 
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Pause a schedule, or resume it with resume=true. A paused schedule keeps its approval. " +
     "A resumed one runs at its next cron time.",
   inputSchema: z.object({

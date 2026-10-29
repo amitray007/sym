@@ -8,6 +8,7 @@ import { ledger, slackFromEnv } from "../../lib/runtime.ts";
 // one reaction per message and three per thread per hour. The brain decides whether one fits.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "React to the message that started this turn with an emoji, like a person would. Use it " +
     "rarely, only on a clear trigger: something funny, a good idea, good news, or a short " +
     "thanks or ack that needs no text reply. Most messages get no reaction. Never use the eyes " +
