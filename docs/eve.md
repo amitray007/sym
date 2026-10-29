@@ -105,12 +105,14 @@ authenticated tools and server instructions. Active-name conflicts are refused b
 
 ## Conversational jobs
 
-The renderer keeps worker progress in a silent working note. Results use human text and code-owned
-facts. `offer_choices` starts an ordinary turn from a stored choice; it grants no authority.
+The renderer keeps worker progress in a silent working note. Results use human text and inline tokens expanded to exact code-owned
+facts; missing facts are appended once. `offer_choices` starts an ordinary turn from a stored choice; it grants no authority.
 `job_followup` proposes work, `job_close` requests settlement and archive, and `job_stop` keeps
 owner confirmation. Old Fix submissions now propose work. Questions live in the job's current
 conversation, including code channels. Completed brain replies use the outbox and display rule.
 
-Decision 069 adds evals for vague problems, explicit Builder requests, acceptance of an offer,
+Decision 071 adds evals for vague problems, a vague report matching a trusted playbook, explicit
+Builder requests, acceptance of an offer,
 finished-job discussion, follow-ups, closure, short answers, lists, and persona recaps. Fixture
-checks prove wiring only. The owner runs real-model evals. Builder work requires explicit consent.
+checks prove wiring only. The owner runs real-model evals. Interactive Builder requests show Start / Not now even for trusted playbooks. Approved schedules
+and PR wakes keep trusted auto-start.

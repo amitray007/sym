@@ -22,7 +22,7 @@ describe("conversational results", () => {
     for (const text of [post.text, JSON.stringify(post.blocks)]) {
       expect(text).toContain("No test covers &lt;the&gt; limit.");
       expect(text).toContain("Cap at 5 tries?");
-      expect(text).toContain("Tests passed");
+      expect(text).toContain("tests passed");
       expect(text).toContain("PR #812");
       expect(text).not.toMatch(/tl;dr|check before merge|☐|% sure|open questions/);
     }

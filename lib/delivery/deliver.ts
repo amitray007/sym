@@ -186,6 +186,9 @@ async function sendDocument(slack: SlackApi, payload: Record<string, unknown>): 
     files: [{ id: upload.file_id, title: "Full reply" }],
     channel_id: payload.channel,
     ...(payload.thread_ts ? { thread_ts: payload.thread_ts } : {}),
-    initial_comment: "That's a long reply. I've attached the details.",
+    initial_comment: text
+      .trim()
+      .split(/\n\s*\n/, 1)[0]
+      ?.slice(0, 12_000),
   });
 }

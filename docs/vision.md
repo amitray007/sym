@@ -20,7 +20,8 @@ an operations group with scheduled checks. One adopter's playbooks never shape t
    repositories itself.
 4. Builder work needs explicit consent, including repository investigations. A problem report
    does not authorize a job. Writes need a person. Any job that can change code, data, or settings needs an approval
-   until the trust ladder promotes its job class. Production and customer data stay read-only:
+   for every interactive chat request, even when the trust ladder promotes its job class.
+   Approved schedules and PR wakes keep trusted auto-start within their approved scope. Production and customer data stay read-only:
    a job can prepare a change to them, and a person runs it.
 5. Quiet by default. Code decides each message's display level. New messages are only for
    "you need to act" and "it is done".

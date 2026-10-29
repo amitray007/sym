@@ -44,21 +44,22 @@ Notes:
 - Card posts never unfurl links. Put PR and CI links on buttons or in the card footer.
 ## Voice
 
-Sym uses short sentences in one configured persona (decisions 068 and 069). It gives the point
+Sym uses short sentences in one configured persona (decisions 070 and 071). It gives the point
 first and preserves facts, links, warnings, scope boundaries, and uncertainty. Plain is calm,
 casual is warm and practical, and spicy is dry and playful. Failures and concerns never get jokes.
 The persona comes from the pack, then the saved owner setting, then `SYM_PERSONA`, then casual.
 The initial status fallback is "Working...". Tool labels replace it with known steps.
 
-The writer returns human text, covered concern IDs, and optional choices. Code adds uncovered
-concerns and open decisions as sentences. PR and test facts stay code-owned and appear in the
-notification text. Tests distinguish passed, failed, not run, unknown, and no applicable tests.
+The writer returns human text with inline fact tokens such as {{c1}}, {{q1}}, {{tests}}, and {{pr}},
+and optional choices. Code expands each token to its exact concern, decision, or fact. Missing
+facts appear together as sentences; facts already in the body do not repeat. Contradictory test
+claims use the plain fallback. PR and test facts stay code-owned in the notification text. Tests distinguish passed, failed, not run, unknown, and no applicable tests.
 The result has no fixed headings, confidence score, numbered concern list, or checklist.
 A writer failure or a recovered job uses the plain deterministic result.
 
 Text uses Slack's `markdown` block. Lists, tables, code, quotes, and checkboxes fit only content
 that needs them. Images become links and lists stay flat. A markdown block holds 12,000
-characters. Completed brain replies over that limit become a Markdown file with a short notice.
+characters. Completed brain replies over that limit become a Markdown file with its first paragraph as the comment.
 Replies pass through `chooseDisplay` and the outbox, which retries delivery and checks deleted roots.
 Ordinary chat replies have no feedback buttons.
 
@@ -67,7 +68,8 @@ Ordinary chat replies have no feedback buttons.
 Sym checks read-only facts with its own tools first. A problem report does not authorize Builder.
 `worker_job` requires an explicit request for Builder work or acceptance of a specific offer,
 including for repository investigations. The brief still needs its code-owned Start approval.
-Approved schedules and trusted playbooks retain their existing limits.
+Interactive chat always shows Start / Not now, even for trusted playbooks. Approved schedules
+and PR wakes retain trusted auto-start within their approved scope.
 
 - A question about a result stays chat.
 - A requested redirect of running work uses `job_steer`.
@@ -111,9 +113,11 @@ who runs Sym. `SYM_STRANGER_REPLIES=off` disables these replies.
   conversation choices, and native feedback when enabled. Feedback buttons appear only on
   results. Reactions on Sym's messages still record feedback. `SYM_FEEDBACK=off` hides buttons
   while handlers keep accepting old clicks.
-- Old Steer and Fix controls explain the conversational path. Existing text boxes still submit;
-  Fix creates a follow-up proposal. Old Close controls remain routable.
-- Home shows Needs you, Running, and Done today with job links. The owner also sees Setup,
+- Legacy controls remain routable. A legacy change submission creates a follow-up proposal
+  with Start / Not now; submitting text never starts work.
+- Home shows Needs you, Running, and Finished today with job links. Start waits, schedules
+  waiting for approval, and incomplete closures go under Needs you and change the opening summary.
+  Finished today labels failed and cancelled jobs as such. The owner also sees Setup,
   including worker state, persona, quiet mode, projects, and connections. It renders no Retry
   or Stop controls. Every Home open rechecks the allow-list and owner role.
 - Permission notices go to the recorded owner, else the pack owner, else `SYM_OWNER_SLACK_USER`.

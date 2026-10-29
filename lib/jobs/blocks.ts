@@ -6,10 +6,9 @@ import {
   escapeMrkdwn,
   failureMessage,
   type JobFacts,
-  resultFacts,
   resultMessage,
 } from "./messages.ts";
-import { requiredConcerns, WRITTEN_MAX, type WriterOutput } from "./writer.ts";
+import { resultTokens, WRITTEN_MAX, type WriterOutput } from "./writer.ts";
 
 // Block Kit for the result and failure posts (decision 047). Each builder returns the blocks and
 // the plain `text` fallback that Slack shows in notifications and to screen readers. The text is
@@ -108,19 +107,44 @@ export function writtenPost(
   prUrl: string | null,
   limitation: string | null = null,
 ): BlockPost {
-  const output = typeof written === "string" ? { text: written, coveredConcernIds: [] } : written;
-  const required = requiredConcerns(contract, concerns);
-  const uncovered = required.filter((c) => !(output.coveredConcernIds ?? []).includes(c.id));
+  const output = typeof written === "string" ? { text: written } : written;
   const body = defuse(output.text.slice(0, WRITTEN_MAX));
-  if (contradictsTestReport(body, contract)) return resultPost(job, contract, concerns, limitation);
+  if (contradictsTestReport(body, contract))
+    return resultPost(job, { ...contract, prUrl }, concerns, limitation);
+  const tokens = resultTokens(contract, concerns, prUrl);
+  const used = new Set<string>();
+  const expanded = body.replace(/\{\{([a-z]+\d*)\}\}/g, (token, id: string) => {
+    const fact = tokens[id];
+    if (!fact) return token;
+    used.add(id);
+    return /^[cq]\d+$/.test(id) ? escapeMrkdwn(fact) : fact;
+  });
+  // Legacy prose can already contain a full fact. Compare visible link labels as well.
+  const visible = (text: string) =>
+    text
+      .replace(/<[^|<>]+\|([^<>]+)>/g, "$1")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  const missing = Object.entries(tokens).filter(
+    ([id, fact]) =>
+      !used.has(id) &&
+      (/^[cq]\d+$/.test(id) ||
+        (!visible(expanded).includes(visible(escapeMrkdwn(fact))) &&
+          !visible(expanded).includes(visible(fact)))),
+  );
+  const facts = missing.filter(([id]) => !/^[cq]\d+$/.test(id)).map(([, fact]) => fact);
   const additions = [
-    ...(!body.includes(job.ref) ? [job.ref] : []),
-    // Test and PR truth remain code-owned, including when the writer claims coverage.
-    ...resultFacts(contract, prUrl),
-    ...uncovered.map((c) => escapeMrkdwn(c.text)),
-    ...(limitation && !required.some((c) => c.text === limitation) ? [limitation] : []),
+    ...missing.filter(([id]) => /^[cq]\d+$/.test(id)).map(([, fact]) => escapeMrkdwn(fact)),
+    ...(facts.length ? [`${facts.map((fact) => fact.replace(/\.$/, "")).join("; ")}.`] : []),
   ];
-  const text = [body, ...additions].filter(Boolean).join("\n\n");
+  if (
+    limitation &&
+    !visible(expanded).includes(visible(limitation)) &&
+    !additions.includes(escapeMrkdwn(limitation))
+  )
+    additions.push(escapeMrkdwn(limitation));
+  const text = [expanded, additions.join(" ")].filter(Boolean).join("\n\n");
   return {
     text,
     blocks: [
