@@ -50,7 +50,7 @@ describe("code channel conversations", () => {
     until(
       () =>
         h.slack.messages.find(
-          (m) => m.channel === channel && (m.text ?? "").startsWith(`${ref} is done.`),
+          (m) => m.channel === channel && (m.text ?? "").startsWith(`Done with ${ref}:`),
         ),
       { label: `${ref} result` },
     );
@@ -88,7 +88,7 @@ describe("code channel conversations", () => {
     expect(
       (await h.sql`select archive_state from jobs where id = ${job.id}`)[0]?.archiveState,
     ).toBe("archived");
-    expect(c.botMessages().some((m) => (m.text ?? "").startsWith(`${ref} is done.`))).toBe(false);
+    expect(c.botMessages().some((m) => (m.text ?? "").startsWith(`Done with ${ref}:`))).toBe(false);
   });
 
   it("asks locally and accepts a typed answer through a normal brain turn", async () => {
@@ -177,7 +177,9 @@ describe("code channel conversations", () => {
       () =>
         h.slack.messages.find(
           (m) =>
-            m.channel === channel.id && (m.text ?? "").includes("couldn't archive this channel"),
+            m.channel === channel.id &&
+            m.ts !== result.ts &&
+            (m.text ?? "").includes("couldn't archive this channel"),
         ),
       { label: "honest retry notice" },
     );
@@ -194,6 +196,9 @@ describe("code channel conversations", () => {
     expect(channel.summaryTs).toBe(result.ts);
     expect(thread.organized.filter((action) => action === "settle")).toHaveLength(1);
     expect(messageText(notice)).toContain("I've archived");
+    expect(messageText(notice)).not.toContain("I'll retry");
+    expect(messageText(result)).toContain(`I've closed J-${child.id} and archived its channel.`);
+    expect(messageText(result)).not.toContain("couldn't archive");
     const archives = h.slack.callsTo("agents.conversations.archive");
     expect(archives.at(-1)?.body).toMatchObject({
       channel_id: channel.id,

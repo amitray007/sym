@@ -66,7 +66,9 @@ and PR wakes keep trusted auto-start within their existing scope.
    with status `launching`, keyed on the tool call ID, and takes the Slack thread of the session.
 4. Sym posts a short brief with Start / Not now. Typed approval binds to one current proposal.
    A revised brief expires the old proposal. Start rechecks current project policy. The ledger
-   keeps the callback so reconcile can recover an approved start. After Start:
+   keeps the callback so reconcile can recover an approved start. A committed click or addressed
+   typed decision wakes a separate Start hook immediately. The task reads the ledger again before
+   launching. Its twelve five-minute fallback waits still bound idle workflow events. After Start:
    - It looks for a worker thread whose title holds the job ID. If one exists, it adopts it. This
      stops a re-run step from launching twice.
    - It launches the thread: title `[J-142] Billing sync retry`, a new worktree, the model the

@@ -62,7 +62,12 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     };
   const context = request.messages.map((message) => message.text).join("\n");
   const job = [...context.matchAll(/This conversation is about (J-\d+)/g)].at(-1)?.[1];
-  if (job && /^staging[.!]?$/i.test(message.trim()))
+  // Choice clicks are ordinary attributed message parts, never bare approval text.
+  const chosen = /^<@[UW][A-Z0-9]+> chose this conversation option: ("(?:[^"\\]|\\.)*")$/.exec(
+    message,
+  )?.[1];
+  const answer = chosen ? (JSON.parse(chosen) as string) : message;
+  if (job && /^staging[.!]?$/i.test(answer.trim()))
     return { toolCalls: [{ name: "job_steer", input: { job, text: "staging" } }] };
   const result = base(request);
   return typeof result === "string" && result.startsWith("Fixture brain heard:")

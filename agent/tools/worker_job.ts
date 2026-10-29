@@ -1,7 +1,7 @@
 import type { SessionAuthContext } from "eve/context";
 import { isScheduleAuth } from "eve/schedules";
 import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
-import { createWebhook, FatalError, sleep } from "eve/workflow";
+import { createHook, createWebhook, FatalError, sleep } from "eve/workflow";
 import type { Brief } from "../../lib/jobs/brief.ts";
 import { callbackFor } from "../../lib/jobs/callback.ts";
 import { parseOutputContract } from "../../lib/jobs/contract.ts";
@@ -27,7 +27,7 @@ import { sessionInstructions } from "../../lib/learning/format.ts";
 import { approvedForSession } from "../../lib/learning/rows.ts";
 import { linkPlaybook, markAutoStarted, trustedPlaybookOf } from "../../lib/learning/trust.ts";
 import { getJob, jobRef } from "../../lib/ledger/jobs.ts";
-import { proposalStatus } from "../../lib/ledger/proposals.ts";
+import { proposalStatus, startWakeToken } from "../../lib/ledger/proposals.ts";
 import { slackUserOfPrincipal } from "../../lib/owner.ts";
 import { personaInstructions } from "../../lib/persona.ts";
 import { storedPersonaOrNone } from "../../lib/persona-setting.ts";
@@ -112,6 +112,9 @@ export default defineWorkflowTool({
 
     try {
       const callback = createWebhook();
+      const startWake = createHook({ token: startWakeToken(`${ctx.session.id}:${ctx.callId}`) });
+      // Register before publishing Start, so even an immediate decision can wake this task.
+      await startWake.getConflict();
       await rememberCallback(job.id, callback.url);
       // Decision 024: only an approved schedule run skips the click. The step checks the
       // session's initiator, the schedule row, and the brief, so the model cannot widen it.
@@ -139,7 +142,9 @@ export default defineWorkflowTool({
           preApproved ? "Starting scheduled run" : trusted ? "Starting" : "Waiting for Start",
         ),
       };
-      const decision = preApproved || trusted ? "approved" : await waitForStart(job.id, stopped);
+      const decision =
+        preApproved || trusted ? "approved" : await waitForStart(job.id, stopped, startWake);
+      startWake.dispose();
       if (decision === "pending") return { job: ref, status: "awaiting_start", ...POSTED };
       if (decision !== "approved") {
         await closeBeforeStart(job.id, "Not started");
@@ -306,14 +311,22 @@ function unavailable(reason: string): ModelCheck {
   return { status: "unavailable", reason };
 }
 
-async function waitForStart(jobId: number, stopped: Promise<"stopped">): Promise<string> {
+async function waitForStart(
+  jobId: number,
+  stopped: Promise<"stopped">,
+  wake: PromiseLike<unknown>,
+): Promise<string> {
+  const decided = Promise.resolve(wake).then(() => "decision" as const);
   // At most twelve waits and thirteen reads. Late approvals belong to reconcile, so an idle
   // day-long proposal cannot accumulate a day of workflow events.
   for (let attempt = 0; attempt <= 12; attempt++) {
     const status = await startDecision(jobId);
     if (!status) return "unavailable";
     if (status !== "pending" || attempt === 12) return status;
-    if ((await Promise.race([sleep(300_000).then(() => "wait" as const), stopped])) === "stopped")
+    if (
+      (await Promise.race([sleep(300_000).then(() => "wait" as const), stopped, decided])) ===
+      "stopped"
+    )
       return "dismissed";
   }
   return "pending";

@@ -57,7 +57,7 @@ export function personaSource(sources: PersonaSources): PersonaSource {
   return sources.env?.trim() ? "env" : "default";
 }
 
-// Fallback for the initial thinking indicator, before a real step is known (decision 069).
+// Fallback for the initial thinking indicator, before a real step is known (decision 071).
 // Tool labels and workflow yields replace it with the current step. Do not rotate invented
 // activities, jokes, or time promises here: receiving a message proves none of those things.
 export const LOADING_MESSAGES: Record<PersonaName, readonly string[]> = {

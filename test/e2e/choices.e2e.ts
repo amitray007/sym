@@ -17,6 +17,8 @@ afterAll(async () => {
 describe("offered conversation choices", () => {
   it("records a click visibly and starts one ordinary turn as the allowed clicker", async () => {
     const c = newConversation(h);
+    const echoedChoice =
+      'Fixture brain heard: <@UHELPER> chose this conversation option: "Show details"';
     await c.mention("<@UBOT> fixture-choices");
     const offer = await c.waitForControls(/What would you like next/);
     expect(offer.controls.map((control) => control.label)).toEqual(["Show details", "Leave it"]);
@@ -25,12 +27,16 @@ describe("offered conversation choices", () => {
     expect(
       c
         .botMessages()
-        .some((m) =>
-          (m.text ?? m.markdown_text ?? "").includes("Fixture brain heard: Show details"),
+        .some(
+          (m) =>
+            (m.text ?? m.markdown_text ?? "").includes("Fixture brain heard:") &&
+            (m.text ?? m.markdown_text ?? "").includes("Show details"),
         ),
     ).toBe(false);
     await c.click(offer, "Show details", "UHELPER");
-    await c.waitForPrompt(/Fixture brain heard: Show details/);
+    await c.waitForPrompt(
+      /Fixture brain heard: <@UHELPER> chose this conversation option: "Show details"/,
+    );
     await settle(h);
     expect(offer.message.text).toContain("<@UHELPER> chose: Show details");
     expect(JSON.stringify(offer.message.blocks)).not.toContain("sym_choice_");
@@ -41,11 +47,7 @@ describe("offered conversation choices", () => {
     await c.click(offer, "Show details", "UHELPER");
     await settle(h);
     expect(
-      c
-        .botMessages()
-        .filter((m) =>
-          (m.text ?? m.markdown_text ?? "").includes("Fixture brain heard: Show details"),
-        ),
+      c.botMessages().filter((m) => (m.text ?? m.markdown_text ?? "").includes(echoedChoice)),
     ).toHaveLength(1);
     expect(await h.sql`select id from jobs`).toHaveLength(0);
   });

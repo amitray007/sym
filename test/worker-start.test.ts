@@ -8,7 +8,7 @@ import { linkPlaybook, recordOutcome, setStartMode } from "../lib/learning/trust
 import { createJob } from "../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { approveSchedule, createSchedule, recordRun } from "../lib/schedules/rows.ts";
-import { handleTypedProposal } from "../lib/slack/job-actions.ts";
+import { handleProposal, handleTypedProposal } from "../lib/slack/job-actions.ts";
 import { FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 import { TEST_PROJECTS } from "./helpers/projects.ts";
@@ -17,6 +17,11 @@ const runtime = vi.hoisted(() => ({
   sql: undefined as Sql | undefined,
   deps: undefined as JobDeps | undefined,
   sleeps: [] as number[],
+  holdSleep: false,
+  wakes: new Map<string, () => void>(),
+}));
+vi.mock("eve/workflow/api", () => ({
+  resumeHook: async (token: string) => runtime.wakes.get(token)?.(),
 }));
 vi.mock("../lib/runtime.ts", async (original) => ({
   ...(await original<object>()),
@@ -30,10 +35,18 @@ vi.mock("../lib/runtime.ts", async (original) => ({
   },
 }));
 vi.mock("eve/workflow", () => ({
+  createHook: ({ token }: { token: string }) => {
+    const hook = new Promise<void>((resolve) => runtime.wakes.set(token, resolve));
+    return Object.assign(hook, {
+      getConflict: async () => null,
+      dispose: () => runtime.wakes.delete(token),
+    });
+  },
   createWebhook: () => Object.assign(new Promise(() => {}), { url: "http://127.0.0.1/cb" }),
   FatalError: Error,
   sleep: async (ms: number) => {
     runtime.sleeps.push(ms);
+    if (runtime.holdSleep) await new Promise(() => {});
     if (runtime.sleeps.length > 12) throw new Error("Proposal exceeded its workflow event budget");
   },
 }));
@@ -46,6 +59,8 @@ describe.skipIf(!hasDatabase)("worker_job Start wait", () => {
   async function run(key: string, playbook?: string, scheduled = false) {
     runtime.sql = ledger.sql();
     runtime.sleeps.length = 0;
+    runtime.holdSleep = false;
+    runtime.wakes.clear();
     runtime.deps = { sql: runtime.sql, worker: new FakeWorker(), allowedProjects: TEST_PROJECTS };
     vi.stubEnv("SYM_CODE_CHANNELS", "off");
     const brief = Brief.parse({
@@ -97,6 +112,42 @@ describe.skipIf(!hasDatabase)("worker_job Start wait", () => {
       context,
     ) as AsyncGenerator<{ status: string }, { status: string }>;
   }
+  it.each(["click", "typed"])(
+    "wakes Start promptly after an authorized %s",
+    async (kind) => {
+      const task = await run(`prompt-${kind}`);
+      await task.next();
+      runtime.holdSleep = true;
+      const launching = task.next();
+      await vi.waitFor(() => expect(runtime.sleeps).toEqual([300_000]));
+      const sql = ledger.sql();
+      const deps = runtime.deps;
+      if (!deps) throw new Error("Missing test dependencies");
+      const [proposal] = await sql`select id from job_proposals where status = 'pending'`;
+      const input = {
+        id: String(proposal?.id),
+        by: "U1",
+        channel: "C1",
+        threadTs: `prompt-${kind}`,
+        start: true,
+      };
+      expect(await handleProposal(deps, { ...input, by: "U2" }, (by) => by === "U1")).toMatchObject(
+        { kind: "refused" },
+      );
+      expect((deps.worker as FakeWorker).launches).toBe(0);
+      if (kind === "click") await handleProposal(deps, input, (by) => by === "U1");
+      else await handleTypedProposal(deps, { ...input, text: "start" }, (by) => by === "U1");
+      await expect(launching).resolves.toMatchObject({
+        done: false,
+        value: { status: expect.stringContaining("Launching") },
+      });
+      await task.next();
+      expect((deps.worker as FakeWorker).launches).toBe(1);
+      expect(runtime.sleeps).toEqual([300_000]);
+      await task.return({ status: "test-ended" });
+    },
+    2000,
+  );
   it("bounds an idle proposal to twelve five-minute waits, leaving late Start to reconcile", async () => {
     const task = await run("bounded-start");
     expect((await task.next()).value?.status).toContain("Waiting for Start");

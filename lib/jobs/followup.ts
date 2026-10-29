@@ -319,7 +319,7 @@ async function completeClosure(deps: JobDeps, id: number): Promise<string> {
     const retry = settlementPending ? "I couldn't settle the worker thread. I'll retry." : "";
     const text = [archiveError, retry].filter(Boolean).join(" ");
     await closureNotice(deps, job, text);
-    await editEndPost(deps.sql, job, `${closed} ${text}`);
+    await editEndPost(deps.sql, job, `${closed} ${text}`, true);
     return `${closed} ${text}`;
   }
   await clearClosureNotice(deps, job);
@@ -329,6 +329,7 @@ async function completeClosure(deps: JobDeps, id: number): Promise<string> {
     job.codeChannel
       ? `I've closed ${ref} and archived its channel.`
       : `I've closed ${ref} and stopped following its PR.`,
+    true,
   );
   return closed;
 }
@@ -408,7 +409,12 @@ export async function isClosed(sql: Sql, jobId: number): Promise<boolean> {
 
 // Edits the job's sent result message: its Looks good, Fix, and Close buttons go, the Open PR
 // button stays, and a note says what happened. The edit keeps the result post's display.
-export async function editEndPost(sql: Sql, job: Job, note: string): Promise<void> {
+export async function editEndPost(
+  sql: Sql,
+  job: Job,
+  note: string,
+  replaceClosure = false,
+): Promise<void> {
   const ref = jobRef(job.id);
   const [post] = await sql<
     {
@@ -421,17 +427,24 @@ export async function editEndPost(sql: Sql, job: Job, note: string): Promise<voi
     where idempotency_key = ${`${ref}:end`} and status = 'sent' and slack_ts is not null
   `;
   if (!post?.payload.channel) return;
-  // A second note, such as Close after a Fix, keeps the first: start from the latest edit.
+  // Keep actor and follow-up notes from the latest edit. Closure state replaces its old note.
   const [edited] = await sql<{ payload: { text?: string; blocks?: Record<string, unknown>[] } }[]>`
     select payload from outbox
     where payload ->> 'channel' = ${post.payload.channel} and payload ->> 'ts' = ${post.slackTs}
       and method = 'chat.update' and status <> 'failed'
     order by id desc limit 1
   `;
-  const blocks = [
-    ...withoutResultButtons(edited?.payload.blocks ?? post.payload.blocks ?? []),
-    { type: "context", elements: [{ type: "mrkdwn", text: note }] },
-  ];
+  let text = edited?.payload.text ?? post.payload.text ?? "";
+  const kept = withoutResultButtons(edited?.payload.blocks ?? post.payload.blocks ?? []).filter(
+    (block) => {
+      const old = replaceClosure ? closureNoteText(block, ref) : undefined;
+      if (!old) return true;
+      const at = text.lastIndexOf(`\n${old}`);
+      if (at >= 0) text = text.slice(0, at) + text.slice(at + old.length + 1);
+      return false;
+    },
+  );
+  const blocks = [...kept, { type: "context", elements: [{ type: "mrkdwn", text: note }] }];
   await enqueuePost(sql, {
     idempotencyKey: `${ref}:end-edit:${note}`,
     jobId: job.id,
@@ -439,11 +452,26 @@ export async function editEndPost(sql: Sql, job: Job, note: string): Promise<voi
     payload: {
       channel: post.payload.channel,
       ts: post.slackTs,
-      text: `${edited?.payload.text ?? post.payload.text ?? ""}\n${note}`,
+      text: `${text}\n${note}`,
       blocks,
     },
     display: post.display,
   });
+}
+
+function closureNoteText(block: Record<string, unknown>, ref: string): string | undefined {
+  if (block.type !== "context" || !Array.isArray(block.elements) || block.elements.length !== 1)
+    return undefined;
+  const text = (block.elements[0] as { text?: unknown } | undefined)?.text;
+  return typeof text === "string" &&
+    [
+      `I stopped following ${ref}.`,
+      `Closed ${ref}.`,
+      `Closed ${ref} and `,
+      `I've closed ${ref} and `,
+    ].some((prefix) => text.startsWith(prefix))
+    ? text
+    : undefined;
 }
 
 function withoutResultButtons(blocks: Record<string, unknown>[]): Record<string, unknown>[] {

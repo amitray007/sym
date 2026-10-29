@@ -3,6 +3,10 @@ import { getJob, type Job, json } from "./jobs.ts";
 
 export const START_ACTION_ID = "sym_proposal_start";
 export const DISMISS_ACTION_ID = "sym_proposal_dismiss";
+
+export function startWakeToken(requestKey: string): string {
+  return `sym:start:${requestKey}`;
+}
 export interface JobProposal {
   id: string;
   jobId: number;

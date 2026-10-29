@@ -253,7 +253,9 @@ describe("milestone 1", () => {
       timeoutMs: 30_000,
     });
     expect(dms()).toHaveLength(1);
-    expect(dms()[0]?.text).toContain("needs permission");
+    expect(dms()[0]?.text).toBe(
+      `${ref} is waiting on a permission in Builder. I can't approve that from Slack.`,
+    );
     expect(c.botMessages().some((m) => (m.text ?? "").includes("permission prompt"))).toBe(false);
 
     await workerAdvance(h, thread, finishedSteps());
@@ -295,7 +297,11 @@ describe("milestone 1", () => {
     const c = newConversation(h);
     const first = await startJob(h, c, "Edited job");
     await c.reply(briefMention("Revised job", { goal: "Only touch the retry module." }));
-    const ask = await c.waitForControls(/Only touch the retry module/);
+    const ask = await c.waitForControls(/revised job/);
+    const [proposal] = await h.sql<{ payload: { goal: string } }[]>`
+      select payload from job_proposals where channel = ${c.channel} and status = 'pending'
+    `;
+    expect(proposal?.payload.goal).toBe("Only touch the retry module.");
     await waitForJobStatus(h.sql, first.job.id, "cancelled");
     expect(launchesOf(h, first.ref)).toHaveLength(0);
     await c.click(ask, "Not now");

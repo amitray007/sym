@@ -40,6 +40,10 @@ Choices only supply conversation text. They never carry tool or approval authori
 typed approval binds to one current proposal here. A revised brief expires the old proposal.
 Ambiguous replies cannot approve a different payload. Starts recheck current project policy. The ledger keeps the callback so reconcile can recover
 an approved start even when its task dies before launch.
+The task registers a separate Start hook before posting the proposal. A committed click or
+addressed typed decision wakes it immediately; the hook carries no approval authority. The task
+reads the ledger again before launching. Twelve five-minute fallback waits bound idle workflow
+events, and reconcile handles approved Starts after the task ends.
 `job_followup` proposes a specific change on a finished job's thread and branch. Start rechecks
 the stored revision, actor, project mapping, worker identity, and current pack restrictions.
 A follow-up gets a new job row and scoped worker credential. `job_close` requests settlement,

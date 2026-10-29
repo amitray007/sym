@@ -1,3 +1,4 @@
+import { resumeHook } from "eve/workflow/api";
 import type { Sql } from "../db.ts";
 import { chooseDisplay } from "../display.ts";
 import { recordFeedback } from "../feedback/feedback.ts";
@@ -24,9 +25,14 @@ import { refOfPrompt } from "../jobs/prompts.ts";
 import type { JobDeps } from "../jobs/run.ts";
 import { deliverNow } from "../jobs/run.ts";
 import { steerJob, stopJob } from "../jobs/steer.ts";
-import { getJobByRef } from "../ledger/jobs.ts";
+import { getJob, getJobByRef } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
-import { decideProposal, type JobProposal, typedProposal } from "../ledger/proposals.ts";
+import {
+  decideProposal,
+  type JobProposal,
+  startWakeToken,
+  typedProposal,
+} from "../ledger/proposals.ts";
 import { slackText } from "../quiet/command.ts";
 import { isSlackUserAllowed } from "./guard.ts";
 
@@ -176,6 +182,12 @@ export async function handleProposal(
       ? `<@${input.by}> chose: Start. I'll start the approved work.`
       : `<@${input.by}> chose: Not now. I'll leave it there.`;
   await editProposal(deps, decision, text);
+  if (decision.kind === "start") {
+    const job = await getJob(deps.sql, decision.jobId);
+    // The committed ledger decision grants authority. The hook only shortens the wait.
+    // A finished or lost task may have no hook; reconcile still recovers accepted Starts.
+    if (job) await resumeHook(startWakeToken(job.requestKey), null).catch(() => {});
+  }
   return {
     kind: "accepted",
     text: decision.status === "approved" ? "Starting the approved work." : "I'll leave it there.",

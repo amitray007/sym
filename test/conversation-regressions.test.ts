@@ -203,6 +203,32 @@ describe.skipIf(!hasDatabase)("conversation recovery regressions", () => {
     expect(s.calls.filter((c) => c.method === "agents.conversations.archive")).toHaveLength(1);
   });
 
+  it("replaces stale archive retry facts in the result after recovery", async () => {
+    const s = await setup("archive-result-retry", true);
+    const ref = `J-${s.job.id}`;
+    await s.sql`update jobs set code_channel = true, slack_thread_ts = null where id = ${s.job.id}`;
+    let failed = false;
+    const slack = {
+      async call(method: string, body: Record<string, unknown>) {
+        if (method === "agents.conversations.archive" && !failed) {
+          failed = true;
+          throw new SlackApiError(method, "internal_error");
+        }
+        return s.slack.call(method, body);
+      },
+    };
+    await closeJob({ ...s.deps, slack }, ref, "U1");
+    const pending = s.calls.filter((call) => call.method === "chat.update").at(-1);
+    expect(pending?.body.text).toContain("couldn't archive");
+    await retryClosures({ ...s.deps, slack });
+    await deliver(s.sql, slack);
+    const recovered = s.calls.filter((call) => call.method === "chat.update").at(-1);
+    expect(recovered?.body.text).toContain(`I've closed ${ref} and archived its channel.`);
+    expect(recovered?.body.text).toContain("done");
+    expect(recovered?.body.text).not.toContain("couldn't archive");
+    expect(JSON.stringify(recovered?.body.blocks)).not.toContain("I'll retry");
+  });
+
   it("preserves result controls and actor notes across choice and Close edits, and expires choices", async () => {
     const s = await setup("choice-controls", true);
     const ref = `J-${s.job.id}`;
