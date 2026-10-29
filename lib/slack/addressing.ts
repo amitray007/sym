@@ -34,6 +34,7 @@ export interface TriageInput {
   people: ThreadPeople;
   // The person Sym last served in this thread.
   partnerId?: string | undefined;
+  jobThread?: boolean;
 }
 
 const MENTION = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/g;
@@ -71,6 +72,7 @@ export function triageThreadMessage(input: TriageInput): Addressing {
   if (mentionedUserIds(input.text).some((id) => id !== input.senderId)) return "skip";
   const others = input.people.ids.filter((id) => id !== input.senderId);
   if (input.people.complete && others.length === 0) return "reply";
+  if (input.jobThread) return "maybe";
   if (input.partnerId && input.partnerId === input.senderId) return "maybe";
   if (namesBot(input.text, input.botName)) return "maybe";
   return "skip";

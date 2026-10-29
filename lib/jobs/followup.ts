@@ -3,13 +3,15 @@ import { chooseDisplay } from "../display.ts";
 import { recordFeedback } from "../feedback/feedback.ts";
 import { getJobByRef, type Job, jobRef, json } from "../ledger/jobs.ts";
 import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
+import { proposalBlocks, propose } from "../ledger/proposals.ts";
 import { archiveCodeChannel, setChannelStatus } from "../slack/code-channel.ts";
 import { workerNoun } from "../worker-label.ts";
 import { Brief } from "./brief.ts";
 import { RESULT_ACTION_IDS } from "./card.ts";
+import { escapeMrkdwn } from "./messages.ts";
 import { presentStart } from "./present.ts";
-import { answeredPrompt, type PromptKind, promptPost } from "./prompts.ts";
-import { deliverNow, endWithoutWorker, type JobDeps, JobSetupError, planLaunch } from "./run.ts";
+import { answeredPrompt, type PromptKind } from "./prompts.ts";
+import { deliverNow, type JobDeps, JobSetupError, planLaunch } from "./run.ts";
 import { cleanSteerText } from "./steer.ts";
 import { workerCallbackInstructions, workerCapabilityEndpoint } from "./worker-capabilities.ts";
 
@@ -80,10 +82,22 @@ export async function startFollowUp(
   if (!clean) return { answer: "Nothing to send. Say what should change." };
 
   const requestKey = `fix:${requestId}`;
-  const [earlier] = await deps.sql<{ id: number }[]>`
-    select id from jobs where request_key = ${requestKey}
+  const [earlier] = await deps.sql<{ id: number; followupSentAt: Date | null }[]>`
+    select id, followup_sent_at from jobs where request_key = ${requestKey}
   `;
-  if (earlier) return { answer: `Already sent as ${jobRef(Number(earlier.id))}.` };
+  if (earlier) {
+    if (earlier.followupSentAt) return { answer: `Already sent as ${jobRef(Number(earlier.id))}.` };
+    const existing = await getJobByRef(deps.sql, jobRef(Number(earlier.id)));
+    const plan = await planLaunch(deps, Brief.parse(parent.brief));
+    if (
+      !existing ||
+      !parent.workerIdentity ||
+      parent.workerIdentity !== deps.workerIdentity ||
+      parent.workerProjectId !== plan.projectId
+    )
+      return { answer: "The worker or project changed. Ask for a new job." };
+    return sendFollowUp(deps, parent, existing, clean, by, requestKey, plan.brief, plan.guardrails);
+  }
   // One job reads a worker thread at a time, so their results do not mix.
   const [busy] = await deps.sql<{ id: number }[]>`
     select id from jobs
@@ -131,23 +145,37 @@ export async function startFollowUp(
     if (same) return { answer: `Already sent as ${jobRef(Number(same.id))}.` };
     return { answer: "Another job just started in this thread. Steer it instead." };
   }
+  return sendFollowUp(deps, parent, job, clean, by, requestKey, plan.brief, plan.guardrails);
+}
+
+async function sendFollowUp(
+  deps: JobDeps,
+  parent: Job,
+  job: Job,
+  clean: string,
+  by: string,
+  requestKey: string,
+  brief: Brief,
+  guardrails?: string[],
+): Promise<FollowUpResult> {
+  const name = jobRef(parent.id);
   const ref = jobRef(job.id);
   try {
     const endpoint = await workerCapabilityEndpoint(deps.sql, parent.id);
     const tools = endpoint ? await workerCallbackInstructions(deps.sql, job.id, endpoint) : "";
     await deps.worker.send(
-      parent.workerThreadId,
-      `${followUpMessage(ref, name, clean, plan.brief, plan.guardrails)}\n\n${tools}`,
+      parent.workerThreadId as string,
+      `${followUpMessage(ref, name, clean, brief, guardrails)}\n\n${tools}`,
       "auto",
       requestKey,
     );
   } catch (error) {
     const reason = `The ${workerNoun()} did not take the follow-up: ${(error as Error).message}`;
-    // Free the request key, so the same box can try again.
-    await deps.sql`update jobs set request_key = ${`${requestKey}:failed:${job.id}`} where id = ${job.id}`;
-    await endWithoutWorker(deps, job, "failed", reason);
-    return { answer: `${ref} could not start. ${reason}`, job };
+    await deps.sql`update jobs set last_summary = 'The follow-up could not be sent yet.', watch_until = now() + interval '1 minute' where id = ${job.id}`;
+    throw new Error(`${ref} could not start. ${reason}`);
   }
+
+  await deps.sql`update jobs set followup_sent_at = now() where id = ${job.id}`;
 
   // A fix is feedback on the parent job: the weekly learn pass groups repeated fixes.
   await recordFeedback(
@@ -175,7 +203,13 @@ export async function startFollowUp(
 // over. It also takes over the parent's pull request watch, so a later wake posts once, under
 // the follow-up.
 async function insertFollowUp(sql: Sql, parent: Job, requestKey: string, brief: Brief) {
-  const [row] = await sql<{ id: number }[]>`
+  return sql.begin(async (transaction) => {
+    const tx = transaction as unknown as Sql;
+    await tx`select id from jobs where id = ${parent.id} for update`;
+    const current = await getJobByRef(tx, jobRef(parent.id));
+    if (!current || current.closedAt || (await laterJob(tx, current)))
+      throw new JobSetupError("This job was closed or continued. Ask for a new proposal.");
+    const [row] = await tx<{ id: number }[]>`
     insert into jobs (
       request_key, session_id, kind, title, owner, slack_channel, slack_thread_ts, code_channel, brief, worker,
       worker_project_id, worker_identity, worker_thread_id, worker_model, cursor, status, started_at, parent_job_id,
@@ -183,15 +217,16 @@ async function insertFollowUp(sql: Sql, parent: Job, requestKey: string, brief: 
     )
     select
       ${requestKey}, session_id, 'code-change', ${brief.title}, owner, slack_channel,
-      slack_thread_ts, code_channel, ${json(sql, brief)}, worker, worker_project_id, worker_identity, worker_thread_id,
+      slack_thread_ts, code_channel, ${json(tx, brief)}, worker, worker_project_id, worker_identity, worker_thread_id,
       worker_model, cursor, 'running', now(), id, pr_url, pr_watched_url, pr_wake_cursor,
       now() + interval '1 minute'
     from jobs where id = ${parent.id}
     returning id
   `;
-  const job = row && (await getJobByRef(sql, jobRef(Number(row.id))));
-  if (!job) throw new Error("insert into jobs returned no row");
-  return job;
+    const job = row && (await getJobByRef(tx, jobRef(Number(row.id))));
+    if (!job) throw new Error("insert into jobs returned no row");
+    return job;
+  });
 }
 
 export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<string> {
@@ -407,7 +442,7 @@ export async function postPrompt(
   deps: JobDeps,
   kind: PromptKind,
   ref: string,
-  by: string,
+  _by: string,
 ): Promise<string | undefined> {
   const job = await getJobByRef(deps.sql, ref);
   if (!job?.slackChannel) return `There is no job ${ref}.`;
@@ -420,21 +455,9 @@ export async function postPrompt(
     const later = await laterJob(deps.sql, job);
     if (later) return `${later} continued this thread. Use its buttons instead.`;
   }
-  const post = promptPost(kind, name);
-  const minute = Math.floor((deps.now?.() ?? new Date()).getTime() / 60_000);
-  await enqueuePost(deps.sql, {
-    idempotencyKey: `${name}:${kind}-prompt:${by}:${minute}`,
-    jobId: job.id,
-    method: "chat.postMessage",
-    payload: {
-      channel: job.slackChannel,
-      ...(job.slackThreadTs ? { thread_ts: job.slackThreadTs } : {}),
-      ...post,
-    },
-    display: promptDisplay(job, true),
-  });
-  await deliverNow(deps);
-  return undefined;
+  return kind === "steer"
+    ? `Reply here with the direction for ${name}. I'll read it in context.`
+    : `Tell me what should change in ${name}. I'll propose the follow-up before starting it.`;
 }
 
 // Replaces a sent text box with what the person wrote and what Sym did with it.
@@ -467,4 +490,59 @@ function promptDisplay(job: Job, isNew: boolean) {
     surface: /^D/.test(job.slackChannel ?? "") ? "dm" : "channel",
     quiet: false,
   });
+}
+
+// A follow-up is a stored proposal. Neither asking for one nor talking about the result sends
+// work to the worker. Current project and worker limits are checked now and again on Start.
+export async function proposeFollowUp(
+  deps: JobDeps,
+  ref: string,
+  change: string,
+  key: string,
+): Promise<FollowUpResult> {
+  const parent = await getJobByRef(deps.sql, ref);
+  if (!parent) return { answer: `There is no job ${ref}.` };
+  if (!FIXABLE.has(parent.status) || parent.closedAt)
+    return { answer: `${jobRef(parent.id)} can't take a follow-up now.` };
+  const later = await laterJob(deps.sql, parent);
+  if (later) return { answer: `${later} continued this thread. Use that job.` };
+  const clean = cleanSteerText(change);
+  if (!clean) return { answer: "What should change?" };
+  let plan: Awaited<ReturnType<typeof planLaunch>>;
+  try {
+    plan = await planLaunch(deps, Brief.parse(parent.brief));
+  } catch (error) {
+    if (error instanceof JobSetupError) return { answer: error.message };
+    throw error;
+  }
+  if (
+    !parent.workerThreadId ||
+    !parent.workerIdentity ||
+    parent.workerIdentity !== deps.workerIdentity ||
+    parent.workerProjectId !== plan.projectId
+  ) {
+    return { answer: `${jobRef(parent.id)}'s worker or project has changed. Ask for a new job.` };
+  }
+  const text = `I'll ${clean.charAt(0).toLowerCase()}${clean.slice(1).replace(/[.!?]+$/, "")} on the same branch. Go?`;
+  const proposal = await propose(deps.sql, {
+    key,
+    job: parent,
+    kind: "followup",
+    payload: { change: clean },
+    message: escapeMrkdwn(text),
+  });
+  await enqueuePost(deps.sql, {
+    idempotencyKey: `proposal:${proposal.id}`,
+    jobId: parent.id,
+    method: "chat.postMessage",
+    payload: {
+      channel: proposal.channel,
+      ...(proposal.threadTs ? { thread_ts: proposal.threadTs } : {}),
+      text: proposal.message,
+      blocks: proposalBlocks(proposal),
+    },
+    display: promptDisplay(parent, true),
+  });
+  await deliverNow(deps);
+  return { answer: "I posted the proposal. Nothing starts until Start.", job: parent };
 }

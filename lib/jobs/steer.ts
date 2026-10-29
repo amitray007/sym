@@ -1,8 +1,8 @@
-import { createHash } from "node:crypto";
 import { getJobByRef, type Job, jobRef, updateJob } from "../ledger/jobs.ts";
 import { workerNoun } from "../worker-label.ts";
-import type { SendMode } from "../workers/types.ts";
-import { cancelJob, type JobDeps } from "./run.ts";
+import type { SendMode, WorkerAnswers } from "../workers/types.ts";
+import { answerQuestion, cancelJob, type JobDeps } from "./run.ts";
+import { shortHash } from "./worker-calls.ts";
 
 // Steering and stopping from the job thread (docs/architecture.md, flow 5). The text comes from
 // a person in Slack, so it is data: Sym cleans and caps it before the worker sees it.
@@ -26,7 +26,7 @@ export function cleanSteerText(text: string): string {
 // it.
 export function steerRequestId(ref: string, text: string, callId?: string): string {
   const key = callId ?? text;
-  return `steer-${ref}-${createHash("sha256").update(key).digest("hex").slice(0, 12)}`;
+  return `steer-${ref}-${shortHash(key)}`;
 }
 
 type Found = { job: Job } | { answer: string };
@@ -46,6 +46,7 @@ export async function steerJob(
   text: string,
   mode: SendMode = "steer",
   callId?: string,
+  answer?: { requestId?: string | undefined; answers?: WorkerAnswers | undefined },
 ): Promise<string> {
   const found = await findActive(deps, ref);
   if ("answer" in found) return found.answer;
@@ -53,6 +54,27 @@ export async function steerJob(
   const name = jobRef(job.id);
   const clean = cleanSteerText(text);
   if (!clean) return "Nothing to send. Say what should change.";
+  if (job.status === "waiting_input" || answer?.requestId || answer?.answers) {
+    const pending = await deps.worker.pendingQuestions(job.workerThreadId as string);
+    const question = answer?.requestId
+      ? pending.find((q) => q.requestId === answer.requestId)
+      : pending.length === 1
+        ? pending[0]
+        : undefined;
+    if (!question)
+      return `I couldn't match that to one pending question for ${name}. Ask me which question is waiting.`;
+    const answers =
+      answer?.answers ??
+      (question.questions.length === 1 && question.questions[0]
+        ? { [question.questions[0].id]: clean }
+        : undefined);
+    if (!answers)
+      return `There are several parts to ${name}'s question. Which answers should I send?`;
+    const sent = await answerQuestion(deps, job.id, question.requestId, answers);
+    return sent
+      ? `I passed your answer to ${name}'s ${workerNoun()}.`
+      : `That question for ${name} is no longer waiting.`;
+  }
   await deps.worker.send(
     job.workerThreadId as string,
     `Direction from the person in the Slack thread: ${clean}`,

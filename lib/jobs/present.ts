@@ -5,6 +5,7 @@ import { recordOutcome } from "../learning/trust.ts";
 import { choiceBlocks, storeChoices } from "../ledger/choices.ts";
 import { type Job, type JobStatus, jobRef, setJobCard, updateJob } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
+import { proposalBlocks, propose } from "../ledger/proposals.ts";
 import type { Pack } from "../pack/load.ts";
 import { resolvePackProject } from "../pack/policy.ts";
 import { isQuiet } from "../quiet/quiet.ts";
@@ -18,7 +19,7 @@ import {
   writtenPost,
 } from "./blocks.ts";
 import { Brief } from "./brief.ts";
-import { BRIEF_ACTION_ID, jobButton, renderCollapsedCard, renderJobCard } from "./card.ts";
+import { renderCollapsedCard, renderJobCard } from "./card.ts";
 import type { OutputContract } from "./contract.ts";
 import { briefPrompt, type JobFacts, permissionBlockMessage, quietNotice } from "./messages.ts";
 import type { ProgressEvent } from "./progress.ts";
@@ -67,6 +68,15 @@ export async function presentBrief(
     surface: surfaceOf(job.slackChannel),
     quiet: false,
   });
+  const proposal = playbook?.trusted
+    ? undefined
+    : await propose(sql, {
+        key: `${ref}:start`,
+        job,
+        kind: "start",
+        payload: job.brief,
+        message: text,
+      });
   await enqueuePost(sql, {
     idempotencyKey: `${ref}:brief`,
     jobId: job.id,
@@ -74,16 +84,10 @@ export async function presentBrief(
     payload: {
       ...target(job),
       text,
-      blocks: [
-        { type: "section", text: { type: "mrkdwn", text: clipText(text, SECTION_MAX) } },
-        {
-          type: "actions",
-          block_id: `job-${ref}-brief`,
-          elements: [jobButton(BRIEF_ACTION_ID, "Full brief", ref)],
-        },
-      ],
+      blocks: proposal
+        ? proposalBlocks(proposal)
+        : [{ type: "section", text: { type: "mrkdwn", text: clipText(text, SECTION_MAX) } }],
     },
-    // The Start buttons are Eve's prompt below this message, so the brief stays in the thread.
     display: { ...display, target: "thread" },
   });
 }

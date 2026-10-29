@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { Sql } from "../lib/db.ts";
 import { deliver } from "../lib/delivery/deliver.ts";
 import type { Brief } from "../lib/jobs/brief.ts";
-import { closeJob, retryClosures } from "../lib/jobs/followup.ts";
+import { closeJob, retryClosures, startFollowUp } from "../lib/jobs/followup.ts";
 import { jobsToWatch } from "../lib/jobs/pr-wakes.ts";
-import { promptPost, refOfPrompt } from "../lib/jobs/prompts.ts";
+import { refOfPrompt } from "../lib/jobs/prompts.ts";
 import { reconcileJobs } from "../lib/jobs/reconcile.ts";
 import { checkJob, type JobDeps, launchOrAdopt, startJob } from "../lib/jobs/run.ts";
 import { getJob, type Job } from "../lib/ledger/jobs.ts";
@@ -41,17 +41,6 @@ const CHANNEL = "C1";
 
 describe("prompt blocks", () => {
   it("put the job reference in the block ID and send on Enter", () => {
-    const post = promptPost("fix", "J-7");
-    expect(post.blocks[0]).toMatchObject({
-      type: "input",
-      block_id: "fix-J-7",
-      dispatch_action: true,
-      element: {
-        type: "plain_text_input",
-        action_id: "sym_job_fix_text",
-        dispatch_action_config: { trigger_actions_on: ["on_enter_pressed"] },
-      },
-    });
     expect(refOfPrompt("fix", "fix-J-7")).toBe("J-7");
     expect(refOfPrompt("steer", "fix-J-7")).toBeUndefined();
     expect(refOfPrompt("fix", "fix-J-7-x")).toBeUndefined();
@@ -97,6 +86,16 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
 
   const click = (deps: JobDeps, action: Partial<JobAction> & { actionId: string }) => {
     const replies: string[] = [];
+    if (action.actionId === "sym_job_fix_text") {
+      const ref = action.blockId?.replace(/^fix-/, "") ?? "";
+      return startFollowUp(
+        deps,
+        ref,
+        action.value ?? "",
+        "U1",
+        `${CHANNEL}:${action.messageTs}`,
+      ).then((result) => ({ answer: result.answer, replies }));
+    }
     return handleJobAction(deps, { user: { id: "U1" }, ...action }, CHANNEL, async (text) => {
       replies.push(text);
     }).then((answer) => ({ answer, replies }));
@@ -115,7 +114,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     const ref = `J-${job.id}`;
     const first = await click(deps, { actionId: "sym_job_ok", value: ref, messageTs: "1.1" });
     await click(deps, { actionId: "sym_job_ok", value: ref, messageTs: "1.1" });
-    expect(first.replies).toEqual([`Noted: ${ref} looks good.`]);
+    expect(first.replies).toEqual([`Thanks, I recorded your feedback on ${ref}.`]);
     const rows = await sql`select kind, value from feedback where job_id = ${job.id}`;
     expect(rows).toEqual([{ kind: "thumbs_up", value: "looks_good" }]);
   });
@@ -128,8 +127,8 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     await sql`update jobs set brief = brief || '{"goal": "Retry 5xx & 429."}' where id = ${job.id}`;
     const shown = await click(deps, { actionId: "sym_job_brief", value: ref });
     expect(shown.replies).toHaveLength(1);
-    expect(shown.replies[0]).toContain("*goal* Retry 5xx &amp; 429.");
-    expect(shown.replies[0]).toContain("*done when*\n☐ Tests pass");
+    expect(shown.replies[0]).toContain(`${ref}: Retry 5xx &amp; 429.`);
+    expect(shown.replies[0]).toContain("I'll check: Tests pass.");
 
     const elsewhere = await handleJobAction(
       deps,
@@ -152,7 +151,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
 
     await click(deps, { actionId: "sym_job_fix", value: ref });
     const [prompt] = await outbox(sql, `${ref}:fix-prompt:U1:`);
-    expect(JSON.stringify(prompt?.payload)).toContain(`"block_id":"fix-${ref}"`);
+    expect(prompt).toBeUndefined();
 
     const sent = await click(deps, {
       actionId: "sym_job_fix_text",
@@ -179,9 +178,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     expect(await sql`select kind, value from feedback where job_id = ${job.id}`).toEqual([
       { kind: "fix", value: "Also cover the empty list." },
     ]);
-    // The text box becomes the person's words, and the parent's result loses its buttons.
-    const [answered] = await outbox(sql, `prompt-answer:${CHANNEL}:1700000099.1`);
-    expect(answered?.method).toBe("chat.update");
+    // A follow-up records the continuation on the parent's result.
     const [edit] = await outbox(sql, `${ref}:end-edit:`);
     expect(JSON.stringify(edit?.payload)).not.toContain("sym_job_fix");
     expect(JSON.stringify(edit?.payload)).toContain(`Fix sent as ${childRef}`);
@@ -208,7 +205,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     expect(done?.status).toBe("done");
     expect(done?.lastMessage).toContain("Fixed the edge case");
     const [end] = await outbox(sql, `${childRef}:end`);
-    expect(JSON.stringify(end?.payload)).toContain("sym_job_fix");
+    expect(JSON.stringify(end?.payload)).not.toContain("sym_job_fix");
 
     // The parent's thread now belongs to the follow-up: no second Fix or Close on the parent.
     const fixParent = await click(deps, { actionId: "sym_job_fix", value: ref });
@@ -499,9 +496,9 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     const ref = `J-${job.id}`;
 
     const box = await click(deps, { actionId: "sym_job_steer", value: ref });
-    expect(box.replies).toEqual([]);
+    expect(box.replies[0]).toContain("Reply here with the direction");
     const [prompt] = await outbox(sql, `${ref}:steer-prompt:U1:`);
-    expect(JSON.stringify(prompt?.payload)).toContain("sym_job_steer_text");
+    expect(prompt).toBeUndefined();
 
     const steered = await click(deps, {
       actionId: "sym_job_steer_text",

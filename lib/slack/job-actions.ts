@@ -1,3 +1,5 @@
+import type { Sql } from "../db.ts";
+import { chooseDisplay } from "../display.ts";
 import { recordFeedback } from "../feedback/feedback.ts";
 import { Brief } from "../jobs/brief.ts";
 import {
@@ -10,13 +12,23 @@ import {
   STEER_TEXT_ACTION_ID,
   STOP_ACTION_ID,
 } from "../jobs/card.ts";
-import { answerPrompt, closeJob, postPrompt, startFollowUp } from "../jobs/followup.ts";
+import {
+  answerPrompt,
+  closeJob,
+  postPrompt,
+  proposeFollowUp,
+  startFollowUp,
+} from "../jobs/followup.ts";
 import { fullBrief } from "../jobs/messages.ts";
 import { refOfPrompt } from "../jobs/prompts.ts";
 import type { JobDeps } from "../jobs/run.ts";
+import { deliverNow } from "../jobs/run.ts";
 import { steerJob, stopJob } from "../jobs/steer.ts";
 import { getJobByRef } from "../ledger/jobs.ts";
+import { enqueuePost } from "../ledger/outbox.ts";
+import { decideProposal, type JobProposal, typedProposal } from "../ledger/proposals.ts";
 import { slackText } from "../quiet/command.ts";
+import { isSlackUserAllowed } from "./guard.ts";
 
 // The job buttons and text boxes in Slack (decisions 056, 060, and 005): Full brief on the brief,
 // Steer and Stop on the live card, Looks good, Fix, and Close on the result, and the Steer and Fix text boxes. The channel
@@ -69,7 +81,7 @@ export async function handleJobAction(
     const outcome =
       kind === "steer"
         ? await steerJob(deps, ref, text, "steer", `box:${channel}:${action.messageTs}`)
-        : (await startFollowUp(deps, ref, text, by, `${channel}:${action.messageTs}`)).answer;
+        : (await proposeFollowUp(deps, ref, text, `legacy:${channel}:${action.messageTs}`)).answer;
     await answerPrompt(deps, job, { channel, ts: action.messageTs }, by, text, outcome);
     return slackText(outcome);
   }
@@ -113,9 +125,141 @@ export async function handleJobAction(
         channel,
         messageTs: action.messageTs ?? null,
       });
-      return say(`Noted: ${ref} looks good.`);
+      return say(`Thanks, I recorded your feedback on ${ref}.`);
     }
     default:
       return undefined;
   }
+}
+
+export async function handleProposal(
+  deps: JobDeps,
+  input: {
+    id: string;
+    by: string;
+    channel: string;
+    threadTs: string | null;
+    messageTs?: string;
+    start: boolean;
+  },
+  allowed: (user: string) => boolean,
+): Promise<string> {
+  if (!allowed(input.by) || !/^[1-9][0-9]*$/.test(input.id))
+    return "I couldn't approve that request.";
+  const decision = await deps.sql.begin(async (transaction) => {
+    const sql = transaction as unknown as Sql;
+    const [row] = await sql<
+      JobProposal[]
+    >`select * from job_proposals where id = ${input.id}::bigint for update`;
+    if (
+      !row ||
+      row.channel !== input.channel ||
+      row.threadTs !== input.threadTs ||
+      (input.messageTs && row.messageTs !== input.messageTs) ||
+      !allowed(input.by)
+    )
+      return undefined;
+    return decideProposal(sql, input.id, input.by, input.start);
+  });
+  if (!decision || decision.status === "expired")
+    return "That proposal is no longer current. Ask me for a new one.";
+  if (decision.status === "approved" && decision.kind === "followup") {
+    return executeFollowupProposal(deps, decision);
+  }
+  const text =
+    decision.status === "approved"
+      ? `<@${input.by}> chose: Start. I'll start the approved work.`
+      : `<@${input.by}> chose: Not now. I'll leave it there.`;
+  await editProposal(deps, decision, text);
+  return decision.status === "approved" ? "Starting the approved work." : "I'll leave it there.";
+}
+
+export async function handleTypedProposal(
+  deps: JobDeps,
+  input: {
+    text: string;
+    by: string;
+    channel: string;
+    threadTs: string | null;
+  },
+  allowed: (user: string) => boolean,
+): Promise<string | undefined> {
+  const text = input.text
+    .trim()
+    .replace(/[.!]+$/, "")
+    .toLowerCase();
+  const start = /^(start|yes|yes please|go|go ahead|do it)$/.test(text);
+  const dismiss = /^(not now|no|cancel|never mind)$/.test(text);
+  if (!start && !dismiss) return undefined;
+  const proposal = await typedProposal(deps.sql, input.channel, input.threadTs);
+  if (!proposal) return undefined;
+  if (proposal === "ambiguous")
+    return "There are several proposals here. Tell me which job you mean.";
+  return handleProposal(
+    deps,
+    { id: proposal.id, by: input.by, channel: input.channel, threadTs: input.threadTs, start },
+    allowed,
+  );
+}
+
+async function executeFollowupProposal(deps: JobDeps, proposal: JobProposal): Promise<string> {
+  const payload = proposal.payload as { change?: unknown };
+  if (typeof payload.change !== "string" || !proposal.decidedBy)
+    return "I couldn't read that follow-up. Ask me for a new proposal.";
+  const result = await startFollowUp(
+    deps,
+    `J-${proposal.jobId}`,
+    payload.change,
+    proposal.decidedBy,
+    `proposal:${proposal.id}`,
+  );
+  await deps.sql`update job_proposals set executed_at = now() where id = ${proposal.id}::bigint`;
+  await editProposal(deps, proposal, `<@${proposal.decidedBy}> chose: Start. ${result.answer}`);
+  return result.answer;
+}
+
+export async function retryFollowupProposals(deps: JobDeps): Promise<void> {
+  const rows = await deps.sql<JobProposal[]>`select * from job_proposals where kind = 'followup'
+    and status = 'approved' and executed_at is null order by id limit 20`;
+  for (const row of rows) {
+    if (
+      !row.decidedBy ||
+      !isSlackUserAllowed(deps.pack, process.env.SYM_SLACK_USERS, row.decidedBy)
+    ) {
+      await deps.sql`update job_proposals set status = 'expired', executed_at = now() where id = ${row.id}::bigint`;
+      continue;
+    }
+    await executeFollowupProposal(deps, {
+      ...row,
+      id: String(row.id),
+      jobId: Number(row.jobId),
+    }).catch(() => undefined);
+  }
+}
+
+async function editProposal(deps: JobDeps, proposal: JobProposal, outcome: string): Promise<void> {
+  if (!proposal.messageTs) return;
+  const text = `${proposal.message}\n\n${outcome}`;
+  await enqueuePost(deps.sql, {
+    idempotencyKey: `proposal:${proposal.id}:decided`,
+    jobId: proposal.jobId,
+    method: "chat.update",
+    payload: {
+      channel: proposal.channel,
+      ts: proposal.messageTs,
+      text,
+      blocks: [{ type: "markdown", text }],
+    },
+    display: chooseDisplay({
+      kind: "conversation",
+      needsAction: false,
+      isNew: true,
+      estMinutes: 0,
+      steps: 0,
+      lines: 1,
+      surface: "channel",
+      quiet: false,
+    }),
+  });
+  await deliverNow(deps);
 }

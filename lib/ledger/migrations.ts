@@ -239,4 +239,35 @@ export const migrations: Migration[] = [
     `,
   },
   { version: "027_job_skipping", sql: "alter table jobs add column skipping text;" },
+  {
+    version: "028_conversational_job_gates",
+    sql: `
+      alter table jobs add column followup_sent_at timestamptz;
+      alter table conversation_choices add column message_ts text;
+      alter table conversation_choices add column dispatched_at timestamptz;
+      create table job_proposals (
+        id bigint generated always as identity primary key,
+        request_key text not null unique,
+        job_id bigint not null references jobs(id),
+        kind text not null check (kind in ('start', 'followup')),
+        payload jsonb not null,
+        revision int not null,
+        channel text not null,
+        thread_ts text,
+        message text not null,
+        message_ts text,
+        status text not null default 'pending' check (status in ('pending', 'approved', 'dismissed', 'expired')),
+        decided_by text,
+        executed_at timestamptz,
+        expires_at timestamptz not null default now() + interval '1 day',
+        created_at timestamptz not null default now()
+      );
+      create unique index job_proposal_pending on job_proposals(job_id) where status = 'pending';
+      create table job_questions (
+        job_id bigint not null references jobs(id), request_id text not null,
+        question jsonb not null, answered_at timestamptz,
+        primary key (job_id, request_id)
+      );
+    `,
+  },
 ];

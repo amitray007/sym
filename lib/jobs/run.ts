@@ -49,6 +49,7 @@ import {
   SCHEDULED_CHECK,
 } from "./present.ts";
 import { detectEvents } from "./progress.ts";
+import { presentQuestions } from "./questions.ts";
 import { type ModelCheck, VerifierOutput, verifierMessage } from "./verify.ts";
 import { workerCallbackInstructions } from "./worker-capabilities.ts";
 import { WriterOutput, writerMessage } from "./writer.ts";
@@ -271,9 +272,7 @@ export async function checkJob(
   const activity = await readNewActivity(deps.worker, job.workerThreadId, job.cursor);
   // A waiting worker asks a question or waits on a permission prompt. Only questions are listed.
   const questions =
-    activity.status === "waiting"
-      ? await deps.worker.pendingQuestions(job.workerThreadId).catch(() => [])
-      : [];
+    activity.status === "waiting" ? await deps.worker.pendingQuestions(job.workerThreadId) : [];
   const worked = toJobStatus(activity.status, questions.length > 0, job.status);
   const hold = (options.verify === true || options.write === true) && job.kind !== SCHEDULED_CHECK;
   const status: JobStatus = worked === "done" && hold ? "checking" : worked;
@@ -339,6 +338,7 @@ export async function checkJob(
     at,
     deps.pack,
   );
+  await presentQuestions(deps, updated, questions);
   if (TERMINAL.includes(updated.status)) {
     await presentEnd(deps.sql, updated, parseOutputContract(updated.lastMessage), at, deps.pack);
   } else {
@@ -464,16 +464,35 @@ export async function answerQuestion(
   jobId: number,
   requestId: string,
   answers: WorkerAnswers,
-): Promise<void> {
-  const job = await mustGetJob(deps.sql, jobId);
-  if (!job.workerThreadId) throw new Error(`${jobRef(job.id)} has no worker thread`);
-  // T3 has no retry key for an answer. A re-run step finds the question gone and stops.
-  const pending = await deps.worker.pendingQuestions(job.workerThreadId);
-  if (!pending.some((question) => question.requestId === requestId)) return;
-  await deps.worker.answer(job.workerThreadId, requestId, answers);
-  await updateJob(deps.sql, job.id, {
-    status: "running",
-    lastSummary: `Answer sent to the ${workerNoun()}`,
+): Promise<boolean> {
+  return deps.sql.begin(async (transaction) => {
+    const sql = transaction as unknown as Sql;
+    await sql`select id from jobs where id = ${jobId} for update`;
+    const job = await mustGetJob(sql, jobId);
+    if (!job.workerThreadId || TERMINAL.includes(job.status) || job.status === "checking")
+      return false;
+    const pending = await deps.worker.pendingQuestions(job.workerThreadId);
+    const question = pending.find((question) => question.requestId === requestId);
+    if (!question) return false;
+    const ids = question.questions.map((part) => part.id);
+    if (
+      ids.length !== Object.keys(answers).length ||
+      ids.some((id) => {
+        const value = answers[id];
+        return Array.isArray(value)
+          ? value.length === 0 || value.some((v) => !v.trim())
+          : !value?.trim();
+      })
+    ) {
+      throw new Error("Please answer each part of the worker's question.");
+    }
+    await deps.worker.answer(job.workerThreadId, requestId, answers);
+    await sql`update job_questions set answered_at = now() where job_id = ${jobId} and request_id = ${requestId}`;
+    await updateJob(sql, jobId, {
+      status: "running",
+      lastSummary: `I passed your answer to the ${workerNoun()}.`,
+    });
+    return true;
   });
 }
 

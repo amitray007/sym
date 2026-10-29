@@ -1,4 +1,5 @@
 import type { Sql } from "../db.ts";
+import { CHOICE_ACTION_ID } from "../ledger/choices.ts";
 import { getJob, jobsWithStaleCards, markCardSent, type SlackCard } from "../ledger/jobs.ts";
 import {
   claimPosts,
@@ -7,6 +8,7 @@ import {
   markPostSent,
   type OutboxPost,
 } from "../ledger/outbox.ts";
+import { DISMISS_ACTION_ID, START_ACTION_ID } from "../ledger/proposals.ts";
 import { type SlackApi, SlackApiError } from "../slack/api.ts";
 
 // Sends Sym's own Slack posts from the outbox and brings job cards up to date (docs/slack.md).
@@ -79,6 +81,24 @@ async function sendPost(sql: Sql, slack: SlackApi, post: OutboxPost): Promise<vo
   const ts = typeof response.ts === "string" ? response.ts : (payload.ts as string | undefined);
   if (!ts) throw new Error(`Slack ${post.method} returned no ts`);
 
+  for (const block of (Array.isArray(payload.blocks) ? payload.blocks : []) as {
+    elements?: { action_id?: string; value?: string }[];
+  }[]) {
+    for (const action of block.elements ?? []) {
+      if (
+        action.action_id?.startsWith(`${CHOICE_ACTION_ID}_`) &&
+        /^\d+:[0-2]$/.test(action.value ?? "")
+      ) {
+        await sql`update conversation_choices set message_ts = coalesce(message_ts, ${ts}) where id = ${(action.value ?? "").split(":")[0] ?? "0"}::bigint`;
+      }
+      if (
+        [START_ACTION_ID, DISMISS_ACTION_ID].includes(action.action_id ?? "") &&
+        /^\d+$/.test(action.value ?? "")
+      ) {
+        await sql`update job_proposals set message_ts = coalesce(message_ts, ${ts}) where id = ${action.value ?? "0"}::bigint`;
+      }
+    }
+  }
   if (post.purpose === "card" && post.jobId !== null) {
     // One statement: the post is sent and the job knows the card's ts and version.
     await markCardPostSent(

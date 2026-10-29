@@ -7,11 +7,9 @@ import { callbackFor } from "../../lib/jobs/callback.ts";
 import { parseOutputContract } from "../../lib/jobs/contract.ts";
 import { resultConcerns } from "../../lib/jobs/present.ts";
 import {
-  answerQuestion,
   cancelJob,
   checkJob,
   closeUnlaunched,
-  deliverNow,
   failJob,
   finishJob,
   launchOrAdopt,
@@ -29,6 +27,7 @@ import { sessionInstructions } from "../../lib/learning/format.ts";
 import { approvedForSession } from "../../lib/learning/rows.ts";
 import { linkPlaybook, markAutoStarted, trustedPlaybookOf } from "../../lib/learning/trust.ts";
 import { getJob, jobRef } from "../../lib/ledger/jobs.ts";
+import { proposalStatus } from "../../lib/ledger/proposals.ts";
 import { slackUserOfPrincipal } from "../../lib/owner.ts";
 import { personaInstructions } from "../../lib/persona.ts";
 import { storedPersonaOrNone } from "../../lib/persona-setting.ts";
@@ -45,13 +44,11 @@ import {
 } from "../../lib/schedules/rows.ts";
 import {
   moveToCodeChannel,
-  pointToQuestion,
   type SessionStatus,
   setChannelStatus,
   setContextBar,
 } from "../../lib/slack/code-channel.ts";
 import { workerLabel, workerNoun } from "../../lib/worker-label.ts";
-import type { WorkerAnswers, WorkerQuestion } from "../../lib/workers/types.ts";
 
 // One worker job from brief to result (docs/architecture.md, flows 1 and 3, decision 017). It
 // runs as a task, so the conversation stays open while the worker runs. The owner starts each
@@ -71,12 +68,6 @@ const WRITER_SECONDS = 120;
 // With the writer after it, both stay under the watch lease (see jobTiming). Local end-to-end
 // runs can change it with SYM_VERIFIER_TIMEOUT_SECONDS.
 const VERIFIER_SECONDS = 300;
-
-const START_OPTIONS = [
-  { id: "start", label: "Start", style: "primary" as const },
-  { id: "edit", label: "Edit" },
-  { id: "cancel", label: "Cancel", style: "danger" as const },
-];
 
 // Sym posts each result in the job thread itself, so a lost session cannot lose it (decision
 // 044). The result gives the brain no summary to repeat, only `posted: true`: when the result
@@ -146,49 +137,9 @@ export default defineWorkflowTool({
           preApproved ? "Starting scheduled run" : trusted ? "Starting" : "Waiting for Start",
         ),
       };
-      const decision =
-        preApproved || trusted
-          ? ({ status: "answered", optionId: "start" } as const)
-          : await Promise.race([
-              ctx.ask({
-                prompt: `Start ${ref}: ${brief.title}? The Full brief button is above.`,
-                display: "confirmation",
-                options: START_OPTIONS,
-              }),
-              stopped,
-            ]);
-      if (decision === "stopped") {
-        await closeBeforeStart(job.id, "Cancelled before start");
-        return { job: ref, status: "cancelled" };
-      }
-      if (decision.status === "unavailable") {
-        // A session without a person, such as a schedule, cannot approve. Fail closed.
-        await closeBeforeStart(job.id, "No one could approve the brief");
-        await endRun(ctx.session.id, job.id, "cancelled", null);
-        return { job: ref, status: "not_started", reason: "This session cannot ask for approval." };
-      }
-      if (decision.status !== "answered" || decision.optionId === "cancel") {
-        await closeBeforeStart(job.id, "Cancelled before start");
-        return { job: ref, status: "cancelled" };
-      }
-      if (decision.optionId === "edit") {
-        const edits = await Promise.race([
-          ctx.ask({ prompt: `What should change in ${ref}?`, display: "text" }),
-          stopped,
-        ]);
-        await closeBeforeStart(job.id, "Brief edited");
-        if (edits === "stopped" || edits.status !== "answered") {
-          return { job: ref, status: "cancelled" };
-        }
-        return {
-          job: ref,
-          status: "edit_requested",
-          edits: edits.text ?? edits.optionId ?? "",
-          next: "Rewrite the brief with these edits and call worker_job again.",
-        };
-      }
-      if (decision.optionId !== "start") {
-        await closeBeforeStart(job.id, "Cancelled before start");
+      const decision = preApproved || trusted ? "approved" : await waitForStart(job.id, stopped);
+      if (decision !== "approved") {
+        await closeBeforeStart(job.id, "Not started");
         return { job: ref, status: "cancelled" };
       }
 
@@ -251,17 +202,6 @@ export default defineWorkflowTool({
           };
         }
 
-        if (inChannel && result.questions.length > 0) await channelStatus(job.id, "suspended");
-        for (const question of result.questions) {
-          if (inChannel) await linkQuestion(job.id, question);
-          const answers = await askQuestion(ctx.ask, ref, question, stopped);
-          if (answers === "stopped") {
-            await cancel(job.id);
-            if (inChannel) await channelStatus(job.id, "active");
-            return { job: ref, status: "cancelled", threadId, ...POSTED };
-          }
-          if (answers) await answer(job.id, question.requestId, answers);
-        }
         // Eve sets the channel's status for each brain turn there, so the job sets its own again
         // after every check.
         if (inChannel && !result.terminal) await channelStatus(job.id, "processing");
@@ -289,8 +229,6 @@ export default defineWorkflowTool({
     }
   },
 });
-
-type Ask = WorkflowToolContext["ask"];
 
 // Runs the `verifier` subagent in the workflow body: `ctx.agent` is not available in a step. A
 // failure, a malformed reply, or a timeout gives an unavailable check, so the result still posts.
@@ -366,34 +304,19 @@ function unavailable(reason: string): ModelCheck {
   return { status: "unavailable", reason };
 }
 
-// Asks each part of a worker question as Slack buttons, with free text for other answers.
-// Returns nothing when a person dismissed a part, so the worker keeps waiting for the owner.
-async function askQuestion(
-  ask: Ask,
-  ref: string,
-  question: WorkerQuestion,
-  stopped: Promise<"stopped">,
-): Promise<WorkerAnswers | "stopped" | undefined> {
-  const answers: WorkerAnswers = {};
-  for (const part of question.questions) {
-    const reply = await Promise.race([
-      ask({
-        prompt: `${ref} asks: ${part.header ? `${part.header}: ` : ""}${part.prompt}`,
-        display: part.options.length > 0 ? "select" : "text",
-        options: part.options.map((option) => ({
-          id: option.label,
-          label: option.label,
-          ...(option.description ? { description: option.description } : {}),
-        })),
-        allowFreeform: true,
-      }),
-      stopped,
-    ]);
-    if (reply === "stopped") return "stopped";
-    if (reply.status !== "answered") return undefined;
-    answers[part.id] = reply.optionId ?? reply.text ?? "";
+async function waitForStart(jobId: number, stopped: Promise<"stopped">): Promise<string> {
+  for (;;) {
+    const status = await startDecision(jobId);
+    if (!status) return "unavailable";
+    if (status !== "pending") return status;
+    if ((await Promise.race([sleep(1000).then(() => "wait" as const), stopped])) === "stopped")
+      return "dismissed";
   }
-  return answers;
+}
+
+async function startDecision(jobId: number) {
+  "use step";
+  return proposalStatus(ledger(), jobId);
 }
 
 // Read in a step, so a replay of the body sees the same values.
@@ -525,15 +448,6 @@ async function toCodeChannel(jobId: number): Promise<boolean> {
   return job ? (await moveToCodeChannel(deps, job)).codeChannel : false;
 }
 
-async function linkQuestion(jobId: number, question: WorkerQuestion) {
-  "use step";
-  const deps = ledgerDeps();
-  const job = await getJob(deps.sql, jobId);
-  if (!job?.codeChannel) return;
-  await pointToQuestion(deps, job, question.requestId, question.questions[0]?.prompt ?? "");
-  await deliverNow(deps);
-}
-
 // The code channel's status follows the job; at the end the context bar gains the pull request.
 async function channelStatus(jobId: number, status: SessionStatus) {
   "use step";
@@ -547,11 +461,6 @@ async function channelStatus(jobId: number, status: SessionStatus) {
 async function finish(jobId: number, verdict: ModelCheck | undefined, written?: WriterOutput) {
   "use step";
   return finishJob(ledgerDeps(), jobId, verdict, written);
-}
-
-async function answer(jobId: number, requestId: string, answers: WorkerAnswers) {
-  "use step";
-  await withJobDeps((deps) => answerQuestion(deps, jobId, requestId, answers));
 }
 
 async function cancel(jobId: number) {

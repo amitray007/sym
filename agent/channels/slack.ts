@@ -10,6 +10,7 @@ import {
   type SlackRenderHandler,
   slackChannel,
 } from "eve/channels/slack";
+import { takeChoice } from "../../lib/delivery/choices.ts";
 import {
   FEEDBACK_ACTION_ID,
   feedbackBlocks,
@@ -20,10 +21,15 @@ import {
   recordFeedback,
 } from "../../lib/feedback/feedback.ts";
 import { publishLiveHome } from "../../lib/home/live.ts";
+import { Brief } from "../../lib/jobs/brief.ts";
+import { fullBrief } from "../../lib/jobs/messages.ts";
+import { pendingQuestionContext } from "../../lib/jobs/questions.ts";
 import { jobListAnswer } from "../../lib/jobs/status.ts";
-import { jobRef, recentJobs } from "../../lib/ledger/jobs.ts";
+import { CHOICE_ACTION_ID } from "../../lib/ledger/choices.ts";
+import { getJob, type Job, jobRef, recentJobs } from "../../lib/ledger/jobs.ts";
 import { getListenMode } from "../../lib/ledger/listen.ts";
 import { sentPostTimestamps } from "../../lib/ledger/outbox.ts";
+import { DISMISS_ACTION_ID, START_ACTION_ID } from "../../lib/ledger/proposals.ts";
 import { lastTurnUser, recordSessionThread } from "../../lib/ledger/threads.ts";
 import { isApprovalAction, mayDecideAsOwner, ownerUserId } from "../../lib/owner.ts";
 import { loadingMessages } from "../../lib/persona.ts";
@@ -47,7 +53,12 @@ import {
   setChannelStatus,
 } from "../../lib/slack/code-channel.ts";
 import { isSlackUserAllowed, sayPrivately } from "../../lib/slack/guard.ts";
-import { handleJobAction, JOB_ACTION_IDS } from "../../lib/slack/job-actions.ts";
+import {
+  handleJobAction,
+  handleProposal,
+  handleTypedProposal,
+  JOB_ACTION_IDS,
+} from "../../lib/slack/job-actions.ts";
 import {
   MAYBE_NOTE,
   nameOf,
@@ -444,16 +455,59 @@ async function codeChannelNote(channelId: string): Promise<string | undefined> {
   try {
     const job = await jobOfCodeChannel(ledger(), channelId);
     if (!job) return undefined;
-    const ref = jobRef(job.id);
-    return (
-      `This Slack code channel belongs to worker job ${ref} ("${job.title}"), now ${job.status}. ` +
-      `Messages here are about ${ref}: use ${ref} with the job tools, and steer it instead of ` +
-      "starting a new job unless the person asks for separate work."
-    );
+    return jobConversationNote(job);
   } catch (error) {
     console.warn("Sym could not read the job of a code channel.", String(error));
     return undefined;
   }
+}
+
+async function jobConversationNote(job: Job): Promise<string> {
+  const ref = jobRef(job.id);
+  const questions = await pendingQuestionContext({ sql: ledger() }, job.id);
+  return [
+    `This conversation is about ${ref} (${JSON.stringify(job.title)}), now ${job.status}. Read each message in context. Choose chat, job_steer for explicit direction or a pending answer, job_followup to propose more work after completion, job_stop for an explicit stop request, job_close when the person is done, or no_reply for side talk. Do not turn every reply into steering. Follow-ups always need a stored Start approval.`,
+    `Stored job scope (details on request): ${fullBrief(Brief.parse(job.brief), ref)}`,
+    questions,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function threadJobNote(channel: string, thread: string): Promise<string | undefined> {
+  const id = await jobIdOfThread(ledger(), channel, thread);
+  const job = id ? await getJob(ledger(), id) : undefined;
+  return job ? jobConversationNote(job) : undefined;
+}
+
+async function typedDecision(
+  ctx: SlackInboundMessageContext,
+  message: SlackMessage,
+): Promise<boolean> {
+  const by = message.author?.userId;
+  if (!by) return false;
+  // Most conversation messages need no worker connection or database query for approvals.
+  if (
+    !/^(start|yes(?: please)?|go(?: ahead)?|do it|not now|no|cancel|never mind)[.!]*$/i.test(
+      message.text.trim(),
+    )
+  )
+    return false;
+  const answer = await withJobDeps((deps) =>
+    handleTypedProposal(
+      deps,
+      {
+        text: message.text,
+        by,
+        channel: message.channelId,
+        threadTs: ctx.slack.codeChannel ? null : message.threadTs,
+      },
+      isAllowed,
+    ),
+  );
+  if (answer === undefined) return false;
+  // The proposal's edit is the visible acknowledgement; no second notifying post.
+  return true;
 }
 
 export default slackChannel({
@@ -473,6 +527,7 @@ export default slackChannel({
       await replyToStranger(ctx, message, "tag");
       return null;
     }
+    if (await typedDecision(ctx, message)) return null;
     setQuiet(message, false);
     const auth = defaultSlackAuth(message, ctx);
     if (ctx.slack.codeChannel) {
@@ -486,16 +541,20 @@ export default slackChannel({
       message.author?.userId ?? "",
       await peopleOf(ctx).then((people) => people.ids),
     ).catch(() => undefined);
-    return note ? { auth, context: [note] } : { auth };
+    const jobNote = await threadJobNote(message.channelId, message.threadTs);
+    const context = [note, jobNote].filter((value): value is string => Boolean(value));
+    return context.length ? { auth, context } : { auth };
   },
   async onDirectMessage(ctx, message) {
     if (!fromAllowedHuman(message)) {
       await replyToStranger(ctx, message, "direct");
       return null;
     }
+    if (await typedDecision(ctx, message)) return null;
     setQuiet(message, false);
     await noteSession(ctx, message);
-    return { auth: defaultSlackAuth(message, ctx) };
+    const note = await threadJobNote(message.channelId, message.threadTs);
+    return { auth: defaultSlackAuth(message, ctx), ...(note ? { context: [note] } : {}) };
   },
   // Replies in a thread that already has a session continue it without a new mention, when they
   // are meant for Sym. Side talk between people starts no turn (decision 050).
@@ -504,6 +563,7 @@ export default slackChannel({
       await replyToStranger(ctx, message, "thread");
       return null;
     }
+    if (await typedDecision(ctx, message)) return null;
     // Everything in a code channel is meant for Sym: it needs no tag, triage, or listen mode.
     if (ctx.slack.codeChannel) {
       const auth = defaultSlackAuth(message, ctx);
@@ -527,6 +587,7 @@ export default slackChannel({
       lastTurnUser(ledger(), channelId, threadTs).catch(() => undefined),
       peopleOf(ctx),
     ]);
+    const jobNote = await threadJobNote(channelId, threadTs);
     const addressing = triageThreadMessage({
       senderId,
       text: message.text,
@@ -535,10 +596,15 @@ export default slackChannel({
       listenMode,
       people,
       partnerId,
+      jobThread: Boolean(jobNote),
     });
     if (addressing === "skip") return null;
     const note = await participantsContext(ctx, senderId, people.ids).catch(() => undefined);
-    const context = [...(addressing === "maybe" ? [MAYBE_NOTE] : []), ...(note ? [note] : [])];
+    const context = [
+      ...(addressing === "maybe" ? [MAYBE_NOTE] : []),
+      ...(note ? [note] : []),
+      ...(jobNote ? [jobNote] : []),
+    ];
     setQuiet(message, addressing === "maybe");
     return context.length > 0 ? { auth, context } : { auth };
   },
@@ -566,9 +632,58 @@ export default slackChannel({
   // The job buttons and text boxes (lib/slack/job-actions.ts) and the feedback buttons. Open PR
   // is a URL button, so its click needs no work.
   async onInteraction(action, ctx) {
+    const choice = action.actionId.startsWith(`${CHOICE_ACTION_ID}_`);
+    const proposal = [START_ACTION_ID, DISMISS_ACTION_ID].includes(action.actionId);
+    if (choice || proposal) {
+      if (!isAllowed(action.user.id)) return;
+      const { channelId, threadTs } = ctx.slack;
+      const slack = slackFromEnv();
+      try {
+        if (choice && slack && action.value && action.messageTs) {
+          const note = ctx.slack.codeChannel
+            ? await codeChannelNote(channelId)
+            : await threadJobNote(channelId, threadTs);
+          await takeChoice(
+            { sql: ledger(), slack, allowed: isAllowed },
+            {
+              value: action.value,
+              user: action.user.id,
+              channel: channelId,
+              messageTs: action.messageTs,
+            },
+            (text, idempotencyKey) =>
+              ctx.send(text, { idempotencyKey, ...(note ? { context: [note] } : {}) }),
+          );
+        } else if (proposal && action.value) {
+          await withJobDeps((deps) =>
+            handleProposal(
+              deps,
+              {
+                id: action.value ?? "",
+                by: action.user.id,
+                channel: channelId,
+                threadTs: ctx.slack.codeChannel ? null : threadTs,
+                ...(action.messageTs ? { messageTs: action.messageTs } : {}),
+                start: action.actionId === START_ACTION_ID,
+              },
+              isAllowed,
+            ),
+          );
+        }
+      } catch (error) {
+        console.warn("Sym couldn't handle a conversation choice.", String(error));
+        await sayPrivately(
+          ctx.slack,
+          { channel: channelId, user: action.user.id, threadTs },
+          "I couldn't finish that choice. Reply here and I'll check its state.",
+        );
+      }
+      return;
+    }
     const jobAction = JOB_ACTION_IDS.includes(action.actionId);
     if (!jobAction && action.actionId !== FEEDBACK_ACTION_ID) return;
     if (!isAllowed(action.user.id)) return;
+    if (action.actionId === "sym_job_stop" && !mayDecideAsOwner(action.user.id, pack())) return;
     const { channelId, threadTs } = ctx.slack;
     if (action.actionId === FEEDBACK_ACTION_ID) {
       const kind = kindOfButton(action.value);

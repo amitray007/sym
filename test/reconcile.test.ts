@@ -248,12 +248,12 @@ describe.skipIf(!hasDatabase)("reconcileJobs", () => {
 
     await reconcileJobs(s.deps);
     await s.send();
-    const asked = () => textsOf(s.newPosts()).filter((t) => t.includes("has a question"));
+    const asked = () => textsOf(s.newPosts()).filter((t) => t.includes("Reply here and"));
     expect(asked()).toHaveLength(2);
     expect(asked().join("\n")).toContain("Use exponential backoff?");
     expect(asked().join("\n")).toContain("Add jitter?");
-    expect(asked()[0]).toContain(`${s.ref} has a question on the worker`);
-    expect(asked()[0]).toContain(String((await getJob(s.sql, s.job.id))?.workerThreadId));
+    expect(asked()[0]).toContain("Reply here and");
+    expect(asked()[0]).not.toContain("Answer it in the worker thread");
     expect((await getJob(s.sql, s.job.id))?.status).toBe("waiting_input");
 
     await expireLease(s.job);

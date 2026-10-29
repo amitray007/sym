@@ -1,7 +1,7 @@
-import { chooseDisplay } from "../display.ts";
 import { getJob, type Job, jobRef, orphanedJobs, updateJob } from "../ledger/jobs.ts";
 import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
 import { setChannelStatus } from "../slack/code-channel.ts";
+import { retryFollowupProposals } from "../slack/job-actions.ts";
 import { workerNoun } from "../worker-label.ts";
 import type { WorkerAdapter } from "../workers/types.ts";
 import { parseOutputContract } from "./contract.ts";
@@ -37,6 +37,7 @@ export interface ReconcileReport {
 
 export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
   await retryClosures(deps);
+  await retryFollowupProposals(deps);
   const report: ReconcileReport = { checked: 0, finished: 0, offline: 0 };
   for (const job of await orphanedJobs(deps.sql)) {
     try {
@@ -59,10 +60,6 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
       if (check.terminal) {
         report.finished++;
         await settleChannel(deps, job);
-      }
-      // No task is here to turn a question into buttons, so tell the thread once per question.
-      for (const question of check.questions) {
-        await postQuestion(deps, job, question.requestId, question.questions[0]?.prompt ?? "");
       }
     } catch {
       report.offline++;
@@ -172,32 +169,6 @@ async function followPullRequests(deps: JobDeps): Promise<void> {
 // back to active (decision 067). No-op for a job in a thread.
 async function settleChannel(deps: JobDeps, job: Job): Promise<void> {
   if (job.codeChannel) await setChannelStatus(deps, job, "active");
-}
-
-async function postQuestion(deps: JobDeps, job: Job, requestId: string, prompt: string) {
-  if (!job.slackChannel) return;
-  const ref = jobRef(job.id);
-  const text = `${ref} has a question on the ${workerNoun()}: ${prompt}\nAnswer it in the ${workerNoun()} thread ${job.workerThreadId}.`;
-  await enqueuePost(deps.sql, {
-    idempotencyKey: `${ref}:question:${requestId}`,
-    jobId: job.id,
-    method: "chat.postMessage",
-    payload: {
-      channel: job.slackChannel,
-      ...(job.slackThreadTs ? { thread_ts: job.slackThreadTs } : {}),
-      text,
-    },
-    display: chooseDisplay({
-      kind: job.kind,
-      needsAction: true,
-      isNew: true,
-      estMinutes: 0,
-      steps: 0,
-      lines: 2,
-      surface: "channel",
-      quiet: false,
-    }),
-  });
 }
 
 // The worker did not answer. Post once when a job goes offline; the next good check moves it

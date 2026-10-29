@@ -629,7 +629,8 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
 
       expect(check.status).toBe("waiting_input");
       expect(check.questions).toEqual([QUESTION]);
-      expect(s.slack.posts().slice(before)).toEqual([]);
+      expect(s.slack.posts().slice(before)).toHaveLength(1);
+      expect(String(s.slack.posts().at(-1)?.body.text)).toContain("Use exponential backoff?");
 
       await answerQuestion(s.deps, s.job.id, "req-1", { q1: "Yes" });
       await answerQuestion(s.deps, s.job.id, "req-1", { q1: "Yes" });

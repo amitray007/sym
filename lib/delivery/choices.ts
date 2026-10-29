@@ -1,0 +1,81 @@
+import type { Sql } from "../db.ts";
+import { chooseDisplay } from "../display.ts";
+import { escapeMrkdwn } from "../jobs/messages.ts";
+import type { StoredChoices } from "../ledger/choices.ts";
+import { enqueuePost } from "../ledger/outbox.ts";
+import type { SlackApi } from "../slack/api.ts";
+import { deliver } from "./deliver.ts";
+
+interface ChoiceRow extends StoredChoices {
+  messageTs: string | null;
+  chosenBy: string | null;
+  chosenIndex: number | null;
+  dispatchedAt: Date | null;
+  valid: boolean;
+}
+
+// The caller verifies Slack's signature and allow-list. Recheck the actor before consuming the
+// row too. A button supplies only the index, never a tool or an approval payload.
+export async function takeChoice(
+  deps: { sql: Sql; slack: SlackApi; allowed: (user: string) => boolean },
+  input: {
+    value: string;
+    user: string;
+    channel: string;
+    messageTs: string;
+  },
+  send: (text: string, key: string) => Promise<unknown>,
+): Promise<boolean> {
+  if (!deps.allowed(input.user)) return false;
+  const match = /^([1-9][0-9]*):([0-2])$/.exec(input.value);
+  if (!match) return false;
+  return deps.sql.begin(async (transaction) => {
+    const sql = transaction as unknown as Sql;
+    const [row] = await sql<ChoiceRow[]>`
+      select *, expires_at > now() as valid from conversation_choices where id = ${match[1] ?? "0"}::bigint for update
+    `;
+    const index = Number(match[2]);
+    if (
+      !row?.valid ||
+      row.channel !== input.channel ||
+      row.messageTs !== input.messageTs ||
+      !deps.allowed(input.user)
+    )
+      return false;
+    const text = row.choices[index];
+    if (
+      !text ||
+      row.dispatchedAt ||
+      (row.chosenBy && (row.chosenBy !== input.user || row.chosenIndex !== index))
+    )
+      return false;
+    await sql`update conversation_choices set chosen_by = ${input.user}, chosen_index = ${index} where id = ${match[1] ?? "0"}::bigint`;
+    const visible = `${row.message}\n\n<@${input.user}> chose: ${escapeMrkdwn(text)}`;
+    await enqueuePost(sql, {
+      idempotencyKey: `choice:${row.id}:picked`,
+      method: "chat.update",
+      payload: {
+        channel: row.channel,
+        ts: row.messageTs,
+        text: visible,
+        blocks: [{ type: "markdown", text: visible }],
+      },
+      display: chooseDisplay({
+        kind: "conversation",
+        needsAction: false,
+        isNew: true,
+        estMinutes: 0,
+        steps: 0,
+        lines: 1,
+        surface: "channel",
+        quiet: false,
+      }),
+    });
+    await deliver(sql, deps.slack);
+    // Eve's inbound interaction context binds this send to this thread and this Slack user.
+    // Its idempotency key makes a retry after a lost receipt safe.
+    await send(text, `choice:${row.id}:turn`);
+    await sql`update conversation_choices set dispatched_at = now() where id = ${match[1] ?? "0"}::bigint`;
+    return true;
+  });
+}

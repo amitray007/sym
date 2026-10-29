@@ -1,0 +1,325 @@
+import { describe, expect, it } from "vitest";
+import { takeChoice } from "../lib/delivery/choices.ts";
+import { deliver } from "../lib/delivery/deliver.ts";
+import { chooseDisplay } from "../lib/display.ts";
+import { Brief } from "../lib/jobs/brief.ts";
+import { proposeFollowUp } from "../lib/jobs/followup.ts";
+import { presentBrief } from "../lib/jobs/present.ts";
+import { checkJob, type JobDeps, launchOrAdopt } from "../lib/jobs/run.ts";
+import { steerJob } from "../lib/jobs/steer.ts";
+import { choiceBlocks, storeChoices } from "../lib/ledger/choices.ts";
+import { createJob, getJob, updateJob } from "../lib/ledger/jobs.ts";
+import { enqueuePost } from "../lib/ledger/outbox.ts";
+import { type JobProposal, propose } from "../lib/ledger/proposals.ts";
+import type { SlackApi } from "../lib/slack/api.ts";
+import { handleJobAction, handleProposal, handleTypedProposal } from "../lib/slack/job-actions.ts";
+import { FakeWorker } from "./fakes/worker.ts";
+import { hasDatabase, useLedger } from "./helpers/ledger.ts";
+import { TEST_PROJECTS } from "./helpers/projects.ts";
+
+const brief = Brief.parse({
+  project: "test-repo",
+  title: "Retry",
+  goal: "add retries",
+  doneWhen: ["Tests pass"],
+});
+const allowed = (by: string) => by === "U1";
+const display = chooseDisplay({
+  kind: "conversation",
+  needsAction: true,
+  isNew: true,
+  estMinutes: 0,
+  steps: 0,
+  lines: 1,
+  surface: "channel",
+  quiet: false,
+});
+
+describe.skipIf(!hasDatabase)("conversation gates", () => {
+  const ledger = useLedger();
+  let sequence = 0;
+  function setup() {
+    const calls: { method: string; body: Record<string, unknown> }[] = [];
+    const slack: SlackApi = {
+      async call(method, body) {
+        calls.push({ method, body });
+        return { ok: true, ts: body.ts ?? `1.${++sequence}` };
+      },
+    };
+    const worker = new FakeWorker({
+      script: [
+        { status: "completed", items: ['```json\n{"summary":"done","tests":"passed"}\n```'] },
+        { status: "running" },
+      ],
+    });
+    const deps: JobDeps = {
+      sql: ledger.sql(),
+      slack,
+      worker,
+      workerIdentity: "worker-one",
+      allowedProjects: TEST_PROJECTS,
+    };
+    return { deps, calls, slack, worker };
+  }
+  const job = (key: string) =>
+    createJob(ledger.sql(), {
+      requestKey: key,
+      kind: "code-change",
+      title: brief.title,
+      brief,
+      worker: "fake",
+      owner: "U1",
+      slackChannel: "C1",
+      slackThreadTs: key,
+    });
+
+  it("records a choice visibly, removes controls, and dispatches exactly one turn", async () => {
+    const s = setup();
+    const sql = ledger.sql();
+    const stored = await storeChoices(sql, {
+      key: "offer-1",
+      channel: "C1",
+      threadTs: "1.1",
+      message: "What next?",
+      choices: ["Explain it", "Leave it"],
+    });
+    await enqueuePost(sql, {
+      idempotencyKey: "offer-1",
+      method: "chat.postMessage",
+      payload: {
+        channel: "C1",
+        thread_ts: "1.1",
+        text: stored.message,
+        blocks: choiceBlocks(stored),
+      },
+      display,
+    });
+    await deliver(sql, s.slack);
+    const ts = String(s.calls[0]?.body.ts ?? "1.1");
+    const [row] = await sql<
+      { messageTs: string }[]
+    >`select message_ts from conversation_choices where id = ${stored.id}::bigint`;
+    expect(row?.messageTs).toBeTruthy();
+    const input = {
+      value: `${stored.id}:0`,
+      user: "U1",
+      channel: "C1",
+      messageTs: row?.messageTs ?? ts,
+    };
+    const turns: { text: string; key: string }[] = [];
+    const send = async (text: string, key: string) => {
+      turns.push({ text, key });
+    };
+    for (const wrong of [
+      { ...input, user: "U2" },
+      { ...input, channel: "C2" },
+      { ...input, messageTs: "forged" },
+    ]) {
+      expect(await takeChoice({ sql, slack: s.slack, allowed }, wrong, send)).toBe(false);
+    }
+    await Promise.all([
+      takeChoice({ sql, slack: s.slack, allowed }, input, send),
+      takeChoice({ sql, slack: s.slack, allowed }, input, send),
+    ]);
+    expect(turns).toEqual([{ text: "Explain it", key: `choice:${stored.id}:turn` }]);
+    const edited = s.calls.find((c) => c.method === "chat.update");
+    expect(edited?.body.text).toContain("<@U1> chose: Explain it");
+    expect(JSON.stringify(edited?.body.blocks)).not.toContain("actions");
+    expect(s.worker.sends).toEqual([]);
+  });
+
+  it("replays a lost turn receipt under the same key and rejects expired choices", async () => {
+    const s = setup();
+    const sql = ledger.sql();
+    const stored = await storeChoices(sql, {
+      key: "offer-retry",
+      channel: "C1",
+      threadTs: null,
+      message: "Pick",
+      choices: ["Explain", "Wait"],
+    });
+    await sql`update conversation_choices set message_ts = '7.1' where id = ${stored.id}::bigint`;
+    const input = { value: `${stored.id}:0`, user: "U1", channel: "C1", messageTs: "7.1" };
+    const keys: string[] = [];
+    await expect(
+      takeChoice({ sql, slack: s.slack, allowed }, input, async (_text, key) => {
+        keys.push(key);
+        throw new Error("lost receipt");
+      }),
+    ).rejects.toThrow("lost receipt");
+    await takeChoice({ sql, slack: s.slack, allowed }, input, async (_text, key) => {
+      keys.push(key);
+    });
+    expect(new Set(keys).size).toBe(1);
+    await sql`update conversation_choices set expires_at = now() - interval '1 second', dispatched_at = null where id = ${stored.id}::bigint`;
+    expect(await takeChoice({ sql, slack: s.slack, allowed }, input, async () => {})).toBe(false);
+  });
+
+  it("binds typed Start to the stored payload and rejects stale, forged and unauthorized approvals", async () => {
+    const s = setup();
+    const original = await job("initial-gate");
+    const sql = ledger.sql();
+    await presentBrief(sql, original);
+    await deliver(sql, s.slack);
+    const [proposal] = await sql<
+      JobProposal[]
+    >`select * from job_proposals where job_id = ${original.id}`;
+    if (!proposal) throw new Error("missing proposal");
+    const input = {
+      id: String(proposal.id),
+      by: "U1",
+      channel: "C1",
+      threadTs: "initial-gate",
+      messageTs: proposal.messageTs ?? "",
+      start: true,
+    };
+    expect(await handleProposal(s.deps, { ...input, by: "U2" }, allowed)).toContain(
+      "couldn't approve",
+    );
+    expect(await handleProposal(s.deps, { ...input, messageTs: "forged" }, allowed)).toContain(
+      "no longer current",
+    );
+    expect(
+      await handleTypedProposal(
+        s.deps,
+        { text: "yes, but change scope", by: "U1", channel: "C1", threadTs: "initial-gate" },
+        allowed,
+      ),
+    ).toBeUndefined();
+    expect(
+      await handleTypedProposal(
+        s.deps,
+        { text: "start", by: "U1", channel: "C1", threadTs: "initial-gate" },
+        allowed,
+      ),
+    ).toBe("Starting the approved work.");
+    expect(await handleProposal(s.deps, input, allowed)).toContain("no longer current");
+    expect(
+      (await sql`select status from job_proposals where job_id = ${original.id}`)[0]?.status,
+    ).toBe("approved");
+    expect(s.worker.launches).toBe(0);
+    const stale = await job("stale");
+    const gate = await propose(sql, {
+      key: "stale",
+      job: stale,
+      kind: "start",
+      payload: stale.brief,
+      message: "Start?",
+    });
+    await updateJob(sql, stale.id, { lastSummary: "scope changed" });
+    expect(
+      await handleProposal(
+        s.deps,
+        { id: gate.id, by: "U1", channel: "C1", threadTs: "stale", start: true },
+        allowed,
+      ),
+    ).toContain("no longer current");
+  });
+
+  it("proposes a follow-up without sending, then checks current project permissions on Start", async () => {
+    const s = setup();
+    const original = await job("follow-gate");
+    const sql = ledger.sql();
+    await launchOrAdopt(s.deps, original.id, "http://127.0.0.1/cb");
+    await checkJob(s.deps, original.id, 1);
+    await proposeFollowUp(s.deps, `J-${original.id}`, "cap retries at 3", "follow-gate");
+    expect(s.worker.sends).toEqual([]);
+    const [gate] = await sql<
+      JobProposal[]
+    >`select * from job_proposals where job_id = ${original.id} and kind = 'followup'`;
+    if (!gate) throw new Error("no follow-up proposal");
+    expect(gate.message).toBe("I'll cap retries at 3 on the same branch. Go?");
+    const answer = await handleProposal(
+      { ...s.deps, allowedProjects: [] },
+      {
+        id: String(gate.id),
+        by: "U1",
+        channel: "C1",
+        threadTs: "follow-gate",
+        messageTs: gate.messageTs ?? "",
+        start: true,
+      },
+      allowed,
+    );
+    expect(answer).toContain("no projects configured");
+    expect(s.worker.sends).toEqual([]);
+    expect(await sql`select id from jobs where parent_job_id = ${original.id}`).toHaveLength(0);
+  });
+
+  it("answers every part of a worker question in its code channel, through the brain's steer tool", async () => {
+    const s = setup();
+    const original = await job("questions");
+    const sql = ledger.sql();
+    const question = {
+      requestId: "two-parts",
+      questions: [
+        { id: "count", prompt: "How many attempts?", options: [], multiSelect: false },
+        { id: "wait", prompt: "How long between attempts?", options: [], multiSelect: false },
+      ],
+    };
+    const worker = new FakeWorker({ script: [{ status: "waiting", questions: [question] }] });
+    const deps = { ...s.deps, worker };
+    await launchOrAdopt(deps, original.id, "http://127.0.0.1/cb");
+    await updateJob(sql, original.id, {
+      codeChannel: true,
+      slackChannel: "C-code",
+      slackThreadTs: null,
+    });
+    await checkJob(deps, original.id, 1);
+    const asks = s.calls.filter(
+      (c) => c.method === "chat.postMessage" && c.body.channel === "C-code",
+    );
+    expect(asks.map((c) => c.body.text).join(" ")).toContain("How many attempts?");
+    expect(asks.map((c) => c.body.text).join(" ")).toContain("How long between attempts?");
+    expect(await steerJob(deps, `J-${original.id}`, "3")).toContain("several parts");
+    expect(worker.answers).toEqual([]);
+    expect(
+      await steerJob(deps, `J-${original.id}`, "3 attempts, 10 seconds", "steer", "answer", {
+        requestId: "two-parts",
+        answers: { count: "3", wait: "10 seconds" },
+      }),
+    ).toContain("passed your answer");
+    expect(worker.answers).toEqual([
+      {
+        threadId: (await getJob(sql, original.id))?.workerThreadId,
+        requestId: "two-parts",
+        answers: { count: "3", wait: "10 seconds" },
+      },
+    ]);
+    expect(worker.sends).toEqual([]);
+  });
+
+  it("keeps old Fix buttons conversational and turns old text submissions into proposals", async () => {
+    const s = setup();
+    const original = await job("old-fix");
+    await launchOrAdopt(s.deps, original.id, "http://127.0.0.1/cb");
+    await checkJob(s.deps, original.id, 1);
+    const ref = `J-${original.id}`;
+    await handleJobAction(
+      s.deps,
+      { actionId: "sym_job_fix", value: ref, user: { id: "U1" } },
+      "C1",
+      async () => {},
+    );
+    expect(s.calls.some((c) => JSON.stringify(c.body.blocks).includes("plain_text_input"))).toBe(
+      false,
+    );
+    await handleJobAction(
+      s.deps,
+      {
+        actionId: "sym_job_fix_text",
+        blockId: `fix-${ref}`,
+        value: "add a test",
+        messageTs: "9.1",
+        user: { id: "U1" },
+      },
+      "C1",
+      async () => {},
+    );
+    expect(s.worker.sends).toEqual([]);
+    expect(
+      (await ledger.sql()`select status from job_proposals where job_id = ${original.id}`)[0]
+        ?.status,
+    ).toBe("pending");
+  });
+});
