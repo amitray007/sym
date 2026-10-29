@@ -20,8 +20,8 @@ an operations group with scheduled checks. One adopter's playbooks never shape t
    repositories itself.
 4. Builder work needs explicit consent, including repository investigations. A problem report
    does not authorize a job. Writes need a person. Any job that can change code, data, or settings needs an approval
-   for every interactive chat request, even when the trust ladder promotes its job class.
-   Approved schedules and PR wakes keep trusted auto-start within their approved scope. Production and customer data stay read-only:
+   for every interactive chat request, including playbooks with historical trust data.
+   Approved schedules start without a click (decision 024). The trust ladder no longer auto-starts jobs. Production and customer data stay read-only:
    a job can prepare a change to them, and a person runs it.
 5. Quiet by default. Code decides each message's display level. New messages are only for
    "you need to act" and "it is done".
@@ -54,7 +54,7 @@ an operations group with scheduled checks. One adopter's playbooks never shape t
 2. Single owner in production. Deploy, schedules with the dispatcher, the outbox, the digest,
    memory, feedback buttons, and evals.
 3. Learning. Approved playbooks and rules through `defineDynamic`, the weekly `learn`
-   schedule, the trust ladder, and code changes through worker pull requests.
+   schedule and code changes through worker pull requests.
 4. Teams. Per-person scope and policy, shared-channel rules, and more
    worker adapters.
 5. More sources. GitHub CI events, error trackers, and ticket systems as event channels.

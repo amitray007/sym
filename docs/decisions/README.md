@@ -64,7 +64,7 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [056](056-result-buttons.md) | The card has Steer and the result has Looks good, Fix, and Close; Steer and Fix post a text box, a Fix runs as a follow-up job on the same worker thread, and Close settles it |
 | [057](057-pr-fact-checks.md) | A finished code job stores the worker's pull request facts and runs generic rule checks on them; the verifier judges production-touching changes; CI status comes only from PR-follow wakes |
 | [058](058-repeated-work.md) | A weekly review lets the brain find repeated work in recent briefs and draft playbooks for the owner to approve |
-| [059](059-trust-ladder.md) | An approved playbook is a job class; after clean runs the owner can trust it with `playbook_trust`, its jobs then start without the click, and any concern, 👎, or Fix puts it back to asking |
+| [059](059-trust-ladder.md) | Playbook links and outcomes; auto-start and promotion superseded in part by 071 |
 | [060](060-short-brief.md) | The brief post shows the title, project, delivery, model, and playbook; a Full brief button sends the goal, constraints, and done-when list privately |
 | [061](061-whole-last-message.md) | The job check reads the worker's last message whole, because its result block comes last; it keeps the last 20,000 characters, and a failed read keeps the cut text |
 | [062](062-written-results.md) | The `writer` subagent writes a finished code job's result in the persona's voice with no template; Sym keeps the concerns list, a footer, and the buttons; the brain's Voice rules drop the fixed shape |

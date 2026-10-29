@@ -38,7 +38,7 @@ describe("trusted playbooks", () => {
       values ('sync-retry', 'playbook', 'Steps.', 1, 'owner', 'approved', ${OWNER}, now(), 'auto')
       returning id::int
     `;
-    // Trust covers projects the playbook already ran clean on.
+    // Preserve a historical auto row; it no longer grants authority.
     await h.sql`
       insert into jobs (request_key, kind, title, brief, worker, status, finished_at, playbook_id,
         outcome)
@@ -72,5 +72,9 @@ describe("trusted playbooks", () => {
       { label: "the recorded outcome" },
     );
     expect(row).toEqual({ outcome: "clean", autoStarted: false, playbookId: playbook?.id });
+    expect(
+      (await h.sql`select start_mode from playbooks where id = ${playbook?.id ?? 0}`)[0]?.startMode,
+    ).toBe("auto");
+    expect(await h.sql`select id from outbox where idempotency_key like 'trust:%'`).toHaveLength(0);
   });
 });

@@ -238,8 +238,7 @@ async function executeFollowupProposal(deps: JobDeps, proposal: JobProposal): Pr
     proposal.decidedBy,
     `proposal:${proposal.id}`,
   );
-  await deps.sql`update job_proposals set executed_at = now() where id = ${proposal.id}::bigint`;
-  await editProposal(deps, proposal, `<@${proposal.decidedBy}> chose: Start. ${result.answer}`);
+  await finishFollowupProposal(deps, proposal, result.answer, Boolean(result.job));
   return result.answer;
 }
 
@@ -251,7 +250,12 @@ export async function retryFollowupProposals(deps: JobDeps): Promise<void> {
       !row.decidedBy ||
       !isSlackUserAllowed(deps.pack, process.env.SYM_SLACK_USERS, row.decidedBy)
     ) {
-      await deps.sql`update job_proposals set status = 'expired', executed_at = now() where id = ${row.id}::bigint`;
+      await finishFollowupProposal(
+        deps,
+        row,
+        "The approver no longer has access. Ask for a new proposal.",
+        false,
+      );
       continue;
     }
     await executeFollowupProposal(deps, {
@@ -260,6 +264,59 @@ export async function retryFollowupProposals(deps: JobDeps): Promise<void> {
       jobId: Number(row.jobId),
     }).catch(() => undefined);
   }
+}
+
+// Closing the proposal and cancelling its unsent child are one ledger operation. Queue both
+// notices in that transaction too, so a crash cannot hide a permanent refusal.
+async function finishFollowupProposal(
+  deps: JobDeps,
+  proposal: JobProposal,
+  reason: string,
+  sent: boolean,
+): Promise<void> {
+  await deps.sql.begin(async (transaction) => {
+    const sql = transaction as unknown as Sql;
+    await sql`select id from job_proposals where id = ${proposal.id}::bigint for update`;
+    const key = `fix:proposal:${proposal.id}`;
+    if (!sent) {
+      await sql`update jobs set status = 'cancelled', finished_at = coalesce(finished_at, now()),
+        last_summary = ${reason}, revision = revision + 1
+        where request_key = ${key} and followup_sent_at is null and status = 'running'`;
+    }
+    const [closed] = await sql`update job_proposals set executed_at = now(),
+      status = ${sent ? "approved" : "expired"} where id = ${proposal.id}::bigint
+      and not exists (select 1 from jobs where request_key = ${key}
+        and followup_sent_at is null and status = 'running') returning id`;
+    if (!closed) throw new Error("The follow-up is still unsent and running");
+    const { slack: _held, ...rest } = deps;
+    const queued = { ...rest, sql };
+    await editProposal(queued, proposal, `<@${proposal.decidedBy}> chose: Start. ${reason}`);
+    if (!sent && proposal.decidedBy) {
+      await enqueuePost(sql, {
+        idempotencyKey: `proposal:${proposal.id}:refused`,
+        jobId: proposal.jobId,
+        method: "chat.postMessage",
+        payload: {
+          channel: proposal.decidedBy,
+          text: `I couldn't start the follow-up on J-${proposal.jobId}: ${reason}`,
+        },
+        display: {
+          ...chooseDisplay({
+            kind: "conversation",
+            needsAction: true,
+            isNew: true,
+            estMinutes: 0,
+            steps: 0,
+            lines: 1,
+            surface: "dm",
+            quiet: false,
+          }),
+          target: "dm",
+        },
+      });
+    }
+  });
+  await deliverNow(deps);
 }
 
 async function editProposal(deps: JobDeps, proposal: JobProposal, outcome: string): Promise<void> {

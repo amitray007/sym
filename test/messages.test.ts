@@ -105,6 +105,22 @@ describe("other messages", () => {
 });
 
 describe("briefPrompt", () => {
+  it("keeps API capitalization and plain no-PR delivery", () => {
+    const brief = {
+      project: "example-app",
+      title: "API retries",
+      goal: "add API retries",
+      constraints: [],
+      doneWhen: ["Tests pass"],
+      openPullRequest: true,
+      estimatedMinutes: 15,
+    };
+    expect(briefPrompt(brief)).toContain("I'd work on API retries in example-app on a draft PR.");
+    expect(briefPrompt({ ...brief, openPullRequest: false })).toContain(
+      ". I'll commit on a branch and won't push or open a PR.",
+    );
+  });
+
   const brief = Brief.parse({
     project: "sync-service",
     title: "Billing retry",
@@ -115,7 +131,7 @@ describe("briefPrompt", () => {
   });
   it("asks a short question with scope and boundaries", () => {
     const text = briefPrompt(brief, "J-142", "default model");
-    expect(text).toContain('I\'d work on "billing retry" in sync-service');
+    expect(text).toContain("I'd work on Billing retry in sync-service");
     expect(text).toContain("on a draft PR");
     expect(text).toContain("Leave webhooks alone.");
     expect(text).toContain("Production and customer data stay read-only");
@@ -128,14 +144,11 @@ describe("briefPrompt", () => {
       title: "Add retries",
       goal: "Add retries. Check the database. Then run tests.",
     });
-    expect(text).toContain('I\'d work on "add retries" in sync-service on a draft PR.');
+    expect(text).toContain("I'd work on Add retries in sync-service on a draft PR.");
     expect(text).not.toContain("Check the database");
     expect(text.match(/read-only/g)).toHaveLength(1);
   });
-  it("explains trusted starts and gives full details on request", () => {
-    expect(briefPrompt(brief, "J-142", undefined, { name: "retry", trusted: true })).toContain(
-      "trusted playbook retry",
-    );
+  it("gives full details on request", () => {
     const text = fullBrief(brief, "J-142");
     expect(text).toContain("J-142: add retries");
     expect(text).toContain("I'll check: Tests pass");

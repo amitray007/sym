@@ -297,7 +297,7 @@ describe("milestone 1", () => {
     const c = newConversation(h);
     const first = await startJob(h, c, "Edited job");
     await c.reply(briefMention("Revised job", { goal: "Only touch the retry module." }));
-    const ask = await c.waitForControls(/revised job/);
+    const ask = await c.waitForControls(/Revised job/);
     const [proposal] = await h.sql<{ payload: { goal: string } }[]>`
       select payload from job_proposals where channel = ${c.channel} and status = 'pending'
     `;

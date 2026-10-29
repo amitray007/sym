@@ -43,7 +43,7 @@ strands running sessions, so every job keeps enough state to continue in a new s
 | `outbox` | Pending Slack posts with an idempotency key and the `chooseDisplay` result. Refuses level 0 and missing choices |
 | `feedback` | Buttons, reactions, "Fix" replies, brief edits, linked to a job |
 | `memory` | Facts and preferences (learning layer 1) |
-| `playbooks` | Approved playbooks and rules with version history (learning layer 2), and each playbook's start mode for the trust ladder |
+| `playbooks` | Approved playbooks and rules with version history (learning layer 2), historical trust fields |
 
 Job statuses: `launching`, `running`, `waiting_input`, `waiting_permission`, `quiet`,
 `worker_offline`, `checking`, `done`, `failed`, `cancelled`.
@@ -56,7 +56,7 @@ The brain checks read-only facts with its own tools first. A problem report does
 Builder consent (decision 071). A job needs an explicit Builder request or acceptance of a
 specific offer, including for repository investigations. Sym never edits repositories itself.
 Interactive chat requests show Start / Not now, even for trusted playbooks. Approved schedules
-and PR wakes keep trusted auto-start within their existing scope.
+start without a click (decision 024). The trust ladder no longer auto-starts jobs.
 
 1. `onAppMention` checks the sender against the allow-list and starts a session for the thread.
 2. The model loads the `task-brief` playbook and writes a brief: project, goal, constraints, a

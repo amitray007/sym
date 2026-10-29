@@ -215,6 +215,33 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     expect(worker.settled).toEqual([]);
   });
 
+  it.each(["failed", "interrupted"] as const)(
+    "ends a sent follow-up on a new %s without an assistant message",
+    async (status) => {
+      const { deps, job, sql } = await finishedJob(`early-${status}`, [
+        { status: "completed", items: [result("Parent done")] },
+        { status },
+      ]);
+      const child = await startFollowUp(deps, `J-${job.id}`, "add a test", "U1", `early-${status}`);
+      if (!child.job) throw new Error(child.answer);
+      expect((await checkJob(deps, child.job.id, 1)).status).toBe("failed");
+      expect((await getJob(sql, child.job.id))?.lastMessage).toBeNull();
+      const [end] = await outbox(sql, `J-${child.job.id}:end`);
+      expect(end?.payload.text).toContain("didn't finish");
+      expect(end?.payload.text).not.toContain("Parent done");
+    },
+  );
+
+  it("closes a job without claiming a PR watch it never had", async () => {
+    const { deps, job, sql } = await finishedJob("no-watch", [
+      { status: "completed", items: ['```json\n{"summary":"Done","tests":"passed"}\n```'] },
+    ]);
+    await closeJob(deps, `J-${job.id}`, "U1");
+    const edits = await outbox(sql, `J-${job.id}:end-edit`);
+    expect(JSON.stringify(edits)).not.toContain("stopped following its PR");
+    expect(JSON.stringify(edits)).toContain(`I've closed J-${job.id}.`);
+  });
+
   it("refuses a Fix when its project has been removed, before creating or sending a job", async () => {
     const { deps, worker, job, sql } = await finishedJob("revoked", [
       { status: "completed", items: [result("Done")] },
@@ -378,13 +405,14 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     const ref = `J-${job.id}`;
     expect((await jobsToWatch(deps, new Date(0))).map((j) => j.id)).toContain(job.id);
 
+    await sql`update jobs set pr_watched_url = ${PR} where id = ${job.id}`;
     await click(deps, { actionId: "sym_job_ok", value: ref, messageTs: "4.1" });
     const closed = await click(deps, { actionId: "sym_job_close", value: ref });
     expect(closed.replies).toEqual([`Closed ${ref}.`]);
     expect(worker.settled).toEqual([job.workerThreadId]);
     const [edit] = await outbox(sql, `${ref}:end-edit:`);
     expect(JSON.stringify(edit?.payload)).toContain(
-      `I've closed ${ref} and stopped following its PR.`,
+      `I've closed ${ref}. I stopped following its PR.`,
     );
     expect(JSON.stringify(edit?.payload)).toContain("sym_job_pr");
     expect((await jobsToWatch(deps, new Date(0))).map((j) => j.id)).not.toContain(job.id);

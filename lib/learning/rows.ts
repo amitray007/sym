@@ -20,7 +20,7 @@ export interface Playbook {
   proposedAt: Date;
   decidedBy: string | null;
   decidedAt: Date | null;
-  // The trust ladder (decision 059): whether jobs that follow this approved row ask for Start.
+  // Historical trust data (decision 059); decision 071 retired auto-start.
   startMode: "ask" | "auto";
 }
 

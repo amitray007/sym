@@ -11,18 +11,17 @@ import type { Pack } from "../pack/load.ts";
 import { resolvePackProject } from "../pack/policy.ts";
 import { isQuiet } from "../quiet/quiet.ts";
 import { workerLabel } from "../worker-label.ts";
-import {
-  type BlockPost,
-  clipText,
-  failurePost,
-  resultPost,
-  SECTION_MAX,
-  writtenPost,
-} from "./blocks.ts";
+import { type BlockPost, failurePost, resultPost, writtenPost } from "./blocks.ts";
 import { Brief } from "./brief.ts";
 import { renderCollapsedCard, renderJobCard } from "./card.ts";
 import type { OutputContract } from "./contract.ts";
-import { briefPrompt, type JobFacts, permissionBlockMessage, quietNotice } from "./messages.ts";
+import {
+  briefPrompt,
+  escapeMrkdwn,
+  type JobFacts,
+  permissionBlockMessage,
+  quietNotice,
+} from "./messages.ts";
 import type { ProgressEvent } from "./progress.ts";
 import {
   checkResult,
@@ -50,15 +49,10 @@ export const SCHEDULED_CHECK = "scheduled-check";
 // characters, so the brief is Sym's own message in the job thread. It names the job, the
 // project, and the delivery; its Full brief button shows the goal, constraints, and done-when
 // list (decision 060). A brief needs an action, so quiet mode never hides it.
-export async function presentBrief(
-  sql: Sql,
-  job: Job,
-  modelLine?: string,
-  playbook?: { name: string; trusted: boolean },
-): Promise<void> {
+export async function presentBrief(sql: Sql, job: Job, modelLine?: string): Promise<void> {
   if (!job.slackChannel) return;
   const ref = jobRef(job.id);
-  const text = briefPrompt(Brief.parse(job.brief), ref, modelLine, playbook);
+  const text = briefPrompt(Brief.parse(job.brief), ref, modelLine);
   const display = chooseDisplay({
     kind: job.kind,
     needsAction: true,
@@ -70,15 +64,13 @@ export async function presentBrief(
     surface: surfaceOf(job.slackChannel),
     quiet: false,
   });
-  const proposal = playbook?.trusted
-    ? undefined
-    : await propose(sql, {
-        key: `${ref}:start`,
-        job,
-        kind: "start",
-        payload: job.brief,
-        message: text,
-      });
+  const proposal = await propose(sql, {
+    key: `${ref}:start`,
+    job,
+    kind: "start",
+    payload: job.brief,
+    message: text,
+  });
   await enqueuePost(sql, {
     idempotencyKey: `${ref}:brief`,
     jobId: job.id,
@@ -86,9 +78,7 @@ export async function presentBrief(
     payload: {
       ...target(job),
       text,
-      blocks: proposal
-        ? proposalBlocks(proposal)
-        : [{ type: "section", text: { type: "mrkdwn", text: clipText(text, SECTION_MAX) } }],
+      blocks: proposalBlocks(proposal),
     },
     display: { ...display, target: "thread" },
   });
@@ -144,7 +134,7 @@ export async function presentStart(
     method: "chat.postMessage",
     payload: {
       ...target(withDisplay),
-      text: `I'm on ${jobRef(job.id)}: ${job.title}.${modelNote ? `\n${modelNote}` : ""}`,
+      text: `I'm on ${jobRef(job.id)}: ${escapeMrkdwn(job.title)}.${modelNote ? `\n${modelNote}` : ""}`,
     },
     display,
   });
@@ -224,7 +214,7 @@ export async function presentEnd(
 ): Promise<void> {
   await presentEndOnce(sql, job, contract, now, pack, check, written);
   if (TERMINAL.includes(job.status)) {
-    // The trust ladder counts the same checks the result shows (decision 059). It records once,
+    // Playbook outcomes use the same checks the result shows (decisions 059 and 071). Record once,
     // before the end mark, so recovery re-presents a job whose outcome a crash lost.
     const clean =
       job.status === "done" &&

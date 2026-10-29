@@ -4,7 +4,7 @@ import { Brief } from "../lib/jobs/brief.ts";
 import { reconcileJobs } from "../lib/jobs/reconcile.ts";
 import type { JobDeps } from "../lib/jobs/run.ts";
 import { approvePlaybook, propose } from "../lib/learning/rows.ts";
-import { linkPlaybook, recordOutcome, setStartMode } from "../lib/learning/trust.ts";
+import { linkPlaybook, recordOutcome } from "../lib/learning/trust.ts";
 import { createJob } from "../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { approveSchedule, createSchedule, recordRun } from "../lib/schedules/rows.ts";
@@ -196,7 +196,7 @@ describe.skipIf(!hasDatabase)("worker_job Start wait", () => {
     await linkPlaybook(sql, old.id, approved.name);
     await sql`update jobs set status = 'done', finished_at = now() where id = ${old.id}`;
     await recordOutcome(sql, { id: old.id, kind: "code-change", status: "done" }, true, undefined);
-    await setStartMode(sql, approved.id, "auto", "U1");
+    await sql`update playbooks set start_mode = 'auto' where id = ${approved.id}`;
     const task = await run("trusted-chat", approved.name);
     expect((await task.next()).value?.status).toContain("Waiting for Start");
     expect(

@@ -38,7 +38,6 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_PROJECTS` | T3 project titles or IDs Sym may work on, comma-separated. Required without a pack: with neither, no job starts (decision 042). Ignored when a pack lists `projects` |
 | `SYM_WORKER_LABEL` | Optional. The name Slack users see for the worker, such as `Builder`. Default `Worker`. Max 30 characters (decision 044) |
 | `SYM_FEEDBACK` | Optional. `on` (default) or `off` (also `false`, `0`, `no`). Off removes the helpful / not helpful buttons from replies. Old buttons still record clicks (decision 047) |
-| `SYM_TRUST_RUNS` | Optional. How many clean runs in a row a playbook needs before Sym suggests trusting it. Default 5, at least 2 (decision 059) |
 | `SYM_DIGEST_CHANNEL` | Optional. The daily digest's channel ID, or the owner's user ID for a DM. Unset means no digest and no weekly `learn` proposals. A pack's `channels.digest` wins (decision 024) |
 | `SYM_DIGEST_CRON` | Optional. When the digest posts, as cron in UTC. Default `0 17 * * *`. Read at build time, so a change needs a rebuild |
 | `SYM_DIGEST` | Optional. `off` (default) or `on` (also `true`, `1`, `yes`). On posts the daily digest to the digest channel. The `learn` proposals and the sign-in notice use the channel either way (decision 054) |

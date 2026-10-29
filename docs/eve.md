@@ -16,7 +16,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Model | Gateway model ID from `SYM_MODEL`, read by `defineDynamic` before each model call (decision 018) | Use | Chat, briefs, triage, summaries. Workers do heavy work | Needs `AI_GATEWAY_API_KEY` off Vercel. The model is fixed per session |
 | Dynamic model | `defineDynamic(ctx => model)` with a turn-keyed `ctx.memo` | Later | Cheap model for status, stronger model for planning | Switching mid-session loses the prompt cache |
 | Spend limits | `limits.sessionUsage` | Use | $2 of brain model cost per window, then Eve asks to continue or stop; Continue starts a new window (`agent/agent.ts`) | Cost tracking needs reported cost |
-| Instructions | `agent/instructions.md`, `instructions/` | Use | Persona, trust ladder, Slack style | TS instructions evaluate at build time |
+| Instructions | `agent/instructions.md`, `instructions/` | Use | Persona, consent, Slack style | TS instructions evaluate at build time |
 | Skills | `agent/skills/*.md` | Use | Pack playbooks through the overlay (decision 035). The brief rules live in `agent/instructions.md`, and the progress and result rules in code (`lib/jobs/progress.ts`, `lib/jobs/verify.ts`) | Supporting files need a sandbox |
 
 ## Tools and durable work
@@ -115,4 +115,4 @@ Decision 071 adds evals for vague problems, a vague report matching a trusted pl
 Builder requests, acceptance of an offer,
 finished-job discussion, follow-ups, closure, short answers, lists, and persona recaps. Fixture
 checks prove wiring only. The owner runs real-model evals. Interactive Builder requests show Start / Not now even for trusted playbooks. Approved schedules
-and PR wakes keep trusted auto-start.
+start without a click (decision 024). The trust ladder no longer auto-starts jobs.

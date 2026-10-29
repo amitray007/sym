@@ -349,7 +349,7 @@ describe.skipIf(!hasDatabase)("conversation recovery regressions", () => {
     await proposeFollowUp(s.deps, `J-${s.job.id}`, "can you add a test?", "proposal-grammar");
     const [p] = await s.sql`select message from job_proposals where job_id = ${s.job.id}`;
     expect(p?.message).toBe(
-      "I'll make this change on the same branch: can you add a test. Should I start?",
+      "You asked: 'can you add a test?' I'd continue on the same branch. Should I start?",
     );
   });
 });

@@ -1,6 +1,6 @@
 import { feedbackBlocks } from "../feedback/feedback.ts";
 import { buttonUrl, openPrButton } from "./card.ts";
-import { contradictsTestReport, type OutputContract } from "./contract.ts";
+import { hasOutcomeClaim, type OutputContract } from "./contract.ts";
 import {
   duration,
   escapeMrkdwn,
@@ -109,8 +109,7 @@ export function writtenPost(
 ): BlockPost {
   const output = typeof written === "string" ? { text: written } : written;
   const body = defuse(output.text.slice(0, WRITTEN_MAX));
-  if (contradictsTestReport(body, contract))
-    return resultPost(job, { ...contract, prUrl }, concerns, limitation);
+  if (hasOutcomeClaim(body)) return resultPost(job, { ...contract, prUrl }, concerns, limitation);
   const tokens = resultTokens(contract, concerns, prUrl);
   const used = new Set<string>();
   const expanded = body.replace(/\{\{([a-z]+\d*)\}\}/g, (token, id: string) => {
@@ -136,7 +135,7 @@ export function writtenPost(
   const facts = missing.filter(([id]) => !/^[cq]\d+$/.test(id)).map(([, fact]) => fact);
   const additions = [
     ...missing.filter(([id]) => /^[cq]\d+$/.test(id)).map(([, fact]) => escapeMrkdwn(fact)),
-    ...(facts.length ? [`${facts.map((fact) => fact.replace(/\.$/, "")).join("; ")}.`] : []),
+    ...(facts.length ? [`${facts.map((fact) => fact.replace(/\.$/, "")).join(". ")}.`] : []),
   ];
   if (
     limitation &&

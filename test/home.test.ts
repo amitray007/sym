@@ -11,6 +11,7 @@ import {
   NOT_SET_UP,
 } from "../lib/home/view.ts";
 import { createJob, type Job, type JobStatus, updateJob } from "../lib/ledger/jobs.ts";
+import { propose } from "../lib/ledger/proposals.ts";
 import { setQuietUntil } from "../lib/quiet/quiet.ts";
 import { approveSchedule, createSchedule, pauseSchedule } from "../lib/schedules/rows.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
@@ -94,6 +95,17 @@ const ownerData = (overrides: Partial<HomeData> = {}) =>
 const textOf = (view: { blocks: unknown[] }) => JSON.stringify(view.blocks);
 
 describe("homeView by role", () => {
+  it("shows an approved launch as starting", () => {
+    const text = textOf(
+      homeView(
+        "member",
+        data({ active: [job(91, { status: "launching" })], approvedStarts: [91] }),
+      ),
+    );
+    expect(text).toContain("starting");
+    expect(text).not.toContain("waiting for you to start it");
+  });
+
   it("links stuck jobs without Retry or Stop controls", () => {
     const text = textOf(
       homeView("owner", ownerData({ active: [job(91, { status: "worker_offline" })] })),
@@ -357,6 +369,40 @@ describe.skipIf(!hasDatabase)("worker state from the worker", () => {
       "member",
     );
     expect(broken.worker.state).toBe("unknown");
+  });
+
+  it("collects only the latest Start decision for Home", async () => {
+    const sql = ledger.sql();
+    const created = await createJob(sql, {
+      requestKey: "home-start",
+      kind: "code-change",
+      title: "Start retry",
+      brief: {},
+      worker: "fake",
+      slackChannel: "C1",
+    });
+    const first = await propose(sql, {
+      key: "home-start-first",
+      job: created,
+      kind: "start",
+      payload: {},
+      message: "Start?",
+    });
+    let collected = await collectHome(base(), "member");
+    expect(textOf(homeView("member", collected))).toContain("waiting for you to start it");
+    await sql`update job_proposals set status = 'approved' where id = ${first.id}::bigint`;
+    collected = await collectHome(base(), "member");
+    expect(textOf(homeView("member", collected))).toContain("starting");
+    expect(textOf(homeView("member", collected))).not.toContain("waiting for you to start it");
+    await propose(sql, {
+      key: "home-start-later",
+      job: created,
+      kind: "start",
+      payload: {},
+      message: "Start revised?",
+    });
+    collected = await collectHome(base(), "member");
+    expect(textOf(homeView("member", collected))).toContain("waiting for you to start it");
   });
 
   it("collects closure repairs older than today and beyond the recent list", async () => {

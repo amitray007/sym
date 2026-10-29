@@ -86,9 +86,23 @@ export async function startFollowUp(
     select id, followup_sent_at from jobs where request_key = ${requestKey}
   `;
   if (earlier) {
-    if (earlier.followupSentAt) return { answer: `Already sent as ${jobRef(Number(earlier.id))}.` };
+    if (earlier.followupSentAt) {
+      const sent = await getJobByRef(deps.sql, jobRef(Number(earlier.id)));
+      return {
+        answer: `Already sent as ${jobRef(Number(earlier.id))}.`,
+        ...(sent ? { job: sent } : {}),
+      };
+    }
     const existing = await getJobByRef(deps.sql, jobRef(Number(earlier.id)));
-    const plan = await planLaunch(deps, Brief.parse(parent.brief));
+    if (existing?.status === "cancelled")
+      return { answer: existing.lastSummary ?? "That follow-up was cancelled." };
+    let plan: Awaited<ReturnType<typeof planLaunch>>;
+    try {
+      plan = await planLaunch(deps, Brief.parse(parent.brief));
+    } catch (error) {
+      if (error instanceof JobSetupError) return { answer: error.message };
+      throw error;
+    }
     if (
       !existing ||
       !parent.workerIdentity ||
@@ -323,12 +337,15 @@ async function completeClosure(deps: JobDeps, id: number): Promise<string> {
     return `${closed} ${text}`;
   }
   await clearClosureNotice(deps, job);
+  const [watch] = await deps.sql<
+    { watched: boolean }[]
+  >`select pr_watched_url is not null as watched from jobs where id = ${job.id}`;
   await editEndPost(
     deps.sql,
     job,
     job.codeChannel
       ? `I've closed ${ref} and archived its channel.`
-      : `I've closed ${ref} and stopped following its PR.`,
+      : `I've closed ${ref}.${watch?.watched ? " I stopped following its PR." : ""}`,
     true,
   );
   return closed;
@@ -395,6 +412,7 @@ async function laterJob(sql: Sql, job: Job): Promise<string | undefined> {
   const [row] = await sql<{ id: number }[]>`
     select id from jobs
     where worker_thread_id = ${job.workerThreadId} and id > ${job.id}
+      and not (status = 'cancelled' and parent_job_id is not null and followup_sent_at is null)
     order by id desc limit 1
   `;
   return row ? jobRef(Number(row.id)) : undefined;
@@ -577,7 +595,11 @@ export async function proposeFollowUp(
   ) {
     return { answer: `${jobRef(parent.id)}'s worker or project has changed. Ask for a new job.` };
   }
-  const text = `I'll make this change on the same branch: ${clean.replace(/[.!?]+$/, "")}. Should I start?`;
+  const question =
+    /\?$/.test(clean) || /^(can|could|would|will|should|do|does|is|are)\b/i.test(clean);
+  const text = question
+    ? `You asked: '${clean.replace(/[.!?]+$/, "")}?' I'd continue on the same branch. Should I start?`
+    : `I'll make this change on the same branch: ${clean.replace(/[.!?]+$/, "")}. Should I start?`;
   const proposal = await propose(deps.sql, {
     key,
     job: parent,

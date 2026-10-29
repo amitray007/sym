@@ -58,7 +58,7 @@ choices, and optional feedback. Chat replies have no feedback controls. Choices 
 
 `offer_choices` stores the conversation and consumes a click once. Typed replies still work.
 Interactive work and follow-ups always show Start / Not now, including trusted playbooks.
-Approved schedules and PR wakes keep trusted auto-start. Stop keeps owner confirmation.
+Approved schedules start without a click (decision 024). The trust ladder no longer auto-starts jobs. Stop keeps owner confirmation.
 A `posted: true` result suppresses only a duplicate reply to that tool result.
 
 Plain sentences are the default. Lists, tables, quotes, checkboxes, and code fit only content

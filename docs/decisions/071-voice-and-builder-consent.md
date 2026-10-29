@@ -28,7 +28,7 @@ The base brain instructions and built-in personas follow these rules:
   Builder on it" accepts the preceding specific offer. An unclear offer or target needs a
   question. Consent to prepare a brief does not consume the code-owned approval to run it.
 - Interactive chat requests always show Start / Not now, even for trusted playbooks. Approved
-  schedules and PR wakes keep trusted auto-start within their approved project scope. A vague
+  schedules start without a click (decision 024). The trust ladder no longer auto-starts jobs. A vague
   report that fits a trusted playbook still needs an offer or a question. The brain cannot grant
   trust or use a finding to widen approved work. Production and customer data remain read-only; a job can prepare a change for a person to run.
 - In a job thread or code channel, a question about a result is chat. A requested redirect of a

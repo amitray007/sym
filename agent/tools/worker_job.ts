@@ -25,10 +25,9 @@ import { type ModelCheck, VerifierOutput, verifierEnabled } from "../../lib/jobs
 import { WriterOutput, writerEnabled } from "../../lib/jobs/writer.ts";
 import { sessionInstructions } from "../../lib/learning/format.ts";
 import { approvedForSession } from "../../lib/learning/rows.ts";
-import { linkPlaybook, markAutoStarted, trustedPlaybookOf } from "../../lib/learning/trust.ts";
+import { linkPlaybook } from "../../lib/learning/trust.ts";
 import { getJob, jobRef } from "../../lib/ledger/jobs.ts";
 import { proposalStatus, startWakeToken } from "../../lib/ledger/proposals.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
 import { personaInstructions } from "../../lib/persona.ts";
 import { storedPersonaOrNone } from "../../lib/persona-setting.ts";
 import { checkProject } from "../../lib/projects/allowed.ts";
@@ -125,25 +124,18 @@ export default defineWorkflowTool({
         ctx.session.id,
         job.id,
       );
-      // Interactive requests always need Start, including a trusted playbook. Trust still
-      // covers approved schedules and existing PR watches.
-      const trusted = preApproved ? null : await trustedStart(job.id, ctx.session.auth.current);
       if (preApproved) {
         // A scheduled check speaks only when something needs attention (decision 031).
         await markScheduled(job.id);
         await linkRun(ctx.session.id, job.id);
       } else {
         // The brief is Sym's own post; Eve's prompt card keeps only about 200 characters.
-        await postBrief(job.id, trusted);
+        await postBrief(job.id);
       }
       yield {
-        status: statusLine(
-          ref,
-          preApproved ? "Starting scheduled run" : trusted ? "Starting" : "Waiting for Start",
-        ),
+        status: statusLine(ref, preApproved ? "Starting scheduled run" : "Waiting for Start"),
       };
-      const decision =
-        preApproved || trusted ? "approved" : await waitForStart(job.id, stopped, startWake);
+      const decision = preApproved ? "approved" : await waitForStart(job.id, stopped, startWake);
       startWake.dispose();
       if (decision === "pending") return { job: ref, status: "awaiting_start", ...POSTED };
       if (decision !== "approved") {
@@ -385,23 +377,9 @@ async function recordJob(brief: Brief, callId: string, sessionId: string) {
   // A tool call ID is unique only inside its session, so the session scopes the key.
   const requestKey = `${sessionId}:${callId}`;
   const job = await startJob(ledger(), { requestKey, sessionId, brief });
-  // The job class for the trust ladder: the approved playbook the brief names, if any.
+  // Link the reviewed playbook for outcome tracking, without granting Start.
   await linkPlaybook(ledger(), job.id, brief.playbook);
   return { id: job.id };
-}
-
-// Read trigger-scoped trust in a step. Interactive sessions always need Start.
-async function trustedStart(
-  jobId: number,
-  caller: SessionAuthContext | null | undefined,
-): Promise<string | null> {
-  "use step";
-  if (!slackUserOfPrincipal(caller?.principalId)) return null;
-  const sql = ledger();
-  const playbook = await trustedPlaybookOf(sql, jobId, "interactive");
-  if (!playbook) return null;
-  await markAutoStarted(sql, jobId);
-  return playbook.name;
 }
 
 async function markScheduled(jobId: number) {
@@ -409,9 +387,9 @@ async function markScheduled(jobId: number) {
   await markScheduledCheck(ledger(), jobId);
 }
 
-async function postBrief(jobId: number, trustedPlaybook: string | null) {
+async function postBrief(jobId: number) {
   "use step";
-  await showBrief(ledgerDeps(), jobId, trustedPlaybook ?? undefined);
+  await showBrief(ledgerDeps(), jobId);
 }
 
 async function launch(jobId: number, webhookUrl: string): Promise<string> {

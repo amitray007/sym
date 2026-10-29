@@ -69,7 +69,7 @@ Sym checks read-only facts with its own tools first. A problem report does not a
 `worker_job` requires an explicit request for Builder work or acceptance of a specific offer,
 including for repository investigations. The brief still needs its code-owned Start approval.
 Interactive chat always shows Start / Not now, even for trusted playbooks. Approved schedules
-and PR wakes retain trusted auto-start within their approved scope.
+start without a click (decision 024). The trust ladder no longer auto-starts jobs.
 
 - A question about a result stays chat.
 - A requested redirect of running work uses `job_steer`.

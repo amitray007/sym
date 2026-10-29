@@ -3,8 +3,8 @@ import { takeChoice } from "../lib/delivery/choices.ts";
 import { deliver } from "../lib/delivery/deliver.ts";
 import { chooseDisplay } from "../lib/display.ts";
 import { Brief } from "../lib/jobs/brief.ts";
-import { proposeFollowUp } from "../lib/jobs/followup.ts";
-import { presentBrief } from "../lib/jobs/present.ts";
+import { proposeFollowUp, startFollowUp } from "../lib/jobs/followup.ts";
+import { presentBrief, presentStart } from "../lib/jobs/present.ts";
 import { reconcileJobs } from "../lib/jobs/reconcile.ts";
 import { checkJob, type JobDeps, launchOrAdopt } from "../lib/jobs/run.ts";
 import { steerJob } from "../lib/jobs/steer.ts";
@@ -73,6 +73,20 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
       slackChannel: "C1",
       slackThreadTs: key,
     });
+
+  it("escapes a short job title in the start post", async () => {
+    const original = await job("escaped-start");
+    const sql = ledger.sql();
+    await presentStart(
+      sql,
+      { ...original, title: "API retries <!channel>", brief: { ...brief, estimatedMinutes: 1 } },
+      new Date(),
+    );
+    const [post] =
+      await sql`select payload from outbox where idempotency_key = ${`J-${original.id}:start`}`;
+    expect(post?.payload.text).toContain("API retries &lt;!channel&gt;");
+    expect(post?.payload.text).not.toContain("<!channel>");
+  });
 
   it("records a choice visibly, removes controls, and dispatches exactly one turn", async () => {
     const s = setup();
@@ -256,6 +270,98 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
     expect(answer.text).toContain("no projects configured");
     expect(s.worker.sends).toEqual([]);
     expect(await sql`select id from jobs where parent_job_id = ${original.id}`).toHaveLength(0);
+  });
+
+  it.each(["project removed", "worker changed", "approver removed"])(
+    "cancels an unsent follow-up when retry is refused: %s",
+    async (reason) => {
+      vi.stubEnv("SYM_SLACK_USERS", "U1");
+      try {
+        const s = setup();
+        const sql = ledger.sql();
+        const original = await job(`refused-${reason}`);
+        await launchOrAdopt(s.deps, original.id, "http://127.0.0.1/cb");
+        await checkJob(s.deps, original.id, 1);
+        await proposeFollowUp(s.deps, `J-${original.id}`, "add a test", `refused-${reason}`);
+        const [gate] = await sql<
+          JobProposal[]
+        >`select * from job_proposals where job_id = ${original.id}`;
+        if (!gate) throw new Error("missing proposal");
+        const send = vi.spyOn(s.worker, "send").mockRejectedValueOnce(new Error("offline"));
+        await expect(
+          handleProposal(
+            s.deps,
+            {
+              id: String(gate.id),
+              by: "U1",
+              channel: "C1",
+              threadTs: `refused-${reason}`,
+              start: true,
+            },
+            allowed,
+          ),
+        ).rejects.toThrow("could not start");
+        const [child] =
+          await sql`select id, status, followup_sent_at from jobs where parent_job_id = ${original.id}`;
+        expect(child?.status).toBe("running");
+        expect(child?.followupSentAt).toBeNull();
+        const retry = { ...s.deps };
+        if (reason === "project removed") retry.allowedProjects = [];
+        if (reason === "worker changed") retry.workerIdentity = "worker-two";
+        if (reason === "approver removed") vi.stubEnv("SYM_SLACK_USERS", "U2");
+        await reconcileJobs(retry);
+        const closed = await getJob(sql, Number(child?.id));
+        expect(closed?.status).toBe("cancelled");
+        expect(closed?.finishedAt).not.toBeNull();
+        const [proposal] =
+          await sql`select status, executed_at from job_proposals where id = ${gate.id}::bigint`;
+        expect(proposal?.status).toBe("expired");
+        expect(proposal?.executedAt).not.toBeNull();
+        const refusal =
+          reason === "project removed"
+            ? "no projects configured"
+            : reason === "worker changed"
+              ? "worker or project changed"
+              : "access";
+        expect(
+          s.calls.some((c) => c.method === "chat.update" && String(c.body.text).includes(refusal)),
+        ).toBe(true);
+        expect(
+          s.calls.some(
+            (c) =>
+              c.method === "chat.postMessage" &&
+              c.body.channel === "U1" &&
+              String(c.body.text).includes(refusal),
+          ),
+        ).toBe(true);
+        expect(send).toHaveBeenCalledTimes(1);
+        vi.stubEnv("SYM_SLACK_USERS", "U1");
+        const next = await startFollowUp(
+          s.deps,
+          `J-${original.id}`,
+          "add a test",
+          "U1",
+          `new-${reason}`,
+        );
+        expect(next.job?.status).toBe("running");
+        expect(s.worker.sends).toHaveLength(1);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  it("preserves a question in a follow-up offer", async () => {
+    const s = setup();
+    const original = await job("question-offer");
+    await launchOrAdopt(s.deps, original.id, "http://127.0.0.1/cb");
+    await checkJob(s.deps, original.id, 1);
+    await proposeFollowUp(s.deps, `J-${original.id}`, "can you add a test?", "question-offer");
+    const [gate] =
+      await ledger.sql()`select message from job_proposals where job_id = ${original.id}`;
+    expect(gate?.message).toBe(
+      "You asked: 'can you add a test?' I'd continue on the same branch. Should I start?",
+    );
   });
 
   it("answers every part of a worker question in its code channel, through the brain's steer tool", async () => {

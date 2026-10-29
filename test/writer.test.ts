@@ -183,20 +183,14 @@ describe("writtenPost", () => {
   });
 
   it("appends missing facts together and keeps facts already stated only once", () => {
-    const post = writtenPost(
-      job,
-      request.contract,
-      [],
-      "PR #3 is up. Tests passed (12 passed).",
-      request.prUrl,
-    );
+    const post = writtenPost(job, request.contract, [], "PR #3 is up. {{tests}}", request.prUrl);
     expect(post.text.match(/PR #3/g)).toHaveLength(1);
     expect(post.text.match(/Tests passed/g)).toHaveLength(1);
     expect(post.text.split("\n\n")).toHaveLength(2);
     expect(post.text).toContain("Cap the wait at 30s? 1 file changed.");
   });
 
-  it("appends missing PR, test, CI, and file facts as one sentence", () => {
+  it("appends missing PR, test, CI, and file facts as separate sentences", () => {
     const post = writtenPost(
       job,
       { ...request.contract, openQuestions: [], ciStatus: "passed" },
@@ -205,7 +199,7 @@ describe("writtenPost", () => {
       request.prUrl,
     );
     expect(post.text.split("\n\n")[1]).toBe(
-      "<https://github.com/example/app/pull/3|PR #3> is up; Tests passed (12 passed); CI is green; 1 file changed.",
+      "<https://github.com/example/app/pull/3|PR #3> is up. Tests passed (12 passed). CI is green. 1 file changed.",
     );
   });
 
@@ -237,6 +231,26 @@ describe("writtenPost", () => {
     expect(post.text).not.toContain("All tests are green");
     expect(post.text).toContain("Tests failed (1 failed).");
     expect(post.text).toContain("PR #3");
+  });
+
+  it.each([
+    "Tests have all passed",
+    "tests are all green",
+    "the test suite is passing",
+    "all green",
+    "CI is green",
+  ])("keeps outcome claims in code-owned tokens: %s", (claim) => {
+    for (const testsStatus of ["failed", "unknown", "not_run"] as const) {
+      const post = writtenPost(
+        job,
+        { ...request.contract, tests: "", testsStatus, ciStatus: "unknown" },
+        [],
+        `${claim}. {{tests}}`,
+        null,
+      );
+      expect(post.text).toContain("Done with J-7:");
+      expect(post.text).not.toContain(claim);
+    }
   });
 
   it("defuses mentions the writer copied from a worker report", () => {

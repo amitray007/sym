@@ -39,6 +39,7 @@ export interface HomeData {
   worker: WorkerHealth;
   active: Job[];
   closures?: Job[];
+  approvedStarts?: number[];
   finished: { done: number; failed: number; cancelled: number; latest: Job[] };
   schedules: Schedule[];
   // The allow-list names only. The collector never reads any other project.
@@ -123,7 +124,7 @@ function needsYou(job: Job, now: Date): boolean {
         86_400_000)
   );
 }
-function jobLine(job: Job, now: Date): string {
+function jobLine(job: Job, now: Date, approvedStarts: number[] = []): string {
   const link = threadLink(job);
   const ref = link ? `<${link}|${esc(jobRef(job.id))}>` : esc(jobRef(job.id));
   const since = job.finishedAt ?? job.lastActivityAt ?? job.startedAt ?? job.createdAt;
@@ -136,7 +137,9 @@ function jobLine(job: Job, now: Date): string {
       : job.closedAt && !job.workerSettledAt
         ? "worker settlement pending"
         : job.status === "launching"
-          ? "waiting for you to start it"
+          ? approvedStarts.includes(job.id)
+            ? "starting"
+            : "waiting for you to start it"
           : job.status === "worker_offline"
             ? "worker is offline"
             : !job.finishedAt && needsYou(job, now) && !job.status.startsWith("waiting")
@@ -222,7 +225,7 @@ export function homeView(role: HomeRole, data?: HomeData): HomeView {
     blocks.push(
       section(
         listLines(
-          rows.map((job) => jobLine(job, now)),
+          rows.map((job) => jobLine(job, now, data.approvedStarts)),
           limit,
         ),
       ),
@@ -234,7 +237,7 @@ export function homeView(role: HomeRole, data?: HomeData): HomeView {
       section(
         listLines(
           [
-            ...attention.map((job) => jobLine(job, now)),
+            ...attention.map((job) => jobLine(job, now, data.approvedStarts)),
             ...pendingSchedules.map(
               (schedule) =>
                 `S-${schedule.id} · ${esc(clip(schedule.title, MAX_TITLE_CHARS))} · waiting for approval`,

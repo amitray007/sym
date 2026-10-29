@@ -269,8 +269,9 @@ export async function checkJob(
   // A job in `checking` has nothing more to read from the worker.
   if (TERMINAL.includes(job.status) || job.status === "checking") return toCheck(job, []);
 
-  const [followup] = await deps.sql<{ sent: boolean }[]>`
-    select followup_sent_at is not null as sent from jobs where id = ${job.id} and parent_job_id is not null
+  const [followup] = await deps.sql<{ sent: boolean; parentStatus: string }[]>`
+    select child.followup_sent_at is not null as sent, parent.status as parent_status
+    from jobs child join jobs parent on parent.id = child.parent_job_id where child.id = ${job.id}
   `;
   // An unsent follow-up still sees its parent's completed thread. Retry the send through the
   // proposal recovery path; do not consume that thread's status or cursor yet.
@@ -282,8 +283,12 @@ export async function checkJob(
   const questions =
     activity.status === "waiting" ? await deps.worker.pendingQuestions(job.workerThreadId) : [];
   const awaitingReply = followup && !job.lastMessage && !latestAssistantItem(activity.items);
+  const staleTerminal =
+    followup?.parentStatus === "done"
+      ? activity.status === "completed"
+      : ["failed", "interrupted"].includes(activity.status);
   const worked =
-    awaitingReply && ["completed", "failed", "interrupted"].includes(activity.status)
+    awaitingReply && !job.lastActivityAt && activity.items.length === 0 && staleTerminal
       ? "running"
       : toJobStatus(activity.status, questions.length > 0, job.status);
   const hold = (options.verify === true || options.write === true) && job.kind !== SCHEDULED_CHECK;
@@ -311,8 +316,8 @@ export async function checkJob(
     latestAssistantItem(activity.items),
   );
   const summary =
-    status === "failed" && activity.status === "interrupted"
-      ? `${workerLabel()} thread interrupted`
+    status === "failed"
+      ? `${workerLabel()} thread ${activity.status === "interrupted" ? "interrupted" : "failed"}`
       : status === "waiting_permission"
         ? `Waiting for a permission prompt on the ${workerNoun()}`
         : (firstLine(latest) ?? job.lastSummary ?? "Working");
@@ -330,7 +335,10 @@ export async function checkJob(
       ...(message ? { lastMessage: message } : {}),
       ...(prFacts ? { prFacts } : {}),
       ...(progress.state.prUrl ? { prUrl: progress.state.prUrl } : {}),
-      ...(activity.items.length > 0 ? { lastActivityAt: at } : {}),
+      ...(activity.items.length > 0 ||
+      (followup && ["running", "waiting"].includes(activity.status))
+        ? { lastActivityAt: at }
+        : {}),
       ...(progress.state.lastQuietPostAt
         ? { quietNoticedAt: new Date(progress.state.lastQuietPostAt) }
         : {}),
@@ -547,12 +555,7 @@ export async function markScheduledCheck(sql: Sql, jobId: number): Promise<void>
 }
 
 // Shows the owner the short brief in the job thread before the Start prompt (decision 060).
-// `trustedPlaybook` names the trusted playbook when the job starts without the click.
-export async function showBrief(
-  deps: LedgerDeps,
-  jobId: number,
-  trustedPlaybook?: string,
-): Promise<void> {
+export async function showBrief(deps: LedgerDeps, jobId: number): Promise<void> {
   const job = await mustGetJob(deps.sql, jobId);
   const brief = Brief.parse(job.brief);
   const { models, projectModel } = modelsFor(deps, brief.project);
@@ -561,10 +564,6 @@ export async function showBrief(
     briefModel: brief.model,
     ...(brief.modelReason ? { reason: brief.modelReason } : {}),
   });
-  // The owner sees which playbook a brief follows before trusting it (decision 059).
-  const [linked] = await deps.sql<{ name: string }[]>`
-    select p.name from jobs j join playbooks p on p.id = j.playbook_id where j.id = ${job.id}
-  `;
   await presentBrief(
     deps.sql,
     job,
@@ -572,7 +571,6 @@ export async function showBrief(
       chooseModel(models, { projectModel, briefModel: brief.model }).entry.id !== models.defaultId
       ? line
       : undefined,
-    linked ? { name: linked.name, trusted: trustedPlaybook === linked.name } : undefined,
   );
   await deliverNow(deps);
 }

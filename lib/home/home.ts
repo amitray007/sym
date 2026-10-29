@@ -121,11 +121,15 @@ export async function collectHome(deps: HomeDeps, role: HomeRole): Promise<HomeD
     getStoredPersona(sql).catch(() => undefined),
     incompleteClosures(sql),
   ]);
+  const starts = await sql<{ jobId: number }[]>`select p.job_id from job_proposals p
+    where p.kind = 'start' and p.status = 'approved'
+    and p.id = (select max(latest.id) from job_proposals latest where latest.job_id = p.job_id and latest.kind = 'start')`;
   const data: HomeData = {
     now,
     persona: personaStatus(deps.pack, stored, deps.env.SYM_PERSONA, () => {}),
     worker,
     active,
+    approvedStarts: starts.map((row) => Number(row.jobId)),
     closures,
     finished,
     schedules,

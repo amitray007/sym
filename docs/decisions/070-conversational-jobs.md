@@ -21,9 +21,8 @@ text with inline fact tokens and optional choices of two or three labels. Each l
 fit. {{ci}} and {{files}} hold CI and file-count facts when available. Code expands each token to
 the exact code-owned sentence or fact. IDs alone never count as coverage. Code appends missing
 concerns and open decisions as short sentences, then any missing PR, test, CI, and file facts
-as one sentence. Facts already present do not repeat. The job reference and duration live in the muted context line. A contradictory test claim,
-including "the test suite is passing" or "all tests are green" when tests failed, did not run, or
-are unknown, rejects the written result and uses the plain fallback. These facts appear in the
+as separate sentences. Facts already present do not repeat. The job reference and duration live in the muted context line. A test or CI outcome sentence outside a code-owned token,
+including "the test suite is passing" or "all green", rejects the written result and uses the plain fallback. These facts appear in the
 full notification text. Test outcomes distinguish passed, failed, not run, unknown, and explicitly
 no applicable tests. Result controls are PR and CI links,
 conversation choices, and optional native feedback. Chat replies have no feedback controls.

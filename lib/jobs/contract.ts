@@ -117,3 +117,19 @@ export function contradictsTestReport(text: string, contract: OutputContract): b
   ];
   return claims.some(([pattern, status]) => pattern.test(text) && actual !== status);
 }
+
+// Test and CI outcomes belong to code-owned tokens. Reject outcome sentences outside them,
+// even if a later token would append the truth. Counts of added tests are not outcomes.
+export function hasOutcomeClaim(text: string): boolean {
+  const prose = text.replace(/\{\{[a-z]+\d*\}\}/g, "");
+  return prose
+    .split(/(?<=[.!?])\s+|\n/)
+    .some(
+      (sentence) =>
+        (/\b(tests?|suite|ci|checks?)\b/i.test(sentence) &&
+          /\b(pass(?:ed|ing)?|fail(?:ed|ing|ure)?|green|red|run|ran|executed|skipped|unknown|pending)\b/i.test(
+            sentence,
+          )) ||
+        /\ball\s+green\b|\b\d+\s+passed\b/i.test(sentence),
+    );
+}

@@ -13,8 +13,8 @@ planning or building anything.
 - Every Slack post goes through `chooseDisplay` in `lib/display.ts`. The outbox refuses a post
   without a display choice.
 - Sym never edits repositories itself. Workers do, through an adapter.
-- A job that can write code, data, or settings needs an approval until the owner promotes its job
-  class on the trust ladder. Briefs keep production and customer data read-only. A job can
+- Every interactive chat job shows Start / Not now. Approved schedules start without a click
+  (decision 024); the trust ladder no longer auto-starts jobs. Briefs keep production and customer data read-only. A job can
   prepare a production change; a person runs it (decision 064).
 - Learned behavior is text, rows, or code under review. Layer 2 rows load only after approval.
   Layer 3 changes arrive as draft PRs.

@@ -165,17 +165,11 @@ function deliveryOf(brief: Brief): string {
     : "commit on the worktree branch, no push, no PR";
 }
 
-export function briefPrompt(
-  brief: Brief,
-  _ref?: string,
-  modelLine?: string,
-  playbook?: { name: string; trusted: boolean },
-): string {
+export function briefPrompt(brief: Brief, _ref?: string, modelLine?: string): string {
   return lines([
-    `I'd work on "${escapeMrkdwn(brief.title.charAt(0).toLowerCase() + brief.title.slice(1)).replace(/[.!?]+$/, "")}" in ${escapeMrkdwn(brief.project)}${brief.openPullRequest ? " on a draft PR" : "; I'll commit on the worktree branch, with no push or PR"}. Production and customer data stay read-only.`,
+    `I'd work on ${escapeMrkdwn(brief.title).replace(/[.!?]+$/, "")} in ${escapeMrkdwn(brief.project)}${brief.openPullRequest ? " on a draft PR." : ". I'll commit on a branch and won't push or open a PR."} Production and customer data stay read-only.`,
     ...brief.constraints.map(escapeMrkdwn),
     brief.modelReason && modelLine ? escapeMrkdwn(modelLine) : null,
-    playbook?.trusted ? `This fits the trusted playbook ${escapeMrkdwn(playbook.name)}.` : null,
     "Want me to start?",
   ]);
 }

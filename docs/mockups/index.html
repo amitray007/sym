@@ -363,7 +363,7 @@ footer p + p { margin-top: 8px; }
     </div>
 
     <h3>Same job, two levels</h3>
-    <p class="prose muted small">A read-only job that's already trusted (no approval needed): "why did the Billing sync fail for account 4412?" Both versions notify you twice. The card version gives you something to glance at while it runs. The text version keeps the thread to two lines.</p>
+    <p class="prose muted small">A read-only job after Start: "why did the Billing sync fail for account 4412?" Both versions notify you twice. The card version gives you something to glance at while it runs. The text version keeps the thread to two lines.</p>
     <div class="pair">
       <div>
         <p class="label">Card (default for a 10-minute job)</p>
@@ -794,14 +794,14 @@ footer p + p { margin-top: 8px; }
         <h3>Who approves what</h3>
         <dl>
           <dt>Layer 1</dt><dd>Facts and preferences. Sym saves them right away and tells you it did.</dd>
-          <dt>Layer 2</dt><dd>Playbooks, rules, trust levels. One click. Loaded from Postgres at the next session, no deploy.</dd>
+          <dt>Layer 2</dt><dd>Playbooks and rules. One click. Loaded from Postgres at the next session, no deploy.</dd>
           <dt>Layer 3</dt><dd>New tools and code. Draft PR, evals in CI, your merge, then Dokploy redeploys.</dd>
         </dl>
         <ul>
           <li>Everything is text, rows, or code you can read and revert. No model training.</li>
           <li>The weekly message is one ping, even with several proposals.</li>
           <li>Repeated work: when the same kind of job finished 3 times, the weekly review drafts a playbook from those briefs for you to approve (decision 058).</li>
-          <li>Trust: after 5 clean runs of one playbook, Sym asks you to trust it. Interactive chat still shows Start / Not now, even for a trusted playbook. Approved schedules and PR wakes keep trusted auto-start. A 👎, a requested fix, or a run with concerns puts it back to asking (decisions 059 and 071).</li>
+          <li>Every chat request shows Start / Not now. Approved schedules start without a click (decision 024). The trust ladder no longer auto-starts jobs; historical trust rows remain stored (decision 071).</li>
         </ul>
       </div>
     </div>
