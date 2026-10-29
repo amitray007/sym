@@ -1,24 +1,14 @@
-import { workerLabel, workerNoun } from "../worker-label.ts";
-import {
-  buttonUrl,
-  CLOSE_ACTION_ID,
-  FIX_ACTION_ID,
-  jobButton,
-  LOOKS_GOOD_ACTION_ID,
-  openPrButton,
-} from "./card.ts";
+import { buttonUrl, openPrButton } from "./card.ts";
 import type { OutputContract } from "./contract.ts";
 import {
   duration,
   escapeMrkdwn,
   failureMessage,
   type JobFacts,
+  resultFacts,
   resultMessage,
-  resultView,
 } from "./messages.ts";
-import { nearDuplicate } from "./similar.ts";
-import { CONCERNS_HEADER } from "./verify.ts";
-import { WRITTEN_MAX } from "./writer.ts";
+import { requiredConcerns, WRITTEN_MAX, type WriterOutput } from "./writer.ts";
 
 // Block Kit for the result and failure posts (decision 047). Each builder returns the blocks and
 // the plain `text` fallback that Slack shows in notifications and to screen readers. The text is
@@ -36,9 +26,6 @@ export interface BlockPost {
 export const SECTION_MAX = 3000;
 export const HEADER_MAX = 150;
 export const MAX_BLOCKS = 50;
-const ITEM_MAX = 500;
-const MAX_ITEMS = 10;
-
 /** Cuts plain text to `max` characters and marks the cut with an ellipsis. */
 export function clipText(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
@@ -55,142 +42,87 @@ export function safeMrkdwn(text: string, max: number): string {
   }
 }
 
-function section(text: string): Block {
-  return { type: "section", text: { type: "mrkdwn", text: clipText(text, SECTION_MAX) } };
+// A markdown block supports 12,000 characters. Larger deterministic results use several
+// section blocks without dropping required concerns. The full notification text is never cut.
+function textBlocks(text: string): Block[] {
+  if (text.length <= 12_000) return [{ type: "markdown", text }];
+  const blocks: Block[] = [];
+  for (let i = 0; i < text.length; i += SECTION_MAX) {
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: text.slice(i, i + SECTION_MAX) },
+    });
+  }
+  return blocks;
 }
 
-function header(emoji: string, job: JobFacts, tail?: string): Block {
-  const end = tail ? ` · ${tail}` : "";
-  const start = `${emoji} ${job.ref} · `;
-  const title = clipText(job.title, Math.max(1, HEADER_MAX - start.length - end.length));
+function meta(job: JobFacts): Block {
+  const time = duration(job);
   return {
-    type: "header",
-    text: { type: "plain_text", text: clipText(`${start}${title}${end}`, HEADER_MAX), emoji: true },
+    type: "context",
+    elements: [{ type: "mrkdwn", text: `${job.ref}${time ? ` · ${time}` : ""}` }],
   };
 }
 
-function context(parts: string[]): Block | null {
-  const elements = parts.filter((part) => part !== "").map((text) => ({ type: "mrkdwn", text }));
-  return elements.length > 0 ? { type: "context", elements: elements.slice(0, 10) } : null;
-}
-
-// Rich text holds the text as typed, so a list item takes no mrkdwn escapes.
-function numberedList(items: string[]): Block {
-  const shown = items.slice(0, MAX_ITEMS).map((item) => clipText(item, ITEM_MAX));
-  if (items.length > MAX_ITEMS) shown.push(`…and ${items.length - MAX_ITEMS} more`);
-  return {
-    type: "rich_text",
-    elements: [
-      {
-        type: "rich_text_list",
-        style: "ordered",
-        elements: shown.map((text) => ({
-          type: "rich_text_section",
-          elements: [{ type: "text", text }],
-        })),
-      },
-    ],
-  };
-}
-
-function checklist(title: string, items: string[]): string {
-  const shown = items.slice(0, MAX_ITEMS).map((item) => `☐ ${safeMrkdwn(item, ITEM_MAX)}`);
-  if (items.length > MAX_ITEMS) shown.push(`…and ${items.length - MAX_ITEMS} more`);
-  return [title, ...shown].join("\n");
-}
-
-function present(blocks: (Block | null | false | "")[]): Block[] {
-  return blocks.filter((block): block is Block => !!block).slice(0, MAX_BLOCKS);
-}
-
-function threadContext(job: JobFacts): string {
-  return job.workerThreadId
-    ? `${workerLabel()} thread: \`${escapeMrkdwn(job.workerThreadId)}\``
-    : "";
+function resultActions(prUrl: string | null, ciUrl?: string): Block[] {
+  const pr = buttonUrl(prUrl);
+  const ci = buttonUrl(ciUrl);
+  const elements = [
+    ...(pr ? [openPrButton(pr)] : []),
+    ...(ci
+      ? [
+          {
+            type: "button",
+            action_id: "sym_job_ci",
+            text: { type: "plain_text", text: "CI run" },
+            url: ci,
+          },
+        ]
+      : []),
+  ];
+  return elements.length ? [{ type: "actions", elements }] : [];
 }
 
 export function resultPost(
   job: JobFacts,
   contract: OutputContract | null,
   concerns: string[] = [],
-  verdict: string | null = null,
+  limitation: string | null = null,
 ): BlockPost {
-  const text = resultMessage(job, contract, concerns, verdict);
-  const view = resultView(job, contract, concerns, verdict);
-  const head = header(view.emoji, job, view.duration);
-
-  if (view.noResult) {
-    return {
-      text,
-      blocks: present([
-        head,
-        section(`*tl;dr* ${view.gist}`),
-        view.verdict && section(safeMrkdwn(view.verdict, SECTION_MAX)),
-        context([threadContext(job)]),
-        resultActions(job.ref, null, true),
-      ]),
-    };
-  }
-
-  const prUrl = view.pr ? buttonUrl(view.pr.url) : null;
-  const facts = [
-    view.tests && `tests: ${safeMrkdwn(view.tests, 200)}`,
-    view.filesChanged > 0 &&
-      `${view.filesChanged} ${view.filesChanged === 1 ? "file" : "files"} changed`,
-  ].filter((part): part is string => typeof part === "string" && part !== "");
-
+  const text = resultMessage(job, contract, concerns, limitation);
   return {
     text,
-    blocks: present([
-      head,
-      view.gist !== "" && section(`*tl;dr* ${safeMrkdwn(view.gist, SECTION_MAX - 10)}`),
-      view.verdict && section(safeMrkdwn(view.verdict, SECTION_MAX)),
-      view.concernsHeader !== null && section(view.concernsHeader),
-      view.concernsHeader !== null && numberedList(view.concerns),
-      view.questions.length > 0 && section(checklist("*open questions*", view.questions)),
-      context(facts),
-      resultActions(job.ref, prUrl, true),
-    ]),
+    blocks: [
+      ...textBlocks(text),
+      meta(job),
+      ...resultActions(contract?.prUrl ?? null, contract?.ciUrl),
+    ],
   };
 }
 
-// A result the `writer` subagent wrote (decision 062). The text is the writer's, in Slack's
-// markdown block, with no template. Sym keeps what a person must not miss, because a worker
-// report must not be able to talk the writer out of it: the verifier line, the check concerns,
-// and the open questions. Then a footer with the job, its time, and its facts, and the buttons.
 export function writtenPost(
   job: JobFacts,
   contract: OutputContract,
   concerns: string[],
-  written: string,
+  written: string | WriterOutput,
   prUrl: string | null,
-  verdict: string | null = null,
+  limitation: string | null = null,
 ): BlockPost {
-  const flagged = concerns.length > 0;
-  const emoji = flagged ? "⚠️" : "✅";
-  const time = duration(job);
-  const files = contract.filesChanged.length;
-  const text = defuse(written);
-  const firstLine = text.split("\n").find((line) => line.trim() !== "") ?? "";
-  // A concern that already says what an open question says makes the question redundant.
-  const questions = contract.openQuestions.filter(
-    (question) => !concerns.some((concern) => nearDuplicate(concern, question)),
-  );
+  const output = typeof written === "string" ? { text: written, coveredConcernIds: [] } : written;
+  const required = requiredConcerns(contract, concerns);
+  const uncovered = required.filter((c) => !(output.coveredConcernIds ?? []).includes(c.id));
+  const body = defuse(output.text.slice(0, WRITTEN_MAX));
+  const additions = [
+    ...(!body.includes(job.ref) ? [job.ref] : []),
+    // Test and PR truth remain code-owned, including when the writer claims coverage.
+    ...resultFacts(contract, prUrl),
+    ...uncovered.map((c) => escapeMrkdwn(c.text)),
+    ...(limitation && !required.some((c) => c.text === limitation) ? [limitation] : []),
+  ];
+  const text = [body, ...additions].filter(Boolean).join("\n\n");
   return {
-    text: clipText(`${emoji} ${job.ref} · ${firstLine}`, HEADER_MAX * 2),
-    blocks: present([
-      { type: "markdown", text: clipText(text, WRITTEN_MAX) },
-      verdict && !verdict.startsWith(CONCERNS_HEADER) && section(safeMrkdwn(verdict, SECTION_MAX)),
-      flagged && section(verdict?.startsWith(CONCERNS_HEADER) ? verdict : CONCERNS_HEADER),
-      flagged && numberedList(concerns),
-      questions.length > 0 && section(checklist("*open questions*", questions)),
-      context([
-        `${emoji} ${job.ref}${time ? ` · ${time}` : ""}`,
-        contract.tests && `tests: ${safeMrkdwn(contract.tests, 200)}`,
-        files > 0 ? `${files} ${files === 1 ? "file" : "files"} changed` : "",
-      ]),
-      resultActions(job.ref, prUrl ? buttonUrl(prUrl) : null, true),
-    ]),
+    text,
+    blocks: [...textBlocks(text), meta(job), ...resultActions(prUrl, contract.ciUrl)],
   };
 }
 
@@ -202,33 +134,7 @@ export function defuse(text: string): string {
     .replace(/@(channel|here|everyone)\b/gi, "@\u200b$1");
 }
 
-// Open PR, then Looks good, Fix, and Close (decision 056). A failure gets Fix and Close only.
-function resultActions(ref: string, prUrl: string | null, done: boolean): Block {
-  return {
-    type: "actions",
-    block_id: `job-${ref}-result`,
-    elements: [
-      ...(prUrl ? [openPrButton(prUrl)] : []),
-      ...(done ? [jobButton(LOOKS_GOOD_ACTION_ID, "Looks good", ref, "primary")] : []),
-      jobButton(FIX_ACTION_ID, "Fix…", ref),
-      jobButton(CLOSE_ACTION_ID, "Close", ref),
-    ],
-  };
-}
-
 export function failurePost(job: JobFacts, reason?: string | null): BlockPost {
-  const time = duration(job);
-  return {
-    text: failureMessage(job, reason),
-    blocks: present([
-      header("❌", job, time ? `failed in ${time}` : "failed"),
-      section(
-        reason
-          ? safeMrkdwn(reason, SECTION_MAX)
-          : `the ${workerNoun()} stopped before it finished.`,
-      ),
-      context([threadContext(job)]),
-      resultActions(job.ref, null, false),
-    ]),
-  };
+  const text = failureMessage(job, reason);
+  return { text, blocks: [...textBlocks(text), meta(job)] };
 }

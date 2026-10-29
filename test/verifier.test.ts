@@ -83,19 +83,19 @@ describe("verdictLine", () => {
   });
 
   it("reports a pass with its confidence", () => {
-    expect(verdictLine(checked({ verdict: "pass", concerns: [], confidence: 0.86 }), [])).toBe(
-      "✅ verifier: matches the brief (86% sure)",
-    );
+    expect(
+      verdictLine(checked({ verdict: "pass", concerns: [], confidence: 0.86 }), []),
+    ).toBeNull();
   });
 
   it("points at the concerns when any check found one", () => {
     const pass = checked({ verdict: "pass", concerns: [], confidence: 0.9 });
-    expect(verdictLine(pass, [PR_NOT_ALLOWED])).toBe("*⚠️ check before merge* (90% sure)");
+    expect(verdictLine(pass, [PR_NOT_ALLOWED])).toBeNull();
   });
 
   it("says the model check was unavailable", () => {
     expect(verdictLine({ status: "unavailable", reason: "timeout" }, [])).toBe(
-      "verifier unavailable, only the rule checks ran",
+      "I couldn't run the independent check; only the rule checks ran.",
     );
   });
 });
@@ -273,8 +273,8 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
     expect(again.concerns).toEqual(end.concerns);
     const posts = s.posts();
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain("*⚠️ check before merge* (70% sure)");
-    expect(posts[0]).toContain(`1. ${PR_NOT_ALLOWED}\n2. No test covers the retry limit.`);
+    expect(posts[0]).not.toContain("% sure");
+    expect(posts[0]).toContain(`${PR_NOT_ALLOWED}\n\nNo test covers the retry limit.`);
     const collapse = s
       .added()
       .filter((c) => c.method === "chat.update")
@@ -301,12 +301,12 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
     await finishJob(s.deps, s.job.id, undefined, written);
 
     const post = s.added().find((c) => c.method === "chat.postMessage");
-    expect(String(post?.body.text)).toBe(`⚠️ ${s.ref} · ${written}`);
+    expect(String(post?.body.text)).toContain(written);
     const blocks = post?.body.blocks as Record<string, unknown>[];
-    expect(blocks[0]).toEqual({ type: "markdown", text: written });
+    expect((blocks[0] as { text: string }).text).toContain(written);
     // The writer cannot drop a concern: Sym lists it under the text.
     expect(JSON.stringify(blocks)).toContain(PR_NOT_ALLOWED);
-    expect(JSON.stringify(blocks)).toContain('"action_id":"sym_job_ok"');
+    expect(JSON.stringify(blocks)).not.toContain('"action_id":"sym_job_ok"');
   });
 
   it("posts the template when the written text is empty", async () => {
@@ -317,7 +317,7 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
 
     const posts = s.posts();
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain(`*${s.ref} · Billing sync retry*`);
+    expect(posts[0]).toContain(`${s.ref} is done.`);
   });
 
   it("posts the result with the rule checks when the model check was unavailable", async () => {
@@ -328,8 +328,8 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
 
     const posts = s.posts();
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain("verifier unavailable, only the rule checks ran");
-    expect(posts[0]).toContain(`1. ${PR_NOT_ALLOWED}`);
+    expect(posts[0]).toContain("I couldn't run the independent check; only the rule checks ran.");
+    expect(posts[0]).toContain(PR_NOT_ALLOWED);
   });
 
   it("treats a malformed verifier reply as unavailable", async () => {
@@ -341,7 +341,7 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
       output: { verdict: "maybe", concerns: [], confidence: 2 } as unknown as VerifierOutput,
     });
 
-    expect(s.posts()[0]).toContain("verifier unavailable");
+    expect(s.posts()[0]).toContain("couldn't run the independent check");
   });
 
   it("finishes a job cancelled while checking as done, without interrupting the worker", async () => {
@@ -354,7 +354,7 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
     expect(s.worker.interrupts).toEqual([]);
     const posts = s.posts();
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain(`*${s.ref} · `);
+    expect(posts[0]).toContain(`${s.ref} is done.`);
     expect(posts[0]).not.toContain("verifier");
   });
 
@@ -366,7 +366,7 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
 
     const posts = s.posts();
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain("verifier unavailable");
+    expect(posts[0]).toContain("couldn't run the independent check");
   });
 
   it("ends a scheduled check as done without the model check", async () => {

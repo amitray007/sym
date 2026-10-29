@@ -233,7 +233,7 @@ export default defineWorkflowTool({
             verdict = await runVerifier(ctx, job.id, stopped, timing.verifierMs);
           }
           const modelCheck = verdict === "stopped" ? undefined : verdict;
-          let written: string | undefined | "stopped";
+          let written: WriterOutput | undefined | "stopped";
           if (timing.write && timing.writerMs > 0 && verdict !== "stopped") {
             yield { status: statusLine(ref, "Writing the result") };
             written = await runWriter(ctx, job.id, modelCheck, stopped, timing.writerMs);
@@ -336,7 +336,7 @@ async function runWriter(
   check: ModelCheck | undefined,
   stopped: Promise<"stopped">,
   timeoutMs: number,
-): Promise<string | undefined | "stopped"> {
+): Promise<WriterOutput | undefined | "stopped"> {
   // A failed input read, such as an unreadable persona file, gets the template.
   const message = await writerInput(jobId, check).catch(() => null);
   if (!message) return undefined;
@@ -356,7 +356,7 @@ async function runWriter(
     if (outcome === "stopped") return "stopped";
     if (outcome === "timeout" || outcome.status === "failed") return undefined;
     // finishJob parses the text again, so a wrong shape gets the template.
-    return (outcome.data as WriterOutput | undefined)?.text;
+    return outcome.data as WriterOutput | undefined;
   } catch {
     return undefined;
   }
@@ -544,7 +544,7 @@ async function channelStatus(jobId: number, status: SessionStatus) {
   if (status === "active") await setContextBar(deps, job);
 }
 
-async function finish(jobId: number, verdict: ModelCheck | undefined, written?: string) {
+async function finish(jobId: number, verdict: ModelCheck | undefined, written?: WriterOutput) {
   "use step";
   return finishJob(ledgerDeps(), jobId, verdict, written);
 }

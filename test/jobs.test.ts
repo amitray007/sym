@@ -560,10 +560,10 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       expect(posts).toHaveLength(1);
       const text = String(posts[0]?.body.text);
       expect(posts[0]?.body).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });
-      expect(text).toContain(`*${s.ref} · Billing sync retry* · 9m`);
+      expect(text).toContain(`${s.ref} is done.`);
       expect(text).toContain("Added retry with backoff");
-      expect(text).toContain(`🔗 <${PR_URL}|PR #42>`);
-      expect(text).toContain("tests: 12 passed");
+      expect(text).toContain(`<${PR_URL}|PR #42>`);
+      expect(text).toContain("Tests passed. Reported: 12 passed");
       expect(text).toContain("2 files changed");
     });
 
@@ -592,7 +592,9 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       const s = await launched({ script: [{ status: "completed", items: ["Finished it."] }] });
       await checkJob(s.deps, s.job.id, 1000);
 
-      expect(String(s.slack.posts().at(-1)?.body.text)).toContain("sent no result summary");
+      expect(String(s.slack.posts().at(-1)?.body.text)).toContain(
+        "finished without a result summary",
+      );
     });
   });
 
@@ -656,7 +658,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       expect(added).toHaveLength(1);
       expect(added[0]?.body.channel).toBe(OWNER);
       expect(added[0]?.body.thread_ts).toBeUndefined();
-      expect(String(added[0]?.body.text)).toContain(`${s.ref} is waiting for a permission prompt`);
+      expect(String(added[0]?.body.text)).toContain(`${s.ref} needs permission`);
     });
   });
 
@@ -683,7 +685,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       const afterQuiet = s.slack.posts().slice(before);
       expect(afterQuiet).toHaveLength(1);
       expect(String(afterQuiet[0]?.body.text)).toContain(
-        `⏳ ${s.ref} has had no new activity for 21m. still running.`,
+        `I haven't heard from the worker on ${s.ref} for 21m. Want me to stop it?`,
       );
 
       clock = minutes(25);

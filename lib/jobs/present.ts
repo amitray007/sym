@@ -2,6 +2,7 @@ import type { Sql } from "../db.ts";
 import { CARD_VERSION_FIELD } from "../delivery/deliver.ts";
 import { chooseDisplay, type Surface } from "../display.ts";
 import { recordOutcome } from "../learning/trust.ts";
+import { choiceBlocks, storeChoices } from "../ledger/choices.ts";
 import { type Job, type JobStatus, jobRef, setJobCard, updateJob } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
 import type { Pack } from "../pack/load.ts";
@@ -35,6 +36,7 @@ import {
   openPrUrl,
   verdictLine,
 } from "./verify.ts";
+import type { WriterOutput } from "./writer.ts";
 
 // How a job shows in Slack (docs/display.md, docs/slack.md). Every post goes through
 // chooseDisplay and the outbox. The card is Sym's own message: the job row holds the card Sym
@@ -218,7 +220,7 @@ export async function presentEnd(
   now: Date,
   pack?: Pack,
   check?: ModelCheck,
-  written?: string,
+  written?: string | WriterOutput,
 ): Promise<void> {
   await presentEndOnce(sql, job, contract, now, pack, check, written);
   if (TERMINAL.includes(job.status)) {
@@ -241,7 +243,7 @@ async function presentEndOnce(
   now: Date,
   pack?: Pack,
   check?: ModelCheck,
-  written?: string,
+  written?: string | WriterOutput,
 ): Promise<void> {
   if (!job.slackChannel || !TERMINAL.includes(job.status)) return;
   const ref = jobRef(job.id);
@@ -282,6 +284,24 @@ async function presentEndOnce(
         : job.status === "failed"
           ? failurePost(facts(job, now), job.lastSummary)
           : { text: `🚫 ${ref} was cancelled.`, blocks: [] };
+  if (
+    job.status === "done" &&
+    written &&
+    typeof written !== "string" &&
+    written.choices &&
+    job.slackChannel
+  ) {
+    const choices = await storeChoices(sql, {
+      key: `${ref}:result-choices`,
+      jobId: job.id,
+      channel: job.slackChannel,
+      threadTs: job.slackThreadTs,
+      message: message.text,
+      choices: written.choices,
+    });
+    message.blocks.push(...choiceBlocks(choices));
+    message.text += `\n\n${written.choices.join(" / ")}. You can also reply in your own words.`;
+  }
   // A failure notifies even in quiet mode (docs/display.md).
   const quiet = await isQuiet(sql, pack, now);
   await post(

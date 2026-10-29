@@ -79,21 +79,34 @@ describe("fixture writer", () => {
 describe("writtenPost", () => {
   const job = { ref: "J-7", title: "Retry", workerThreadId: "t-1", durationMs: 6 * 60_000 };
 
-  it("keeps the verifier line and the open questions under the written text", () => {
+  it("adds uncovered concerns and decisions as sentences in both forms", () => {
     const post = writtenPost(
       job,
       request.contract,
-      [],
+      ["No limit test."],
       "J-7 is done.",
-      null,
-      "matches the brief (90% sure)",
+      request.prUrl,
     );
-    const json = JSON.stringify(post.blocks);
-    expect(post.blocks[0]).toEqual({ type: "markdown", text: "J-7 is done." });
-    expect(json).toContain("matches the brief (90% sure)");
-    expect(json).toContain("☐ Cap the wait at 30s?");
-    expect(json).toContain("✅ J-7 · 6m");
-    expect(post.text).toBe("✅ J-7 · J-7 is done.");
+    expect(post.text).toContain("No limit test.");
+    expect(post.text).toContain("Cap the wait at 30s?");
+    expect(post.text).toContain("Tests passed");
+    expect(post.text).toContain("PR #3");
+    expect(JSON.stringify(post.blocks)).not.toMatch(/% sure|☐|check before merge/);
+  });
+  it("lets the writer weave covered concerns into its text", () => {
+    const post = writtenPost(
+      job,
+      request.contract,
+      ["No limit test."],
+      {
+        text: "J-7 is done, but the limit has no test.",
+        coveredConcernIds: ["c1"],
+        choices: ["Prepare a test", "Leave it"],
+      },
+      null,
+    );
+    expect(post.text).not.toContain("No limit test.");
+    expect(post.text).toContain("Cap the wait at 30s?");
   });
 
   it("defuses mentions the writer copied from a worker report", () => {

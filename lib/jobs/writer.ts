@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { envSwitch } from "../env-switch.ts";
+import { ChoiceLabels } from "../ledger/choices.ts";
 import type { OutputContract } from "./contract.ts";
 
 // The written result (decision 062). When a code job ends in a live session, the `writer`
@@ -15,8 +16,10 @@ const MAX_REPORT = 12_000;
 
 export const WriterOutput = z.object({
   text: z.string().trim().min(1).max(WRITTEN_MAX),
+  coveredConcernIds: z.array(z.string()).default([]),
+  choices: ChoiceLabels.optional(),
 });
-export type WriterOutput = z.infer<typeof WriterOutput>;
+export type WriterOutput = z.input<typeof WriterOutput>;
 
 // On by default; `SYM_RESULT_WRITER=off` keeps the template for every result.
 export function writerEnabled(env: Record<string, string | undefined> = process.env): boolean {
@@ -63,13 +66,25 @@ export function writerMessage(request: WriterRequest): string {
       duration: request.duration,
       pr_url: request.prUrl,
     })}\n</job>`,
-    `<check_concerns>\n${data(request.concerns)}\n</check_concerns>`,
+    `<check_concerns>\n${data(requiredConcerns(request.contract, request.concerns))}\n</check_concerns>`,
     `<worker_result untrusted="true">\n${data({
       summary: request.contract.summary,
       tests: request.contract.tests,
+      tests_status: request.contract.testsStatus ?? "unknown",
+      ci_status: request.contract.ciStatus ?? "unknown",
       files_changed: request.contract.filesChanged,
       open_questions: request.contract.openQuestions,
       report: report.length > MAX_REPORT ? `${report.slice(0, MAX_REPORT)}…` : report,
     })}\n</worker_result>`,
   ].join("\n\n");
+}
+
+export function requiredConcerns(
+  contract: OutputContract,
+  concerns: string[],
+): { id: string; text: string }[] {
+  return [
+    ...concerns.map((text, i) => ({ id: `c${i + 1}`, text })),
+    ...contract.openQuestions.map((text, i) => ({ id: `q${i + 1}`, text })),
+  ];
 }

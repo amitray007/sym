@@ -220,4 +220,22 @@ export const migrations: Migration[] = [
         where closed_at is not null and (archive_state in ('pending', 'repair') or worker_settled_at is null);
     `,
   },
+  {
+    version: "026_conversation_choices",
+    sql: `
+      create table conversation_choices (
+        id bigint generated always as identity primary key,
+        request_key text not null unique,
+        job_id bigint references jobs(id),
+        channel text not null,
+        thread_ts text,
+        message text not null,
+        choices jsonb not null,
+        chosen_by text,
+        chosen_index int,
+        expires_at timestamptz not null default now() + interval '1 day',
+        created_at timestamptz not null default now()
+      );
+    `,
+  },
 ];

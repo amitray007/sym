@@ -50,9 +50,9 @@ ${text}
 Keep the brief constraints below. The current project rules below replace earlier project rules:
 ${constraints}
 
-When you finish, end your last message with one JSON block in this shape:
+When you finish, write a short human report, then end your last message with one JSON block in this shape:
 \`\`\`json
-{"summary": "", "pr_url": null, "tests": "", "files_changed": [], "open_questions": []}
+{"summary": "", "pr_url": null, "tests": "", "tests_status": "unknown", "ci_status": "unknown", "files_changed": [], "open_questions": []}
 \`\`\``;
 }
 

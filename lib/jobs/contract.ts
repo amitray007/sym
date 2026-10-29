@@ -6,6 +6,9 @@ const Raw = z.object({
   summary: z.string().min(1),
   pr_url: z.string().nullish(),
   tests: z.string().default(""),
+  tests_status: z.enum(["passed", "failed", "not_run", "unknown", "none"]).optional(),
+  ci_status: z.enum(["passed", "failed", "running", "unknown"]).optional(),
+  ci_url: z.string().optional(),
   files_changed: z.array(z.string()).default([]),
   open_questions: z.array(z.string()).default([]),
 });
@@ -14,6 +17,9 @@ export interface OutputContract {
   summary: string;
   prUrl: string | null;
   tests: string;
+  testsStatus?: "passed" | "failed" | "not_run" | "unknown" | "none";
+  ciStatus?: "passed" | "failed" | "running" | "unknown";
+  ciUrl?: string;
   filesChanged: string[];
   openQuestions: string[];
 }
@@ -41,7 +47,33 @@ export function parseOutputContract(message: string | null): OutputContract | nu
     summary: raw.summary,
     prUrl: raw.pr_url ? raw.pr_url : null,
     tests: raw.tests,
+    testsStatus: raw.tests_status ?? testStatus(raw.tests),
+    ...(raw.ci_status ? { ciStatus: raw.ci_status } : {}),
+    ...(raw.ci_url && safeHttpUrl(raw.ci_url) ? { ciUrl: raw.ci_url } : {}),
     filesChanged: raw.files_changed,
     openQuestions: raw.open_questions,
   };
+}
+
+// Legacy reports remain readable. Counts of new tests do not establish that tests ran.
+export function testStatus(tests: string): NonNullable<OutputContract["testsStatus"]> {
+  if (/\b(not run|didn['’]t run|not executed|skipped)\b/i.test(tests)) return "not_run";
+  if (/\b(failed|failing|fail)\b/i.test(tests)) return "failed";
+  if (/\b(passed|passing|pass)\b/i.test(tests)) return "passed";
+  if (/^none[.!]?$/i.test(tests.trim())) return "none";
+  return "unknown";
+}
+
+export function safeHttpUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return ["https:", "http:"].includes(parsed.protocol) &&
+      !parsed.username &&
+      !parsed.password &&
+      !/[<>|\s]/.test(url)
+      ? url
+      : null;
+  } catch {
+    return null;
+  }
 }

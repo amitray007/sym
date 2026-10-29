@@ -36,133 +36,32 @@ describe("escapeMrkdwn", () => {
 });
 
 describe("resultMessage", () => {
-  it("leads with the status and the gist, and lists the facts", () => {
-    expect(resultMessage(job, contract)).toBe(
-      [
-        "✅ *J-142 · Billing sync retry* · 14m",
-        "*tl;dr* Added retry with backoff.",
-        "",
-        "*open questions*",
-        "☐ Cap at 5 tries?",
-        "",
-        "🔗 <https://github.com/o/r/pull/812|PR #812> · tests: 12 passed · 3 files changed",
-      ].join("\n"),
-    );
+  it("shows a short result, every concern and decision, and full facts", () => {
+    const text = resultMessage(job, contract, ["No test covers <the> limit."]);
+    expect(text).toContain("J-142 is done. Added retry with backoff.");
+    expect(text).toContain("No test covers &lt;the&gt; limit.");
+    expect(text).toContain("Cap at 5 tries?");
+    expect(text).toContain("Tests passed. Reported: 12 passed");
+    expect(text).toContain("PR #812");
+    expect(text).not.toMatch(/tl;dr|check before merge|☐|% sure/);
   });
-
-  it("skips empty parts and uses the singular", () => {
-    const text = resultMessage(
-      { ref: "J-1", title: "T" },
-      { ...contract, prUrl: null, tests: "", filesChanged: ["a.ts"], openQuestions: [] },
-    );
-    expect(text).toBe("✅ *J-1 · T*\n*tl;dr* Added retry with backoff.\n\n1 file changed");
+  it.each([
+    ["12 passed", "Tests passed."],
+    ["1 failed", "Tests failed."],
+    ["not run; read-only", "Tests did not run."],
+    ["4 new tests", "I don't know whether tests ran."],
+    ["none", "no tests apply"],
+  ])("preserves test truth for %s", (tests, truth) => {
+    expect(resultMessage(job, { ...contract, tests })).toContain(truth);
   });
-
-  it("escapes worker text so it cannot ping or link", () => {
-    const text = resultMessage(job, { ...contract, summary: "<!channel> & <@U1>" });
-    expect(text).toContain("&lt;!channel&gt; &amp; &lt;@U1&gt;");
-    expect(text).not.toContain("<!channel>");
+  it("does not discard warnings in the second clause of a test report", () => {
+    expect(
+      resultMessage(job, { ...contract, tests: "12 passed; integration tests not run" }),
+    ).toContain("integration tests not run");
   });
-
-  it("strips characters that break a link", () => {
-    const text = resultMessage(job, { ...contract, prUrl: "https://x.test/pull/1>|evil" });
-    expect(text).toContain("<https://x.test/pull/1evil|PR #1>");
-  });
-
-  it("numbers the concerns under a header that carries the verdict", () => {
-    const text = resultMessage(
-      job,
-      { ...contract, openQuestions: [] },
-      ["No test covers <the> limit.", "CI was not checked."],
-      "*⚠️ check before merge* (70% sure)",
-    );
-    expect(text).toContain("⚠️ *J-142 · Billing sync retry* · 14m");
-    expect(text).toContain(
-      "*⚠️ check before merge* (70% sure)\n1. No test covers &lt;the&gt; limit.\n2. CI was not checked.",
-    );
-  });
-
-  it("uses the plain header when there are concerns and no model verdict", () => {
-    const text = resultMessage(job, contract, ["Something is off."]);
-    expect(text).toContain("*⚠️ check before merge*\n1. Something is off.");
-  });
-
-  it("shows a clean verdict as one line under the gist", () => {
-    const text = resultMessage(job, contract, [], "✅ verifier: matches the brief (90% sure)");
-    expect(text).toContain("*tl;dr* Added retry with backoff.\n✅ verifier: matches the brief");
-  });
-
-  it("drops an open question that a concern already covers", () => {
-    const text = resultMessage(
-      job,
-      {
-        ...contract,
-        openQuestions: ["CI status for head 271896a was not checked", "Cap at 5 tries?"],
-      },
-      ["CI status for head 271896a was not checked before recommending merge."],
-    );
-    expect(text).not.toContain("CI status for head 271896a was not checked\n");
-    expect(text).toContain("☐ Cap at 5 tries?");
-    expect(text.match(/271896a/g)).toHaveLength(1);
-  });
-
-  it("does not show the raw worker thread line on a normal result", () => {
-    expect(resultMessage(job, contract)).not.toContain("thr_8f2c");
-  });
-
-  it("explains a missing contract and keeps the thread pointer", () => {
-    const text = resultMessage(job, null);
-    expect(text).toContain("⚠️ *J-142 · Billing sync retry* · 14m");
-    expect(text).toContain("no result summary");
-    expect(text).toContain("`thr_8f2c`");
-  });
-
-  it("keeps only the first clause of a long tests note", () => {
-    const text = resultMessage(job, {
-      ...contract,
-      tests: "not run; read-only review, test logic verified by reading",
-    });
-    expect(text).toContain("tests: not run ·");
-    expect(text).not.toContain("read-only review");
-  });
-
-  it("renders the owner's example", () => {
-    const text = resultMessage(
-      { ref: "J-3", title: "Review PR #7698 billing_core data:null fix", durationMs: 60_000 },
-      {
-        summary:
-          "Merge PR #7698: the one-line fix is correct. All callers I checked handle a null-data response, and the new test fails on the old code. Only low-severity follow-ups remain.",
-        prUrl: "https://github.com/o/r/pull/7698",
-        tests: "not run; read-only review, test logic verified by reading",
-        filesChanged: [],
-        openQuestions: [
-          "CI status for head 271896a was not checked",
-          "Should the other .get('data', {}) sites in api_functions.py get a follow-up issue?",
-        ],
-      },
-      [
-        "worker opened a PR the job didn't allow.",
-        "Tests were not run, so fail-before / pass-after is unverified.",
-        "CI status for head 271896a was not checked before recommending merge.",
-      ],
-      "*⚠️ check before merge* (75% sure)",
-    );
-    expect(text).toBe(
-      [
-        "⚠️ *J-3 · Review PR #7698 billing_core data:null fix* · 1m",
-        "*tl;dr* Merge PR #7698: the one-line fix is correct.",
-        "",
-        "*⚠️ check before merge* (75% sure)",
-        "1. worker opened a PR the job didn't allow.",
-        "2. Tests were not run, so fail-before / pass-after is unverified.",
-        "3. CI status for head 271896a was not checked before recommending merge.",
-        "",
-        "*open questions*",
-        "☐ Should the other .get('data', {}) sites in api_functions.py get a follow-up issue?",
-        "",
-        "🔗 <https://github.com/o/r/pull/7698|PR #7698> · tests: not run",
-      ].join("\n"),
-    );
+  it("explains a missing report and keeps the worker pointer", () => {
+    expect(resultMessage(job, null)).toContain("can't say what changed");
+    expect(resultMessage(job, null)).toContain("thr_8f2c");
   });
 });
 
@@ -189,74 +88,40 @@ describe("tldr", () => {
 });
 
 describe("other messages", () => {
-  it("formats a failure with and without a reason", () => {
-    expect(failureMessage(job, "Build <broke>")).toBe(
-      "❌ *J-142 · Billing sync retry* · failed in 14m\nBuild &lt;broke&gt;\nWorker thread: `thr_8f2c`",
+  it("keeps failures and blockers plain", () => {
+    expect(failureMessage(job, "Build <broke>")).toContain(
+      "J-142 stopped before finishing. Build &lt;broke&gt;",
     );
-    expect(failureMessage({ ref: "J-2", title: "X" })).toBe(
-      "❌ *J-2 · X* · failed\nthe worker stopped before it finished.",
-    );
-  });
-
-  it("words the permission DM", () => {
-    expect(permissionBlockMessage("J-142")).toBe(
-      "🔒 J-142 is waiting for a permission prompt on the worker. Approve it in the worker.",
-    );
-  });
-
-  it("words the quiet notice", () => {
-    expect(quietNotice(job, 25 * 60_000)).toBe(
-      "⏳ J-142 has had no new activity for 25m. still running.\nWorker thread: `thr_8f2c`",
-    );
+    expect(permissionBlockMessage("J-142")).toContain("needs permission");
+    expect(quietNotice(job, 45 * 60_000)).toContain("for 45m. Want me to stop it?");
   });
 });
 
 describe("briefPrompt", () => {
   const brief = Brief.parse({
     project: "sync-service",
-    title: "Billing sync retry",
-    goal: "Retry failed syncs & log them.",
-    constraints: ["No schema changes"],
-    doneWhen: ["Tests pass", "Retries are capped"],
+    title: "Billing retry",
+    goal: "add retries",
+    constraints: ["Leave webhooks alone."],
+    doneWhen: ["Tests pass"],
     openPullRequest: true,
   });
-
-  it("shows only the title, project, and delivery", () => {
-    expect(briefPrompt(brief, "J-142")).toBe(
-      [
-        "📋 *J-142 · Billing sync retry*",
-        "*project* sync-service · *delivery* push the branch and open a draft PR",
-        "press *Start* to run it, *Edit* to change it, or *Cancel*. *Full brief* shows the goal and checks.",
-      ].join("\n"),
+  it("asks a short question with scope and boundaries", () => {
+    const text = briefPrompt(brief, "J-142", "default model");
+    expect(text).toContain("I'll add retries in sync-service");
+    expect(text).toContain("open a draft PR");
+    expect(text).toContain("Leave webhooks alone.");
+    expect(text).toContain("production and customer data read-only");
+    expect(text).toContain("Want me to start?");
+    expect(text).not.toMatch(/Full brief|Edit|default model/);
+  });
+  it("explains trusted starts and gives full details on request", () => {
+    expect(briefPrompt(brief, "J-142", undefined, { name: "retry", trusted: true })).toContain(
+      "trusted playbook retry",
     );
-  });
-
-  it("names the playbook, and drops the Start line when the playbook is trusted", () => {
-    const follows = briefPrompt(brief, "J-142", undefined, { name: "sync-fix", trusted: false });
-    expect(follows).toContain("Follows the playbook sync-fix.");
-    expect(follows).toContain("press *Start*");
-    const trusted = briefPrompt(brief, "J-142", undefined, { name: "sync-fix", trusted: true });
-    expect(trusted).toContain("Starting without Start: the owner trusts the playbook sync-fix.");
-    expect(trusted).not.toContain("press *Start*");
-  });
-
-  it("puts the goal, constraints, and done-when list in the full brief", () => {
-    expect(fullBrief({ ...brief, baseRef: "release" }, "J-142")).toBe(
-      [
-        "📋 *J-142 · Billing sync retry*",
-        "*project* sync-service · *base* release",
-        "*goal* Retry failed syncs &amp; log them.",
-        "*constraints*\n• No schema changes",
-        "*done when*\n☐ Tests pass\n☐ Retries are capped",
-        "*delivery* push the branch and open a draft PR",
-      ].join("\n"),
-    );
-  });
-
-  it("omits empty constraints and the ref", () => {
-    const text = fullBrief({ ...brief, constraints: [], openPullRequest: false });
-    expect(text).not.toContain("constraints");
-    expect(text.startsWith("📋 *Billing sync retry*")).toBe(true);
-    expect(text).toContain("no push, no PR");
+    const text = fullBrief(brief, "J-142");
+    expect(text).toContain("J-142: add retries");
+    expect(text).toContain("I'll check: Tests pass");
+    expect(text).not.toContain("☐");
   });
 });

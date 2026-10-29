@@ -425,13 +425,15 @@ export async function finishJob(
   deps: LedgerDeps,
   jobId: number,
   check?: ModelCheck,
-  written?: string,
+  written?: string | WriterOutput,
 ): Promise<FinishedJob> {
   const job = await mustGetJob(deps.sql, jobId);
   const contract = parseOutputContract(job.lastMessage);
   const model = parseModelCheck(check);
   // The text crossed the workflow boundary, so check its shape again; a bad one gets the template.
-  const text = WriterOutput.safeParse({ text: written }).data?.text;
+  const text = WriterOutput.safeParse(
+    typeof written === "string" ? { text: written } : written,
+  ).data;
   if (job.status !== "checking") {
     return { ...toCheck(job, []), concerns: endConcerns(job, contract, deps.pack, model) };
   }
