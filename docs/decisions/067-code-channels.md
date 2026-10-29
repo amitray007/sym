@@ -35,20 +35,24 @@ create call can fail with `feature_disabled`.
    follows the job: `processing`, `suspended` while a worker question waits, `active` at the end
    and when the job stops or fails. Eve also sets the status for each brain turn in the channel,
    so the job sets `processing` again after each check.
-8. Close archives the channel, with the result post as the summary Slack shares in the origin
-   thread. Looks good stays feedback, so Fix still works in the open channel. A Fix follow-up job
-   shares its parent's channel.
-9. Every message in a code channel reaches the brain with no tag, triage, or listen mode. Each turn
+8. Close archives the channel, with the sent result post as the summary Slack shares in the
+   origin thread. A repeat Close retries an archive that failed. Looks good stays feedback, so Fix
+   still works in the open channel. A Fix follow-up job shares its parent's channel and sets it to
+   `processing`; reconcile sets it back to `active` when the follow-up ends.
+9. The brief, Full brief, and feedback buttons in the origin thread still find the moved job
+   through the origin columns. The Home tab links a moved job to its channel.
+10. Every message in a code channel reaches the brain with no tag, triage, or listen mode. Each turn
    gets a note naming the channel's job, so the brain steers that job instead of starting another.
-10. The channel calls post no message, so they skip the outbox. The question link goes through
+11. The channel calls post no message, so they skip the outbox. The question link goes through
     the outbox and `chooseDisplay` like every Slack post.
 
 ## Consequences
 
 - The manifest adds the code channel feature, `code_channels:manage`, `channels:read`,
   `groups:read`, `mpim:read`, and `agent_session_stopped`. The owner reinstalls the app.
-- The status and context bar update from the job's own task. A job that reconcile finishes after
-  its session died keeps its last status until Close.
+- The status follows the job's task, and reconcile sets `active` for a job it finishes. The
+  context bar updates only from the task, so a follow-up's PR shows after the next task-driven
+  job or not at all.
 - A person answers a worker question in the original thread, not in the channel. Answering in
   the channel needs the job's task to run in the channel's session, which Eve 0.88 cannot move.
 - Slack's Stop button on the channel stops the brain's turn, not the worker job. The card's Stop

@@ -322,6 +322,9 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
       const channel = codeChannel(b.channel_id);
       if (channel.archived) throw "already_archived";
       if (b.summary_message_ts && !channel.originTs) throw "no_origin_link";
+      if (b.summary_message_ts && !find(channel.id, b.summary_message_ts)) {
+        throw "summary_message_not_found";
+      }
       channel.archived = true;
       channel.summaryTs = b.summary_message_ts ? String(b.summary_message_ts) : undefined;
       changed();

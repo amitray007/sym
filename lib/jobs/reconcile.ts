@@ -1,6 +1,7 @@
 import { chooseDisplay } from "../display.ts";
 import { getJob, type Job, jobRef, orphanedJobs, updateJob } from "../ledger/jobs.ts";
 import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
+import { setChannelStatus } from "../slack/code-channel.ts";
 import { workerNoun } from "../worker-label.ts";
 import type { WorkerAdapter } from "../workers/types.ts";
 import { parseOutputContract } from "./contract.ts";
@@ -41,6 +42,7 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
         await finishJob(deps, job.id);
         report.checked++;
         report.finished++;
+        await settleChannel(deps, job.id);
         continue;
       }
       // For a job coming back from an outage, hold delivery until the outage notice is dropped
@@ -52,7 +54,10 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
       });
       report.checked++;
       if (offline) await markBack(deps, job);
-      if (check.terminal) report.finished++;
+      if (check.terminal) {
+        report.finished++;
+        await settleChannel(deps, job.id);
+      }
       // No task is here to turn a question into buttons, so tell the thread once per question.
       for (const question of check.questions) {
         await postQuestion(deps, job, question.requestId, question.questions[0]?.prompt ?? "");
@@ -158,6 +163,13 @@ async function followPullRequests(deps: JobDeps): Promise<void> {
   for (const job of await watchedPrJobs(deps, since)) {
     await checkPrWakes(deps, job).catch(() => 0);
   }
+}
+
+// A job reconcile finished, such as a follow-up or one whose session died, sets its code channel
+// back to active (decision 067). No-op for a job in a thread.
+async function settleChannel(deps: JobDeps, jobId: number): Promise<void> {
+  const job = await getJob(deps.sql, jobId);
+  if (job?.codeChannel) await setChannelStatus(deps, job, "active");
 }
 
 async function postQuestion(deps: JobDeps, job: Job, requestId: string, prompt: string) {

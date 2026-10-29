@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { jobIdOfThread } from "../lib/feedback/feedback.ts";
 import { createJob, getJob, updateJob } from "../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import {
@@ -189,13 +190,32 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
       status: "done",
       prUrl: "https://example.com/pr/1",
     });
+    const posted = await api.call("chat.postMessage", { channel: done.slackChannel, text: "Done" });
+    const summaryTs = String(posted.ts);
     await setChannelStatus({ sql, slack: api }, done, "active");
-    await archiveCodeChannel({ sql, slack: api }, done, "1700000000.000900");
-    await archiveCodeChannel({ sql, slack: api }, done, "1700000000.000900");
+    await archiveCodeChannel({ sql, slack: api }, done, summaryTs);
+    await archiveCodeChannel({ sql, slack: api }, done, summaryTs);
 
     const channel = slack.codeChannels.find((c) => c.id === done.slackChannel);
-    expect(channel).toMatchObject({ archived: true, summaryTs: "1700000000.000900" });
+    expect(channel).toMatchObject({ archived: true, summaryTs });
     expect(channel?.statuses).toEqual(["processing", "active", "closed", "closed"]);
+  });
+
+  it("archives without a summary when Slack cannot find it", async () => {
+    vi.stubEnv("SYM_CODE_CHANNELS", "on");
+    const sql = ledger.sql();
+    const moved = await moveToCodeChannel({ sql, slack: api }, await newJob());
+    await archiveCodeChannel({ sql, slack: api }, moved, "1700000000.999999");
+    const channel = slack.codeChannels.find((c) => c.id === moved.slackChannel);
+    expect(channel).toMatchObject({ archived: true, summaryTs: undefined });
+  });
+
+  it("finds a moved job from a button in the thread it left", async () => {
+    vi.stubEnv("SYM_CODE_CHANNELS", "on");
+    const sql = ledger.sql();
+    const moved = await moveToCodeChannel({ sql, slack: api }, await newJob("CFEED"));
+    expect(await jobIdOfThread(sql, "CFEED", "1700000000.000100")).toBe(moved.id);
+    expect(await jobIdOfThread(sql, moved.slackChannel ?? "", "1700000000.123456")).toBe(moved.id);
   });
 
   it("does nothing for a job that stayed in its thread", async () => {

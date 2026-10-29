@@ -140,6 +140,17 @@ describe("homeView by role", () => {
     expect(text).toContain("14m");
   });
 
+  it("links a job in its own code channel to the channel", () => {
+    const view = homeView(
+      "member",
+      data({
+        active: [job(4, { codeChannel: true, slackChannel: "CCODE1", slackThreadTs: null })],
+      }),
+    );
+    expect(textOf(view)).toContain("app_redirect?channel=CCODE1");
+    expect(textOf(view)).not.toContain("message_ts");
+  });
+
   it("shows paused and waiting schedules", () => {
     const schedule = {
       id: 1,

@@ -2,8 +2,8 @@ import type { Sql } from "../db.ts";
 import { chooseDisplay } from "../display.ts";
 import { recordFeedback } from "../feedback/feedback.ts";
 import { getJobByRef, type Job, jobRef, json } from "../ledger/jobs.ts";
-import { enqueuePost, latestPost } from "../ledger/outbox.ts";
-import { archiveCodeChannel } from "../slack/code-channel.ts";
+import { enqueuePost } from "../ledger/outbox.ts";
+import { archiveCodeChannel, setChannelStatus } from "../slack/code-channel.ts";
 import { workerNoun } from "../worker-label.ts";
 import { Brief } from "./brief.ts";
 import { RESULT_ACTION_IDS } from "./card.ts";
@@ -163,6 +163,8 @@ export async function startFollowUp(
     deps.pack,
   );
   await presentStart(deps.sql, job, deps.now?.() ?? new Date(), deps.pack);
+  // A follow-up in a code channel shows it is working again. Reconcile sets it back at the end.
+  await setChannelStatus(deps, job, "processing");
   await editEndPost(deps.sql, parent, `Fix sent as ${ref} by <@${by}>.`);
   await deliverNow(deps);
   return { answer: `Sent to the ${workerNoun()} as ${ref}.`, job };
@@ -205,7 +207,11 @@ export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<
     where id = ${job.id} and closed_at is null
     returning id
   `;
-  if (!closed) return `${name} is already closed.`;
+  if (!closed) {
+    // A repeat Close retries an archive that failed the first time (decision 067).
+    if (job.codeChannel) await archiveJobChannel(deps, job);
+    return `${name} is already closed.`;
+  }
   if (job.workerThreadId && deps.worker.settle) {
     // Settling only tidies the worker's list. A failure leaves the job closed in Sym.
     await deps.worker.settle(job.workerThreadId).catch((error: unknown) => {
@@ -214,13 +220,19 @@ export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<
   }
   await editEndPost(deps.sql, job, `Closed by <@${by}>.`);
   await deliverNow(deps);
-  // A job in its own code channel archives it; the result is the summary Slack shares in the
-  // thread the job came from (decision 067).
-  if (job.codeChannel) {
-    const end = await latestPost(deps.sql, job.id, `${name}:end`);
-    await archiveCodeChannel(deps, job, end?.slackTs ?? null);
-  }
+  if (job.codeChannel) await archiveJobChannel(deps, job);
   return `Closed ${name}.`;
+}
+
+// A job in its own code channel archives it on Close; the result post is the summary Slack shares
+// in the thread the job came from (decision 067). Only the sent result itself qualifies, not the
+// edits that later rows of the same key prefix make to it.
+async function archiveJobChannel(deps: JobDeps, job: Job): Promise<void> {
+  const [end] = await deps.sql<{ slackTs: string | null }[]>`
+    select slack_ts from outbox
+    where job_id = ${job.id} and idempotency_key = ${`${jobRef(job.id)}:end`} and status = 'sent'
+  `;
+  await archiveCodeChannel(deps, job, end?.slackTs ?? null);
 }
 
 // The newest later job on the same worker thread, such as a follow-up, as a reference.

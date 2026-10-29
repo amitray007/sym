@@ -382,18 +382,20 @@ export async function clickButton(
   message: FakeSlackMessage,
   actionId: string,
   value: string,
-  user = OWNER,
+  options: { user?: string; blockId?: string; actionType?: string } = {},
 ): Promise<void> {
   await postSlack(
     h,
     blockActionsRequest({
       signingSecret: SIGNING_SECRET,
       channel: message.channel,
-      user,
+      user: options.user ?? OWNER,
       messageTs: message.ts,
       ...(message.thread_ts ? { threadTs: message.thread_ts } : {}),
       actionId,
       value,
+      ...(options.blockId ? { blockId: options.blockId } : {}),
+      ...(options.actionType ? { actionType: options.actionType } : {}),
     }),
   );
 }

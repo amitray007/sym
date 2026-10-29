@@ -112,7 +112,8 @@ export async function recordFeedback(
 }
 
 // The job whose thread this is. A feedback button sits under a reply in a job's thread. A job in
-// its own code channel has no thread: the whole channel is its (decision 067).
+// its own code channel has no thread: the whole channel is its, and its old thread still finds it
+// through the origin columns (decision 067).
 export async function jobIdOfThread(
   sql: Sql,
   channel: string,
@@ -120,7 +121,8 @@ export async function jobIdOfThread(
 ): Promise<number | null> {
   const [row] = await sql<{ id: string }[]>`
     select id from jobs
-    where slack_channel = ${channel} and (slack_thread_ts = ${threadTs} or code_channel)
+    where (slack_channel = ${channel} and (slack_thread_ts = ${threadTs} or code_channel))
+      or (origin_channel = ${channel} and origin_thread_ts = ${threadTs})
     order by id desc limit 1
   `;
   return row ? Number(row.id) : null;

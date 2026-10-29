@@ -2,9 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CLOSE_ACTION_ID } from "../../lib/jobs/card.ts";
 import {
   clickButton,
+  contractMessage,
   finishedSteps,
   type Harness,
+  messageText,
   newConversation,
+  SAMPLE_CONTRACT,
   sayInChannel,
   settle,
   startHarness,
@@ -146,5 +149,102 @@ describe("code channels", () => {
 
     await workerAdvance(h, thread, finishedSteps());
     await waitForJobStatus(h.sql, job.id, "done");
+  });
+
+  it("keeps the old thread's buttons working, runs a Fix in the channel, and retries Close", async () => {
+    const reconcile = async () => {
+      const response = await fetch(`${h.eveUrl()}/eve/v1/dev/schedules/reconcile`, {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error(`reconcile answered ${response.status}`);
+    };
+    const c = newConversation(h);
+    const { approval, job, ref } = await startJob(h, c, "Fix in channel");
+    const briefPost = c
+      .botMessages()
+      .find((m) => JSON.stringify(m.blocks ?? []).includes("sym_job_brief"));
+    if (!briefPost) throw new Error(`${ref} has no brief post`);
+    await c.click(approval, "Start");
+    const channel = await until(
+      () => h.slack.codeChannels.find((cc) => cc.sessionId === `sym-${ref}`),
+      { label: `${ref} code channel` },
+    );
+
+    // Full brief still answers in the thread the job moved out of.
+    const before = h.slack.ephemerals.length;
+    await clickButton(h, briefPost, "sym_job_brief", ref);
+    const brief = await until(() => h.slack.ephemerals.slice(before)[0], {
+      label: "the full brief",
+    });
+    expect(messageText(brief)).not.toContain("There is no job");
+    expect(messageText(brief)).toContain(ref);
+
+    const thread = await until(() => threadsOf(h, ref)[0], { label: `${ref} worker thread` });
+    await workerAdvance(h, thread, finishedSteps());
+    await waitForJobStatus(h.sql, job.id, "done");
+    const inChannel = (pattern: RegExp) =>
+      until(
+        () => h.slack.messages.find((m) => m.channel === channel.id && pattern.test(m.text ?? "")),
+        { label: `a channel post matching ${pattern}` },
+      );
+    const result = await inChannel(new RegExp(`^(✅|⚠️) \\*${ref} · `));
+
+    // Fix: the text box posts in the channel, and the follow-up shares it.
+    await clickButton(h, result, "sym_job_fix", ref);
+    const fixBox = await until(
+      () =>
+        h.slack.messages.find(
+          (m) =>
+            m.channel === channel.id && JSON.stringify(m.blocks ?? []).includes("sym_job_fix_text"),
+        ),
+      { label: "the Fix box" },
+    );
+    await clickButton(h, fixBox, "sym_job_fix_text", "also log each retry", {
+      blockId: `fix-${ref}`,
+      actionType: "plain_text_input",
+    });
+    const [child] = await until(
+      async () => {
+        const rows = await h.sql<{ id: number; codeChannel: boolean; slackChannel: string }[]>`
+          select id::int, code_channel, slack_channel from jobs where parent_job_id = ${job.id}
+        `;
+        return rows.length > 0 ? rows : undefined;
+      },
+      { label: "the follow-up job" },
+    );
+    expect(child).toMatchObject({ codeChannel: true, slackChannel: channel.id });
+    const childRef = `J-${child?.id}`;
+    await until(() => (channel.statuses.at(-1) === "processing" ? true : undefined), {
+      label: "the channel working on the follow-up",
+    });
+
+    // Reconcile drives the follow-up to its result and sets the channel back to active.
+    await h.sql`update jobs set watch_until = now() - interval '1 second' where id = ${Number(child?.id)}`;
+    thread.steps.push({
+      status: "completed",
+      items: [contractMessage({ ...SAMPLE_CONTRACT, summary: "Logged each retry." })],
+    });
+    await reconcile();
+    await waitForJobStatus(h.sql, Number(child?.id), "done");
+    const childResult = await inChannel(new RegExp(`^(✅|⚠️) \\*${childRef} · `));
+    await until(() => (channel.statuses.at(-1) === "active" ? true : undefined), {
+      label: "the channel active after the follow-up",
+    });
+
+    // A failed archive on Close is retried by the next Close, with the result as the summary.
+    h.slack.failNext("agents.conversations.archive", "internal_error");
+    await clickButton(h, childResult, "sym_job_close", childRef);
+    await until(
+      async () =>
+        (
+          await h.sql`select 1 from jobs where id = ${Number(child?.id)} and closed_at is not null`
+        )[0],
+      { label: "the closed follow-up" },
+    );
+    await settle(h);
+    expect(channel.archived).toBe(false);
+    await clickButton(h, childResult, "sym_job_close", childRef);
+    await until(() => (channel.archived ? true : undefined), { label: "the retried archive" });
+    expect(channel.summaryTs).toBe(childResult.ts);
   });
 });
