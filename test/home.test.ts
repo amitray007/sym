@@ -31,6 +31,9 @@ function job(id: number, overrides: Partial<Job> = {}): Job {
     owner: null,
     slackChannel: "C1",
     slackThreadTs: "1700000000.000100",
+    codeChannel: false,
+    originChannel: null,
+    originThreadTs: null,
     brief: {},
     worker: "t3",
     workerIdentity: null,
@@ -135,6 +138,17 @@ describe("homeView by role", () => {
     expect(text).toContain("waiting for you");
     expect(text).toContain("app_redirect?channel=C1&message_ts=1700000000.000100");
     expect(text).toContain("14m");
+  });
+
+  it("links a job in its own code channel to the channel", () => {
+    const view = homeView(
+      "member",
+      data({
+        active: [job(4, { codeChannel: true, slackChannel: "CCODE1", slackThreadTs: null })],
+      }),
+    );
+    expect(textOf(view)).toContain("app_redirect?channel=CCODE1");
+    expect(textOf(view)).not.toContain("message_ts");
   });
 
   it("shows paused and waiting schedules", () => {

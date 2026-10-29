@@ -3,9 +3,10 @@ import { chooseDisplay } from "../display.ts";
 import { recordFeedback } from "../feedback/feedback.ts";
 import { getJobByRef, type Job, jobRef, json } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
+import { archiveCodeChannel, setChannelStatus } from "../slack/code-channel.ts";
 import { workerNoun } from "../worker-label.ts";
 import { Brief } from "./brief.ts";
-import { RESULT_ACTION_IDS } from "./card.ts";
+import { CLOSE_ACTION_ID, jobButton, RESULT_ACTION_IDS } from "./card.ts";
 import { presentStart } from "./present.ts";
 import { answeredPrompt, type PromptKind, promptPost } from "./prompts.ts";
 import { deliverNow, endWithoutWorker, type JobDeps, JobSetupError, planLaunch } from "./run.ts";
@@ -162,6 +163,8 @@ export async function startFollowUp(
     deps.pack,
   );
   await presentStart(deps.sql, job, deps.now?.() ?? new Date(), deps.pack);
+  // A follow-up in a code channel shows it is working again. Reconcile sets it back at the end.
+  await setChannelStatus(deps, job, "processing");
   await editEndPost(deps.sql, parent, `Fix sent as ${ref} by <@${by}>.`);
   await deliverNow(deps);
   return { answer: `Sent to the ${workerNoun()} as ${ref}.`, job };
@@ -174,13 +177,13 @@ export async function startFollowUp(
 async function insertFollowUp(sql: Sql, parent: Job, requestKey: string, brief: Brief) {
   const [row] = await sql<{ id: number }[]>`
     insert into jobs (
-      request_key, session_id, kind, title, owner, slack_channel, slack_thread_ts, brief, worker,
+      request_key, session_id, kind, title, owner, slack_channel, slack_thread_ts, code_channel, brief, worker,
       worker_project_id, worker_identity, worker_thread_id, worker_model, cursor, status, started_at, parent_job_id,
       pr_url, pr_watched_url, pr_wake_cursor, watch_until
     )
     select
       ${requestKey}, session_id, 'code-change', ${brief.title}, owner, slack_channel,
-      slack_thread_ts, ${json(sql, brief)}, worker, worker_project_id, worker_identity, worker_thread_id,
+      slack_thread_ts, code_channel, ${json(sql, brief)}, worker, worker_project_id, worker_identity, worker_thread_id,
       worker_model, cursor, 'running', now(), id, pr_url, pr_watched_url, pr_wake_cursor,
       now() + interval '1 minute'
     from jobs where id = ${parent.id}
@@ -204,7 +207,11 @@ export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<
     where id = ${job.id} and closed_at is null
     returning id
   `;
-  if (!closed) return `${name} is already closed.`;
+  if (!closed) {
+    // A repeat Close retries an archive that failed the first time (decision 067).
+    if (job.codeChannel) await archiveJobChannel(deps, job);
+    return `${name} is already closed.`;
+  }
   if (job.workerThreadId && deps.worker.settle) {
     // Settling only tidies the worker's list. A failure leaves the job closed in Sym.
     await deps.worker.settle(job.workerThreadId).catch((error: unknown) => {
@@ -213,7 +220,47 @@ export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<
   }
   await editEndPost(deps.sql, job, `Closed by <@${by}>.`);
   await deliverNow(deps);
+  if (job.codeChannel) await archiveJobChannel(deps, job);
   return `Closed ${name}.`;
+}
+
+// A job in its own code channel archives it on Close; the result post is the summary Slack shares
+// in the thread the job came from (decision 067). Only the sent result itself qualifies, not the
+// edits that later rows of the same key prefix make to it. Close took its button off the result,
+// so a failed archive posts a new Close button to try again.
+async function archiveJobChannel(deps: JobDeps, job: Job): Promise<void> {
+  const ref = jobRef(job.id);
+  const [end] = await deps.sql<{ slackTs: string | null }[]>`
+    select slack_ts from outbox
+    where job_id = ${job.id} and idempotency_key = ${`${ref}:end`} and status = 'sent'
+  `;
+  if (await archiveCodeChannel(deps, job, end?.slackTs ?? null)) return;
+  if (!job.slackChannel) return;
+  const text = `Sym could not archive this channel. Close it again to retry.`;
+  await enqueuePost(deps.sql, {
+    idempotencyKey: `${ref}:archive-retry`,
+    jobId: job.id,
+    method: "chat.postMessage",
+    payload: {
+      channel: job.slackChannel,
+      text,
+      blocks: [
+        { type: "section", text: { type: "mrkdwn", text } },
+        { type: "actions", elements: [jobButton(CLOSE_ACTION_ID, "Close", ref)] },
+      ],
+    },
+    display: chooseDisplay({
+      kind: job.kind,
+      needsAction: true,
+      isNew: true,
+      estMinutes: 0,
+      steps: 0,
+      lines: 1,
+      surface: "channel",
+      quiet: false,
+    }),
+  });
+  await deliverNow(deps);
 }
 
 // The newest later job on the same worker thread, such as a follow-up, as a reference.

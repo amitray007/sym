@@ -360,6 +360,46 @@ export class Conversation {
   }
 }
 
+// A person's top-level message in a channel, with no tag, such as in a code channel.
+export async function sayInChannel(
+  h: Harness,
+  channel: string,
+  text: string,
+  user = OWNER,
+): Promise<FakeSlackMessage> {
+  const message = h.slack.addMessage({ channel, user, text });
+  await postSlack(
+    h,
+    channelMessageRequest({ signingSecret: SIGNING_SECRET, channel, user, text, ts: message.ts }),
+  );
+  return message;
+}
+
+// Clicks one of Sym's own buttons on a message anywhere, such as a result in a code channel,
+// which has no thread.
+export async function clickButton(
+  h: Harness,
+  message: FakeSlackMessage,
+  actionId: string,
+  value: string,
+  options: { user?: string; blockId?: string; actionType?: string } = {},
+): Promise<void> {
+  await postSlack(
+    h,
+    blockActionsRequest({
+      signingSecret: SIGNING_SECRET,
+      channel: message.channel,
+      user: options.user ?? OWNER,
+      messageTs: message.ts,
+      ...(message.thread_ts ? { threadTs: message.thread_ts } : {}),
+      actionId,
+      value,
+      ...(options.blockId ? { blockId: options.blockId } : {}),
+      ...(options.actionType ? { actionType: options.actionType } : {}),
+    }),
+  );
+}
+
 async function postSlack(h: Harness, parts: SlackRequestParts): Promise<void> {
   const response = await fetch(`${h.eveUrl()}/eve/v1/slack`, {
     method: "POST",

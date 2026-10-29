@@ -206,8 +206,11 @@ with the public host before you import it.
 | `emoji:read` | The workspace's custom emoji (`emoji.list`), so Sym can pick a fitting one |
 | `commands` | `/sym` |
 | `users:read` | Resolve the approver for DM routing, and display names in a shared thread |
+| `code_channels:manage` | Create, archive, and label a job's code channel (decision 067) |
+| `channels:read`, `groups:read`, `mpim:read` | Tell a code channel apart (`conversations.info`) |
 
-Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reaction_added`, `app_home_opened`.
+Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reaction_added`, `app_home_opened`,
+`agent_session_stopped`. The manifest also turns on `features.code_channels`.
 Interactivity and the slash command use the same request URL, `/eve/v1/slack`. The manifest turns
 on the Home tab: reinstall the app after you import this change, or Slack sends no
 `app_home_opened`. To post the digest in a channel, invite Sym to it first;
@@ -222,6 +225,16 @@ Eve's "Type your answer" box, so the same check covers them; a reply typed in th
 message, not an answer (decision 066). Thread context still includes
 messages from other people in the thread. The instructions treat that text as data, and job
 launches need approval.
+
+## Code channels
+
+With `SYM_CODE_CHANNELS` on, a job a person starts moves from its thread into its own Slack code
+channel (decision 067, [slack-code.md](slack-code.md)). The brief and Start stay in the thread;
+Slack links the new channel there. The card, result, and buttons post top-level in the channel.
+Worker questions stay in the thread, where Eve asks them; the channel links to them. The channel's context bar shows the job, its project, and its pull request, and its status
+follows the job. Everything said in the channel reaches Sym with no tag and is about that job.
+Close archives the channel and shares the result in the original thread. A scheduled check, a job
+in a DM, and any job Slack refuses stay in their thread.
 
 ## Threads with several people
 

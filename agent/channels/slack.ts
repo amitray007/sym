@@ -21,7 +21,7 @@ import {
 } from "../../lib/feedback/feedback.ts";
 import { publishLiveHome } from "../../lib/home/live.ts";
 import { jobListAnswer } from "../../lib/jobs/status.ts";
-import { recentJobs } from "../../lib/ledger/jobs.ts";
+import { jobRef, recentJobs } from "../../lib/ledger/jobs.ts";
 import { getListenMode } from "../../lib/ledger/listen.ts";
 import { sentPostTimestamps } from "../../lib/ledger/outbox.ts";
 import { lastTurnUser, recordSessionThread } from "../../lib/ledger/threads.ts";
@@ -36,10 +36,16 @@ import {
 import { parseSymCommand, slackText, USAGE } from "../../lib/quiet/command.ts";
 import { formatClock, getQuietUntil, setQuietUntil } from "../../lib/quiet/quiet.ts";
 import { recordThreadMessage, recordTurnMessage } from "../../lib/reactions/react.ts";
-import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
+import { ledger, pack, slackFromEnv, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
 import { listSchedules } from "../../lib/schedules/rows.ts";
 import { namesBot, threadPeople, triageThreadMessage } from "../../lib/slack/addressing.ts";
+import {
+  codeChannelsOn,
+  jobOfCodeChannel,
+  jobSessionStatus,
+  setChannelStatus,
+} from "../../lib/slack/code-channel.ts";
 import { isSlackUserAllowed, sayPrivately } from "../../lib/slack/guard.ts";
 import { handleJobAction, JOB_ACTION_IDS } from "../../lib/slack/job-actions.ts";
 import {
@@ -290,6 +296,7 @@ function stayQuiet<T extends StatusEvent>(): SlackRenderHandler<T> {
 // Eve names a content part's kind on its first delta only, so the renderer remembers it. A part
 // ends with its content.completed, which removes it.
 const partKinds = new Map<string, string>();
+const PART_KINDS_MAX = 1000;
 
 // Eve's defaults keep this bookkeeping in the channel state: turn.started resets the first two,
 // and a reply clears the saved status so a later step does not show it again. Eve 0.87 took the
@@ -371,7 +378,11 @@ const symRenderer = defineSlackRenderer({
     // Reasoning keeps a quiet turn quiet. Reply text that is not blank ends it.
     async "content.delta"(event, ctx, next) {
       const { partId, kind, delta } = event.data;
-      if (kind) partKinds.set(partId, kind);
+      if (kind) {
+        // A part that never completes, such as one a cancel cut off, leaves its entry behind.
+        if (partKinds.size >= PART_KINDS_MAX) partKinds.clear();
+        partKinds.set(partId, kind);
+      }
       const key = quietKey(ctx.channel);
       if (isQuietTurn(key)) {
         if (partKinds.get(partId) !== "text" || delta.trim() === "") return;
@@ -384,6 +395,11 @@ const symRenderer = defineSlackRenderer({
       endQuietTurn(quietKey(ctx.channel));
       // A failed or cancelled quiet turn still gets Eve's notice.
       if (!quiet || event.data.outcome !== "completed") await next(event);
+      // Eve sets a code channel back to active when the brain's turn ends. The channel shows its
+      // job, so Sym sets the job's own status again, such as suspended while a question waits.
+      if (ctx.channel.state.codeChannel && ctx.channel.state.channelId) {
+        await restoreJobStatus(ctx.channel.state.channelId);
+      }
     },
     // Feedback buttons ride inside each final reply (docs/learning.md), so they add no message
     // and no notification. postCompletedSlackReply keeps Eve's fallbacks: a refused or long
@@ -411,8 +427,40 @@ const symRenderer = defineSlackRenderer({
   },
 });
 
+async function restoreJobStatus(channelId: string): Promise<void> {
+  try {
+    const job = await jobOfCodeChannel(ledger(), channelId);
+    const status = job && jobSessionStatus(job);
+    const slack = slackFromEnv();
+    if (job && status && slack) await setChannelStatus({ sql: ledger(), slack }, job, status);
+  } catch (error) {
+    console.warn("Sym could not restore a code channel's status.", String(error));
+  }
+}
+
+// A code channel belongs to one job (decision 067). Each turn there tells the brain which one, so
+// "how is it going" or "also fix the docs" acts on that job. A failed lookup adds nothing.
+async function codeChannelNote(channelId: string): Promise<string | undefined> {
+  try {
+    const job = await jobOfCodeChannel(ledger(), channelId);
+    if (!job) return undefined;
+    const ref = jobRef(job.id);
+    return (
+      `This Slack code channel belongs to worker job ${ref} ("${job.title}"), now ${job.status}. ` +
+      `Messages here are about ${ref}: use ${ref} with the job tools, and steer it instead of ` +
+      "starting a new job unless the person asks for separate work."
+    );
+  } catch (error) {
+    console.warn("Sym could not read the job of a code channel.", String(error));
+    return undefined;
+  }
+}
+
 export default slackChannel({
   renderers: [symRenderer],
+  // Off unless SYM_CODE_CHANNELS is on: Eve then serves each code channel as one session, and the
+  // generated manifest asks for the code channel scopes and events.
+  codeChannels: codeChannelsOn(),
   // Undefined keeps Slack's own host. Tests and the local e2e point it at a fake Slack server.
   ...(process.env.SLACK_API_BASE_URL
     ? { api: { apiBaseUrl: process.env.SLACK_API_BASE_URL } }
@@ -426,8 +474,12 @@ export default slackChannel({
       return null;
     }
     setQuiet(message, false);
-    await noteSession(ctx, message);
     const auth = defaultSlackAuth(message, ctx);
+    if (ctx.slack.codeChannel) {
+      const note = await codeChannelNote(message.channelId);
+      return note ? { auth, context: [note] } : { auth };
+    }
+    await noteSession(ctx, message);
     if (message.threadTs === message.ts) return { auth };
     const note = await participantsContext(
       ctx,
@@ -451,6 +503,12 @@ export default slackChannel({
     if (!fromAllowedHuman(message)) {
       await replyToStranger(ctx, message, "thread");
       return null;
+    }
+    // Everything in a code channel is meant for Sym: it needs no tag, triage, or listen mode.
+    if (ctx.slack.codeChannel) {
+      const auth = defaultSlackAuth(message, ctx);
+      const note = await codeChannelNote(message.channelId);
+      return note ? { auth, context: [note] } : { auth };
     }
     if (!(await ctx.isSubscribed())) return null;
     await noteSession(ctx, message, true);

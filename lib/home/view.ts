@@ -92,8 +92,12 @@ function listLines(lines: string[], max: number): string {
   return shown.join("\n");
 }
 
-// A Slack deep link to a thread. It works in any workspace the reader is signed in to.
+// A Slack deep link to a thread, or to a job's own code channel (decision 067). It works in any
+// workspace the reader is signed in to.
 function threadLink(job: Job): string | undefined {
+  if (job.codeChannel && job.slackChannel) {
+    return `https://slack.com/app_redirect?channel=${encodeURIComponent(job.slackChannel)}`;
+  }
   if (!job.slackChannel || !job.slackThreadTs) return undefined;
   const channel = encodeURIComponent(job.slackChannel);
   const ts = encodeURIComponent(job.slackThreadTs);

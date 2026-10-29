@@ -42,6 +42,7 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_DIGEST_CHANNEL` | Optional. The daily digest's channel ID, or the owner's user ID for a DM. Unset means no digest and no weekly `learn` proposals. A pack's `channels.digest` wins (decision 024) |
 | `SYM_DIGEST_CRON` | Optional. When the digest posts, as cron in UTC. Default `0 17 * * *`. Read at build time, so a change needs a rebuild |
 | `SYM_DIGEST` | Optional. `off` (default) or `on` (also `true`, `1`, `yes`). On posts the daily digest to the digest channel. The `learn` proposals and the sign-in notice use the channel either way (decision 054) |
+| `SYM_CODE_CHANNELS` | Optional. `off` (default) or `on`. On moves each job a person starts into its own Slack code channel; a Slack refusal keeps it in its thread. Reinstall the app with the current manifest first (decision 067) |
 | `SYM_VERIFIER` | Optional. `off` (default) or `on`. On runs the `verifier` subagent, a paid model call, on each finished code job. Off ends the job with the rule checks alone (decision 054) |
 | `SYM_RESULT_WRITER` | Optional. `on` (default) or `off`. On runs the `writer` subagent, a model call, on each finished code job, so the result reads in the persona's voice. Off keeps the template result (decision 062) |
 | `SYM_PR_FOLLOW` | Optional. `off` (default) or `on`. On asks the worker to watch each job's PR for 7 days and posts CI and review wakes in the job thread (decision 054) |

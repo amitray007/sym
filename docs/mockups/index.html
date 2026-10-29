@@ -858,6 +858,41 @@ footer p + p { margin-top: 8px; }
     </div>
   </section>
 
+  <!-- 9. Code channels -->
+  <section class="section" id="code" aria-labelledby="code-h">
+    <h2 id="code-h">9. Code channels</h2>
+    <p class="prose muted">Off unless <code>SYM_CODE_CHANNELS</code> is on (decision 067). When you click Start, the job moves from its thread into its own Slack code channel. The card and result post there, and anything said there is about that job, with no tag needed. Worker questions stay in the thread, with a link from the channel. Close archives the channel. If Slack refuses the channel, the job stays in its thread.</p>
+    <div class="pair">
+      <div>
+        <p class="label">The thread you asked in</p>
+        <div class="slack">
+          <div class="sl-top"><b># release-eng</b><span>Thread</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>10:02</time></div><div class="mt">@sym add a retry with backoff to the billing sync client</div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:02</time></div><div class="mt"><p><b>J-142 · Billing sync retry</b> · example-app · new PR</p></div><div class="btns"><span class="sb">Full brief</span></div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:03</time></div><div class="mt"><p>Code channel <span class="sl-link"># j-142-billing-sync-retry</span> · Working</p></div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:31</time></div><div class="mt"><p>✅ <b>J-142 · Billing sync retry</b> · PR #812 opened · tests pass</p><p class="muted">Summary shared when the channel was archived</p></div></div></div>
+            <div class="compose">Reply…</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="label">The job's code channel</p>
+        <div class="slack">
+          <div class="sl-top"><b># j-142-billing-sync-retry</b><span>Code channel · Working</span></div>
+          <div class="tabs"><span class="sl-link">J-142</span><span>example-app</span><span class="sl-link">Pull request</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:03</time></div><div class="mt"><p><b>J-142 · Billing sync retry</b> · running · 4 of 7 steps</p></div><div class="btns"><span class="sb">Steer</span><span class="sb">Stop</span></div></div></div>
+            <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>10:12</time></div><div class="mt">also keep the batch size at 50</div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:12</time></div><div class="mt">Sent that to J-142. It's running the tests now.</div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:31</time></div><div class="mt"><p>✅ <b>J-142 · Billing sync retry</b> · 28m</p><p>PR #812 opened. Retries back off from 1s to 30s; tests pass.</p></div><div class="btns"><span class="sb">Looks good</span><span class="sb">Fix…</span><span class="sb">Close</span></div></div></div>
+            <div class="compose">Message # j-142-billing-sync-retry</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <footer>
     <p>Slack visuals are close approximations of Slack's dark theme. The plan and task card blocks follow Slack's AI app docs, and their exact status values get checked in Block Kit Builder during the spike. Repo names, job IDs, PR numbers, and times are examples.</p>
     <p>Source: <code>rundown.md</code> sections 5.1 to 5.10 in work-sym-slack-agent.</p>

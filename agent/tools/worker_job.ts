@@ -11,6 +11,7 @@ import {
   cancelJob,
   checkJob,
   closeUnlaunched,
+  deliverNow,
   failJob,
   finishJob,
   launchOrAdopt,
@@ -42,6 +43,13 @@ import {
   getSchedule,
   parseScheduleRef,
 } from "../../lib/schedules/rows.ts";
+import {
+  moveToCodeChannel,
+  pointToQuestion,
+  type SessionStatus,
+  setChannelStatus,
+  setContextBar,
+} from "../../lib/slack/code-channel.ts";
 import { workerLabel, workerNoun } from "../../lib/worker-label.ts";
 import type { WorkerAnswers, WorkerQuestion } from "../../lib/workers/types.ts";
 
@@ -184,6 +192,9 @@ export default defineWorkflowTool({
         return { job: ref, status: "cancelled" };
       }
 
+      // Decision 067: a job a person started moves into its own code channel, when that is on.
+      // A scheduled check stays quiet in its thread.
+      const inChannel = preApproved ? false : await toCodeChannel(job.id);
       yield { status: statusLine(ref, `Launching ${workerNoun()} thread`) };
       const callback = createWebhook();
       const threadId = await launch(job.id, callback.url);
@@ -202,6 +213,7 @@ export default defineWorkflowTool({
         if (woke === "stopped") {
           await cancel(job.id);
           await endRun(ctx.session.id, job.id, "cancelled", null);
+          if (inChannel) await channelStatus(job.id, "active");
           return { job: ref, status: "cancelled", threadId, ...POSTED };
         }
         if (woke === "callback") calledBack = true;
@@ -230,6 +242,7 @@ export default defineWorkflowTool({
           // is ready, and the template.
           const end = await finish(job.id, modelCheck, written === "stopped" ? undefined : written);
           await endRun(ctx.session.id, job.id, end.status, end.lastMessage, end.concerns);
+          if (inChannel) await channelStatus(job.id, "active");
           return {
             job: ref,
             status: end.status,
@@ -238,17 +251,24 @@ export default defineWorkflowTool({
           };
         }
 
+        if (inChannel && result.questions.length > 0) await channelStatus(job.id, "suspended");
         for (const question of result.questions) {
+          if (inChannel) await linkQuestion(job.id, question);
           const answers = await askQuestion(ctx.ask, ref, question, stopped);
           if (answers === "stopped") {
             await cancel(job.id);
+            if (inChannel) await channelStatus(job.id, "active");
             return { job: ref, status: "cancelled", threadId, ...POSTED };
           }
           if (answers) await answer(job.id, question.requestId, answers);
         }
+        // Eve sets the channel's status for each brain turn there, so the job sets its own again
+        // after every check.
+        if (inChannel && !result.terminal) await channelStatus(job.id, "processing");
 
         if (result.terminal) {
           await endRun(ctx.session.id, job.id, result.status, result.lastMessage);
+          if (inChannel) await channelStatus(job.id, "active");
           return {
             job: ref,
             status: result.status,
@@ -264,6 +284,7 @@ export default defineWorkflowTool({
         error instanceof Error ? error.message : String(error),
       );
       await endRun(ctx.session.id, job.id, status, null);
+      await channelStatus(job.id, "active").catch(() => {});
       throw error;
     }
   },
@@ -494,6 +515,33 @@ async function writerInput(jobId: number, check: ModelCheck | undefined) {
   }
   const learned = sessionInstructions(await approvedForSession(sql).catch(() => []));
   return writerRequest(ledgerDeps(), jobId, { persona, learned }, check);
+}
+
+// True when the job now lives in its own code channel, so later steps know to keep it current.
+async function toCodeChannel(jobId: number): Promise<boolean> {
+  "use step";
+  const deps = ledgerDeps();
+  const job = await getJob(deps.sql, jobId);
+  return job ? (await moveToCodeChannel(deps, job)).codeChannel : false;
+}
+
+async function linkQuestion(jobId: number, question: WorkerQuestion) {
+  "use step";
+  const deps = ledgerDeps();
+  const job = await getJob(deps.sql, jobId);
+  if (!job?.codeChannel) return;
+  await pointToQuestion(deps, job, question.requestId, question.questions[0]?.prompt ?? "");
+  await deliverNow(deps);
+}
+
+// The code channel's status follows the job; at the end the context bar gains the pull request.
+async function channelStatus(jobId: number, status: SessionStatus) {
+  "use step";
+  const deps = ledgerDeps();
+  const job = await getJob(deps.sql, jobId);
+  if (!job?.codeChannel) return;
+  await setChannelStatus(deps, job, status);
+  if (status === "active") await setContextBar(deps, job);
 }
 
 async function finish(jobId: number, verdict: ModelCheck | undefined, written?: string) {

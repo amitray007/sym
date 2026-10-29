@@ -20,6 +20,10 @@ features:
       description: Status, quiet mode, schedules, and persona
       usage_hint: status | jobs | schedules | quiet [minutes|off] | persona [name]
       should_escape: false
+  # Slack code channels (decision 067). Sym opens one per started job only when SYM_CODE_CHANNELS
+  # is on. Reinstall the app after you add this.
+  code_channels:
+    enabled: true
 oauth_config:
   scopes:
     bot:
@@ -40,6 +44,12 @@ oauth_config:
       - reactions:read
       - reactions:write
       - users:read
+      # Code channels: create, archive, status, and context bar (decision 067). Eve reads
+      # conversations.info to tell a code channel apart, which needs the read scopes.
+      - code_channels:manage
+      - channels:read
+      - groups:read
+      - mpim:read
 settings:
   event_subscriptions:
     request_url: https://sym.example.com/eve/v1/slack
@@ -50,6 +60,8 @@ settings:
       - message.im
       - reaction_added
       - app_home_opened
+      # The Stop button on a code channel's session.
+      - agent_session_stopped
   interactivity:
     is_enabled: true
     request_url: https://sym.example.com/eve/v1/slack
