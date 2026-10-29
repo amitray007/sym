@@ -111,7 +111,7 @@ export async function startFollowUp(
   }
 
   const later = await laterJob(deps.sql, parent);
-  if (later) return { answer: `${later} continued this thread. Use its buttons instead.` };
+  if (later) return { answer: `${later} continued this thread. Use that job.` };
 
   const brief = Brief.parse(parent.brief);
   if (!parent.workerIdentity || parent.workerIdentity !== deps.workerIdentity) {
@@ -193,7 +193,7 @@ async function sendFollowUp(
   await presentStart(deps.sql, job, deps.now?.() ?? new Date(), deps.pack);
   // A follow-up in a code channel shows it is working again. Reconcile sets it back at the end.
   await setChannelStatus(deps, job, "processing");
-  await editEndPost(deps.sql, parent, `Fix sent as ${ref} by <@${by}>.`);
+  await editEndPost(deps.sql, parent, `I sent the follow-up as ${ref} on the same branch.`);
   await deliverNow(deps);
   return { answer: `Sent to the ${workerNoun()} as ${ref}.`, job };
 }
@@ -453,7 +453,7 @@ export async function postPrompt(
     if (!FIXABLE.has(job.status)) return `${name} cannot take a fix now.`;
     if (await isClosed(deps.sql, job.id)) return `${name} is closed.`;
     const later = await laterJob(deps.sql, job);
-    if (later) return `${later} continued this thread. Use its buttons instead.`;
+    if (later) return `${later} continued this thread. Use that job.`;
   }
   return kind === "steer"
     ? `Reply here with the direction for ${name}. I'll read it in context.`

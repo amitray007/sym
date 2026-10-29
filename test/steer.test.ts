@@ -79,7 +79,7 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
     expect(s.worker.sends[1]?.requestId).toBe(s.worker.sends[0]?.requestId);
     expect(s.worker.sends[0]?.requestId).toMatch(new RegExp(`^steer-J-${job.id}-[0-9a-f]{14}$`));
     expect((await getJob(ledger.sql(), job.id))?.lastSummary).toBe(
-      "Steered: skip the staging test",
+      "I passed on: skip the staging test",
     );
 
     await steerJob(s.deps, `J-${job.id}`, "also skip lint");

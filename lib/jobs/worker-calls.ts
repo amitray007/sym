@@ -127,7 +127,7 @@ export async function askOwner(
     payload: {
       channel: job.slackChannel,
       ...(job.slackThreadTs ? { thread_ts: job.slackThreadTs } : {}),
-      text: `*${ref} needs an answer:* ${escapeMrkdwn(question)}`,
+      text: `${escapeMrkdwn(question)}\nReply here and I'll pass your answer on.`,
     },
     display,
   });

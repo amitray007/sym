@@ -83,7 +83,7 @@ export async function steerJob(
   );
   const short =
     clean.length <= SUMMARY_TEXT_MAX ? clean : `${clean.slice(0, SUMMARY_TEXT_MAX - 1)}…`;
-  await updateJob(deps.sql, job.id, { lastSummary: `Steered: ${short}` });
+  await updateJob(deps.sql, job.id, { lastSummary: `I passed on: ${short}` });
   return `Sent to ${name}'s ${workerNoun()}: ${short}`;
 }
 

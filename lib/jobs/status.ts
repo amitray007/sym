@@ -12,7 +12,7 @@ function waitingOn(): Partial<Record<JobStatus, string>> {
     waiting_input: `Waiting for your answer to the ${noun}'s question.`,
     waiting_permission: `Waiting for a permission prompt on the ${noun}. Approve it in the ${noun}.`,
     worker_offline: `Waiting for the ${noun} to come back.`,
-    quiet: `No new ${noun} activity for a while.`,
+    quiet: `I haven't heard from the ${noun}. I'm still checking.`,
   };
 }
 
@@ -43,14 +43,19 @@ export const STATUS_EMOJI: Record<JobStatus, string> = {
 };
 
 export function jobAnswer(job: Job, now: Date): string {
-  const lines = [
-    `${STATUS_EMOJI[job.status]} ${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}.`,
-  ];
-  if (job.lastSummary) lines.push(`last: ${job.lastSummary}`);
+  const lines = [`${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}.`];
+  if (job.lastSummary && job.status !== "checking") lines.push(job.lastSummary);
   const waiting = waitingOn()[job.status];
   if (waiting) lines.push(waiting);
-  if (job.workerModel) lines.push(`model: ${job.workerModel}`);
-  if (job.prUrl) lines.push(`🔗 ${job.prUrl}`);
+  if (job.prUrl) lines.push(job.prUrl);
+  if (job.closedAt)
+    lines.push(
+      job.codeChannel && job.archiveState !== "archived"
+        ? "I stopped following the PR. The channel still needs to be archived."
+        : "I've closed this job.",
+    );
+  if (job.archiveState === "repair")
+    lines.push("The saved channel or Slack connection needs repair.");
   return lines.join("\n");
 }
 
@@ -59,7 +64,7 @@ export function jobListAnswer(jobs: Job[], now: Date): string {
   return jobs
     .map((job) => {
       const summary = job.lastSummary ? ` · ${job.lastSummary}` : "";
-      return `${STATUS_EMOJI[job.status]} ${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}${summary}`;
+      return `${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}${summary}`;
     })
     .join("\n");
 }

@@ -142,7 +142,7 @@ export async function presentStart(
     method: "chat.postMessage",
     payload: {
       ...target(withDisplay),
-      text: `Started ${jobRef(job.id)}: ${job.title}${modelNote ? `\n${modelNote}` : ""}`,
+      text: `I'm on ${jobRef(job.id)}: ${job.title}.${modelNote ? `\n${modelNote}` : ""}`,
     },
     display,
   });
@@ -269,7 +269,7 @@ async function presentEndOnce(
         ? resultPost(facts(job, now), contract, concerns, verdictLine(check, concerns))
         : job.status === "failed"
           ? failurePost(facts(job, now), job.lastSummary)
-          : { text: `🚫 ${ref} was cancelled.`, blocks: [] };
+          : { text: `Stopped ${ref}. I haven't checked or reverted its changes.`, blocks: [] };
   if (
     job.status === "done" &&
     written &&

@@ -32,7 +32,6 @@ import { sentPostTimestamps } from "../../lib/ledger/outbox.ts";
 import { DISMISS_ACTION_ID, START_ACTION_ID } from "../../lib/ledger/proposals.ts";
 import { lastTurnUser, recordSessionThread } from "../../lib/ledger/threads.ts";
 import { isApprovalAction, mayDecideAsOwner, ownerUserId } from "../../lib/owner.ts";
-import { loadingMessages } from "../../lib/persona.ts";
 import {
   changePersona,
   describePersona,
@@ -140,9 +139,7 @@ async function answerSymCommand(text: string, now: Date, userId: string): Promis
 // never blocks the turn.
 async function showLoadingMessages(channel: SlackContext): Promise<boolean> {
   try {
-    const stored = await storedPersonaOrNone(ledger);
-    const sources = { stored, env: process.env.SYM_PERSONA, pack: pack(), warn: () => {} };
-    const messages = loadingMessages(sources);
+    const messages = ["Working..."];
     const [status] = messages;
     if (!status || !channel.slack.threadTs) return false;
     const response = await channel.slack.request("assistant.threads.setStatus", {

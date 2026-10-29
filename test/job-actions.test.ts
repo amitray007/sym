@@ -181,7 +181,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     // A follow-up records the continuation on the parent's result.
     const [edit] = await outbox(sql, `${ref}:end-edit:`);
     expect(JSON.stringify(edit?.payload)).not.toContain("sym_job_fix");
-    expect(JSON.stringify(edit?.payload)).toContain(`Fix sent as ${childRef}`);
+    expect(JSON.stringify(edit?.payload)).toContain(`I sent the follow-up as ${childRef}`);
 
     // The same Enter again sends nothing new.
     const again = await click(deps, {
@@ -209,9 +209,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
 
     // The parent's thread now belongs to the follow-up: no second Fix or Close on the parent.
     const fixParent = await click(deps, { actionId: "sym_job_fix", value: ref });
-    expect(fixParent.replies).toEqual([
-      `${childRef} continued this thread. Use its buttons instead.`,
-    ]);
+    expect(fixParent.replies).toEqual([`${childRef} continued this thread. Use that job.`]);
     const closeParent = await click(deps, { actionId: "sym_job_close", value: ref });
     expect(closeParent.replies).toEqual([`${childRef} continued this thread. Close it instead.`]);
     expect(worker.settled).toEqual([]);

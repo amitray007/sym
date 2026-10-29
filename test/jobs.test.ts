@@ -487,7 +487,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     expect(slack.posts()[0]?.body).toMatchObject({
       channel: CHANNEL,
       thread_ts: THREAD_TS,
-      text: `Started ${ref}: Billing sync retry`,
+      text: `I'm on ${ref}: Billing sync retry.`,
     });
     expect((await getJob(sql, fresh.id))?.cardTs).toBeNull();
   });
@@ -704,7 +704,9 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       await cancelJob(s.deps, s.job.id);
 
       expect(s.worker.interrupts).toHaveLength(1);
-      expect(texts(s.slack.posts().slice(before))).toEqual([`🚫 ${s.ref} was cancelled.`]);
+      expect(texts(s.slack.posts().slice(before))).toEqual([
+        `Stopped ${s.ref}. I haven't checked or reverted its changes.`,
+      ]);
     });
 
     it("hands a launched job to reconcile when its watcher fails", async () => {
