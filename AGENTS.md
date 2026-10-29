@@ -38,7 +38,8 @@ schedules with silent clean checks and the digest, memory, the pack (overlay, jo
 result checks and the verifier subagent, quiet mode, `/sym`, card buttons, feedback and learned
 playbook rows, steering, PR wakes, the sign-in expiry notice, the worker MCP channel, per-job
 worker models, the project allow-list, the worker label, owner-managed MCP connections,
-shared-thread manners, stranger replies, and results written in the persona's voice.
+shared-thread manners, stranger replies, results written in the persona's voice, and opt-in Slack
+code channels for started jobs.
 
 ## Commands
 

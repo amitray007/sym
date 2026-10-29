@@ -21,7 +21,7 @@ import {
 } from "../../lib/feedback/feedback.ts";
 import { publishLiveHome } from "../../lib/home/live.ts";
 import { jobListAnswer } from "../../lib/jobs/status.ts";
-import { recentJobs } from "../../lib/ledger/jobs.ts";
+import { jobRef, recentJobs } from "../../lib/ledger/jobs.ts";
 import { getListenMode } from "../../lib/ledger/listen.ts";
 import { sentPostTimestamps } from "../../lib/ledger/outbox.ts";
 import { lastTurnUser, recordSessionThread } from "../../lib/ledger/threads.ts";
@@ -40,6 +40,7 @@ import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
 import { listSchedules } from "../../lib/schedules/rows.ts";
 import { namesBot, threadPeople, triageThreadMessage } from "../../lib/slack/addressing.ts";
+import { codeChannelsOn, jobOfCodeChannel } from "../../lib/slack/code-channel.ts";
 import { isSlackUserAllowed, sayPrivately } from "../../lib/slack/guard.ts";
 import { handleJobAction, JOB_ACTION_IDS } from "../../lib/slack/job-actions.ts";
 import {
@@ -411,8 +412,29 @@ const symRenderer = defineSlackRenderer({
   },
 });
 
+// A code channel belongs to one job (decision 067). Each turn there tells the brain which one, so
+// "how is it going" or "also fix the docs" acts on that job. A failed lookup adds nothing.
+async function codeChannelNote(channelId: string): Promise<string | undefined> {
+  try {
+    const job = await jobOfCodeChannel(ledger(), channelId);
+    if (!job) return undefined;
+    const ref = jobRef(job.id);
+    return (
+      `This Slack code channel belongs to worker job ${ref} ("${job.title}"), now ${job.status}. ` +
+      `Messages here are about ${ref}: use ${ref} with the job tools, and steer it instead of ` +
+      "starting a new job unless the person asks for separate work."
+    );
+  } catch (error) {
+    console.warn("Sym could not read the job of a code channel.", String(error));
+    return undefined;
+  }
+}
+
 export default slackChannel({
   renderers: [symRenderer],
+  // Off unless SYM_CODE_CHANNELS is on: Eve then serves each code channel as one session, and the
+  // generated manifest asks for the code channel scopes and events.
+  codeChannels: codeChannelsOn(),
   // Undefined keeps Slack's own host. Tests and the local e2e point it at a fake Slack server.
   ...(process.env.SLACK_API_BASE_URL
     ? { api: { apiBaseUrl: process.env.SLACK_API_BASE_URL } }
@@ -426,8 +448,12 @@ export default slackChannel({
       return null;
     }
     setQuiet(message, false);
-    await noteSession(ctx, message);
     const auth = defaultSlackAuth(message, ctx);
+    if (ctx.slack.codeChannel) {
+      const note = await codeChannelNote(message.channelId);
+      return note ? { auth, context: [note] } : { auth };
+    }
+    await noteSession(ctx, message);
     if (message.threadTs === message.ts) return { auth };
     const note = await participantsContext(
       ctx,
@@ -451,6 +477,12 @@ export default slackChannel({
     if (!fromAllowedHuman(message)) {
       await replyToStranger(ctx, message, "thread");
       return null;
+    }
+    // Everything in a code channel is meant for Sym: it needs no tag, triage, or listen mode.
+    if (ctx.slack.codeChannel) {
+      const auth = defaultSlackAuth(message, ctx);
+      const note = await codeChannelNote(message.channelId);
+      return note ? { auth, context: [note] } : { auth };
     }
     if (!(await ctx.isSubscribed())) return null;
     await noteSession(ctx, message, true);

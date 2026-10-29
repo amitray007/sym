@@ -2,7 +2,8 @@ import type { Sql } from "../db.ts";
 import { chooseDisplay } from "../display.ts";
 import { recordFeedback } from "../feedback/feedback.ts";
 import { getJobByRef, type Job, jobRef, json } from "../ledger/jobs.ts";
-import { enqueuePost } from "../ledger/outbox.ts";
+import { enqueuePost, latestPost } from "../ledger/outbox.ts";
+import { archiveCodeChannel } from "../slack/code-channel.ts";
 import { workerNoun } from "../worker-label.ts";
 import { Brief } from "./brief.ts";
 import { RESULT_ACTION_IDS } from "./card.ts";
@@ -174,13 +175,13 @@ export async function startFollowUp(
 async function insertFollowUp(sql: Sql, parent: Job, requestKey: string, brief: Brief) {
   const [row] = await sql<{ id: number }[]>`
     insert into jobs (
-      request_key, session_id, kind, title, owner, slack_channel, slack_thread_ts, brief, worker,
+      request_key, session_id, kind, title, owner, slack_channel, slack_thread_ts, code_channel, brief, worker,
       worker_project_id, worker_identity, worker_thread_id, worker_model, cursor, status, started_at, parent_job_id,
       pr_url, pr_watched_url, pr_wake_cursor, watch_until
     )
     select
       ${requestKey}, session_id, 'code-change', ${brief.title}, owner, slack_channel,
-      slack_thread_ts, ${json(sql, brief)}, worker, worker_project_id, worker_identity, worker_thread_id,
+      slack_thread_ts, code_channel, ${json(sql, brief)}, worker, worker_project_id, worker_identity, worker_thread_id,
       worker_model, cursor, 'running', now(), id, pr_url, pr_watched_url, pr_wake_cursor,
       now() + interval '1 minute'
     from jobs where id = ${parent.id}
@@ -213,6 +214,12 @@ export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<
   }
   await editEndPost(deps.sql, job, `Closed by <@${by}>.`);
   await deliverNow(deps);
+  // A job in its own code channel archives it; the result is the summary Slack shares in the
+  // thread the job came from (decision 067).
+  if (job.codeChannel) {
+    const end = await latestPost(deps.sql, job.id, `${name}:end`);
+    await archiveCodeChannel(deps, job, end?.slackTs ?? null);
+  }
   return `Closed ${name}.`;
 }
 

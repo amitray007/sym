@@ -11,6 +11,7 @@ Read them in this order.
 | [workers.md](workers.md) | The worker adapter contract and the T3 Code adapter |
 | [eve.md](eve.md) | Which Eve features Sym uses, defers, or skips, and their limits |
 | [slack.md](slack.md) | Slack surfaces, the job card, scopes, and the app manifest |
+| [slack-code.md](slack-code.md) | The Slack Code API (code channels) and the parts Sym uses |
 | [display.md](display.md) | The display rule: when to post nothing, text, buttons, a card, or a file |
 | [learning.md](learning.md) | The three learning layers and the feedback loop |
 | [adopting.md](adopting.md) | Packs: where an adopter keeps playbooks, schedules, and repository rules |

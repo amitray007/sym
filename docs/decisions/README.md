@@ -72,3 +72,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [064](064-eval-findings.md) | Fixes from the first real-model eval run: `SYM_REASONING` for models without reasoning, no job writes production data, short job offers, a real `worker_job` stub, and an eval setup with its own database |
 | [065](065-security-boundaries.md) | Proposals stay anonymous, Fix rechecks current policy, and worker callbacks use job-scoped credentials |
 | [066](066-eve-088.md) | Eve 0.88.0, for Slack code channels: dynamic capabilities with `ctx.memo`, the `sessionUsage` limit, a v27 Slack renderer, and `onAnswers`; free-text answers go through Eve's answer box |
+| [067](067-code-channels.md) | With `SYM_CODE_CHANNELS` on, a started job moves into its own Slack code channel with a status and context bar; Close archives it; a Slack refusal keeps the job in its thread |

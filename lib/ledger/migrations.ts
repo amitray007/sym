@@ -6,6 +6,7 @@ import {
   connectionInstructionsMigration,
   connectionsMigration,
 } from "../connections/migration.ts";
+import { jobCodeChannelMigration } from "../jobs/code-channel-migration.ts";
 import { workerIdentityMigration } from "../jobs/policy-migration.ts";
 import { workerCapabilitiesMigration } from "../jobs/worker-capabilities-migration.ts";
 import {
@@ -206,4 +207,5 @@ export const migrations: Migration[] = [
   trustLadderMigration,
   workerIdentityMigration,
   workerCapabilitiesMigration,
+  jobCodeChannelMigration,
 ];

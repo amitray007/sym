@@ -42,6 +42,12 @@ import {
   getSchedule,
   parseScheduleRef,
 } from "../../lib/schedules/rows.ts";
+import {
+  moveToCodeChannel,
+  type SessionStatus,
+  setChannelStatus,
+  setContextBar,
+} from "../../lib/slack/code-channel.ts";
 import { workerLabel, workerNoun } from "../../lib/worker-label.ts";
 import type { WorkerAnswers, WorkerQuestion } from "../../lib/workers/types.ts";
 
@@ -184,6 +190,9 @@ export default defineWorkflowTool({
         return { job: ref, status: "cancelled" };
       }
 
+      // Decision 067: a job a person started moves into its own code channel, when that is on.
+      // A scheduled check stays quiet in its thread.
+      if (!preApproved) await toCodeChannel(job.id);
       yield { status: statusLine(ref, `Launching ${workerNoun()} thread`) };
       const callback = createWebhook();
       const threadId = await launch(job.id, callback.url);
@@ -230,6 +239,7 @@ export default defineWorkflowTool({
           // is ready, and the template.
           const end = await finish(job.id, modelCheck, written === "stopped" ? undefined : written);
           await endRun(ctx.session.id, job.id, end.status, end.lastMessage, end.concerns);
+          await channelStatus(job.id, "active");
           return {
             job: ref,
             status: end.status,
@@ -238,6 +248,7 @@ export default defineWorkflowTool({
           };
         }
 
+        if (result.questions.length > 0) await channelStatus(job.id, "suspended");
         for (const question of result.questions) {
           const answers = await askQuestion(ctx.ask, ref, question, stopped);
           if (answers === "stopped") {
@@ -246,9 +257,13 @@ export default defineWorkflowTool({
           }
           if (answers) await answer(job.id, question.requestId, answers);
         }
+        if (result.questions.length > 0 && !result.terminal) {
+          await channelStatus(job.id, "processing");
+        }
 
         if (result.terminal) {
           await endRun(ctx.session.id, job.id, result.status, result.lastMessage);
+          await channelStatus(job.id, "active");
           return {
             job: ref,
             status: result.status,
@@ -494,6 +509,23 @@ async function writerInput(jobId: number, check: ModelCheck | undefined) {
   }
   const learned = sessionInstructions(await approvedForSession(sql).catch(() => []));
   return writerRequest(ledgerDeps(), jobId, { persona, learned }, check);
+}
+
+async function toCodeChannel(jobId: number) {
+  "use step";
+  const deps = ledgerDeps();
+  const job = await getJob(deps.sql, jobId);
+  if (job) await moveToCodeChannel(deps, job);
+}
+
+// The code channel's status follows the job; at the end the context bar gains the pull request.
+async function channelStatus(jobId: number, status: SessionStatus) {
+  "use step";
+  const deps = ledgerDeps();
+  const job = await getJob(deps.sql, jobId);
+  if (!job?.codeChannel) return;
+  await setChannelStatus(deps, job, status);
+  if (status === "active") await setContextBar(deps, job);
 }
 
 async function finish(jobId: number, verdict: ModelCheck | undefined, written?: string) {

@@ -42,8 +42,22 @@ export interface FakeSlackReaction {
   name: string;
 }
 
+// A code channel the fake created with agents.conversations.create.
+export interface FakeCodeChannel {
+  id: string;
+  sessionId: string | undefined;
+  originChannel: string | undefined;
+  originTs: string | undefined;
+  contextBar: unknown[];
+  statuses: string[];
+  archived: boolean;
+  summaryTs: string | undefined;
+}
+
 export interface FakeSlack {
   apiBaseUrl: string;
+  // Code channels by channel ID, in creation order.
+  codeChannels: FakeCodeChannel[];
   calls: FakeSlackCall[];
   messages: FakeSlackMessage[];
   ephemerals: FakeSlackMessage[];
@@ -121,6 +135,12 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
   const views: Record<string, unknown>[] = [];
   const homeViews: Record<string, Record<string, unknown>> = {};
   const uploads: FakeSlack["uploads"] = [];
+  const codeChannels: FakeCodeChannel[] = [];
+  const codeChannel = (id: unknown) => {
+    const found = codeChannels.find((c) => c.id === String(id));
+    if (!found) throw "not_agent_channel";
+    return found;
+  };
   const pendingUploads = new Set<string>();
   const failures = new Map<string, string[]>();
   const waiters = new Set<() => void>();
@@ -261,8 +281,59 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
         .map((m) => (m.ts === root.ts ? { ...m, thread_ts: root.ts } : m));
       return { messages: kept, has_more: false };
     },
+    // Slack Code (decision 067). A repeated session_id returns the same channel.
+    "agents.conversations.create": (b) => {
+      const sessionId = b.session_id === undefined ? undefined : String(b.session_id);
+      const existing = sessionId && codeChannels.find((c) => c.sessionId === sessionId);
+      if (existing) return { channel_id: existing.id };
+      const id = `CCODE${codeChannels.length + 1}`;
+      codeChannels.push({
+        id,
+        sessionId,
+        originChannel: b.origin_channel_id === undefined ? undefined : String(b.origin_channel_id),
+        originTs: b.origin_message_ts === undefined ? undefined : String(b.origin_message_ts),
+        contextBar: [],
+        statuses: [],
+        archived: false,
+        summaryTs: undefined,
+      });
+      changed();
+      return { channel_id: id };
+    },
+    "agents.conversations.setProperties": (b) => {
+      const channel = codeChannel(b.channel_id);
+      const props = b.code_channel as { context_bar_items?: unknown[] } | undefined;
+      if (props?.context_bar_items) channel.contextBar = props.context_bar_items.slice(0, 5);
+      changed();
+      return { channel_id: channel.id };
+    },
+    "agents.sessions.setStatus": (b) => {
+      const channel = codeChannels.find((c) => c.id === String(b.channel_id));
+      if (channel && !b.thread_ts) channel.statuses.push(String(b.status));
+      changed();
+      return { status: b.status, agent_status: b.status };
+    },
+    "agents.conversations.archive": (b) => {
+      const channel = codeChannel(b.channel_id);
+      if (channel.archived) throw "already_archived";
+      if (b.summary_message_ts && !channel.originTs) throw "no_origin_link";
+      channel.archived = true;
+      channel.summaryTs = b.summary_message_ts ? String(b.summary_message_ts) : undefined;
+      changed();
+      return {};
+    },
     "conversations.info": (b) => {
       const channel = String(b.channel);
+      if (codeChannels.some((c) => c.id === channel)) {
+        return {
+          channel: {
+            id: channel,
+            is_channel: true,
+            is_private: false,
+            properties: { record_channel: { record_type: "agent_channel" } },
+          },
+        };
+      }
       const known = options.channels?.[channel];
       return {
         channel: {
@@ -375,6 +446,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
 
   return {
     apiBaseUrl: `${origin}/api/`,
+    codeChannels,
     calls,
     messages,
     ephemerals,
