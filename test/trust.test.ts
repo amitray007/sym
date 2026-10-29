@@ -157,12 +157,12 @@ describe.skipIf(!hasDatabase)("the trust ladder", () => {
     const sql = ledger.sql();
     const playbook = await approved(sql, "rotate-keys");
     const before = await job(sql, "trust-0", "rotate-keys");
-    expect(await trustedPlaybookOf(sql, before.id)).toBeUndefined();
+    expect(await trustedPlaybookOf(sql, before.id, "pr-wake")).toBeUndefined();
     await end(sql, before.id, true);
 
     expect(await setStartMode(sql, playbook.id, "auto", "U0OWNER")).toBe(true);
     const trusted = await job(sql, "trust-1", "rotate-keys");
-    expect((await trustedPlaybookOf(sql, trusted.id))?.name).toBe("rotate-keys");
+    expect((await trustedPlaybookOf(sql, trusted.id, "pr-wake"))?.name).toBe("rotate-keys");
     await end(sql, trusted.id, true);
 
     await recordFeedback(sql, {
@@ -180,7 +180,7 @@ describe.skipIf(!hasDatabase)("the trust ladder", () => {
     expect(notice?.payload.text).toBe(
       `P-${playbook.id} rotate-keys needs your approval before starting again: a 👎 on J-${trusted.id}.`,
     );
-    expect(await trustedPlaybookOf(sql, trusted.id)).toBeUndefined();
+    expect(await trustedPlaybookOf(sql, trusted.id, "pr-wake")).toBeUndefined();
   });
 
   it("trusts only projects the playbook ran clean on", async () => {
@@ -190,7 +190,7 @@ describe.skipIf(!hasDatabase)("the trust ladder", () => {
     await end(sql, first.id, true);
     await setStartMode(sql, playbook.id, "auto", "U0OWNER");
     const same = await job(sql, "project-2", "warm-cache");
-    expect((await trustedPlaybookOf(sql, same.id))?.name).toBe("warm-cache");
+    expect((await trustedPlaybookOf(sql, same.id, "pr-wake"))?.name).toBe("warm-cache");
     const other = await createJob(sql, {
       requestKey: "project-3",
       kind: "code-change",
@@ -199,7 +199,7 @@ describe.skipIf(!hasDatabase)("the trust ladder", () => {
       worker: "t3",
     });
     await linkPlaybook(sql, other.id, "warm-cache");
-    expect(await trustedPlaybookOf(sql, other.id)).toBeUndefined();
+    expect(await trustedPlaybookOf(sql, other.id, "pr-wake")).toBeUndefined();
   });
 
   it("ignores a cancelled job, and keeps a running job's 👎 out of the streak until it ends", async () => {

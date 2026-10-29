@@ -132,6 +132,11 @@ export async function handleJobAction(
   }
 }
 
+export interface ProposalOutcome {
+  kind: "accepted" | "refused" | "stale" | "ambiguous";
+  text: string;
+}
+
 export async function handleProposal(
   deps: JobDeps,
   input: {
@@ -143,9 +148,9 @@ export async function handleProposal(
     start: boolean;
   },
   allowed: (user: string) => boolean,
-): Promise<string> {
+): Promise<ProposalOutcome> {
   if (!allowed(input.by) || !/^[1-9][0-9]*$/.test(input.id))
-    return "I couldn't approve that request.";
+    return { kind: "refused", text: "I couldn't approve that request." };
   const decision = await deps.sql.begin(async (transaction) => {
     const sql = transaction as unknown as Sql;
     const [row] = await sql<
@@ -162,16 +167,19 @@ export async function handleProposal(
     return decideProposal(sql, input.id, input.by, input.start);
   });
   if (!decision || decision.status === "expired")
-    return "That proposal is no longer current. Ask me for a new one.";
+    return { kind: "stale", text: "That proposal is no longer current. Ask me for a new one." };
   if (decision.status === "approved" && decision.kind === "followup") {
-    return executeFollowupProposal(deps, decision);
+    return { kind: "accepted", text: await executeFollowupProposal(deps, decision) };
   }
   const text =
     decision.status === "approved"
       ? `<@${input.by}> chose: Start. I'll start the approved work.`
       : `<@${input.by}> chose: Not now. I'll leave it there.`;
   await editProposal(deps, decision, text);
-  return decision.status === "approved" ? "Starting the approved work." : "I'll leave it there.";
+  return {
+    kind: "accepted",
+    text: decision.status === "approved" ? "Starting the approved work." : "I'll leave it there.",
+  };
 }
 
 export async function handleTypedProposal(
@@ -181,9 +189,10 @@ export async function handleTypedProposal(
     by: string;
     channel: string;
     threadTs: string | null;
+    replyAfter?: string;
   },
   allowed: (user: string) => boolean,
-): Promise<string | undefined> {
+): Promise<ProposalOutcome | undefined> {
   const text = input.text
     .trim()
     .replace(/[.!]+$/, "")
@@ -194,7 +203,11 @@ export async function handleTypedProposal(
   const proposal = await typedProposal(deps.sql, input.channel, input.threadTs);
   if (!proposal) return undefined;
   if (proposal === "ambiguous")
-    return "There are several proposals here. Tell me which job you mean.";
+    return {
+      kind: "ambiguous",
+      text: "There are several proposals here. Tell me which job you mean.",
+    };
+  if (input.replyAfter && proposal.messageTs !== input.replyAfter) return undefined;
   return handleProposal(
     deps,
     { id: proposal.id, by: input.by, channel: input.channel, threadTs: input.threadTs, start },

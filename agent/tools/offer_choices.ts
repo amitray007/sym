@@ -2,6 +2,8 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { deliver } from "../../lib/delivery/deliver.ts";
 import { chooseDisplay } from "../../lib/display.ts";
+import { jobIdOfThread } from "../../lib/feedback/feedback.ts";
+import { defuse } from "../../lib/jobs/blocks.ts";
 import { ChoiceLabels, choiceBlocks, storeChoices } from "../../lib/ledger/choices.ts";
 import { enqueuePost } from "../../lib/ledger/outbox.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
@@ -20,21 +22,26 @@ export default defineTool({
     const sql = ledger();
     const thread = await getSessionThread(sql, ctx.session.id);
     if (!thread) return { posted: false, reason: "I couldn't find this conversation." };
+    const jobId = await jobIdOfThread(sql, thread.channelId, thread.threadTs ?? "");
+    const message = defuse(input.message);
     const key = `${ctx.session.id}:${ctx.callId}:choices`;
     const stored = await storeChoices(sql, {
       key,
+      ...(jobId ? { jobId } : {}),
       channel: thread.channelId,
       threadTs: thread.threadTs,
       ...input,
+      message,
     });
     await enqueuePost(sql, {
       idempotencyKey: key,
+      ...(jobId ? { jobId } : {}),
       method: "chat.postMessage",
       payload: {
         channel: thread.channelId,
         ...(thread.threadTs ? { thread_ts: thread.threadTs } : {}),
-        text: `${input.message}\n\n${input.choices.join(" / ")}. You can also reply in your own words.`,
-        blocks: [{ type: "markdown", text: input.message }, ...choiceBlocks(stored)],
+        text: `${message}\n\n${defuse(input.choices.join(" / "))}. You can also reply in your own words.`,
+        blocks: [{ type: "markdown", text: message }, ...choiceBlocks(stored)],
       },
       display: chooseDisplay({
         kind: "conversation",

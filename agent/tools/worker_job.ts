@@ -122,8 +122,8 @@ export default defineWorkflowTool({
         ctx.session.id,
         job.id,
       );
-      // Decision 059: a brief that follows a playbook the owner trusts skips the click. The step
-      // reads the trust from the ledger, so the model cannot grant it.
+      // Interactive requests always need Start, including a trusted playbook. Trust still
+      // covers approved schedules and existing PR watches.
       const trusted = preApproved ? null : await trustedStart(job.id, ctx.session.auth.current);
       if (preApproved) {
         // A scheduled check speaks only when something needs attention (decision 031).
@@ -140,6 +140,7 @@ export default defineWorkflowTool({
         ),
       };
       const decision = preApproved || trusted ? "approved" : await waitForStart(job.id, stopped);
+      if (decision === "pending") return { job: ref, status: "awaiting_start", ...POSTED };
       if (decision !== "approved") {
         await closeBeforeStart(job.id, "Not started");
         return { job: ref, status: "cancelled" };
@@ -306,13 +307,16 @@ function unavailable(reason: string): ModelCheck {
 }
 
 async function waitForStart(jobId: number, stopped: Promise<"stopped">): Promise<string> {
-  for (;;) {
+  // At most twelve waits and thirteen reads. Late approvals belong to reconcile, so an idle
+  // day-long proposal cannot accumulate a day of workflow events.
+  for (let attempt = 0; attempt <= 12; attempt++) {
     const status = await startDecision(jobId);
     if (!status) return "unavailable";
-    if (status !== "pending") return status;
-    if ((await Promise.race([sleep(1000).then(() => "wait" as const), stopped])) === "stopped")
+    if (status !== "pending" || attempt === 12) return status;
+    if ((await Promise.race([sleep(300_000).then(() => "wait" as const), stopped])) === "stopped")
       return "dismissed";
   }
+  return "pending";
 }
 
 async function startDecision(jobId: number) {
@@ -373,8 +377,7 @@ async function recordJob(brief: Brief, callId: string, sessionId: string) {
   return { id: job.id };
 }
 
-// The name of the trusted playbook that lets this job start without the click, or null. Only a
-// person's turn qualifies: a worker thread or an app session never starts a trusted job.
+// Read trigger-scoped trust in a step. Interactive sessions always need Start.
 async function trustedStart(
   jobId: number,
   caller: SessionAuthContext | null | undefined,
@@ -382,7 +385,7 @@ async function trustedStart(
   "use step";
   if (!slackUserOfPrincipal(caller?.principalId)) return null;
   const sql = ledger();
-  const playbook = await trustedPlaybookOf(sql, jobId);
+  const playbook = await trustedPlaybookOf(sql, jobId, "interactive");
   if (!playbook) return null;
   await markAutoStarted(sql, jobId);
   return playbook.name;

@@ -138,19 +138,15 @@ async function answerSymCommand(text: string, now: Date, userId: string): Promis
   }
 }
 
-// The status line while the brain works. Eve sets one fixed text; Slack also takes a list to
-// rotate (`loading_messages`), so each persona brings its own (decision 046). A failure here
-// never blocks the turn.
+// A neutral status until a tool label or workflow yield supplies a known step.
 async function showLoadingMessages(channel: SlackContext): Promise<boolean> {
   try {
-    const messages = ["Working..."];
-    const [status] = messages;
-    if (!status || !channel.slack.threadTs) return false;
+    if (!channel.slack.threadTs) return false;
     const response = await channel.slack.request("assistant.threads.setStatus", {
       channel_id: channel.slack.channelId,
       thread_ts: channel.slack.threadTs,
-      status,
-      loading_messages: messages,
+      status: "Working...",
+      loading_messages: ["Working..."],
     });
     return response.ok === true;
   } catch (error) {
@@ -505,13 +501,17 @@ async function threadJobNote(channel: string, thread: string): Promise<string | 
 async function typedDecision(
   ctx: SlackInboundMessageContext,
   message: SlackMessage,
+  replyAfter?: string,
 ): Promise<boolean> {
   const by = message.author?.userId;
   if (!by) return false;
+  const text = ctx.isBotMentioned()
+    ? message.text.replace(/<@[UW][A-Z0-9]+(?:\|[^>]*)?>/, "").trim()
+    : message.text;
   // Most conversation messages need no worker connection or database query for approvals.
   if (
     !/^(start|yes(?: please)?|go(?: ahead)?|do it|not now|no|cancel|never mind)[.!]*$/i.test(
-      message.text.trim(),
+      text.trim(),
     )
   )
     return false;
@@ -519,8 +519,9 @@ async function typedDecision(
     handleTypedProposal(
       deps,
       {
-        text: message.text,
+        text,
         by,
+        ...(replyAfter ? { replyAfter } : {}),
         channel: message.channelId,
         threadTs: ctx.slack.codeChannel ? null : message.threadTs,
       },
@@ -528,11 +529,11 @@ async function typedDecision(
     ),
   );
   if (answer === undefined) return false;
-  if (/^(There are several|That proposal|I couldn't)/.test(answer)) {
+  if (answer.kind !== "accepted") {
     await sayPrivately(
       ctx.slack,
       { channel: message.channelId, user: by, threadTs: message.threadTs },
-      answer,
+      answer.text,
     );
   }
   // The proposal's edit is the visible acknowledgement; no second notifying post.
@@ -592,9 +593,9 @@ export default slackChannel({
       await replyToStranger(ctx, message, "thread");
       return null;
     }
-    if (await typedDecision(ctx, message)) return null;
     // Everything in a code channel is meant for Sym: it needs no tag, triage, or listen mode.
     if (ctx.slack.codeChannel) {
+      if (await typedDecision(ctx, message)) return null;
       const auth = defaultSlackAuth(message, ctx);
       const note = await codeChannelNote(message.channelId);
       return note ? { auth, context: [note] } : { auth };
@@ -628,6 +629,27 @@ export default slackChannel({
       jobThread: Boolean(jobNote),
     });
     if (addressing === "skip") return null;
+    if (ctx.isBotMentioned()) {
+      if (await typedDecision(ctx, message)) return null;
+    } else if (partnerId === senderId) {
+      // Refresh before binding a bare decision. A partial thread window cannot prove that
+      // nothing came between this reply and Sym's proposal, so it never grants approval.
+      const refreshed = await ctx.thread.refresh().then(
+        () => true,
+        () => false,
+      );
+      const messages = ctx.thread.recentMessages;
+      const previous = [...messages]
+        .filter((item) => Number(item.ts) < Number(message.ts))
+        .sort((a, b) => Number(b.ts) - Number(a.ts))[0];
+      if (
+        refreshed &&
+        messages.length < 50 &&
+        previous?.isMe &&
+        (await typedDecision(ctx, message, previous.ts))
+      )
+        return null;
+    }
     const note = await participantsContext(ctx, senderId, people.ids).catch(() => undefined);
     const context = [
       ...(addressing === "maybe" ? [MAYBE_NOTE] : []),
@@ -681,7 +703,17 @@ export default slackChannel({
               messageTs: action.messageTs,
             },
             (text, idempotencyKey) =>
-              ctx.send(text, { idempotencyKey, ...(note ? { context: [note] } : {}) }),
+              // Eve's typed-approval intake reads only string messages. Parts are conversation
+              // data even when an old label equals a newer approval option.
+              ctx.send(
+                [
+                  {
+                    type: "text",
+                    text: `<@${action.user.id}> chose this conversation option: ${JSON.stringify(text)}`,
+                  },
+                ],
+                { idempotencyKey, ...(note ? { context: [note] } : {}) },
+              ),
           );
         } else if (proposal && action.value && action.messageTs) {
           const outcome = await withJobDeps((deps) =>
@@ -698,11 +730,11 @@ export default slackChannel({
               isAllowed,
             ),
           );
-          if (/^(That proposal|I couldn't|There are several)/.test(outcome))
+          if (outcome.kind !== "accepted")
             await sayPrivately(
               ctx.slack,
               { channel: channelId, user: action.user.id, threadTs },
-              outcome,
+              outcome.text,
             );
         }
       } catch (error) {

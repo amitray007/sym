@@ -1,3 +1,4 @@
+import { chooseDisplay } from "../display.ts";
 import { getJob, type Job, jobRef, orphanedJobs, updateJob } from "../ledger/jobs.ts";
 import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
 import { moveToCodeChannel, setChannelStatus } from "../slack/code-channel.ts";
@@ -16,7 +17,16 @@ import {
   watchedPrJobs,
 } from "./pr-wakes.ts";
 import { presentEnd, presentProgress } from "./present.ts";
-import { checkJob, finishJob, type JobDeps, type LedgerDeps, launchOrAdopt } from "./run.ts";
+import {
+  checkJob,
+  closeUnlaunched,
+  deliverNow,
+  finishJob,
+  type JobDeps,
+  JobSetupError,
+  type LedgerDeps,
+  launchOrAdopt,
+} from "./run.ts";
 import type { ModelCheck } from "./verify.ts";
 
 // The safety net (docs/architecture.md, "Proactive updates"). Every few minutes it takes over
@@ -77,10 +87,13 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
 // An accepted Start can outlive its Eve task before the worker exists. Keep the callback and
 // approval in the ledger, then use the same launch lock and title adoption as a live task.
 async function recoverAcceptedStarts(deps: JobDeps): Promise<void> {
-  await deps.sql`with expired as (
-    update job_proposals set status = 'expired' where status = 'pending' and expires_at <= now() returning job_id, kind
-  ) update jobs set status = 'cancelled', finished_at = now() from expired
-    where jobs.id = expired.job_id and expired.kind = 'start' and jobs.status = 'launching' and jobs.worker_thread_id is null`;
+  await deps.sql`update job_proposals set status = 'expired'
+    where status = 'pending' and expires_at <= now()`;
+  await deps.sql`update jobs set status = 'cancelled', finished_at = coalesce(finished_at, now())
+    where status = 'launching' and worker_thread_id is null and (
+      select p.status from job_proposals p where p.job_id = jobs.id and p.kind = 'start'
+      order by p.id desc limit 1
+    ) in ('dismissed', 'expired')`;
   const rows = await deps.sql<{ id: number; decidedBy: string; callbackUrl: string }[]>`
     select j.id, p.decided_by, c.callback_url from jobs j
     join job_proposals p on p.job_id = j.id and p.kind = 'start' and p.status = 'approved'
@@ -97,8 +110,29 @@ async function recoverAcceptedStarts(deps: JobDeps): Promise<void> {
       await moveToCodeChannel(deps, job);
       await launchOrAdopt(deps, job.id, callbackFor(row.callbackUrl, process.env.SYM_CALLBACK_URL));
       await deps.sql`update jobs set watch_until = now() + interval '2 minutes' where id = ${job.id}`;
-    } catch {
-      /* The next pass rechecks policy and retries the same stored job. */
+    } catch (error) {
+      if (!(error instanceof JobSetupError)) continue;
+      await closeUnlaunched(deps, Number(row.id), error.message);
+      await enqueuePost(deps.sql, {
+        idempotencyKey: `${jobRef(Number(row.id))}:start-refused`,
+        jobId: Number(row.id),
+        method: "chat.postMessage",
+        payload: {
+          channel: row.decidedBy,
+          text: `I couldn't start ${jobRef(Number(row.id))}: ${error.message}`,
+        },
+        display: chooseDisplay({
+          kind: "conversation",
+          needsAction: true,
+          isNew: true,
+          estMinutes: 0,
+          steps: 0,
+          lines: 1,
+          surface: "dm",
+          quiet: false,
+        }),
+      });
+      await deliverNow(deps);
     }
   }
 }

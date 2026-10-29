@@ -269,12 +269,23 @@ export async function checkJob(
   // A job in `checking` has nothing more to read from the worker.
   if (TERMINAL.includes(job.status) || job.status === "checking") return toCheck(job, []);
 
+  const [followup] = await deps.sql<{ sent: boolean }[]>`
+    select followup_sent_at is not null as sent from jobs where id = ${job.id} and parent_job_id is not null
+  `;
+  // An unsent follow-up still sees its parent's completed thread. Retry the send through the
+  // proposal recovery path; do not consume that thread's status or cursor yet.
+  if (followup && !followup.sent) return toCheck(job, []);
+
   await deps.worker.wait(job.workerThreadId, waitMs);
   const activity = await readNewActivity(deps.worker, job.workerThreadId, job.cursor);
   // A waiting worker asks a question or waits on a permission prompt. Only questions are listed.
   const questions =
     activity.status === "waiting" ? await deps.worker.pendingQuestions(job.workerThreadId) : [];
-  const worked = toJobStatus(activity.status, questions.length > 0, job.status);
+  const awaitingReply = followup && !job.lastMessage && !latestAssistantItem(activity.items);
+  const worked =
+    awaitingReply && ["completed", "failed", "interrupted"].includes(activity.status)
+      ? "running"
+      : toJobStatus(activity.status, questions.length > 0, job.status);
   const hold = (options.verify === true || options.write === true) && job.kind !== SCHEDULED_CHECK;
   const status: JobStatus = worked === "done" && hold ? "checking" : worked;
   // Read once, as the code job ends, and keep it on the row (decision 057). A scheduled check

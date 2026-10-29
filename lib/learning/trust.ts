@@ -57,12 +57,14 @@ export async function linkPlaybook(
   return row;
 }
 
-// The trusted playbook that lets this job skip Start, or nothing. Trust covers only projects
-// the playbook already ran clean on, so naming a trusted playbook for other work still asks.
+// Interactive chat always needs Start. Non-chat triggers may use trust only on projects
+// where this approved playbook already ran clean.
 export async function trustedPlaybookOf(
   sql: Sql,
   jobId: number,
+  source: "interactive" | "schedule" | "pr-wake",
 ): Promise<TrustedPlaybook | undefined> {
+  if (source === "interactive") return undefined;
   const [row] = await sql<TrustedPlaybook[]>`
     select p.id, p.name, p.version, p.start_mode from jobs j
     join playbooks p on p.id = j.playbook_id

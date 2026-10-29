@@ -183,12 +183,12 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
       messageTs: proposal.messageTs ?? "",
       start: true,
     };
-    expect(await handleProposal(s.deps, { ...input, by: "U2" }, allowed)).toContain(
+    expect((await handleProposal(s.deps, { ...input, by: "U2" }, allowed)).text).toContain(
       "couldn't approve",
     );
-    expect(await handleProposal(s.deps, { ...input, messageTs: "forged" }, allowed)).toContain(
-      "no longer current",
-    );
+    expect(
+      (await handleProposal(s.deps, { ...input, messageTs: "forged" }, allowed)).text,
+    ).toContain("no longer current");
     expect(
       await handleTypedProposal(
         s.deps,
@@ -202,8 +202,8 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
         { text: "start", by: "U1", channel: "C1", threadTs: "initial-gate" },
         allowed,
       ),
-    ).toBe("Starting the approved work.");
-    expect(await handleProposal(s.deps, input, allowed)).toContain("no longer current");
+    ).toMatchObject({ kind: "accepted", text: "Starting the approved work." });
+    expect((await handleProposal(s.deps, input, allowed)).text).toContain("no longer current");
     expect(
       (await sql`select status from job_proposals where job_id = ${original.id}`)[0]?.status,
     ).toBe("approved");
@@ -216,14 +216,14 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
       payload: stale.brief,
       message: "Start?",
     });
-    await updateJob(sql, stale.id, { lastSummary: "scope changed" });
+    await sql`update jobs set brief = brief || '{"goal":"changed scope"}' where id = ${stale.id}`;
     expect(
       await handleProposal(
         s.deps,
         { id: gate.id, by: "U1", channel: "C1", threadTs: "stale", start: true },
         allowed,
       ),
-    ).toContain("no longer current");
+    ).toMatchObject({ kind: "stale" });
   });
 
   it("proposes a follow-up without sending, then checks current project permissions on Start", async () => {
@@ -238,7 +238,9 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
       JobProposal[]
     >`select * from job_proposals where job_id = ${original.id} and kind = 'followup'`;
     if (!gate) throw new Error("no follow-up proposal");
-    expect(gate.message).toBe("I'll cap retries at 3 on the same branch. Go?");
+    expect(gate.message).toBe(
+      "I'll make this change on the same branch: cap retries at 3. Should I start?",
+    );
     const answer = await handleProposal(
       { ...s.deps, allowedProjects: [] },
       {
@@ -251,7 +253,7 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
       },
       allowed,
     );
-    expect(answer).toContain("no projects configured");
+    expect(answer.text).toContain("no projects configured");
     expect(s.worker.sends).toEqual([]);
     expect(await sql`select id from jobs where parent_job_id = ${original.id}`).toHaveLength(0);
   });
@@ -373,9 +375,9 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
       "C1",
       async () => {},
     );
-    expect(s.calls.some((c) => JSON.stringify(c.body.blocks).includes("plain_text_input"))).toBe(
-      false,
-    );
+    expect(
+      s.calls.some((c) => JSON.stringify(c.body.blocks ?? []).includes("plain_text_input")),
+    ).toBe(false);
     await handleJobAction(
       s.deps,
       {

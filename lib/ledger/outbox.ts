@@ -46,10 +46,16 @@ export async function enqueuePost(sql: Sql, post: NewPost): Promise<OutboxPost> 
     throw new Error("Display level 0 posts nothing. Leave it to the digest.");
   }
 
+  // Every threaded post uses the same deleted-root guard, regardless of its caller.
+  const payload = post.payload as Record<string, unknown>;
+  const guarded =
+    (post.method === "chat.postMessage" || post.method === "sym.document") && payload?.thread_ts
+      ? { ...payload, sym_thread_reply: true }
+      : post.payload;
   const [inserted] = await sql<OutboxPost[]>`
     insert into outbox (idempotency_key, job_id, method, payload, display, purpose)
     values (
-      ${post.idempotencyKey}, ${post.jobId ?? null}, ${post.method}, ${json(sql, post.payload)},
+      ${post.idempotencyKey}, ${post.jobId ?? null}, ${post.method}, ${json(sql, guarded)},
       ${json(sql, display)}, ${post.purpose ?? "message"}
     )
     on conflict (idempotency_key) do nothing

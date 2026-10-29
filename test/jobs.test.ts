@@ -467,7 +467,8 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     const job = await launchOrAdopt(deps, fresh.id, CALLBACK);
     await launchOrAdopt(deps, fresh.id, CALLBACK);
 
-    expect(slack.calls).toHaveLength(1);
+    expect(slack.posts()).toHaveLength(1);
+    expect(slack.calls.filter((call) => call.method === "chat.getPermalink")).toHaveLength(1);
     const post = slack.posts()[0]?.body;
     expect(post).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });
     const blocks = post?.blocks as { type: string; title: string }[];
@@ -483,7 +484,8 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
 
     await launchOrAdopt(deps, fresh.id, CALLBACK);
 
-    expect(slack.calls).toHaveLength(1);
+    expect(slack.posts()).toHaveLength(1);
+    expect(slack.calls.filter((call) => call.method === "chat.getPermalink")).toHaveLength(1);
     expect(slack.posts()[0]?.body).toMatchObject({
       channel: CHANNEL,
       thread_ts: THREAD_TS,

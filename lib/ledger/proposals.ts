@@ -118,15 +118,19 @@ export async function decideProposal(
   const job = await getJob(sql, proposal.jobId);
   const valid =
     job &&
-    job.revision === proposal.revision &&
     !job.closedAt &&
     (proposal.kind === "start"
       ? job.status === "launching" && JSON.stringify(job.brief) === JSON.stringify(proposal.payload)
-      : ["done", "failed"].includes(job.status));
+      : job.revision === proposal.revision && ["done", "failed"].includes(job.status));
   const [decided] = await sql<JobProposal[]>`
     update job_proposals set status = ${!valid ? "expired" : start ? "approved" : "dismissed"}, decided_by = ${actor}
     where id = ${id}::bigint and status = 'pending' and expires_at > now() returning *
   `;
+  if (decided && proposal.kind === "start" && decided.status !== "approved") {
+    await sql`update jobs set status = 'cancelled', finished_at = coalesce(finished_at, now()),
+      last_summary = 'Not started', revision = revision + 1
+      where id = ${proposal.jobId} and status = 'launching' and worker_thread_id is null`;
+  }
   return decided ? normalize(decided) : undefined;
 }
 

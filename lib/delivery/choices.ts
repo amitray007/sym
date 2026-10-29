@@ -50,15 +50,34 @@ export async function takeChoice(
     )
       return false;
     await sql`update conversation_choices set chosen_by = ${input.user}, chosen_index = ${index} where id = ${match[1] ?? "0"}::bigint`;
-    const visible = `${row.message}\n\n<@${input.user}> chose: ${escapeMrkdwn(text)}`;
+    const [original] = await sql<
+      { jobId: number | null; payload: { text?: string; blocks?: Record<string, unknown>[] } }[]
+    >`
+      select job_id, payload from outbox where payload ->> 'channel' = ${row.channel}
+        and ((method = 'chat.postMessage' and slack_ts = ${row.messageTs})
+          or (method = 'chat.update' and payload ->> 'ts' = ${row.messageTs}))
+        and status <> 'failed' order by id desc limit 1
+    `;
+    const note = `<@${input.user}> chose: ${escapeMrkdwn(text)}`;
+    const visible = `${original?.payload.text ?? row.message}\n\n${note}`;
+    const blocks = (original?.payload.blocks ?? [{ type: "markdown", text: row.message }]).flatMap(
+      (block) => {
+        if (block.type !== "actions" || !Array.isArray(block.elements)) return [block];
+        const elements = (block.elements as { action_id?: string }[]).filter(
+          (element) => !element.action_id?.startsWith("sym_choice_"),
+        );
+        return elements.length ? [{ ...block, elements }] : [];
+      },
+    );
     const post = await enqueuePost(sql, {
       idempotencyKey: `choice:${row.id}:picked`,
+      ...(original?.jobId ? { jobId: Number(original.jobId) } : {}),
       method: "chat.update",
       payload: {
         channel: row.channel,
         ts: row.messageTs,
         text: visible,
-        blocks: [{ type: "markdown", text: visible }],
+        blocks: [...blocks, { type: "context", elements: [{ type: "mrkdwn", text: note }] }],
       },
       display: chooseDisplay({
         kind: "conversation",
