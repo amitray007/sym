@@ -8,7 +8,7 @@ import { formatDuration } from "./card.ts";
 function waitingOn(): Partial<Record<JobStatus, string>> {
   const noun = workerNoun();
   return {
-    launching: "Waiting for Start on the brief.",
+    launching: "Waiting for you to start it.",
     waiting_input: `Waiting for your answer to the ${noun}'s question.`,
     waiting_permission: `Waiting for a permission prompt on the ${noun}. Approve it in the ${noun}.`,
     worker_offline: `Waiting for the ${noun} to come back.`,

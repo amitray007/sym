@@ -317,7 +317,7 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
 
     const posts = s.posts();
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain(`${s.ref} is done.`);
+    expect(posts[0]).toContain(`Done with ${s.ref}:`);
   });
 
   it("posts the result with the rule checks when the model check was unavailable", async () => {
@@ -354,7 +354,7 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
     expect(s.worker.interrupts).toEqual([]);
     const posts = s.posts();
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain(`${s.ref} is done.`);
+    expect(posts[0]).toContain(`Done with ${s.ref}:`);
     expect(posts[0]).not.toContain("verifier");
   });
 

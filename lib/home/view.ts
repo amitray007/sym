@@ -38,6 +38,7 @@ export interface HomeData {
   persona: { name: string; source: string };
   worker: WorkerHealth;
   active: Job[];
+  closures?: Job[];
   finished: { done: number; failed: number; cancelled: number; latest: Job[] };
   schedules: Schedule[];
   // The allow-list names only. The collector never reads any other project.
@@ -111,8 +112,15 @@ function duration(ms: number): string {
 }
 function needsYou(job: Job, now: Date): boolean {
   return (
-    ["waiting_input", "waiting_permission", "worker_offline"].includes(job.status) ||
-    now.getTime() - (job.lastActivityAt ?? job.startedAt ?? job.createdAt).getTime() >= 86_400_000
+    ["launching", "waiting_input", "waiting_permission", "worker_offline"].includes(job.status) ||
+    Boolean(
+      job.closedAt &&
+        (!job.workerSettledAt || (job.codeChannel && job.archiveState !== "archived")),
+    ) ||
+    ["pending", "repair"].includes(job.archiveState) ||
+    (!job.finishedAt &&
+      now.getTime() - (job.lastActivityAt ?? job.startedAt ?? job.createdAt).getTime() >=
+        86_400_000)
   );
 }
 function jobLine(job: Job, now: Date): string {
@@ -121,11 +129,19 @@ function jobLine(job: Job, now: Date): string {
   const since = job.finishedAt ?? job.lastActivityAt ?? job.startedAt ?? job.createdAt;
   const age = duration(now.getTime() - since.getTime());
   const state =
-    job.status === "worker_offline"
-      ? "worker is offline"
-      : !job.finishedAt && needsYou(job, now) && !job.status.startsWith("waiting")
-        ? `no activity for ${age}`
-        : statusWords()[job.status];
+    job.closedAt && job.codeChannel && job.archiveState !== "archived"
+      ? job.archiveState === "repair" || job.archiveError
+        ? "channel archive failed; needs repair"
+        : "channel archive pending"
+      : job.closedAt && !job.workerSettledAt
+        ? "worker settlement pending"
+        : job.status === "launching"
+          ? "waiting for you to start it"
+          : job.status === "worker_offline"
+            ? "worker is offline"
+            : !job.finishedAt && needsYou(job, now) && !job.status.startsWith("waiting")
+              ? `no activity for ${age}`
+              : statusWords()[job.status];
   return `${ref} · ${esc(clip(job.title, MAX_TITLE_CHARS))} · ${state} · ${age}${job.finishedAt ? " ago" : ""}`;
 }
 
@@ -181,13 +197,23 @@ export function homeView(role: HomeRole, data?: HomeData): HomeView {
     return { type: "home", blocks: [section(NOT_SET_UP)] };
   }
   const { now } = data;
-  const attention = data.active.filter((job) => needsYou(job, now));
+  const attention = [
+    ...new Map(
+      [...data.active, ...(data.closures ?? []), ...data.finished.latest]
+        .filter((job) => needsYou(job, now))
+        .map((job) => [job.id, job]),
+    ).values(),
+  ];
+  const pendingSchedules = data.schedules.filter(
+    (schedule) => schedule.status === "pending_approval",
+  );
+  const count = attention.length + pendingSchedules.length;
   const running = data.active.filter((job) => !needsYou(job, now));
   const blocks: Block[] = [
     section(
-      attention.length === 0
+      count === 0
         ? "Nothing needs you."
-        : `${attention.length === 1 ? "One job needs" : `${attention.length} jobs need`} you.`,
+        : `${count === 1 ? "One item needs" : `${count} items need`} you.`,
     ),
   ];
   const jobs = (label: string, rows: Job[], limit: number) => {
@@ -202,10 +228,30 @@ export function homeView(role: HomeRole, data?: HomeData): HomeView {
       ),
     );
   };
-  jobs("Needs you", attention, MAX_ACTIVE_JOBS);
+  if (count) {
+    blocks.push(heading("Needs you"));
+    blocks.push(
+      section(
+        listLines(
+          [
+            ...attention.map((job) => jobLine(job, now)),
+            ...pendingSchedules.map(
+              (schedule) =>
+                `S-${schedule.id} · ${esc(clip(schedule.title, MAX_TITLE_CHARS))} · waiting for approval`,
+            ),
+          ],
+          MAX_ACTIVE_JOBS,
+        ),
+      ),
+    );
+  }
   jobs("Running", running, MAX_ACTIVE_JOBS);
-  jobs("Done today", data.finished.latest, MAX_FINISHED_JOBS);
-  if (!data.active.length && !data.finished.latest.length)
+  jobs(
+    "Finished today",
+    data.finished.latest.filter((job) => !attention.some((item) => item.id === job.id)),
+    MAX_FINISHED_JOBS,
+  );
+  if (!count && !data.active.length && !data.finished.latest.length)
     blocks.push(section("Ask me to start something."));
   if (role === "owner" && data.owner) {
     blocks.push(heading("Setup"));

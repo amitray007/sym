@@ -1,7 +1,12 @@
 import { workerLabel, workerNoun } from "../worker-label.ts";
 import type { Brief } from "./brief.ts";
 import { formatDuration, prLabel } from "./card.ts";
-import { contradictsTestReport, type OutputContract, safeHttpUrl, testStatus } from "./contract.ts";
+import {
+  contradictsTestReport,
+  type OutputContract,
+  reportedTestStatus,
+  safeHttpUrl,
+} from "./contract.ts";
 
 // Text for Sym's own Slack messages. Short, and the result comes first. Worker text is
 // untrusted, so every piece of it goes through escapeMrkdwn.
@@ -67,15 +72,9 @@ export function duration(job: JobFacts): string | undefined {
 }
 
 export function testSentence(contract: OutputContract): string {
-  const inferred = testStatus(contract.tests);
-  const status =
-    inferred === "failed" || inferred === "not_run" ? inferred : (contract.testsStatus ?? inferred);
+  const status = reportedTestStatus(contract);
   const note = contract.tests.trim();
-  if (
-    inferred === "unknown" &&
-    /\bpass(?:ed|ing)?\b/i.test(note) &&
-    /not run|skipped|didn['’]t run/i.test(note)
-  )
+  if (status === "unknown" && /not run|skipped|didn['’]t run/i.test(note) && /pass/i.test(note))
     return `Test report: ${escapeMrkdwn(note)}`;
   const truth = {
     passed: "Tests passed.",
@@ -84,7 +83,10 @@ export function testSentence(contract: OutputContract): string {
     unknown: "I don't know whether tests ran.",
     none: "The worker reported that no tests apply.",
   }[status];
-  return note ? `${truth} Reported: ${escapeMrkdwn(note)}` : truth;
+  // Keep conflicting notes attributed rather than presenting them as the outcome.
+  if (note && contradictsTestReport(note, contract))
+    return `${truth} Reported: ${escapeMrkdwn(note)}`;
+  return note ? `${truth.slice(0, -1)} (${escapeMrkdwn(note).replace(/[.!]+$/, "")}).` : truth;
 }
 
 export function resultFacts(contract: OutputContract, prUrl = contract.prUrl): string[] {
@@ -121,9 +123,18 @@ export function resultMessage(
       threadLine(job),
     ]);
   const required = [...new Set([...concerns, ...contract.openQuestions])];
+  const facts = resultFacts(contract);
+  if (facts[0]?.startsWith("<") && facts[1]?.startsWith("Tests passed"))
+    facts.splice(
+      0,
+      2,
+      `${facts[0].slice(0, -1)} and ${facts[1].charAt(0).toLowerCase() + facts[1].slice(1)}`,
+    );
+  const gist = contradictsTestReport(contract.summary, contract)
+    ? "The worker returned a result."
+    : tldr(contract.summary);
   return sections([
-    `${job.ref} is done. ${escapeMrkdwn(contradictsTestReport(contract.summary, contract) ? "The worker returned a result." : tldr(contract.summary))}`,
-    resultFacts(contract).join(" "),
+    `Done with ${job.ref}: ${escapeMrkdwn(/[.!?…]$/.test(gist) ? gist : `${gist}.`)} ${facts.join(" ")}`,
     ...required.map(escapeMrkdwn),
     limitation && !required.includes(limitation) ? limitation : null,
   ]);
@@ -131,19 +142,19 @@ export function resultMessage(
 
 export function failureMessage(job: JobFacts, reason?: string | null): string {
   return lines([
-    `${job.ref} stopped before finishing. ${reason ? escapeMrkdwn(reason) : `The ${workerNoun()} stopped before it finished.`}`,
+    `${job.ref} didn't finish. ${reason ? escapeMrkdwn(reason) : "The worker stopped without saying why; its thread has the log."}`,
     threadLine(job),
   ]);
 }
 
 /** The DM to the owner when the worker waits on a permission prompt. */
 export function permissionBlockMessage(ref: string): string {
-  return `${ref} needs permission on the ${workerNoun()} before it can continue. Please check it there.`;
+  return `${ref} is waiting on a permission in ${workerLabel()}. I can't approve that from Slack.`;
 }
 
 export function quietNotice(job: JobFacts, quietForMs: number): string {
   return lines([
-    `I haven't heard from the ${workerNoun()} on ${job.ref} for ${formatDuration(quietForMs)}. Want me to stop it?`,
+    `I haven't heard from the ${workerNoun()} on ${job.ref} for ${formatDuration(quietForMs)}. Want me to stop it? If not, I'll keep watching.`,
     threadLine(job),
   ]);
 }
@@ -161,13 +172,11 @@ export function briefPrompt(
   playbook?: { name: string; trusted: boolean },
 ): string {
   return lines([
-    `I'll ${escapeMrkdwn(brief.goal).replace(/[.!?]+$/, "")} in ${escapeMrkdwn(brief.project)} and ${deliveryOf(brief)}.`,
+    `I'd work on "${escapeMrkdwn(brief.title.charAt(0).toLowerCase() + brief.title.slice(1)).replace(/[.!?]+$/, "")}" in ${escapeMrkdwn(brief.project)}${brief.openPullRequest ? " on a draft PR" : "; I'll commit on the worktree branch, with no push or PR"}. Production and customer data stay read-only.`,
     ...brief.constraints.map(escapeMrkdwn),
-    "I'll keep production and customer data read-only.",
     brief.modelReason && modelLine ? escapeMrkdwn(modelLine) : null,
-    playbook?.trusted
-      ? `Starting under the owner's trusted playbook ${escapeMrkdwn(playbook.name)}.`
-      : "Want me to start?",
+    playbook?.trusted ? `This fits the trusted playbook ${escapeMrkdwn(playbook.name)}.` : null,
+    "Want me to start?",
   ]);
 }
 

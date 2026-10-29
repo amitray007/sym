@@ -175,7 +175,60 @@ describe("homeView by role", () => {
     expect(textOf(view)).not.toContain("message_ts");
   });
 
-  it("shows paused and waiting schedules", () => {
+  it("puts a fresh Start wait in Needs you and changes the opening summary", () => {
+    const view = homeView("member", data({ active: [job(12, { status: "launching" })] }));
+    expect(JSON.stringify(view.blocks[0])).toContain("One item needs you.");
+    expect(textOf(view)).toContain("*Needs you*");
+    expect(textOf(view)).toContain("waiting for you to start it");
+    expect(textOf(view)).not.toContain("*Running*");
+  });
+
+  it.each(["pending", "repair"] as const)(
+    "shows an old %s closure under Needs you",
+    (archiveState) => {
+      const closure = job(13, {
+        status: "done",
+        closedAt: minutesAgo(3000),
+        workerSettledAt: minutesAgo(3000),
+        codeChannel: true,
+        archiveState,
+        finishedAt: minutesAgo(3000),
+      });
+      const view = homeView("member", data({ closures: [closure] }));
+      expect(JSON.stringify(view.blocks[0])).toContain("One item needs you.");
+      expect(textOf(view)).toContain(
+        archiveState === "repair"
+          ? "channel archive failed; needs repair"
+          : "channel archive pending",
+      );
+      expect(textOf(view)).not.toContain("Ask me to start something");
+    },
+  );
+
+  it("labels failed and cancelled work in Finished today", () => {
+    const text = textOf(
+      homeView(
+        "member",
+        data({
+          finished: {
+            done: 0,
+            failed: 1,
+            cancelled: 1,
+            latest: [
+              job(14, { status: "failed", finishedAt: minutesAgo(5) }),
+              job(15, { status: "cancelled", finishedAt: minutesAgo(6) }),
+            ],
+          },
+        }),
+      ),
+    );
+    expect(text).toContain("Finished today");
+    expect(text).toContain("failed");
+    expect(text).toContain("cancelled");
+    expect(text).toContain("Nothing needs you.");
+  });
+
+  it("shows only schedules waiting for approval under Needs you", () => {
     const schedule = {
       id: 1,
       cron: "0 9 * * *",
@@ -198,6 +251,7 @@ describe("homeView by role", () => {
         data({
           schedules: [
             schedule,
+            { ...schedule, id: 3, status: "pending_approval" },
             {
               ...schedule,
               id: 2,
@@ -210,6 +264,9 @@ describe("homeView by role", () => {
     );
     expect(text).not.toContain("S-1");
     expect(text).not.toContain("S-2");
+    expect(text).toContain("One item needs you.");
+    expect(text).toContain("*Needs you*");
+    expect(text).toContain("S-3 · Morning check · waiting for approval");
   });
 });
 
@@ -231,7 +288,7 @@ describe("homeView limits", () => {
     const text = textOf(
       homeView("member", data({ finished: { done: 8, failed: 2, cancelled: 0, latest } })),
     );
-    expect(text).toContain("Done today");
+    expect(text).toContain("Finished today");
     expect(text).toContain("+3 more");
     expect(text).toContain("5 minutes ago");
   });
@@ -300,6 +357,25 @@ describe.skipIf(!hasDatabase)("worker state from the worker", () => {
       "member",
     );
     expect(broken.worker.state).toBe("unknown");
+  });
+
+  it("collects closure repairs older than today and beyond the recent list", async () => {
+    const created = await createJob(ledger.sql(), {
+      requestKey: "old-closure",
+      kind: "code-change",
+      title: "Archive retry",
+      brief: {},
+      worker: "t3",
+    });
+    await ledger.sql()`update jobs set status = 'done', finished_at = ${minutesAgo(3000)}, closed_at = ${minutesAgo(2900)}, worker_settled_at = ${minutesAgo(2900)}, code_channel = true, archive_state = 'repair' where id = ${created.id}`;
+    const collected = await collectHome(base(), "member");
+    expect(collected.finished.latest.some((row) => row.id === created.id)).toBe(false);
+    expect(collected.closures?.map((row) => row.id)).toContain(created.id);
+    const text = textOf(homeView("member", collected));
+    expect(text).toContain("Needs you");
+    expect(text).toContain("Archive retry");
+    await ledger.sql()`update jobs set archive_state = 'archived' where id = ${created.id}`;
+    expect((await collectHome(base(), "member")).closures).toEqual([]);
   });
 
   it("reads no owner data for a member and only the allow-listed projects", async () => {
@@ -419,7 +495,7 @@ describe.skipIf(!hasDatabase)("publishHome", () => {
     expect(member).toContain("J-");
     expect(member).toContain("Retry loop");
     expect(member).toContain("waiting for you");
-    expect(member).toContain("Done today");
+    expect(member).toContain("Finished today");
     expect(member).not.toContain("Morning check");
     expect(member).not.toContain("Paused one · paused");
     expect(member).not.toContain("alpha");

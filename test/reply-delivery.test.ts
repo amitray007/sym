@@ -54,7 +54,8 @@ describe.skipIf(!hasDatabase)("durable brain replies", () => {
   });
   it("uploads long replies through the outbox and retries failed completion", async () => {
     slack.failNext("files.completeUploadExternal", "internal_error");
-    const text = `${"A long result. ".repeat(1000)}Tests did not run. PR #12 needs review.`;
+    const summary = "Tests did not run. PR #12 needs review.";
+    const text = `${summary}\n\n${"A long result. ".repeat(1000)}`;
     const input = { key: "long-reply", channel: "C2", threadTs: "2.1", text };
     expect(await queueReply(ledger.sql(), api(), input)).toBe(false);
     const report = await deliver(ledger.sql(), api());
@@ -67,6 +68,7 @@ describe.skipIf(!hasDatabase)("durable brain replies", () => {
     const posts = slack.messages.filter((m) => m.channel === "C2" && m.user !== "U1");
     expect(posts).toHaveLength(1);
     expect(posts[0]?.files).toHaveLength(1);
+    expect(posts[0]?.text).toBe(summary);
     expect(slack.uploads.at(-1)?.bytes).toBe(new TextEncoder().encode(text).length);
     expect(
       (await ledger.sql()`select payload from outbox where idempotency_key = 'long-reply'`)[0]

@@ -53,9 +53,10 @@ Job statuses: `launching`, `running`, `waiting_input`, `waiting_permission`, `qu
 Example: "@sym add retry with backoff to the billing sync in sync-service, open a draft PR".
 
 The brain checks read-only facts with its own tools first. A problem report does not grant
-Builder consent (decision 069). A job needs an explicit Builder request or acceptance of a
+Builder consent (decision 071). A job needs an explicit Builder request or acceptance of a
 specific offer, including for repository investigations. Sym never edits repositories itself.
-Approved schedules and trusted playbooks keep their existing scope.
+Interactive chat requests show Start / Not now, even for trusted playbooks. Approved schedules
+and PR wakes keep trusted auto-start within their existing scope.
 
 1. `onAppMention` checks the sender against the allow-list and starts a session for the thread.
 2. The model loads the `task-brief` playbook and writes a brief: project, goal, constraints, a
@@ -145,7 +146,7 @@ update?" cheap and lets a new session continue the job.
    the concerns from both checks, and the worker's result and report as untrusted data, and
    writes the result text with no template. It has no tools.
 6. `finishJob` marks the result, collapses the working note, and posts human text. Code adds
-   uncovered concerns, open decisions, PR and test facts. Results have links, optional choices,
+   exact sentences from inline fact tokens, then only missing concerns, open decisions, PR and test facts. Results have links, optional choices,
    and optional native feedback. No fixed result checklist or confidence score is shown.
    `job_followup` proposes a change on the finished thread and branch. Start checks the stored
    revision, actor, current project policy, and worker identity. The new job gets its own scoped

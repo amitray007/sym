@@ -48,6 +48,11 @@ describe("working note", () => {
       "waiting for your answer",
     );
   });
+  it("points a completed note to the separate result message", () => {
+    expect(renderJobCard({ ...input, status: "done" }).text).toContain(
+      "Done. Details are in the next message.",
+    );
+  });
   it("does not invent a work step without explicit progress", () => {
     expect(renderJobCard({ ...input, latestSummary: null }).text).toContain(
       "waiting for an update",

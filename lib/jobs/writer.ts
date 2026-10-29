@@ -2,6 +2,7 @@ import { z } from "zod";
 import { envSwitch } from "../env-switch.ts";
 import { ChoiceLabels } from "../ledger/choices.ts";
 import type { OutputContract } from "./contract.ts";
+import { resultFacts } from "./messages.ts";
 
 // The written result (decision 062). When a code job ends in a live session, the `writer`
 // subagent writes the result message in the persona's voice, with no template. Sym's code still
@@ -15,10 +16,14 @@ export const WRITTEN_MAX = 6_000;
 const MAX_REPORT = 12_000;
 
 export const WriterOutput = z.object({
-  text: z.string().trim().min(1).max(WRITTEN_MAX),
-  // Older fixture writers return only text. The wire schema accepts that input and the
-  // parser supplies no coverage, so code appends every required concern.
-  coveredConcernIds: z.array(z.string()).default([]).optional(),
+  text: z
+    .string()
+    .trim()
+    .min(1)
+    .max(WRITTEN_MAX)
+    .describe(
+      "Result prose with inline {{c1}}, {{q1}}, {{tests}}, {{pr}}, {{ci}}, and {{files}} tokens. Code expands each to the exact fact and appends missing facts.",
+    ),
   choices: ChoiceLabels.optional(),
 });
 export type WriterOutput = z.input<typeof WriterOutput>;
@@ -68,6 +73,7 @@ export function writerMessage(request: WriterRequest): string {
       duration: request.duration,
       pr_url: request.prUrl,
     })}\n</job>`,
+    `<fact_tokens>\n${data(resultTokens(request.contract, request.concerns, request.prUrl))}\n</fact_tokens>`,
     `<check_concerns>\n${data(requiredConcerns(request.contract, request.concerns))}\n</check_concerns>`,
     `<worker_result untrusted="true">\n${data({
       summary: request.contract.summary,
@@ -89,4 +95,27 @@ export function requiredConcerns(
     ...concerns.map((text, i) => ({ id: `c${i + 1}`, text })),
     ...contract.openQuestions.map((text, i) => ({ id: `q${i + 1}`, text })),
   ];
+}
+
+/** The only source of sentences expanded into a written result. */
+export function resultTokens(
+  contract: OutputContract,
+  concerns: string[],
+  prUrl = contract.prUrl,
+): Record<string, string> {
+  const facts = resultFacts(contract, prUrl);
+  const tokens = Object.fromEntries(
+    requiredConcerns(contract, concerns).map(({ id, text }) => [id, text]),
+  );
+  for (const fact of facts) {
+    const id = fact.startsWith("<")
+      ? "pr"
+      : fact.startsWith("CI ")
+        ? "ci"
+        : /^\d+ files? changed/.test(fact)
+          ? "files"
+          : "tests";
+    tokens[id] = fact;
+  }
+  return tokens;
 }

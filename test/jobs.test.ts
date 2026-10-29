@@ -562,10 +562,10 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       expect(posts).toHaveLength(1);
       const text = String(posts[0]?.body.text);
       expect(posts[0]?.body).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });
-      expect(text).toContain(`${s.ref} is done.`);
+      expect(text).toContain(`Done with ${s.ref}:`);
       expect(text).toContain("Added retry with backoff");
       expect(text).toContain(`<${PR_URL}|PR #42>`);
-      expect(text).toContain("Tests passed. Reported: 12 passed");
+      expect(text).toContain("tests passed (12 passed).");
       expect(text).toContain("2 files changed");
     });
 
@@ -661,7 +661,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       expect(added).toHaveLength(1);
       expect(added[0]?.body.channel).toBe(OWNER);
       expect(added[0]?.body.thread_ts).toBeUndefined();
-      expect(String(added[0]?.body.text)).toContain(`${s.ref} needs permission`);
+      expect(String(added[0]?.body.text)).toContain(`${s.ref} is waiting on a permission`);
     });
   });
 
@@ -759,7 +759,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
 
       expect((await getJob(s.deps.sql, s.job.id))?.status).toBe("failed");
       expect(s.slack.posts()).toHaveLength(1);
-      expect(String(s.slack.posts()[0]?.body.text)).toContain("stopped before finishing");
+      expect(String(s.slack.posts()[0]?.body.text)).toContain("didn't finish");
     });
 
     it("posts nothing when it closes a job that never launched", async () => {

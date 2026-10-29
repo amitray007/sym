@@ -50,17 +50,20 @@ The job card is now a working note: explicit progress, optional skipped scope, a
 job/time/worker/PR line. It has no controls. Updates are silent edits. The result posts separately.
 
 Results use human sentences in a `markdown` block, with no fixed headings, confidence score,
-concern list, or checklist. Code appends uncovered concerns, open decisions, PR and test facts.
+concern list, or checklist. Code expands inline {{c1}}, {{q1}}, {{tests}}, and {{pr}} tokens to
+exact facts, then appends only missing concerns, open decisions, PR and test facts in one paragraph.
+Contradictory test prose uses the plain fallback. The ref and duration stay in the muted context line.
 Notifications retain these facts. Results can include PR/CI links, two or three conversation
 choices, and optional feedback. Chat replies have no feedback controls. Choices never approve work.
 
 `offer_choices` stores the conversation and consumes a click once. Typed replies still work.
-New work and follow-ups keep Start / Not now proposals. Stop keeps owner confirmation.
+Interactive work and follow-ups always show Start / Not now, including trusted playbooks.
+Approved schedules and PR wakes keep trusted auto-start. Stop keeps owner confirmation.
 A `posted: true` result suppresses only a duplicate reply to that tool result.
 
 Plain sentences are the default. Lists, tables, quotes, checkboxes, and code fit only content
 with that shape. Images become links. Lists stay flat. Slack markdown blocks hold 12,000
-characters. Longer completed brain replies use a Markdown file and a short notice through the
+characters. Longer completed brain replies use a Markdown file and their first paragraph as the comment through the
 outbox. Reactions are rare responses to a person's message, with code-owned limits.
 
 ## Implementation

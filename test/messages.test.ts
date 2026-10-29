@@ -38,18 +38,18 @@ describe("escapeMrkdwn", () => {
 describe("resultMessage", () => {
   it("shows a short result, every concern and decision, and full facts", () => {
     const text = resultMessage(job, contract, ["No test covers <the> limit."]);
-    expect(text).toContain("J-142 is done. Added retry with backoff.");
+    expect(text).toContain("Done with J-142: Added retry with backoff.");
     expect(text).toContain("No test covers &lt;the&gt; limit.");
     expect(text).toContain("Cap at 5 tries?");
-    expect(text).toContain("Tests passed. Reported: 12 passed");
+    expect(text).toContain("tests passed (12 passed).");
     expect(text).toContain("PR #812");
     expect(text).not.toMatch(/tl;dr|check before merge|☐|% sure/);
   });
   it.each([
-    ["12 passed", "Tests passed."],
-    ["1 failed", "Tests failed."],
-    ["not run; read-only", "Tests did not run."],
-    ["4 new tests", "I don't know whether tests ran."],
+    ["12 passed", "tests passed (12 passed)."],
+    ["1 failed", "Tests failed (1 failed)."],
+    ["not run; read-only", "Tests did not run (not run; read-only)."],
+    ["4 new tests", "I don't know whether tests ran (4 new tests)."],
     ["none", "no tests apply"],
   ])("preserves test truth for %s", (tests, truth) => {
     expect(resultMessage(job, { ...contract, tests })).toContain(truth);
@@ -90,10 +90,17 @@ describe("tldr", () => {
 describe("other messages", () => {
   it("keeps failures and blockers plain", () => {
     expect(failureMessage(job, "Build <broke>")).toContain(
-      "J-142 stopped before finishing. Build &lt;broke&gt;",
+      "J-142 didn't finish. Build &lt;broke&gt;",
     );
-    expect(permissionBlockMessage("J-142")).toContain("needs permission");
-    expect(quietNotice(job, 45 * 60_000)).toContain("for 45m. Want me to stop it?");
+    expect(permissionBlockMessage("J-142")).toBe(
+      "J-142 is waiting on a permission in Worker. I can't approve that from Slack.",
+    );
+    expect(failureMessage({ ref: "J-12", title: "Retry" })).toBe(
+      "J-12 didn't finish. The worker stopped without saying why; its thread has the log.",
+    );
+    expect(quietNotice(job, 45 * 60_000)).toContain(
+      "for 45m. Want me to stop it? If not, I'll keep watching.",
+    );
   });
 });
 
@@ -108,12 +115,22 @@ describe("briefPrompt", () => {
   });
   it("asks a short question with scope and boundaries", () => {
     const text = briefPrompt(brief, "J-142", "default model");
-    expect(text).toContain("I'll add retries in sync-service");
-    expect(text).toContain("open a draft PR");
+    expect(text).toContain('I\'d work on "billing retry" in sync-service');
+    expect(text).toContain("on a draft PR");
     expect(text).toContain("Leave webhooks alone.");
-    expect(text).toContain("production and customer data read-only");
+    expect(text).toContain("Production and customer data stay read-only");
     expect(text).toContain("Want me to start?");
     expect(text).not.toMatch(/Full brief|Edit|default model/);
+  });
+  it("uses the title for a capitalized multi-sentence goal and says read-only once", () => {
+    const text = briefPrompt({
+      ...brief,
+      title: "Add retries",
+      goal: "Add retries. Check the database. Then run tests.",
+    });
+    expect(text).toContain('I\'d work on "add retries" in sync-service on a draft PR.');
+    expect(text).not.toContain("Check the database");
+    expect(text.match(/read-only/g)).toHaveLength(1);
   });
   it("explains trusted starts and gives full details on request", () => {
     expect(briefPrompt(brief, "J-142", undefined, { name: "retry", trusted: true })).toContain(

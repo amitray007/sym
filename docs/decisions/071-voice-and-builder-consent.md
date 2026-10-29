@@ -1,4 +1,4 @@
-# 069. A colleague's voice, with consent before Builder work
+# 071. A colleague's voice, with consent before Builder work
 
 Status: accepted
 Date: 2026-10-30
@@ -27,9 +27,10 @@ The base brain instructions and built-in personas follow these rules:
   to put Builder on it?" and wait. "Open a PR that adds retries" requests Builder work. "Yes put
   Builder on it" accepts the preceding specific offer. An unclear offer or target needs a
   question. Consent to prepare a brief does not consume the code-owned approval to run it.
-- Approved schedules and owner-trusted playbooks keep their existing start rules and project
-  scope. The brain cannot grant trust or use a finding to widen approved work. Production and
-  customer data remain read-only; a job can prepare a change for a person to run.
+- Interactive chat requests always show Start / Not now, even for trusted playbooks. Approved
+  schedules and PR wakes keep trusted auto-start within their approved project scope. A vague
+  report that fits a trusted playbook still needs an offer or a question. The brain cannot grant
+  trust or use a finding to widen approved work. Production and customer data remain read-only; a job can prepare a change for a person to run.
 - In a job thread or code channel, a question about a result is chat. A requested redirect of a
   running job uses `job_steer`. A requested change to a finished job uses `job_followup` with
   `{ ref, change }`; the tool proposes work with Start / Not now. An explicit stop uses
@@ -57,8 +58,8 @@ The base brain instructions and built-in personas follow these rules:
 
 ## Verification and limits
 
-The new eval cases cover the vague problem, explicit PR request, acceptance of a Builder offer,
-chat about a finished concern, a requested follow-up, closure, short answers, fitting lists, and
+The new eval cases cover the vague problem, a vague report matching a trusted playbook, an explicit
+PR request, acceptance of a Builder offer, chat about a finished concern, a requested follow-up, closure, short answers, fitting lists, and
 all three persona result recaps. Deterministic checks enforce routing and modest tone floors.
 They do not measure whether a colleague's voice is likable; the owner reviews captured replies.
 The plain and spicy cases use the existing persona scripts; casual runs in the default suite.
@@ -72,9 +73,8 @@ This stream supplies instructions, personas, status fallbacks, and evals. Stream
 can validate their stubs. Action authorization, ledger writes, display choices, delivery,
 result rendering, and the writer/verifier subagent prompts belong to the other streams.
 
-Integration must add this decision to `docs/decisions/README.md`, update `docs/slack.md` Voice
-and conversation examples, update `docs/display.md` formatting and choices, and bring
-`docs/mockups/index.html` in step. The routing descriptions in `docs/architecture.md` and
-`docs/vision.md`, and the eval summary in `docs/eve.md`, also need the consent rule. This decision
+The decision index, `docs/slack.md`, `docs/display.md`, and `docs/mockups/index.html` describe
+these messages and approval gates. `docs/architecture.md`, `docs/vision.md`, and `docs/eve.md`
+carry the same consent rule and distinguish fixture checks from real-model evals. This decision
 supersedes the automatic investigation routing in decisions 063 and 064, and refines the voice
 and status guidance in decisions 044, 046, and 062. Historical decisions keep their original text.

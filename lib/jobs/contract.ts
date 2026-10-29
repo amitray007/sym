@@ -81,21 +81,39 @@ export function safeHttpUrl(url: string): string | null {
   }
 }
 
-// A rewritten report cannot turn absent or failed testing into a success claim.
-export function contradictsTestReport(text: string, contract: OutputContract): boolean {
+// Explicit failure and skipped reports take precedence over optimistic machine status.
+export function reportedTestStatus(
+  contract: OutputContract,
+): NonNullable<OutputContract["testsStatus"]> {
   const inferred = testStatus(contract.tests);
   const mixed =
     inferred === "unknown" &&
     /\bpass(?:ed|ing)?\b/i.test(contract.tests) &&
     /not run|skipped|didn['’]t run/i.test(contract.tests);
-  const actual = mixed
+  return mixed
     ? "unknown"
     : inferred === "failed" || inferred === "not_run"
       ? inferred
       : (contract.testsStatus ?? inferred);
-  const claimsPass =
-    /\btests?\s+(?:all\s+)?(?:pass(?:ed|ing)?|are green)\b|\b\d+\s+(?:tests?\s+)?passed\b/i.test(
-      text,
-    );
-  return claimsPass && actual !== "passed";
+}
+
+// Check writer prose before expanding code-owned test tokens.
+export function contradictsTestReport(text: string, contract: OutputContract): boolean {
+  const actual = reportedTestStatus(contract);
+  const subject = String.raw`(?:all\s+)?tests?(?:\s+suite)?\s+(?:(?:is|are|have|has)\s+)?`;
+  const claims: [RegExp, NonNullable<OutputContract["testsStatus"]>][] = [
+    [
+      new RegExp(
+        String.raw`\b${subject}(?:pass(?:ed|ing)?|green)\b|\b\d+\s+(?:tests?\s+)?passed\b`,
+        "i",
+      ),
+      "passed",
+    ],
+    [new RegExp(String.raw`\b${subject}(?:fail(?:ed|ing)?|red)\b`, "i"), "failed"],
+    [
+      /\btests? (?:did not|didn't|were not|weren't) (?:run|executed)\b|\btests? (?:were )?skipped\b/i,
+      "not_run",
+    ],
+  ];
+  return claims.some(([pattern, status]) => pattern.test(text) && actual !== status);
 }

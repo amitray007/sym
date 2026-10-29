@@ -1,12 +1,13 @@
-# 068: Conversational jobs
+# 070: Conversational jobs
 
 Status: accepted for the conversation redesign.
 
 Sym uses short messages in one configured persona. The ledger holds the facts and approval gates.
 A model can write the result and offer choices. It cannot approve work or select an action target.
 Code uses the same plain voice when no model runs. Completed brain replies also pass through
-chooseDisplay and the outbox. Replies over 12,000 characters become Markdown files with a short
-notice. The outbox keeps the full text and retries delivery. It refuses to post a queued reply
+chooseDisplay and the outbox. Replies over 12,000 characters become Markdown files with the
+first paragraph as the comment. The outbox keeps the full text and retries delivery. It refuses
+to post a queued reply
 when its thread root has been deleted.
 
 A started job has one working note. It shows the latest explicit worker progress and a muted job,
@@ -15,10 +16,16 @@ short quiet period does not create a new post. After 45 minutes without activity
 whether to stop. Questions, failures, and completion can notify.
 
 The result has no fixed headings, confidence score, concern list, or checklist. The writer returns
-text, covered concern IDs, and optional choices of two or three labels. Each label has at most
-30 characters. Code appends uncovered concerns and open decisions as sentences. PR and test facts
-remain code-owned and appear in the full notification text. Test outcomes distinguish passed,
-failed, not run, unknown, and explicitly no applicable tests. Result controls are PR and CI links,
+text with inline fact tokens and optional choices of two or three labels. Each label has at most
+30 characters. The writer places {{c1}}, {{q1}}, {{tests}}, and {{pr}} where their complete sentences
+fit. {{ci}} and {{files}} hold CI and file-count facts when available. Code expands each token to
+the exact code-owned sentence or fact. IDs alone never count as coverage. Code appends missing
+concerns and open decisions as short sentences, then any missing PR, test, CI, and file facts
+as one sentence. Facts already present do not repeat. The job reference and duration live in the muted context line. A contradictory test claim,
+including "the test suite is passing" or "all tests are green" when tests failed, did not run, or
+are unknown, rejects the written result and uses the plain fallback. These facts appear in the
+full notification text. Test outcomes distinguish passed, failed, not run, unknown, and explicitly
+no applicable tests. Result controls are PR and CI links,
 conversation choices, and optional native feedback. Chat replies have no feedback controls.
 Reactions still record feedback. The explicit stream A requirement retains native result feedback.
 

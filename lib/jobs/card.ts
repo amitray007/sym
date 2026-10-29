@@ -88,7 +88,7 @@ export function renderJobCard(input: RenderCardInput): Rendered {
     worker_offline: `I can't reach the ${workerNoun()}. I'll keep checking.`,
     failed: "The worker stopped before finishing.",
     cancelled: "I stopped the job. I haven't checked or reverted its changes.",
-    done: "The work is done. The result is below.",
+    done: "Done. Details are in the next message.",
   };
   const silence =
     quietFor >= 20 * 60_000 && (input.status === "running" || input.status === "quiet")

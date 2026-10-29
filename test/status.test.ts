@@ -119,7 +119,7 @@ describe("jobAnswer", () => {
   });
 
   it.each<[JobStatus, string]>([
-    ["launching", "Waiting for Start on the brief."],
+    ["launching", "Waiting for you to start it."],
     ["worker_offline", "Waiting for the worker to come back."],
     ["quiet", "I haven't heard from the worker. I'm still checking."],
   ])("adds a waiting line for %s", (status, line) => {
