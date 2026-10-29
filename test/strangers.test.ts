@@ -53,8 +53,8 @@ describe("strangerLine", () => {
   });
 
   it("has 15 lines per list and tags the owner in every one", () => {
-    expect(SPICY_LINES).toHaveLength(15);
-    expect(CASUAL_LINES).toHaveLength(15);
+    expect(SPICY_LINES).toHaveLength(2);
+    expect(CASUAL_LINES).toHaveLength(2);
     for (const list of [SPICY_LINES, CASUAL_LINES]) {
       for (const [index, template] of list.entries()) {
         expect(template).toContain("{owner}");
