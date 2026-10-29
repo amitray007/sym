@@ -26,6 +26,18 @@ export const writeToolStubs = [
   { id: "thread-listen", tool: "thread_listen", outcome: { response: NOTHING_RAN } },
   { id: "job-steer", tool: "job_steer", outcome: { response: NOTHING_RAN } },
   { id: "job-stop", tool: "job_stop", outcome: { response: NOTHING_RAN } },
+  // Stream A supplies these tools. A proposal is not a launched follow-up.
+  {
+    id: "job-followup",
+    tool: "job_followup",
+    outcome: { response: { job: "J-12", status: "proposed", posted: true } },
+  },
+  {
+    id: "job-close",
+    tool: "job_close",
+    outcome: { response: { job: "J-12", status: "closed", archived: false } },
+  },
+  { id: "offer-choices", tool: "offer_choices", outcome: { response: { posted: true } } },
   { id: "worker-sign-in", tool: "worker_sign_in", outcome: { response: NOTHING_RAN } },
   { id: "playbook-propose", tool: "playbook_propose", outcome: { response: NOTHING_RAN } },
   { id: "playbook-retire", tool: "playbook_retire", outcome: { response: NOTHING_RAN } },

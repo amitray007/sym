@@ -3,7 +3,7 @@ import { satisfies } from "eve/evals/expect";
 import { writeToolStubs } from "../stubs.ts";
 
 // Run with SYM_PERSONA=plain: `pnpm eval:plain`. The persona is process-wide, so a case cannot
-// set it. The checklist marks of the shared Voice rules are allowed; any other emoji fails.
+// set it. Plain replies have no decorative emoji or checklist exceptions.
 const EMOJI = /\p{Extended_Pictographic}/u;
 
 export default defineEval({
@@ -15,10 +15,7 @@ export default defineEval({
     t.succeeded();
     t.check(
       turn.reply ?? "",
-      satisfies(
-        (message) => !EMOJI.test(String(message).replace(/[✅☐]/gu, "")),
-        "the reply has no emoji besides the checklist marks",
-      ),
+      satisfies((message) => !EMOJI.test(String(message)), "the reply has no emoji"),
     );
   },
 });
