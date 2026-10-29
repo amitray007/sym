@@ -86,7 +86,7 @@ describe("slash command", () => {
     const refused = await slash("C0SLASH2", "status", OUTSIDER);
     expect(refused.target_user).toBe(OUTSIDER);
     // No owner is configured here, so every persona gets the short line (decision 053).
-    expect(refused.text).toBe("Sym only works for people on its allow-list.");
+    expect(refused.text).toBe("I'm not set up to help you yet. Ask the person who runs Sym for access.");
     expect(await h.sql`select * from settings`).toHaveLength(0);
   });
 });

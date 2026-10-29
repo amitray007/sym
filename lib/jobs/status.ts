@@ -29,19 +29,6 @@ export const statusWords = (): Record<JobStatus, string> => ({
   cancelled: "cancelled",
 });
 
-export const STATUS_EMOJI: Record<JobStatus, string> = {
-  launching: "⏳",
-  running: "🔄",
-  waiting_input: "🙋",
-  waiting_permission: "🔒",
-  quiet: "💤",
-  worker_offline: "🔌",
-  checking: "🔍",
-  done: "✅",
-  failed: "❌",
-  cancelled: "🚫",
-};
-
 export function jobAnswer(job: Job, now: Date): string {
   const lines = [`${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}.`];
   if (job.lastSummary && job.status !== "checking") lines.push(job.lastSummary);
