@@ -1,10 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CLOSE_ACTION_ID } from "../../lib/jobs/card.ts";
 import {
+  BOT,
+  briefMention,
   clickButton,
   contractMessage,
   finishedSteps,
   type Harness,
+  hitlControls,
   messageText,
   newConversation,
   SAMPLE_CONTRACT,
@@ -263,5 +266,52 @@ describe("code channels", () => {
     await clickButton(h, retry, "sym_job_close", childRef);
     await until(() => (channel.archived ? true : undefined), { label: "the retried archive" });
     expect(channel.summaryTs).toBe(childResult.ts);
+  });
+
+  it("moves a conversation into a code channel on request, and a job there adopts it", async () => {
+    const c = newConversation(h);
+    const before = h.slack.codeChannels.length;
+    await c.mention(`<@${BOT}> move this to a code channel`);
+    const channel = await until(() => h.slack.codeChannels[before], {
+      label: "the conversation's code channel",
+    });
+    expect(channel.originChannel).toBe(c.channel);
+    // The brain's session continues in the channel and answers there.
+    await until(() => h.slack.messages.find((m) => m.channel === channel.id && m.user === BOT), {
+      label: "Sym's first post in the channel",
+    });
+
+    // A job started inside the channel takes it over instead of opening another.
+    // No tag: in a code channel every message reaches Sym.
+    await sayInChannel(
+      h,
+      channel.id,
+      briefMention("Job in a code channel").replace(`<@${BOT}> `, ""),
+    );
+    const start = await until(
+      () => {
+        for (const m of h.slack.messages) {
+          if (m.channel !== channel.id || m.user !== BOT) continue;
+          const controls = hitlControls(m.blocks ?? []);
+          if (controls.length > 0 && /Start J-\d+:/.test(messageText(m))) return { m, controls };
+        }
+        return undefined;
+      },
+      { label: "the Start prompt in the channel" },
+    );
+    const startControl = start.controls.find((control) => control.label === "Start");
+    if (!startControl?.value) throw new Error("no Start control");
+    await clickButton(h, start.m, startControl.actionId, startControl.value);
+    const [job] = await until(
+      async () => {
+        const rows = await h.sql<{ id: number; codeChannel: boolean }[]>`
+          select id::int, code_channel from jobs where slack_channel = ${channel.id}
+        `;
+        return rows[0]?.codeChannel ? rows : undefined;
+      },
+      { label: "the adopted job" },
+    );
+    expect(job?.codeChannel).toBe(true);
+    expect(h.slack.codeChannels).toHaveLength(before + 1);
   });
 });

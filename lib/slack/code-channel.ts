@@ -39,10 +39,11 @@ async function originOf(sql: Sql, job: Job): Promise<string | null> {
   return job.slackThreadTs;
 }
 
-// Moves a started job into a new code channel. Returns the updated job, or the job unchanged when
-// the feature is off, Slack is not configured, the job is already moved, or the thread is a direct
-// message, a Slack Connect channel, or a code channel itself. Any Slack refusal also keeps the job
-// in its thread. A private thread gets a private channel; one Slack opens as public anyway is
+// Moves a started job into a new code channel. A job started inside a code channel, such as one
+// the `code_channel` tool opened, takes that channel instead of opening another (decision 068).
+// Returns the updated job, or the job unchanged when the feature is off, Slack is not configured,
+// the job is already moved, or the thread is a direct message or a Slack Connect channel. Any
+// Slack refusal also keeps the job in its thread. A private thread gets a private channel; one Slack opens as public anyway is
 // archived, as Eve does. A failed ledger write throws, so the step retries, and the retry reaches
 // the same channel through session_id.
 export async function moveToCodeChannel(deps: Deps, job: Job): Promise<Job> {
@@ -50,12 +51,19 @@ export async function moveToCodeChannel(deps: Deps, job: Job): Promise<Job> {
   const slack = deps.slack;
   const channel = job.slackChannel;
   if (!channel) return job;
+  let from: ConversationInfo;
+  try {
+    from = await conversation(slack, channel);
+  } catch (error) {
+    console.warn(`Sym kept ${jobRef(job.id)} in its thread.`, slackCode(error));
+    return job;
+  }
+  if (isCodeChannel(from)) return adoptCodeChannel(deps, job);
   const origin = await originOf(deps.sql, job);
   if (!origin) return job;
   let channelId: string;
   try {
-    const from = await conversation(slack, channel);
-    if (from.is_im || from.is_mpim || from.is_ext_shared || isCodeChannel(from)) return job;
+    if (from.is_im || from.is_mpim || from.is_ext_shared) return job;
     const isPrivate = from.is_private === true;
     const created = await slack.call("agents.conversations.create", {
       name: codeChannelName(job),
@@ -89,6 +97,15 @@ export async function moveToCodeChannel(deps: Deps, job: Job): Promise<Job> {
   return moved;
 }
 
+// The job already lives in a code channel: it posts top-level there and keeps the channel's status
+// and context bar, with no origin thread of its own.
+async function adoptCodeChannel(deps: Deps, job: Job): Promise<Job> {
+  const adopted = await updateJob(deps.sql, job.id, { slackThreadTs: null, codeChannel: true });
+  await setContextBar(deps, adopted);
+  await setChannelStatus(deps, adopted, "processing");
+  return adopted;
+}
+
 interface ConversationInfo {
   is_private?: boolean;
   is_im?: boolean;
@@ -107,14 +124,15 @@ function isCodeChannel(info: ConversationInfo): boolean {
 }
 
 // Eve asks a moved job's questions in the thread it came from, because the job's task runs in that
-// thread's session. The channel shows the question with a link there, so people find it.
+// thread's session. The channel shows the question with a link there, so people find it. A job
+// that adopted its channel has no origin: Eve asks in the channel itself, so there is no link.
 export async function pointToQuestion(
   deps: Deps,
   job: Job,
   requestId: string,
   prompt: string,
 ): Promise<void> {
-  if (!job.codeChannel || !job.slackChannel) return;
+  if (!job.codeChannel || !job.slackChannel || !job.originChannel) return;
   const ref = jobRef(job.id);
   let link: string | undefined;
   if (deps.slack && job.originChannel && job.originThreadTs) {
