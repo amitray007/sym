@@ -12,6 +12,7 @@ import { changeListenMode } from "../../lib/slack/listen-setting.ts";
 // it needs no approval.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Set how Sym listens in this Slack thread when someone asks. 'mention-only' means answer " +
     "only when tagged. 'all' means answer messages meant for Sym, the default. Works in a " +
     "channel thread, not a direct message. Reply with the one-line result.",

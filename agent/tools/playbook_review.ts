@@ -18,6 +18,7 @@ import { ledger, pack } from "../../lib/runtime.ts";
 // approves exactly the text that loads.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Show a proposed playbook or rule to the owner for approval. Pass the ID and the exact body " +
     "from playbook_propose or playbook_list. The owner approves the call, and approval makes the " +
     "row load in new sessions. It replaces the approved version of the same name.",
@@ -30,8 +31,8 @@ export default defineTool({
     response: ownerResponse(pack),
     prompt: ({ input }) =>
       [
-        `Approve ${playbookRef(input.id)}?`,
-        "New sessions will follow this text as reviewed guidance:",
+        `Use this guidance in new sessions (${playbookRef(input.id)})?`,
+        "This is the exact text:",
         input.body,
       ].join("\n"),
   },

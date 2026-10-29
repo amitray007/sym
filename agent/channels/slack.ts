@@ -119,7 +119,7 @@ async function answerSymCommand(text: string, now: Date, userId: string): Promis
       }
       const until = new Date(now.getTime() + command.arg.minutes * 60_000);
       await setQuietUntil(ledger(), until);
-      return `Quiet until ${formatClock(until, zone)}. Questions, approvals, and failures still post.`;
+      return `Quiet until ${formatClock(until, zone)}. I will still bring you questions, approvals, and failures.`;
     }
     case "persona": {
       // Anyone allowed may read it. Only the owner may change it (decision 046).
@@ -130,7 +130,7 @@ async function answerSymCommand(text: string, now: Date, userId: string): Promis
       return describePersona(personaStatus(pack(), stored, process.env.SYM_PERSONA));
     }
     case "usage":
-      return USAGE;
+      return `Ask me what is running, or tell me to go quiet.\n${USAGE}`;
   }
 }
 

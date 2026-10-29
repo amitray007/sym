@@ -23,14 +23,11 @@ describe("digestMessage", () => {
     });
     expect(text).toBe(
       [
-        "Daily digest for 2026-10-20",
-        "Finished (1):",
-        "- J-1 Billing sync retry",
-        "Failed (1):",
-        "- J-2 Flaky test",
-        "Waiting for you (1):",
-        "- J-3 Schema change",
-        "Still running: 1",
+        "J-3 Schema change needs you.",
+        "J-2 Flaky test failed.",
+        "J-1 Billing sync retry finished.",
+        "J-4 Docs is still running.",
+        "Ask me for the details.",
       ].join("\n"),
     );
   });

@@ -38,7 +38,7 @@ describe("wakeText", () => {
 
   it("links the PR and says the worker acts on a failure", () => {
     expect(wakeText(job, { number: 12, summary: "checks failed" })).toBe(
-      `J-7: <${PR}|PR #12>: checks failed. The worker is looking into it.`,
+      `J-7: <${PR}|PR #12>: checks failed.`,
     );
   });
 

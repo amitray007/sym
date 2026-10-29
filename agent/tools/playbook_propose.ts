@@ -10,6 +10,7 @@ import { ledger, pack } from "../../lib/runtime.ts";
 // playbook_review (docs/learning.md, layer 2).
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Propose a standing rule or a playbook when the owner asks you to remember how to work, for " +
     'example "always run lint before PRs". Use kind "rule" for one short instruction and ' +
     '"playbook" for steps. This saves a proposal only. Then call playbook_review with its ID ' +

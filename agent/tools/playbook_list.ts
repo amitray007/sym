@@ -7,6 +7,7 @@ import { ledger } from "../../lib/runtime.ts";
 
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "List playbooks and rules with their bodies, newest first. Filter by status to see only " +
     "proposals or only approved rows.",
   inputSchema: z.object({

@@ -16,6 +16,7 @@ import { approveSchedule, createSchedule } from "../../lib/schedules/rows.ts";
 
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Schedule a recurring worker job. Convert the person's local time to UTC first and say so. " +
     "The owner approves the schedule once, and the approval covers every run. Each run opens " +
     "a new thread, and you call no_reply when a run finds nothing.",
@@ -30,6 +31,7 @@ export default defineTool({
         `Project: ${input.brief.project}`,
         `Goal: ${input.brief.goal}`,
         `Done when: ${input.brief.doneWhen.join("; ")}`,
+        `Full scope for each run: ${JSON.stringify(input.brief)}`,
         "Runs without asking again. Production and customer data stay read-only.",
       ].join("\n"),
   },

@@ -7,6 +7,7 @@ import { emojiCache } from "../../lib/runtime.ts";
 // no search: slack_react takes their usual names.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Search the workspace's custom emoji by keyword, such as party, ship, or facepalm. " +
     "Returns up to 20 names. Standard emoji are not listed; use their usual names directly.",
   inputSchema: z.object({

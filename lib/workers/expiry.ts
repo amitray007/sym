@@ -57,8 +57,7 @@ export interface SignInNoticeInput {
 }
 
 // The in-app sign-in (decision 036): the owner asks Sym, and Sym sends the sign-in link in a DM.
-export const renewStep = () =>
-  `To renew it, tell Sym "sign in to the ${workerNoun()}" and approve the link Sym sends you in a DM.`;
+export const renewStep = () => `Ask me to renew it and I will send you a private link.`;
 
 export function signInText(stage: Exclude<SignInStage, "none">, input: SignInNoticeInput): string {
   const day = (input.expiresAt as Date).toISOString().slice(0, 10);
@@ -66,7 +65,7 @@ export function signInText(stage: Exclude<SignInStage, "none">, input: SignInNot
   const step = renewStep();
   return stage === "warn"
     ? `The ${workerNoun()} sign-in expires in ${daysLeft} ${daysLeft === 1 ? "day" : "days"} (${day}). ${step}`
-    : `The ${workerNoun()} sign-in expired on ${day}. Jobs pause until you approve a new one. ${step}`;
+    : `The ${workerNoun()} sign-in expired on ${day}. ${step}`;
 }
 
 // Queues the due notice. The key holds the expiry date and the stage, so every pass after the

@@ -84,9 +84,7 @@ describe.skipIf(!hasDatabase)("reconcile follows pull requests", () => {
     await deliver(sql, slack);
 
     const wakes = posts.slice(before).filter((text) => text.includes("checks failed"));
-    expect(wakes).toEqual([
-      `J-${job.id}: <${PR}|PR #12>: checks failed. The worker is looking into it.`,
-    ]);
+    expect(wakes).toEqual([`J-${job.id}: <${PR}|PR #12>: checks failed.`]);
   });
 });
 

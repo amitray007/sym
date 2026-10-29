@@ -104,18 +104,15 @@ export type ModeChoice = ToolMode | "default";
 export function modePrompt(name: string, tool: string | undefined, mode: ModeChoice): string {
   if (tool === undefined) {
     const effect: Record<ModeChoice, string> = {
-      auto:
-        `Every tool on ${name}, including tools the server adds later, runs without asking you. ` +
-        "The server's own policy is then the only gate. Tools you set one by one keep their mode.",
-      ask: `Every tool on ${name}, including tools the server adds later, asks you each time.`,
-      hidden: `Sym cannot find or call any tool on ${name}, including tools the server adds later.`,
-      default: "Read tools run freely and write tools ask you each time.",
+      auto: `Let ${name} tools run without asking, including future tools?`,
+      ask: `Ask you before ${name} tools run, including future tools?`,
+      hidden: `Hide ${name} tools, including future tools?`,
+      default: `Use ${name}'s tool hints? Tools marked read-only run freely; other tools ask you each time.`,
     };
-    const what = mode === "default" ? "the default mode" : `the default mode to ${mode}`;
-    return `Set ${what} of "${name}"? ${effect[mode]}`;
+    return `${effect[mode]} Individual tool settings still apply and can override this setting.`;
   }
   if (mode === "default") {
-    return `Clear the own mode of "${tool}" on "${name}"? It follows the connection default again.`;
+    return `Remove the special setting of "${tool}" on "${name}"? It follows the connection default again.`;
   }
   const effect =
     mode === "auto"

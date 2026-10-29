@@ -7,7 +7,8 @@ import { ledger, pack } from "../../lib/runtime.ts";
 import { deleteSchedule, parseScheduleRef } from "../../lib/schedules/rows.ts";
 
 export default defineTool({
-  description: "Delete a schedule. It never runs again.",
+  description:
+    "Use the returned facts to answer naturally. Do not paste tool returns verbatim or name internal tools. Delete a schedule. It never runs again.",
   inputSchema: z.object({ schedule: z.string().describe("A schedule reference such as S-3.") }),
   approval: { request: always(), response: ownerResponse(pack) },
   label: { start: ({ schedule }) => `Delete ${schedule}` },

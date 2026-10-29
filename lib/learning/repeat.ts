@@ -133,12 +133,12 @@ export async function proposeRepeated(
 export async function queueRepeatNotice(sql: Sql, target: string, rows: Playbook[]): Promise<void> {
   if (rows.length === 0) return;
   const text = [
-    `Sym noticed repeated work and drafted ${rows.length === 1 ? "a playbook" : `${rows.length} playbooks`}.`,
+    `These jobs look similar. I drafted ${rows.length === 1 ? "a playbook" : `${rows.length} playbooks`}.`,
     ...rows.map(
       (row) =>
         `${playbookRef(row.id)} ${row.name} (from ${row.evidence.map(jobRef).join(", ")}):\n${row.body}`,
     ),
-    "Ask me to review each one to approve it. Nothing loads until you do.",
+    "Want to review this guidance? I will only use it after you approve it.",
   ].join("\n");
   const dm = /^[DUW]/.test(target);
   const display = chooseDisplay({

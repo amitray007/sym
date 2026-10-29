@@ -16,11 +16,7 @@ export function scheduleList(schedules: Schedule[]): string {
 // A row that waits for approval also shows its brief, so schedule_approve can repeat it.
 function scheduleWithBrief(schedule: Schedule): string {
   if (schedule.status !== "pending_approval") return scheduleLine(schedule);
-  return [
-    scheduleLine(schedule),
-    "Waiting for approval. To approve it, call schedule_approve with this cron and brief:",
-    `\`\`\`brief\n${JSON.stringify(schedule.brief, null, 2)}\n\`\`\``,
-  ].join("\n");
+  return `${scheduleLine(schedule)}. Ask me to review it before it runs.`;
 }
 
 // The message that starts a scheduled session. It is plain text, so the brain follows it step

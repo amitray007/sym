@@ -33,6 +33,7 @@ const Proposal = z.object({
 
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Propose playbooks for work that people asked for at least 3 times, after reading " +
     "repeated_work. Send every pattern of one review in one call. Name the pattern, not one job. " +
     "Write each body in your own words as steps a future brief can follow: what to ask for, " +

@@ -16,6 +16,7 @@ import { approveSchedule, getSchedule, parseScheduleRef } from "../../lib/schedu
 // and the brief from schedule_list, and execute refuses when they differ from the stored row.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Approve a schedule that waits for approval. Pass the reference, the cron, and the exact " +
     "brief from schedule_list. The owner approves the call once, and the approval covers every run.",
   inputSchema: z.object({
@@ -33,6 +34,7 @@ export default defineTool({
         `Project: ${input.brief.project}`,
         `Goal: ${input.brief.goal}`,
         `Done when: ${input.brief.doneWhen.join("; ")}`,
+        `Full scope for each run: ${JSON.stringify(input.brief)}`,
         "Runs without asking again. Production and customer data stay read-only.",
       ].join("\n"),
   },

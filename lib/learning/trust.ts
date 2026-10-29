@@ -163,10 +163,24 @@ export async function setStartMode(
 ): Promise<boolean> {
   const rows = await sql`
     update playbooks set start_mode = ${mode}, trust_changed_by = ${by}, trust_changed_at = now()
-    where id = ${playbookId} and status = 'approved' and start_mode <> ${mode}
-    returning id
+    where id = ${playbookId} and status = 'approved' and start_mode <> ${mode} returning id
   `;
   return rows.length > 0;
+}
+
+export async function promoteIfClean(sql: Sql, playbookId: number, by: string): Promise<boolean> {
+  return sql.begin(async (tx) => {
+    // Serialize with all outcome writes, including feedback that arrives during approval.
+    // Lock jobs before playbooks to match outcome updates followed by demotion.
+    await tx`lock table jobs in share row exclusive mode`;
+    if ((await cleanStreak(tx as unknown as Sql, playbookId)).length < trustRuns()) return false;
+    const rows = await tx`
+      update playbooks set start_mode = 'auto', trust_changed_by = ${by}, trust_changed_at = now()
+      where id = ${playbookId} and status = 'approved' and start_mode <> 'auto'
+      returning id
+    `;
+    return rows.length > 0;
+  });
 }
 
 async function suggestTrust(sql: Sql, playbookId: number, pack: Pack | undefined): Promise<void> {
@@ -186,7 +200,7 @@ async function suggestTrust(sql: Sql, playbookId: number, pack: Pack | undefined
     `trust:${playbookRef(playbookId)}:${jobRef(streak.at(-1) ?? 0)}`,
     [
       `${playbookRef(playbookId)} ${playbook.name}: the last ${needed} jobs that followed it ended clean (${runs}).`,
-      "Ask me to trust it, and its jobs start without the Start click. A 👎, a Fix, or a run with concerns puts it back to asking.",
+      "Want me to start its jobs automatically on projects where it has already run clean? A 👎, a Fix, or a run with concerns puts it back to asking.",
     ].join("\n"),
   );
 }
@@ -208,7 +222,7 @@ async function demote(
     sql,
     pack,
     `trust-off:${playbookRef(playbookId)}:${jobRef(jobId)}`,
-    `${playbookRef(playbookId)} ${row.name} asks for Start again: ${reason}.`,
+    `${playbookRef(playbookId)} ${row.name} needs your approval before starting again: ${reason}.`,
   );
 }
 

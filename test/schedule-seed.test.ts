@@ -145,8 +145,8 @@ describe.skipIf(!hasDatabase)("seedPackSchedules", () => {
     const row = await theRow();
     expect(row.status).toBe("pending_approval");
     const text = scheduleList([row]);
-    expect(text).toContain("schedule_approve");
-    expect(text).toContain('"goal"');
+    expect(text).not.toContain("schedule_approve");
+    expect(text).not.toContain('"goal"');
 
     const shown = { cron: row.cron, brief: row.brief };
     expect(sameAsStored(row, shown)).toBe(true);

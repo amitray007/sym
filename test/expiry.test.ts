@@ -59,13 +59,13 @@ describe("signInText", () => {
       target: "U1",
     });
     expect(text).toBe(
-      'The worker sign-in expires in 4 days (2026-11-10). To renew it, tell Sym "sign in to the worker" and approve the link Sym sends you in a DM.',
+      "The worker sign-in expires in 4 days (2026-11-10). Ask me to renew it and I will send you a private link.",
     );
   });
 
   it("says jobs pause after expiry", () => {
     expect(signInText("expired", { expiresAt, now: at(-1), target: "U1" })).toMatch(
-      /expired on 2026-11-10\. Jobs pause until you approve a new one\. .*sign in to the worker/,
+      /expired on 2026-11-10\. Ask me to renew it.*private link/,
     );
   });
 });

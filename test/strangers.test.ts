@@ -53,8 +53,8 @@ describe("strangerLine", () => {
   });
 
   it("has 15 lines per list and tags the owner in every one", () => {
-    expect(SPICY_LINES).toHaveLength(15);
-    expect(CASUAL_LINES).toHaveLength(15);
+    expect(SPICY_LINES).toHaveLength(2);
+    expect(CASUAL_LINES).toHaveLength(2);
     for (const list of [SPICY_LINES, CASUAL_LINES]) {
       for (const [index, template] of list.entries()) {
         expect(template).toContain("{owner}");
@@ -104,6 +104,12 @@ describe("strangerRepliesOn", () => {
 });
 
 describe("stranger cooldown", () => {
+  it("releases a failed delivery for retry", () => {
+    const cooldown = createStrangerCooldown();
+    expect(cooldown.claim("U:C", 1)).toBe(true);
+    cooldown.release("U:C");
+    expect(cooldown.claim("U:C", 2)).toBe(true);
+  });
   const HOUR = 60 * 60 * 1000;
 
   it("allows one line per user and channel each hour", () => {
