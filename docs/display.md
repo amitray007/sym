@@ -46,12 +46,22 @@ learned preferences, and shared channels are planned.
   taking longer. Tracking it here."). When a card job ends, the card collapses to one line and the
   result posts as text.
 
-The result message has a fixed shape: a status emoji and title, a one-line tl;dr, a numbered
-concerns list, an open-questions checklist, and a footer (docs/slack.md, Voice; decision 044).
-When a `t3_job` result says `posted: true`, the brain posts nothing more.
+The job card is now a working note: explicit progress, optional skipped scope, and a muted
+job/time/worker/PR line. It has no controls. Updates are silent edits. The result posts separately.
 
-Sym never shows a visual just to look busy. Reactions mark only requests that became jobs. Buttons
-appear only with a real choice. A card never repeats what the result message says.
+Results use human sentences in a `markdown` block, with no fixed headings, confidence score,
+concern list, or checklist. Code appends uncovered concerns, open decisions, PR and test facts.
+Notifications retain these facts. Results can include PR/CI links, two or three conversation
+choices, and optional feedback. Chat replies have no feedback controls. Choices never approve work.
+
+`offer_choices` stores the conversation and consumes a click once. Typed replies still work.
+New work and follow-ups keep Start / Not now proposals. Stop keeps owner confirmation.
+A `posted: true` result suppresses only a duplicate reply to that tool result.
+
+Plain sentences are the default. Lists, tables, quotes, checkboxes, and code fit only content
+with that shape. Images become links. Lists stay flat. Slack markdown blocks hold 12,000
+characters. Longer completed brain replies use a Markdown file and a short notice through the
+outbox. Reactions are rare responses to a person's message, with code-owned limits.
 
 ## Implementation
 

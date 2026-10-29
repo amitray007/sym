@@ -5,50 +5,30 @@ buttons, and an agent surface. Eve drives some of them. Sym's own code drives th
 `ctx.slack.request` and `callSlackApi`. [display.md](display.md) decides which part each message
 uses.
 
-## The job card
+## The working note
 
-Eve's task card shows one row per task: title, working or waiting, and the end state. It shows no
-progress inside a job, and schedule sessions get no card. So each long job gets one message that
-Sym owns. Sym posts it when the job starts and edits it with `chat.update` from the watch loop and
-from reconcile. Its `ts` lives on the ledger row, so the card keeps updating after a session dies
-and for scheduled jobs.
+Each long job gets one working note. Sym edits it silently with explicit worker progress and
+optional scope it is leaving alone. A muted line holds the job reference, elapsed time, worker,
+and PR link. It has no controls or invented checklist. The ledger stores the desired message and
+its Slack timestamp. Reconcile can keep it current after a session dies.
 
-```
-[J-142] Billing sync retry · running 14m
-  ✓ Brief approved
-  ✓ Worker thread started (worktree in sync-service)
-  ◐ Writing code: 3 files changed
-  ○ Tests
-  ○ Draft PR
-  ○ Verify result
-Codex · thread 8f2c… · updated 1 min ago
-[ Stop ]  [ Open PR ]
-```
-
-- The card is a Slack `plan` block. Each row is a step with a status: `pending`, `in_progress`,
-  `complete`, or `error`. A plan holds at most 50 rows. Each edit uses a new `block_id`, because
-  Slack redraws a plan block only under a new one; the version moves only when the card changes.
-- The job row holds the card Sym wants. Delivery posts it and edits Slack to match (decision 020).
-- Sym fills the steps from the brief's done-when list and the worker activity it reads.
-- Slack text calls the worker by `SYM_WORKER_LABEL` (default `Worker`) and never names the software behind it (decision 044). The mockups show the label `Builder`.
-- Sym's renderer removes `worker_job` rows from Eve's task card, and returns `null` when nothing else
-  is left, so the thread has one card.
-- When the job ends, the card collapses to one line, for example "Done in 14m · PR #812", and the
-  result posts as text.
+When the job ends, the note collapses to one line. The result posts separately. A PR opening
+updates the note without a new post. After 20 quiet minutes the note says Sym is still checking.
+After 45 minutes Sym asks once whether to stop.
 
 ## Surfaces
 
 | Surface | What Sym shows | Driven by | When |
 |---|---|---|---|
 | Thread status line | "Launching worker thread", "Tests running" | Eve: `label.start`, `label.delta`, task `yield` | Milestone 1 |
-| Job card (`plan` block) | Live steps with Steer, Stop, and Open PR. Steering also works as a thread reply | Sym: `chat.update` | Built |
+| Working note (`section` and `context`) | Working note with explicit progress and no controls | Sym: `chat.update` | Built |
 | Eve task card | Short tasks that are not worker jobs | Eve | Milestone 1 |
 | Buttons and selects | Approve a brief, answer worker questions, approve rules | Eve: approvals, `ctx.ask` | Milestone 1 |
 | "Type your answer" modal | Free-text answers | Eve, inside `ctx.ask` | Milestone 1 |
-| Feedback buttons | 👍/👎 inside each final reply | Sym: renderer posts the reply with a `context_actions` block | Built |
+| Feedback buttons | 👍/👎 on job results only | Sym: renderer posts the reply with a `context_actions` block | Built |
 | Reactions | A rare emoji on a person's message: 😂 funny, 💡 good idea, 🙌 good news, 🫡 ack. Never 👀, never on every message (decision 051) | Brain: `slack_react` and `slack_emoji`, limits in code | Built |
 | Ephemeral replies | `/sym status`, private sign-in prompts, stranger lines | Eve, Sym | Production |
-| Long output | Over 12,000 characters as an `eve-response.md` snippet | Eve | Production |
+| Long output | Long completed replies as a Markdown file | Eve | Production |
 | Modals | "New schedule" form | Sym: `views.open` with the `trigger_id` | Team phase |
 | App Home tab | Persona and worker state with the sign-in expiry, running and waiting jobs, jobs finished in 24 hours, schedules, the project allow-list; for the owner also MCP connections, persona, and quiet mode (decision 052) | Sym: `app_home_opened` in `onEvent` + `views.publish` on each open | Built (not run on real Slack) |
 | Agent surface | Top-bar entry, suggested prompts, session titles | Sym: `assistant:write`, `assistant.threads.setSuggestedPrompts` | Later |
@@ -62,85 +42,55 @@ Notes:
 - The status line is cut at 50 characters, and Slack clears it after 2 minutes without a post.
   The job card carries anything that must stay visible.
 - Card posts never unfurl links. Put PR and CI links on buttons or in the card footer.
-- Slack's reference uses `complete`; `completed` appears only in guide prose. Sym sends
-  `complete`. `chat.update` is Tier 3 (50 or more per minute).
-
 ## Voice
 
-Two parts make Sym's messages (decisions 044 and 062).
+Sym uses short sentences in one configured persona (decisions 068 and 069). It gives the point
+first and preserves facts, links, warnings, scope boundaries, and uncertainty. Plain is calm,
+casual is warm and practical, and spicy is dry and playful. Failures and concerns never get jokes.
+The persona comes from the pack, then the saved owner setting, then `SYM_PERSONA`, then casual.
+The initial status fallback is "Working...". Tool labels replace it with known steps.
 
-- **Sym's code** builds the brief, the card, failures, status answers, and the template result.
-  These are neutral and never joke.
-- **The `writer` subagent** writes the result of a finished code job in the persona's voice,
-  with no template (decision 062). It gets the persona, the owner's approved playbooks and rules,
-  the job facts, the check concerns, and the worker's report as untrusted data, and picks the
-  length and shape itself. Sym posts its text in a `markdown` block, then the verifier line, the
-  check concerns as a numbered list, and the open questions as a `☐` checklist (so a worker
-  report cannot talk them away), a `context` footer with the status emoji, `J-n`, the duration,
-  the tests line, and the file count, and the result buttons. Mention tokens in the text lose
-  their brackets. The
-  writer runs only in the job's live session: a job that reconcile finishes, a Fix follow-up, a
-  scheduled check, a writer failure or timeout (120 s), and `SYM_RESULT_WRITER=off` all get the
-  template below.
-- **The template result** has this shape:
+The writer returns human text, covered concern IDs, and optional choices. Code adds uncovered
+concerns and open decisions as sentences. PR and test facts stay code-owned and appear in the
+notification text. Tests distinguish passed, failed, not run, unknown, and no applicable tests.
+The result has no fixed headings, confidence score, numbered concern list, or checklist.
+A writer failure or a recovered job uses the plain deterministic result.
 
-  ```
-  ⚠️ *J-3 · Review PR #7698 data:null fix* · 1m
-  *tl;dr* Merge PR #7698: the one-line fix is correct.
+Text uses Slack's `markdown` block. Lists, tables, code, quotes, and checkboxes fit only content
+that needs them. Images become links and lists stay flat. A markdown block holds 12,000
+characters. Completed brain replies over that limit become a Markdown file with a short notice.
+Replies pass through `chooseDisplay` and the outbox, which retries delivery and checks deleted roots.
+Ordinary chat replies have no feedback buttons.
 
-  *⚠️ check before merge* (75% sure)
-  1. worker opened a PR the job didn't allow.
-  2. Tests were not run, so fail-before / pass-after is unverified.
+## Conversation and consent
 
-  *open questions*
-  ☐ Follow-up issue for the other .get('data', {}) sites?
+Sym checks read-only facts with its own tools first. A problem report does not authorize Builder.
+`worker_job` requires an explicit request for Builder work or acceptance of a specific offer,
+including for repository investigations. The brief still needs its code-owned Start approval.
+Approved schedules and trusted playbooks retain their existing limits.
 
-  🔗 <PR #7698> · tests: not run
-  ```
+- A question about a result stays chat.
+- A requested redirect of running work uses `job_steer`.
+- A requested change to finished work uses `job_followup` with `{ ref, change }`. It proposes
+  Start / Not now before sending work. Start checks current policy and worker identity.
+- An explicit stop uses `job_stop` with owner confirmation.
+- "We're done" on finished work uses `job_close` with `{ ref }`.
+- Side talk and bare acknowledgements use `no_reply`.
+- `offer_choices` takes `{ message, choices }` for two or three real alternatives. Labels have
+  at most 30 characters. A click checks the allow-list and stored conversation, consumes the
+  choice once, and starts a normal turn as the actor. Typed replies still work. Choices grant
+  no tool or approval authority.
 
-  Sym posts this as Block Kit (decision 047), with the text above as the `text` fallback for
-  notifications and screen readers:
-
-  | Block | Holds |
-  |---|---|
-  | `header` | status emoji, `J-n · title`, duration (150 characters at most) |
-  | `section` | `*tl;dr* ...`, then the verifier line when `SYM_VERIFIER=on` |
-  | `section` + `rich_text` | the concerns header, then the concerns as an ordered list |
-  | `section` | `*open questions*` as a `☐` checklist |
-  | `context` | the tests line and the file count |
-  | `actions` | an **Open PR** link button, only when there is a PR |
-
-  A failure is a `header` (`❌ J-n · title · failed in 14m`), a `section` with the reason, and a
-  `context` with the worker thread. Sections stop at 3000 characters, lists at 10 items, and a
-  cut ends with `…`. Worker text is escaped in sections and taken as typed in rich text.
-  The emoji is ✅ for a clean result, ⚠️ for concerns, and ❌ for a failure. The tl;dr is the
-  summary's first sentence, capped near 160 characters. Concerns repeat nowhere: Sym drops near
-  duplicates, and drops an open question that a concern already covers. The footer holds the PR
-  link, the tests line, and the file count. The worker thread ID shows only when there is no
-  result to read, or on a failure.
-- **The brain** writes every other reply: answers, questions, status summaries. The persona sets
-  its voice, and it picks the length and shape that fit (decision 062). The shared Voice rules in
-  `agent/instructions.md` only keep facts, refs, links, and warnings exact, and forbid repeating
-  a Sym post. A `worker_job` result carries `posted: true`, and the brain then calls `no_reply`.
-
-The persona is the pack's persona file, else the owner's `/sym persona` setting, else
-`SYM_PERSONA` (the default), else `casual`. The thinking status line rotates short messages per
-persona (`plain`: "Working..."; `casual`: "on it...", "thinking..."; `spicy`: "cooking...",
-"reading your mess..."). The tones: `plain` (neutral), `casual` (default: relaxed, lowercase
-friendly, at most one emoji), or `spicy` (playful, may lightly tease the person talking to Sym,
-with hard limits in `agent/personas/spicy.md`). A pack can supply its own persona file. Worker
-threads never get a persona.
+A tool result with `posted: true` suppresses its duplicate reply only. Later questions still get
+answers. Saved preferences never grant consent for Builder work.
 
 ## People off the allow-list
 
-Sym never sends a message from a person off the allow-list to the brain. When such a human tags
-Sym, writes to it in a direct message, or tags or names it in a thread that has a session, Sym
-answers with one private (ephemeral) line that points to the owner, in the thread for a thread
-reply. Untagged side talk gets nothing. A person gets at most one line per channel (or direct
-message) per hour. The line follows the persona: casual and spicy personas pick a joke
-(spicy 70 percent of the time), and a plain or pack persona gets "Sym only works for people on
-its allow-list. Ask <owner> for access." With no owner configured, the line only says Sym works
-for people on its allow-list. `SYM_STRANGER_REPLIES=off` restores the silent drop (decision 053).
+Sym never sends a stranger's message to the brain. A tag, DM, or named reply in a known thread
+gets one private access line pointing to the owner. Untagged side talk stays silent. The limit
+is one line per person and channel per hour. Failed private delivery releases that cooldown.
+The persona can vary the wording without ridicule. With no owner, the line points to the person
+who runs Sym. `SYM_STRANGER_REPLIES=off` disables these replies.
 
 ## Slash command, card buttons, and feedback
 
@@ -154,25 +104,20 @@ for people on its allow-list. `SYM_STRANGER_REPLIES=off` restores the silent dro
   wins, and then Sym says so and stores nothing. The owner can also say "be spicy" or "tone it
   down" and the brain calls `sym_persona`. Either way the new persona starts in the next
   conversation (decision 046).
-- The brief above the Start prompt is short: the title, the project, the delivery, the model,
-  and the playbook it follows. **Full brief** sends the goal, the constraints, and the done-when
-  list privately to the person who clicks (decision 060).
-- The live card has **Steer**, **Stop** (with a confirm step; the worker is interrupted and the
-  job cancelled), and, once a PR is known, **Open PR**. The collapsed card keeps only **Open PR**.
-- The result has **Looks good**, **Fix…**, and **Close** after **Open PR**; a failure has
-  **Fix…** and **Close** (decision 056). Looks good records a 👍 for the job. Close settles the
-  worker thread, stops PR follow for the job, and edits the result to "Closed by @person".
-  Fix starts a follow-up job on the same worker thread; the result is edited to say so, and the
-  follow-up posts its own card or start line and its own result.
-- **Steer** and **Fix…** post a text box in the job thread, because Eve passes no custom modal
-  submission to Sym. Pressing Enter sends the text: Steer steers the running thread, and Fix sends
-  a follow-up. The box then turns into the person's words and what Sym did. Allowed users can use
-  every job button; answers to a click come privately.
-- Each final reply carries Slack's feedback buttons in the same message, so they add no
-  notification. A reply Slack refuses as blocks goes out as plain Markdown or a snippet without
-  them. Clicks and reactions on Sym's messages go to the `feedback` table, and Sym uses them only
-  after review (docs/learning.md). `SYM_FEEDBACK=off` removes the buttons; the handlers stay, so
-  clicks on old messages still record.
+- The brief names the title, project, delivery, model, and playbook. Start / Not now binds to
+  that proposal. Revising the brief expires it. Legacy Full brief buttons still show the stored
+  goal, constraints, and done-when list privately.
+- Working notes have no action controls. Results have PR and CI links when known, optional
+  conversation choices, and native feedback when enabled. Feedback buttons appear only on
+  results. Reactions on Sym's messages still record feedback. `SYM_FEEDBACK=off` hides buttons
+  while handlers keep accepting old clicks.
+- Old Steer and Fix controls explain the conversational path. Existing text boxes still submit;
+  Fix creates a follow-up proposal. Old Close controls remain routable.
+- Home shows Needs you, Running, and Done today with job links. The owner also sees Setup,
+  including worker state, persona, quiet mode, projects, and connections. It renders no Retry
+  or Stop controls. Every Home open rechecks the allow-list and owner role.
+- Permission notices go to the recorded owner, else the pack owner, else `SYM_OWNER_SLACK_USER`.
+  With no owner, the job thread asks for one to be configured.
 
 ## Connecting a service
 
@@ -218,7 +163,7 @@ the manifest has no `chat:write.public`.
 
 Allow-list: the pack's owner and `allowList`, or `SYM_SLACK_USERS` without a pack. Approvals
 (tool approvals such as schedules, playbooks, and Stop) count only from the owner: the pack owner,
-else `SYM_OWNER_SLACK_USER`. Questions, including Start, Edit, and Cancel, stay open to allowed
+else `SYM_OWNER_SLACK_USER`. Start / Not now proposals and worker questions stay open to allowed
 users. Every inbound
 handler checks it and fails closed, including answers to buttons. Free-text answers go through
 Eve's "Type your answer" box, so the same check covers them; a reply typed in the thread is a new
@@ -231,9 +176,9 @@ launches need approval.
 With `SYM_CODE_CHANNELS` on, a job a person starts moves from its thread into its own Slack code
 channel (decision 067, [slack-code.md](slack-code.md)). The brief and Start stay in the thread;
 Slack links the new channel there. The card, result, and buttons post top-level in the channel.
-Worker questions stay in the thread, where Eve asks them; the channel links to them. The channel's context bar shows the job, its project, and its pull request, and its status
+Worker questions post in the current job conversation, including code channels. The channel's context bar shows the job, its project, and its pull request, and its status
 follows the job. Everything said in the channel reaches Sym with no tag and is about that job.
-Close archives the channel and shares the result in the original thread. A scheduled check, a job
+`job_close` requests settlement and archive, with the result shared in the original thread. A scheduled check, a job
 in a DM, and any job Slack refuses stay in their thread.
 
 A person can also ask Sym to move a conversation into a code channel. The brain's `code_channel`
@@ -267,6 +212,10 @@ Anyone allowed can say "answer only when tagged" and Sym records `mention-only` 
 Thread context: the first turn of a session reads the whole thread. Later turns read only what
 came after Sym's last post. Direct messages are unchanged.
 
-A Fix rechecks current project permissions and pack limits before sending work (decision 065).
-If the project or worker changed, or the old worker identity is unknown, Sym refuses it and asks
-for a new job. An allowed user's typed Fix still counts as approval; it needs no new Start.
+Follow-up Start rechecks current project permissions, pack limits, and worker identity. A changed
+project or unknown worker identity needs a new job. Typed Fix does not bypass proposal approval.
+
+Close acceptance, worker settlement, and archive confirmation are separate ledger facts.
+Reconcile retries incomplete closure. Slack's already-archived response confirms closure.
+A refusal leaves an archive retry control. Sym reports success only after confirmation and
+removes stale retry notices. Missing clients or channel IDs remain visible repair states.

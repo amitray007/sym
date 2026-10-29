@@ -2,8 +2,8 @@
 
 ## What Sym is
 
-Sym is a self-hosted, open-source Slack agent. It answers quick checks itself, turns bigger work
-into a tracked job on a worker, watches the job, and reports the outcome. A worker is a coding agent that runs somewhere
+Sym is a self-hosted, open-source Slack agent. It answers read-only checks itself and turns explicit Builder requests
+into tracked jobs on a worker, watches the job, and reports the outcome. A worker is a coding agent that runs somewhere
 you control. The first worker is T3 Code, which runs Claude Code and Codex threads on your own
 machine and subscriptions.
 
@@ -18,7 +18,8 @@ an operations group with scheduled checks. One adopter's playbooks never shape t
    disposable. A job must survive the loss of its Slack session.
 3. Sym delegates. Workers execute. Sym plans, approves, watches, and checks. It does not edit
    repositories itself.
-4. Writes need a person. Any job that can change code, data, or settings needs an approval
+4. Builder work needs explicit consent, including repository investigations. A problem report
+   does not authorize a job. Writes need a person. Any job that can change code, data, or settings needs an approval
    until the trust ladder promotes its job class. Production and customer data stay read-only:
    a job can prepare a change to them, and a person runs it.
 5. Quiet by default. Code decides each message's display level. New messages are only for
@@ -37,7 +38,7 @@ an operations group with scheduled checks. One adopter's playbooks never shape t
 | Brief | The job spec Sym writes: project, goal, constraints, done-when list, output contract |
 | Job | One unit of delegated work with a ledger row, an ID such as `J-142`, and one Slack thread |
 | Worker | A system that runs agent threads, reached through a worker adapter |
-| Job card | One Slack message per long job that Sym edits in place with live steps |
+| Job card | One Slack message per long job that Sym edits in place with explicit progress and no controls |
 | Display level | 0 silent, 1 text, 2 text and buttons, 3 live card, 4 summary and file |
 | Playbook | An Eve skill that describes how to do one kind of job |
 | Pack | An adopter's private set of playbooks, schedules, instructions, and project rules |
