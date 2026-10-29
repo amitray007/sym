@@ -6,7 +6,7 @@ import { createEmojiCache, type EmojiCache } from "./reactions/emoji.ts";
 import type { SlackApi } from "./slack/api.ts";
 import { slackApiFromEnv } from "./slack/eve-api.ts";
 import { getCredential } from "./workers/credentials.ts";
-import { type ResolvedWorker, resolveWorker } from "./workers/resolve.ts";
+import { type ResolvedWorker, resolveWorker, workerIdentity } from "./workers/resolve.ts";
 import { t3Adapter } from "./workers/t3/adapter.ts";
 import { connectT3 } from "./workers/t3/client.ts";
 
@@ -95,6 +95,7 @@ export async function withJobDeps<T>(fn: (deps: JobDeps) => Promise<T>): Promise
       ...ledgerDeps(),
       worker: t3Adapter(connection.call, { signInExpiresAt: worker.expiresAt }),
       workerName: worker.name,
+      workerIdentity: workerIdentity(worker.name, worker.url),
     };
     return await fn(deps);
   } finally {

@@ -5,7 +5,7 @@ worker. No production deployment and no adopter pack beyond a test pack.
 
 ## Build order
 
-1. **Scaffold.** Done: Eve app with `eve init`, Eve pinned (0.81.0, then 0.88.0 in decision 065), pnpm, Biome, Vitest, Knip,
+1. **Scaffold.** Done: Eve app with `eve init`, Eve pinned (0.81.0, then 0.88.0 in decision 066), pnpm, Biome, Vitest, Knip,
    CI, and Postgres 18 in Docker for local work (decision 014).
 2. **Worker connection.** Done over loopback (2026-10-19): the T3 adapter in `lib/workers/t3/`
    with its own MCP client (decision 015). `pnpm t3:login` signs in with T3's consent flow, and

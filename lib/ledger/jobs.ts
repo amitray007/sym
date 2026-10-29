@@ -31,6 +31,8 @@ export interface Job {
   slackThreadTs: string | null;
   brief: unknown;
   worker: string;
+  // The configured worker name and endpoint at launch; null for legacy jobs.
+  workerIdentity: string | null;
   workerProjectId: string | null;
   workerThreadId: string | null;
   // The model the worker thread runs, as `<provider>/<model>`. Null when the worker's default applies.
@@ -79,6 +81,7 @@ export type JobUpdate = Partial<
     | "status"
     | "workerThreadId"
     | "workerProjectId"
+    | "workerIdentity"
     | "workerModel"
     | "cursor"
     | "lastSummary"

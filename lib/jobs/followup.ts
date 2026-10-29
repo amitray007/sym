@@ -8,8 +8,9 @@ import { Brief } from "./brief.ts";
 import { RESULT_ACTION_IDS } from "./card.ts";
 import { presentStart } from "./present.ts";
 import { answeredPrompt, type PromptKind, promptPost } from "./prompts.ts";
-import { deliverNow, endWithoutWorker, type JobDeps } from "./run.ts";
+import { deliverNow, endWithoutWorker, type JobDeps, JobSetupError, planLaunch } from "./run.ts";
 import { cleanSteerText } from "./steer.ts";
+import { workerCallbackInstructions, workerCapabilityEndpoint } from "./worker-capabilities.ts";
 
 // The buttons on a finished job's result (decision 056). Fix continues the job's worker thread as
 // a new job; Close settles the thread. A new job keeps the ledger simple: a finished job never
@@ -26,13 +27,27 @@ export interface FollowUpResult {
 
 // The message the worker thread gets. The person's words are data, so Sym cleans them, and the
 // brief's limits still apply.
-export function followUpMessage(ref: string, parentRef: string, text: string): string {
+export function followUpMessage(
+  ref: string,
+  parentRef: string,
+  text: string,
+  brief: Brief,
+  guardrails?: string[],
+): string {
+  const delivery = brief.openPullRequest
+    ? "Commit on this worktree's branch, push it, and open a draft pull request."
+    : "Commit on this worktree's branch. Do not push and do not open a pull request.";
+  const rules = guardrails ?? ["Keep production systems and customer data read-only.", delivery];
+  const constraints = [...brief.constraints, "Work only in this worktree.", ...rules]
+    .map((rule) => `- ${rule}`)
+    .join("\n");
   return `This is Sym job ${ref}, a follow-up on ${parentRef} in this thread.
 
 A person in the Slack thread asked for this change:
 ${text}
 
-The constraints of ${parentRef} still apply. Keep production systems and customer data read-only.
+Keep the brief constraints below. The current project rules below replace earlier project rules:
+${constraints}
 
 When you finish, end your last message with one JSON block in this shape:
 \`\`\`json
@@ -84,11 +99,24 @@ export async function startFollowUp(
   if (later) return { answer: `${later} continued this thread. Use its buttons instead.` };
 
   const brief = Brief.parse(parent.brief);
+  if (!parent.workerIdentity || parent.workerIdentity !== deps.workerIdentity) {
+    return { answer: `${name}'s worker has changed or is unknown. Ask for a new job instead.` };
+  }
+  let plan: Awaited<ReturnType<typeof planLaunch>>;
+  try {
+    plan = await planLaunch(deps, brief);
+  } catch (error) {
+    if (error instanceof JobSetupError) return { answer: error.message };
+    throw error;
+  }
+  if (!parent.workerProjectId || parent.workerProjectId !== plan.projectId) {
+    return { answer: `${name}'s worker project has changed. Ask for a new job instead.` };
+  }
   const title = clip(`Fix: ${parent.title}`, TITLE_MAX);
   let job: Job;
   try {
     job = await insertFollowUp(deps.sql, parent, requestKey, {
-      ...brief,
+      ...plan.brief,
       title,
       goal: `${brief.goal}\n\nFollow-up: ${clean}`,
     });
@@ -104,9 +132,11 @@ export async function startFollowUp(
   }
   const ref = jobRef(job.id);
   try {
+    const endpoint = await workerCapabilityEndpoint(deps.sql, parent.id);
+    const tools = endpoint ? await workerCallbackInstructions(deps.sql, job.id, endpoint) : "";
     await deps.worker.send(
       parent.workerThreadId,
-      followUpMessage(ref, name, clean),
+      `${followUpMessage(ref, name, clean, plan.brief, plan.guardrails)}\n\n${tools}`,
       "auto",
       requestKey,
     );
@@ -145,12 +175,12 @@ async function insertFollowUp(sql: Sql, parent: Job, requestKey: string, brief: 
   const [row] = await sql<{ id: number }[]>`
     insert into jobs (
       request_key, session_id, kind, title, owner, slack_channel, slack_thread_ts, brief, worker,
-      worker_project_id, worker_thread_id, worker_model, cursor, status, started_at, parent_job_id,
+      worker_project_id, worker_identity, worker_thread_id, worker_model, cursor, status, started_at, parent_job_id,
       pr_url, pr_watched_url, pr_wake_cursor, watch_until
     )
     select
       ${requestKey}, session_id, 'code-change', ${brief.title}, owner, slack_channel,
-      slack_thread_ts, ${json(sql, brief)}, worker, worker_project_id, worker_thread_id,
+      slack_thread_ts, ${json(sql, brief)}, worker, worker_project_id, worker_identity, worker_thread_id,
       worker_model, cursor, 'running', now(), id, pr_url, pr_watched_url, pr_wake_cursor,
       now() + interval '1 minute'
     from jobs where id = ${parent.id}

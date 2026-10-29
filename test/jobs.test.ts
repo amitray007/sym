@@ -97,6 +97,7 @@ describe.skipIf(!hasDatabase)("worker job steps", () => {
   const deps = (worker: FakeWorker) => ({
     sql: ledger.sql(),
     worker,
+    workerIdentity: "fake-worker",
     allowedProjects: TEST_PROJECTS,
   });
 
@@ -131,6 +132,19 @@ describe.skipIf(!hasDatabase)("worker job steps", () => {
 
       await expect(launchOrAdopt(deps(worker), job.id, CALLBACK)).rejects.toThrow("lost");
       expect((await getJob(ledger.sql(), job.id))?.workerThreadId).toBeNull();
+      expect((await getJob(ledger.sql(), job.id))?.workerIdentity).toBe("fake-worker");
+
+      await expect(
+        launchOrAdopt({ ...deps(worker), workerIdentity: "other-worker" }, job.id, CALLBACK),
+      ).rejects.toThrow("worker changed");
+
+      const remapped = new FakeWorker({
+        projects: [{ id: "project-2", title: "test-repo", workspaceRoot: "/other" }],
+      });
+      await expect(launchOrAdopt(deps(remapped), job.id, CALLBACK)).rejects.toThrow(
+        "project changed",
+      );
+      expect(remapped.launches).toBe(0);
 
       const adopted = await launchOrAdopt(deps(worker), job.id, CALLBACK);
 

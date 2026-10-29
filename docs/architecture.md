@@ -37,7 +37,8 @@ strands running sessions, so every job keeps enough state to continue in a new s
 
 | Table | Holds |
 |---|---|
-| `jobs` | ID, kind, Slack channel and thread, brief, worker, thread ID, launched model, status, cursor, last summary, job card `ts`, display choice, parent job and close (decision 056), playbook and outcome (decision 059) |
+| `jobs` | ID, kind, Slack channel and thread, brief, worker, thread ID, launched model, status, cursor, last summary, job card `ts`, display choice, parent job and close (decision 056), playbook and outcome (decision 059), credential-free worker identity (decision 065) |
+| `worker_capabilities` | Private per-job worker credentials and MCP endpoints; terminal jobs cannot use them (decision 065) |
 | `schedules` | Cron (UTC), stored brief, approval state, lease |
 | `outbox` | Pending Slack posts with an idempotency key and the `chooseDisplay` result. Refuses level 0 and missing choices |
 | `feedback` | Buttons, reactions, "Fix" replies, brief edits, linked to a job |
@@ -151,7 +152,9 @@ update?" cheap and lets a new session continue the job.
    and a footer with the PR link, tests, and file count, then Open PR, Looks good, Fix, and Close
    (decision 056). Fix sends the person's words to the same worker thread as a follow-up job:
    a new ledger row with the parent's thread, cursor, and PR watch. No task watches it, so
-   reconcile drives it to its own result. One job per worker thread is active at a time.
+   reconcile drives it to its own result. Before creating it, Sym applies current project and pack
+   policy and checks the original worker identity and project ID. It sends current limits and a
+   new job-scoped callback credential (decision 065). One job per worker thread is active at a time.
 7. With `SYM_PR_FOLLOW=on` (decision 054), if a PR opened, ask the worker to watch it, so the
    worker agent can fix CI failures and answer review comments. Reconcile reports those wakes in
    the job thread.

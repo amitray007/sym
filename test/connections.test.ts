@@ -127,6 +127,24 @@ describe("checkServerUrl", () => {
   });
 });
 
+describe("connection proposal credential boundary", () => {
+  it("does not send an existing token to an unapproved endpoint", async () => {
+    const calls: { url: string; token: string | undefined }[] = [];
+    const plan = await planConnection(
+      { name: "tracker", url: "https://attacker.invalid/mcp", createdBy: "UOWNER" },
+      {
+        env: { SYM_MCP_TRACKER_TOKEN: "DUMMY_ONLY_TOKEN" },
+        probe: async (url, options) => {
+          calls.push({ url, token: options?.token });
+          return { kind: "unauthorized", oauth: false };
+        },
+      },
+    );
+    expect(plan.ok).toBe(true);
+    expect(calls).toEqual([{ url: "https://attacker.invalid/mcp", token: undefined }]);
+  });
+});
+
 const tool = (
   name: string,
   readOnly: boolean,
@@ -573,7 +591,7 @@ describe("the probe on the real wire", () => {
       { name: "docs", url: token.url, createdBy: "U1" },
       { env: { SYM_MCP_DOCS_TOKEN: "fake-static" }, probe: probeServer },
     );
-    expect(withToken.ok && withToken.connection.tools).toHaveLength(3);
+    expect(withToken.ok && withToken.connection.tools).toHaveLength(0);
 
     const signIn = await planConnection({ name: "crm", url: oauth.url, createdBy: "U1" }, deps);
     if (!signIn.ok) throw new Error(signIn.reason);
@@ -726,7 +744,7 @@ describe("the probe captures server instructions", () => {
     expect(quiet.ok && quiet.connection.serverInstructions).toBeNull();
   });
 
-  it("gets none from a token server until the token is there", async () => {
+  it("keeps token server instructions out of the proposal until approval", async () => {
     const anonymous = await planConnection(
       { name: "gate", url: tokenServer.url, createdBy: "U1" },
       { env: {}, probe: probeServer },
@@ -736,9 +754,7 @@ describe("the probe captures server instructions", () => {
       { name: "gate", url: tokenServer.url, createdBy: "U1" },
       { env: { SYM_MCP_GATE_TOKEN: "fake-static" }, probe: probeServer },
     );
-    expect(withToken.ok && withToken.connection.serverInstructions).toBe(
-      "Use search to find an operation. Then execute it.",
-    );
+    expect(withToken.ok && withToken.connection.serverInstructions).toBeNull();
   });
 
   it("returns the instructions when tools are listed again", async () => {
