@@ -104,6 +104,12 @@ describe("strangerRepliesOn", () => {
 });
 
 describe("stranger cooldown", () => {
+  it("releases a failed delivery for retry", () => {
+    const cooldown = createStrangerCooldown();
+    expect(cooldown.claim("U:C", 1)).toBe(true);
+    cooldown.release("U:C");
+    expect(cooldown.claim("U:C", 2)).toBe(true);
+  });
   const HOUR = 60 * 60 * 1000;
 
   it("allows one line per user and channel each hour", () => {

@@ -187,7 +187,7 @@ export function homeView(role: HomeRole, data?: HomeData): HomeView {
     section(
       attention.length === 0
         ? "Nothing needs you."
-        : `${attention.length === 1 ? "One job needs" : `${attention.length} jobs need`} you. Everything else is fine.`,
+        : `${attention.length === 1 ? "One job needs" : `${attention.length} jobs need`} you.`,
     ),
   ];
   const jobs = (label: string, rows: Job[], limit: number) => {

@@ -89,6 +89,14 @@ const ownerData = (overrides: Partial<HomeData> = {}) =>
 const textOf = (view: { blocks: unknown[] }) => JSON.stringify(view.blocks);
 
 describe("homeView by role", () => {
+  it("puts stale work in Needs you with human days", () => {
+    const text = textOf(
+      homeView("member", data({ active: [job(91, { lastActivityAt: minutesAgo(8 * 1440) })] })),
+    );
+    expect(text).toContain("Needs you");
+    expect(text).toContain("no activity for 8 days");
+    expect(text).not.toContain("*Running*");
+  });
   it("shows one short line to a user who is not allowed", () => {
     const view = homeView("denied");
     expect(view.type).toBe("home");

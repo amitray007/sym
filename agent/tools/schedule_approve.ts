@@ -34,6 +34,7 @@ export default defineTool({
         `Project: ${input.brief.project}`,
         `Goal: ${input.brief.goal}`,
         `Done when: ${input.brief.doneWhen.join("; ")}`,
+        `Full scope for each run: ${JSON.stringify(input.brief)}`,
         "Runs without asking again. Production and customer data stay read-only.",
       ].join("\n"),
   },

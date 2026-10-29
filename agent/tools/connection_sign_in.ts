@@ -165,8 +165,8 @@ async function sendLink(
     owner,
     idempotencyKey: `connection-signin-link:${key}`,
     text:
-      `Sign Sym in to the "${name}" connection: <${authorizationUrl}|open the sign-in page>. ` +
-      "The link works for 10 minutes. Do not share it.",
+      `I need you to sign me in to ${name}: <${authorizationUrl}|open the sign-in page>. ` +
+      "This private link expires in 10 minutes. Please do not share it.",
   });
 }
 

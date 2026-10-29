@@ -344,19 +344,17 @@ describe("approval text", () => {
 
   it("words the connection-wide prompts, with the full warning for auto", () => {
     const auto = modePrompt("example-gateway", undefined, "auto");
-    expect(auto).toContain(
-      "Every tool on example-gateway, including tools the server adds later, runs without asking you.",
-    );
-    expect(auto).toContain("the only gate");
+    expect(auto).toContain("Let example-gateway tools run without asking, including future tools?");
+    expect(auto).toContain("Individual tool settings still apply");
     for (const mode of ["ask", "hidden", "default"] as const) {
       expect(modePrompt("example-gateway", undefined, mode)).toContain(
         "Individual tool settings still apply",
       );
     }
-    expect(modePrompt("example-gateway", undefined, "hidden")).toContain("cannot find or call any");
-    expect(modePrompt("example-gateway", undefined, "default")).toContain(
-      "marked read-only by the server",
+    expect(modePrompt("example-gateway", undefined, "hidden")).toContain(
+      "Hide example-gateway tools",
     );
+    expect(modePrompt("example-gateway", undefined, "default")).toContain("marked read-only");
     expect(modePrompt("example-gateway", "execute", "default")).toContain(
       "follows the connection default",
     );
