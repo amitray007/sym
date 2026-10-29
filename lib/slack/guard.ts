@@ -35,7 +35,7 @@ export async function sayPrivately(
   where: { channel: string; user: string; threadTs?: string },
   text: string,
   warn: (line: string) => void = console.warn,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const response = await slack.request("chat.postEphemeral", {
       channel: where.channel,
@@ -45,9 +45,12 @@ export async function sayPrivately(
     });
     if (response.ok === false) {
       warn(`Sym could not send an ephemeral reply: ${response.error ?? "unknown_error"}.`);
+      return false;
     }
+    return true;
   } catch (error) {
     warn(`Sym could not send an ephemeral reply: ${errorCode(error)}.`);
+    return false;
   }
 }
 

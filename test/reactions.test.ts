@@ -5,6 +5,8 @@ import { NOT_FOR_WORKERS, WORKER_PRINCIPAL } from "../lib/callers.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { createEmojiCache, EMOJI_TTL_MS, normalizeEmoji } from "../lib/reactions/emoji.ts";
 import {
+  captureReactionTarget,
+  reactionTarget,
   reactToTurn,
   recordThreadMessage,
   recordTurnMessage,
@@ -145,8 +147,14 @@ describe.skipIf(!hasDatabase)("reactToTurn", () => {
 
   it("keeps an explicit turn target when another message arrives", async () => {
     const s = await session();
+    await captureReactionTarget(ledger.sql(), s.sessionId, "turn-a");
     await nextTurn(s);
-    await reactToTurn({ sql: ledger.sql(), api: api(), messageTs: s.root.ts }, s.sessionId, "tada");
+    await captureReactionTarget(ledger.sql(), s.sessionId, "turn-a");
+    await reactToTurn(
+      { sql: ledger.sql(), api: api(), messageTs: reactionTarget(s.sessionId, "turn-a") },
+      s.sessionId,
+      "tada",
+    );
     expect(slack.reactions).toContainEqual({
       channel: s.channel,
       timestamp: s.root.ts,

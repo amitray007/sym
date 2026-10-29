@@ -39,7 +39,11 @@ import {
 } from "../../lib/persona-setting.ts";
 import { parseSymCommand, slackText, USAGE } from "../../lib/quiet/command.ts";
 import { formatClock, getQuietUntil, setQuietUntil } from "../../lib/quiet/quiet.ts";
-import { recordThreadMessage, recordTurnMessage } from "../../lib/reactions/react.ts";
+import {
+  captureReactionTarget,
+  recordThreadMessage,
+  recordTurnMessage,
+} from "../../lib/reactions/react.ts";
 import { ledger, pack, slackFromEnv, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
 import { listSchedules } from "../../lib/schedules/rows.ts";
@@ -207,12 +211,14 @@ async function replyToStranger(
     if (!strangerCooldown.claim(strangerKey(userId, message.channelId))) return;
     const inThread = trigger !== "direct" && message.threadTs !== message.ts;
     const threadTs = inThread ? message.threadTs : undefined;
-    await sayPrivately(
+    const delivered = await sayPrivately(
       ctx.slack,
       { channel: message.channelId, user: userId, ...(threadTs ? { threadTs } : {}) },
       await strangerText(),
     );
+    if (!delivered) strangerCooldown.release(strangerKey(userId, message.channelId));
   } catch (error) {
+    strangerCooldown.release(strangerKey(userId, message.channelId));
     console.warn("Sym could not answer a person off the allow-list.", errorName(error));
   }
 }
@@ -360,6 +366,11 @@ const symRenderer = defineSlackRenderer({
             console.warn("Sym could not record the Slack thread of a session.", String(error));
           });
       }
+      await captureReactionTarget(ledger(), ctx.session.id, ctx.session.turn.id).catch(
+        (error: unknown) => {
+          console.warn("Sym could not capture the reaction target.", errorName(error));
+        },
+      );
       // Eve's handler resets the turn state and shows "Thinking...". A quiet turn keeps the
       // reset and skips the status.
       if (quiet) {
@@ -733,7 +744,9 @@ export default slackChannel({
     const where = { channel: channelId, user: action.user.id, threadTs };
     try {
       await withJobDeps((deps) =>
-        handleJobAction(deps, action, channelId, (text) => sayPrivately(ctx.slack, where, text)),
+        handleJobAction(deps, action, channelId, async (text) => {
+          await sayPrivately(ctx.slack, where, text);
+        }),
       );
     } catch (error) {
       console.warn("Sym could not handle a job button.", String(error));

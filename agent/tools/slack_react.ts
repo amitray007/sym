@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { reactToTurn } from "../../lib/reactions/react.ts";
+import { reactionTarget, reactToTurn } from "../../lib/reactions/react.ts";
 import { ledger, slackFromEnv } from "../../lib/runtime.ts";
 
 // A reaction on the message that started this turn (decision 051). Code enforces the limits:
@@ -20,6 +20,14 @@ export default defineTool({
   label: { start: ({ emoji }) => `React :${emoji.replaceAll(":", "")}:` },
   async execute({ emoji }, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
-    return reactToTurn({ sql: ledger(), api: slackFromEnv() }, ctx.session.id, emoji);
+    return reactToTurn(
+      {
+        sql: ledger(),
+        api: slackFromEnv(),
+        messageTs: reactionTarget(ctx.session.id, ctx.session.turn.id),
+      },
+      ctx.session.id,
+      emoji,
+    );
   },
 });

@@ -44,6 +44,22 @@ async function turnMessageTs(sql: Sql, sessionId: string): Promise<string | null
   return row?.messageTs ?? null;
 }
 
+// Snapshot before model work starts. Later inbound messages may update the thread row.
+const turnTargets = new Map<string, string | null>();
+export async function captureReactionTarget(
+  sql: Sql,
+  sessionId: string,
+  turnId: string,
+): Promise<void> {
+  const key = `${sessionId}:${turnId}`;
+  if (turnTargets.has(key)) return;
+  turnTargets.set(key, await turnMessageTs(sql, sessionId));
+  if (turnTargets.size > 2000) turnTargets.delete(turnTargets.keys().next().value as string);
+}
+export function reactionTarget(sessionId: string, turnId: string): string | null {
+  return turnTargets.get(`${sessionId}:${turnId}`) ?? null;
+}
+
 export interface ReactDeps {
   sql: Sql;
   // Undefined when the deployment has no bot token.

@@ -94,6 +94,17 @@ const ownerData = (overrides: Partial<HomeData> = {}) =>
 const textOf = (view: { blocks: unknown[] }) => JSON.stringify(view.blocks);
 
 describe("homeView by role", () => {
+  it("links stuck jobs without Retry or Stop controls", () => {
+    const text = textOf(
+      homeView("owner", ownerData({ active: [job(91, { status: "worker_offline" })] })),
+    );
+    expect(text).toContain(
+      "https://slack.com/app_redirect?channel=C1&message_ts=1700000000.000100",
+    );
+    expect(text).not.toContain('"type":"button"');
+    expect(text).not.toContain('"type":"actions"');
+  });
+
   it("puts stale work in Needs you with human days", () => {
     const text = textOf(
       homeView("member", data({ active: [job(91, { lastActivityAt: minutesAgo(8 * 1440) })] })),

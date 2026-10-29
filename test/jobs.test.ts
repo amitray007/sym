@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type Brief, workerMessage } from "../lib/jobs/brief.ts";
 import { parseOutputContract } from "../lib/jobs/contract.ts";
 import {
@@ -661,6 +661,20 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       expect(added[0]?.body.thread_ts).toBeUndefined();
       expect(String(added[0]?.body.text)).toContain(`${s.ref} needs permission`);
     });
+  });
+
+  it("routes a permission prompt to the configured owner when the job has none", async () => {
+    vi.stubEnv("SYM_OWNER_SLACK_USER", "UCONFIGURED");
+    try {
+      const s = await launched({ script: [{ status: "waiting" }] });
+      await s.sql`update jobs set owner = null where id = ${s.job.id}`;
+      const before = s.slack.posts().length;
+      await checkJob(s.deps, s.job.id, 1000);
+      expect(s.slack.posts().slice(before)).toMatchObject([{ body: { channel: "UCONFIGURED" } }]);
+      expect(s.slack.posts().at(-1)?.body.thread_ts).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("shows a repair notice instead of routing permission instructions to a thread without an owner", async () => {
