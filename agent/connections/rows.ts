@@ -1,7 +1,7 @@
 import { defineDynamic } from "eve/connections";
 import { isWorkerCaller } from "../../lib/callers.ts";
 import { connectionToken } from "../../lib/connections/auth.ts";
-import { signInStates } from "../../lib/connections/credentials.ts";
+import { type SignInState, signInStates } from "../../lib/connections/credentials.ts";
 import { connectionDefinitions } from "../../lib/connections/load.ts";
 import { probeServer } from "../../lib/connections/probe.ts";
 import { refreshStale } from "../../lib/connections/refresh.ts";
@@ -26,19 +26,18 @@ export default defineDynamic(async (ctx) => {
   if (isWorkerCaller(ctx.session.auth.current)) return null;
   try {
     const sql = ledger();
+    // A failed read is saved as no rows, so the turn keeps no connections, as before, instead of
+    // reading again before every model call.
     const saved = await ctx.memo(["rows", ctx.turn?.id ?? null], async () => {
-      const stored = await activeConnections(sql);
-      if (stored.length === 0) return { rows: [], signIns: [] };
-      const rows = await refreshStale(stored, {
-        sql,
-        probe: probeServer,
-        token: (row) => connectionToken(sql, row),
-        attempts,
-        now: new Date(),
-      });
-      const oauthIds = rows.filter((row) => row.authKind === "oauth").map((row) => row.id);
-      const signIns = await signInStates(sql, oauthIds, new Date());
-      return { rows: JSON.parse(JSON.stringify(rows)) as JsonRow[], signIns: [...signIns] };
+      try {
+        return await readRows(sql);
+      } catch (error) {
+        console.warn(
+          "connections: could not load rows",
+          error instanceof Error ? error.message : String(error),
+        );
+        return { rows: [], signIns: [] };
+      }
     });
     if (saved.rows.length === 0) return null;
     const definitions = connectionDefinitions(saved.rows.map(reviveRow), {
@@ -50,12 +49,29 @@ export default defineDynamic(async (ctx) => {
     return Object.keys(definitions).length > 0 ? definitions : null;
   } catch (error) {
     console.warn(
-      "connections: could not load rows",
+      "connections: could not build connections",
       error instanceof Error ? error.message : String(error),
     );
     return null;
   }
 });
+
+async function readRows(
+  sql: ReturnType<typeof ledger>,
+): Promise<{ rows: JsonRow[]; signIns: [number, SignInState][] }> {
+  const stored = await activeConnections(sql);
+  if (stored.length === 0) return { rows: [], signIns: [] };
+  const rows = await refreshStale(stored, {
+    sql,
+    probe: probeServer,
+    token: (row) => connectionToken(sql, row),
+    attempts,
+    now: new Date(),
+  });
+  const oauthIds = rows.filter((row) => row.authKind === "oauth").map((row) => row.id);
+  const signIns = await signInStates(sql, oauthIds, new Date());
+  return { rows: JSON.parse(JSON.stringify(rows)) as JsonRow[], signIns: [...signIns] };
+}
 
 type JsonRow = Omit<Connection, "approvedAt" | "createdAt" | "updatedAt"> & {
   approvedAt: string | null;

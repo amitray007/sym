@@ -291,9 +291,14 @@ function stayQuiet<T extends StatusEvent>(): SlackRenderHandler<T> {
 // ends with its content.completed, which removes it.
 const partKinds = new Map<string, string>();
 
-// Eve's default turn.started resets this per-turn bookkeeping before it shows "Thinking...". Eve
-// 0.87 took the fields out of the public state type, so a quiet turn resets them through this view.
-type TurnBookkeeping = { pendingTaskResults?: unknown; pendingToolCallMessage?: unknown };
+// Eve's defaults keep this bookkeeping in the channel state: turn.started resets the first two,
+// and a reply clears the saved status so a later step does not show it again. Eve 0.87 took the
+// fields out of the public state type, so Sym's own paths reset them through this view.
+type TurnBookkeeping = {
+  pendingTaskResults?: unknown;
+  pendingToolCallMessage?: unknown;
+  threadStatus?: unknown;
+};
 
 const symRenderer = defineSlackRenderer({
   // Eve's default sets "Thinking..." as soon as a message arrives. The persona's list replaces it.
@@ -391,6 +396,7 @@ const symRenderer = defineSlackRenderer({
         return next(event);
       }
       endQuietTurn(quietKey(ctx.channel));
+      (ctx.channel.state as TurnBookkeeping).threadStatus = null;
       await postCompletedSlackReply(ctx.channel, {
         blocks: [{ type: "markdown", text: value }, ...feedbackBlocks()] as never,
         markdown: value,
