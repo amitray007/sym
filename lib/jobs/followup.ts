@@ -2,11 +2,11 @@ import type { Sql } from "../db.ts";
 import { chooseDisplay } from "../display.ts";
 import { recordFeedback } from "../feedback/feedback.ts";
 import { getJobByRef, type Job, jobRef, json } from "../ledger/jobs.ts";
-import { enqueuePost } from "../ledger/outbox.ts";
+import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
 import { archiveCodeChannel, setChannelStatus } from "../slack/code-channel.ts";
 import { workerNoun } from "../worker-label.ts";
 import { Brief } from "./brief.ts";
-import { CLOSE_ACTION_ID, jobButton, RESULT_ACTION_IDS } from "./card.ts";
+import { RESULT_ACTION_IDS } from "./card.ts";
 import { presentStart } from "./present.ts";
 import { answeredPrompt, type PromptKind, promptPost } from "./prompts.ts";
 import { deliverNow, endWithoutWorker, type JobDeps, JobSetupError, planLaunch } from "./run.ts";
@@ -202,65 +202,132 @@ export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<
   // Settling a thread that a follow-up continued would settle the follow-up's work too.
   const later = await laterJob(deps.sql, job);
   if (later) return `${later} continued this thread. Close it instead.`;
-  const [closed] = await deps.sql<{ id: number }[]>`
-    update jobs set closed_at = now(), closed_by = ${by}
-    where id = ${job.id} and closed_at is null
-    returning id
+  await deps.sql`
+    update jobs set closed_at = coalesce(closed_at, now()), closed_by = coalesce(closed_by, ${by}),
+      archive_state = case when code_channel and archive_state = 'none' then 'pending' else archive_state end
+    where id = ${job.id}
   `;
-  if (!closed) {
-    // A repeat Close retries an archive that failed the first time (decision 067).
-    if (job.codeChannel) await archiveJobChannel(deps, job);
-    return `${name} is already closed.`;
-  }
-  if (job.workerThreadId && deps.worker.settle) {
-    // Settling only tidies the worker's list. A failure leaves the job closed in Sym.
-    await deps.worker.settle(job.workerThreadId).catch((error: unknown) => {
-      console.warn(`Sym could not settle the thread of ${name}.`, String(error));
-    });
-  }
-  await editEndPost(deps.sql, job, `Closed by <@${by}>.`);
+  const answer = await completeClosure(deps, job.id);
   await deliverNow(deps);
-  if (job.codeChannel) await archiveJobChannel(deps, job);
-  return `Closed ${name}.`;
+  return answer;
 }
 
-// A job in its own code channel archives it on Close; the result post is the summary Slack shares
-// in the thread the job came from (decision 067). Only the sent result itself qualifies, not the
-// edits that later rows of the same key prefix make to it. Close took its button off the result,
-// so a failed archive posts a new Close button to try again.
-async function archiveJobChannel(deps: JobDeps, job: Job): Promise<void> {
-  const ref = jobRef(job.id);
-  const [end] = await deps.sql<{ slackTs: string | null }[]>`
-    select slack_ts from outbox
-    where job_id = ${job.id} and idempotency_key = ${`${ref}:end`} and status = 'sent'
+// Close acceptance stops PR following through closed_at. External settlement and archive are
+// separate confirmed facts. A row lock serializes retries; a restart resumes the unfinished steps.
+async function completeClosure(deps: JobDeps, id: number): Promise<string> {
+  return deps.sql.begin(async (transaction) => {
+    const sql = transaction as unknown as Sql;
+    await sql`select id from jobs where id = ${id} for update`;
+    const job = await getJobByRef(sql, jobRef(id));
+    if (!job?.closedAt) return `${jobRef(id)} has no close request.`;
+    const local = { ...deps, sql };
+    const ref = jobRef(id);
+    if (!job.workerSettledAt) {
+      if (job.workerThreadId) {
+        if (!deps.worker.settle) {
+          await closureNotice(
+            local,
+            job,
+            "I couldn't settle the worker thread. Its connection needs repair.",
+          );
+          return `I stopped following ${ref}, but its worker thread still needs to be settled.`;
+        }
+        try {
+          await deps.worker.settle(job.workerThreadId);
+        } catch {
+          await closureNotice(local, job, "I couldn't settle the worker thread. I'll retry.");
+          return `I stopped following ${ref}, but couldn't settle its worker thread. I'll retry.`;
+        }
+      }
+      await sql`update jobs set worker_settled_at = now() where id = ${id}`;
+    }
+    if (job.codeChannel && job.archiveState !== "archived") {
+      const missing = !job.slackChannel ? "missing_channel" : !deps.slack ? "missing_client" : null;
+      const [end] = await sql<{ slackTs: string | null }[]>`
+        select slack_ts from outbox
+        where job_id = ${id} and idempotency_key = ${`${ref}:end`} and status = 'sent'
+      `;
+      const archived = !missing && (await archiveCodeChannel(local, job, end?.slackTs ?? null));
+      if (!archived) {
+        await sql`update jobs set archive_state = ${missing ? "repair" : "pending"},
+          archive_error = ${missing ?? "archive_failed"} where id = ${id}`;
+        const text =
+          missing === "missing_channel"
+            ? `I couldn't archive ${ref}: its channel ID is missing. The saved job needs repair.`
+            : missing === "missing_client"
+              ? `I couldn't archive ${ref}: the Slack connection is missing. It needs repair.`
+              : `I couldn't archive this channel for ${ref}. I'll retry.`;
+        await closureNotice(local, job, text);
+        return `I settled ${ref}'s worker thread and stopped following its PR. ${text}`;
+      }
+      await sql`update jobs set archive_state = 'archived', archive_error = null where id = ${id}`;
+    }
+    await clearClosureNotice(local, job);
+    // No success stamp before external confirmation. Keep the existing result and its links.
+    await editEndPost(
+      sql,
+      job,
+      job.codeChannel
+        ? `I've closed ${ref} and archived its channel.`
+        : `I've closed ${ref} and stopped following its PR.`,
+    );
+    return job.codeChannel ? `Closed ${ref} and archived its channel.` : `Closed ${ref}.`;
+  });
+}
+
+export async function retryClosures(deps: JobDeps): Promise<void> {
+  const jobs = await deps.sql<{ id: number }[]>`
+    select id from jobs where closed_at is not null
+      and (worker_settled_at is null or archive_state in ('pending', 'repair'))
+    order by id limit 20
   `;
-  if (await archiveCodeChannel(deps, job, end?.slackTs ?? null)) return;
-  if (!job.slackChannel) return;
-  const text = `Sym could not archive this channel. Close it again to retry.`;
+  for (const job of jobs) await completeClosure(deps, Number(job.id));
+}
+
+async function closureNotice(deps: JobDeps, job: Job, text: string): Promise<void> {
+  // A broken channel binding can still be explained in the saved origin conversation.
+  const channel = job.slackChannel ?? job.originChannel;
+  if (!channel) {
+    await deps.sql`update jobs set archive_state = 'repair', archive_error = 'missing_channel' where id = ${job.id}`;
+    console.warn(`Sym cannot deliver the repair notice for ${jobRef(job.id)}: no channel ID.`);
+    return;
+  }
   await enqueuePost(deps.sql, {
-    idempotencyKey: `${ref}:archive-retry`,
+    idempotencyKey: `${jobRef(job.id)}:archive-retry`,
     jobId: job.id,
     method: "chat.postMessage",
     payload: {
-      channel: job.slackChannel,
+      channel,
+      ...((job.slackThreadTs ?? job.originThreadTs)
+        ? { thread_ts: job.slackThreadTs ?? job.originThreadTs }
+        : {}),
       text,
-      blocks: [
-        { type: "section", text: { type: "mrkdwn", text } },
-        { type: "actions", elements: [jobButton(CLOSE_ACTION_ID, "Close", ref)] },
-      ],
     },
-    display: chooseDisplay({
-      kind: job.kind,
-      needsAction: true,
-      isNew: true,
-      estMinutes: 0,
-      steps: 0,
-      lines: 1,
-      surface: "channel",
-      quiet: false,
-    }),
+    display: promptDisplay(job, true),
   });
-  await deliverNow(deps);
+}
+
+async function clearClosureNotice(deps: JobDeps, job: Job): Promise<void> {
+  const ref = jobRef(job.id);
+  const notice = await latestPost(deps.sql, job.id, `${ref}:archive-retry`);
+  if (!notice) return;
+  if (notice.status === "pending") {
+    await dropPost(deps.sql, notice.id, "Closure completed before the notice was sent");
+  } else if (notice.status === "sent" && notice.slackTs) {
+    const payload = notice.payload as { channel: string };
+    await enqueuePost(deps.sql, {
+      idempotencyKey: `${ref}:archive-recovered`,
+      jobId: job.id,
+      method: "chat.update",
+      payload: {
+        channel: payload.channel,
+        ts: notice.slackTs,
+        text: job.codeChannel ? `I've archived ${ref}'s channel.` : `I've closed ${ref}.`,
+        blocks: [],
+      },
+      display: promptDisplay(job, false),
+    });
+  }
 }
 
 // The newest later job on the same worker thread, such as a follow-up, as a reference.

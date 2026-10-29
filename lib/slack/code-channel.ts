@@ -201,7 +201,6 @@ export async function archiveCodeChannel(
   const slack = deps.slack;
   const channel = job.slackChannel;
   if (!job.codeChannel || !channel || !slack) return false;
-  await setChannelStatus(deps, job, "closed");
   const archive = (summary: string | null) =>
     slack.call("agents.conversations.archive", {
       channel_id: channel,
@@ -209,13 +208,20 @@ export async function archiveCodeChannel(
     });
   try {
     await archive(summaryTs);
+    await setChannelStatus(deps, job, "closed");
     return true;
   } catch (error) {
     const code = slackCode(error);
-    if (code === "already_archived") return true;
+    if (code === "already_archived") {
+      await setChannelStatus(deps, job, "closed");
+      return true;
+    }
     if (summaryTs && (code === "no_origin_link" || code === "summary_message_not_found")) {
       return archive(null).then(
-        () => true,
+        async () => {
+          await setChannelStatus(deps, job, "closed");
+          return true;
+        },
         (retry: unknown) => {
           console.warn(`Sym could not archive the channel of ${jobRef(job.id)}.`, slackCode(retry));
           return false;
@@ -231,6 +237,7 @@ export async function archiveCodeChannel(
 // job with no session to show.
 export function jobSessionStatus(job: Job): SessionStatus | undefined {
   if (!job.codeChannel) return undefined;
+  if (job.archiveState === "archived") return "closed";
   if (job.status === "waiting_input" || job.status === "waiting_permission") return "suspended";
   if (job.status === "done" || job.status === "failed" || job.status === "cancelled") {
     return "active";

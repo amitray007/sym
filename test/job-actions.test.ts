@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Sql } from "../lib/db.ts";
 import { deliver } from "../lib/delivery/deliver.ts";
 import type { Brief } from "../lib/jobs/brief.ts";
+import { closeJob, retryClosures } from "../lib/jobs/followup.ts";
 import { jobsToWatch } from "../lib/jobs/pr-wakes.ts";
 import { promptPost, refOfPrompt } from "../lib/jobs/prompts.ts";
 import { reconcileJobs } from "../lib/jobs/reconcile.ts";
@@ -10,7 +11,7 @@ import { getJob, type Job } from "../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import type { Pack } from "../lib/pack/load.ts";
 import { packSchema } from "../lib/pack/schema.ts";
-import type { SlackApi } from "../lib/slack/api.ts";
+import { type SlackApi, SlackApiError } from "../lib/slack/api.ts";
 import { handleJobAction, type JobAction } from "../lib/slack/job-actions.ts";
 import { type FakeStep, FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
@@ -387,14 +388,99 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     expect(closed.replies).toEqual([`Closed ${ref}.`]);
     expect(worker.settled).toEqual([job.workerThreadId]);
     const [edit] = await outbox(sql, `${ref}:end-edit:`);
-    expect(JSON.stringify(edit?.payload)).toContain("Closed by <@U1>.");
+    expect(JSON.stringify(edit?.payload)).toContain(
+      `I've closed ${ref} and stopped following its PR.`,
+    );
     expect(JSON.stringify(edit?.payload)).toContain("sym_job_pr");
     expect((await jobsToWatch(deps, new Date(0))).map((j) => j.id)).not.toContain(job.id);
 
     const again = await click(deps, { actionId: "sym_job_close", value: ref });
-    expect(again.replies).toEqual([`${ref} is already closed.`]);
+    expect(again.replies).toEqual([`Closed ${ref}.`]);
     const fix = await click(deps, { actionId: "sym_job_fix", value: ref });
     expect(fix.replies).toEqual([`${ref} is closed.`]);
+  });
+
+  it("retries a failed archive after restart without settling twice or claiming success", async () => {
+    const { deps, worker, job, sql } = await finishedJob("archive-recovery", [
+      { status: "completed", items: [result("Done")] },
+    ]);
+    const ref = `J-${job.id}`;
+    await sql`update jobs set code_channel = true, slack_channel = 'C-code', slack_thread_ts = null,
+      origin_channel = 'C1', origin_thread_ts = '1.1' where id = ${job.id}`;
+    const calls: { method: string; body: Record<string, unknown> }[] = [];
+    let fail = true;
+    const api: SlackApi = {
+      async call(method, body) {
+        calls.push({ method, body });
+        if (method === "agents.conversations.archive" && fail) {
+          fail = false;
+          throw new SlackApiError(method, "internal_error");
+        }
+        return slack.call(method, body);
+      },
+    };
+    const answer = await closeJob({ ...deps, slack: api }, ref, "U1");
+    expect(answer).toContain("couldn't archive");
+    expect(answer).not.toContain(`Closed ${ref}`);
+    expect(calls.filter((c) => c.method === "agents.sessions.setStatus")).toEqual([]);
+    expect(await getJob(sql, job.id)).toMatchObject({ archiveState: "pending" });
+    await retryClosures({ ...deps, slack: api });
+    await deliver(sql, api);
+    expect(worker.settled).toEqual([job.workerThreadId]);
+    expect(await getJob(sql, job.id)).toMatchObject({
+      archiveState: "archived",
+      archiveError: null,
+    });
+    const archives = calls.filter((c) => c.method === "agents.conversations.archive");
+    const [end] = await sql<
+      { slackTs: string }[]
+    >`select slack_ts from outbox where idempotency_key = ${`${ref}:end`}`;
+    expect(archives.map((c) => c.body)).toEqual([
+      { channel_id: "C-code", summary_message_ts: end?.slackTs },
+      { channel_id: "C-code", summary_message_ts: end?.slackTs },
+    ]);
+    const [repaired] = await outbox(sql, `${ref}:archive-recovered`);
+    expect(repaired?.payload).toMatchObject({ text: `I've archived ${ref}'s channel.` });
+    await retryClosures({ ...deps, slack: api });
+    expect(worker.settled).toHaveLength(1);
+    expect(calls.filter((c) => c.method === "agents.conversations.archive")).toHaveLength(2);
+  });
+
+  it("repairs an interrupted close, missing client and missing channel without false success", async () => {
+    const { deps, worker, job, sql } = await finishedJob("archive-missing", [
+      { status: "completed", items: [result("Done")] },
+    ]);
+    const ref = `J-${job.id}`;
+    // Simulate death just after accepting Close, before settlement or archive.
+    await sql`update jobs set closed_at = now(), code_channel = true, archive_state = 'pending'
+      where id = ${job.id}`;
+    const { slack: _slack, ...withoutSlack } = deps;
+    await retryClosures(withoutSlack);
+    expect(await getJob(sql, job.id)).toMatchObject({
+      archiveState: "repair",
+      archiveError: "missing_client",
+    });
+    await sql`update jobs set slack_channel = null, origin_channel = 'C-origin', origin_thread_ts = '7.1'
+      where id = ${job.id}`;
+    expect(await closeJob(deps, ref, "U1")).toContain("channel ID is missing");
+    expect(await getJob(sql, job.id)).toMatchObject({
+      archiveState: "repair",
+      archiveError: "missing_channel",
+    });
+    await sql`update jobs set slack_channel = 'C-repaired' where id = ${job.id}`;
+    const api: SlackApi = {
+      async call(method, body) {
+        if (method === "agents.conversations.archive")
+          throw new SlackApiError(method, "already_archived");
+        if (method === "chat.update") throw new SlackApiError(method, "internal_error");
+        return slack.call(method, body);
+      },
+    };
+    expect(await closeJob({ ...deps, slack: api }, ref, "U1")).toBe(
+      `Closed ${ref} and archived its channel.`,
+    );
+    expect(await getJob(sql, job.id)).toMatchObject({ archiveState: "archived" });
+    expect(worker.settled).toEqual([job.workerThreadId]);
   });
 
   it("steers a running job from its text box", async () => {

@@ -208,4 +208,16 @@ export const migrations: Migration[] = [
   workerIdentityMigration,
   workerCapabilitiesMigration,
   jobCodeChannelMigration,
+  {
+    version: "025_job_closure",
+    sql: `
+      alter table jobs add column worker_settled_at timestamptz;
+      alter table jobs add column archive_state text not null default 'none'
+        check (archive_state in ('none', 'pending', 'repair', 'archived'));
+      alter table jobs add column archive_error text;
+      update jobs set archive_state = 'pending' where code_channel and closed_at is not null;
+      create index jobs_pending_closure on jobs (id)
+        where closed_at is not null and (archive_state in ('pending', 'repair') or worker_settled_at is null);
+    `,
+  },
 ];

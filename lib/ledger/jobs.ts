@@ -31,6 +31,10 @@ export interface Job {
   slackThreadTs: string | null;
   // True when the job moved into its own Slack code channel (decision 067).
   codeChannel: boolean;
+  closedAt: Date | null;
+  workerSettledAt: Date | null;
+  archiveState: "none" | "pending" | "repair" | "archived";
+  archiveError: string | null;
   // The thread a moved job came from. Null for a job that never moved.
   originChannel: string | null;
   originThreadTs: string | null;

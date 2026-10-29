@@ -5,6 +5,7 @@ import { setChannelStatus } from "../slack/code-channel.ts";
 import { workerNoun } from "../worker-label.ts";
 import type { WorkerAdapter } from "../workers/types.ts";
 import { parseOutputContract } from "./contract.ts";
+import { retryClosures } from "./followup.ts";
 import {
   checkPrWakes,
   ensurePrWatched,
@@ -35,6 +36,7 @@ export interface ReconcileReport {
 }
 
 export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
+  await retryClosures(deps);
   const report: ReconcileReport = { checked: 0, finished: 0, offline: 0 };
   for (const job of await orphanedJobs(deps.sql)) {
     try {
@@ -117,6 +119,7 @@ export async function reconcileWorkerPass(
   warn: (message: string) => void = console.warn,
 ): Promise<ReconcileReport | "not_configured"> {
   if (!withWorker) {
+    await retryClosures({ ...deps, worker: unreachableWorker });
     warn(WORKER_NOT_CONFIGURED);
     return "not_configured";
   }
