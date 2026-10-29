@@ -54,7 +54,7 @@ export function connectionDefinitions(
         ? {}
         : {
             auth: {
-              credentialOwner: "app" as const,
+              principalType: "app" as const,
               getToken: async () => {
                 const token = await deps.token(row);
                 if (!token) throw new Error(`The "${row.name}" connection has no token.`);

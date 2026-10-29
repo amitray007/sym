@@ -10,12 +10,9 @@ export default defineAgent({
   defaultTools: false,
   // The brain plans and summarizes; workers spend the real compute. A session that passes this
   // model cost pauses and asks a person to continue or stop (docs/eve.md, spend limits).
-  limits: { maxTokenCostUsdPerSession: 2 },
+  // The window restarts when the person approves Continue.
+  limits: { sessionUsage: ({ window }) => (window.costUsd ?? 0) >= 2 },
   // Resolved per step because the fixture is a live model object, which only step selections
   // may return. A gateway ID stays the same each step, so the prompt cache stays valid.
-  model: defineDynamic({
-    events: {
-      "step.started": () => stepModel(fixtureBrain, "medium"),
-    },
-  }),
+  model: defineDynamic(() => stepModel(fixtureBrain, "medium")),
 });

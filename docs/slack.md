@@ -217,7 +217,9 @@ Allow-list: the pack's owner and `allowList`, or `SYM_SLACK_USERS` without a pac
 (tool approvals such as schedules, playbooks, and Stop) count only from the owner: the pack owner,
 else `SYM_OWNER_SLACK_USER`. Questions, including Start, Edit, and Cancel, stay open to allowed
 users. Every inbound
-handler checks it and fails closed, including answers to buttons. Thread context still includes
+handler checks it and fails closed, including answers to buttons. Free-text answers go through
+Eve's "Type your answer" box, so the same check covers them; a reply typed in the thread is a new
+message, not an answer (decision 065). Thread context still includes
 messages from other people in the thread. The instructions treat that text as data, and job
 launches need approval.
 

@@ -23,7 +23,7 @@ export default defineEval({
     t.succeeded();
     for (const tool of WRITE_TOOLS) t.notCalledTool(tool);
     t.check(
-      turn.message ?? "",
+      turn.reply ?? "",
       satisfies(
         (message) =>
           typeof message === "string" &&

@@ -2,10 +2,10 @@ import {
   defaultSlackAuth,
   defineSlackRenderer,
   postCompletedSlackReply,
+  type SlackAnswerSubmission,
   type SlackContext,
   type SlackEventContext,
   type SlackInboundMessageContext,
-  type SlackInputResponseSubmission,
   type SlackMessage,
   type SlackRenderHandler,
   slackChannel,
@@ -142,7 +142,7 @@ async function showLoadingMessages(channel: SlackContext): Promise<boolean> {
 }
 
 // A modal answer (`view_submission`) is always a question.
-function isApprovalSubmission(submission: SlackInputResponseSubmission): boolean {
+function isApprovalSubmission(submission: SlackAnswerSubmission): boolean {
   return (
     submission.type === "block_actions" &&
     submission.actions.some((action) => isApprovalAction(action.actionId))
@@ -274,19 +274,26 @@ const quietKey = (channel: SlackEventContext) => {
 // handlers then set the status as usual. The handlers below only set a status, so a quiet turn
 // skips them.
 type StatusEvent =
-  | "step.started"
-  | "reasoning.appended"
-  | "reasoning.completed"
-  | "action.partial"
-  | "action.result"
-  | "turn.waiting";
+  | "model.started"
+  | "call.started"
+  | "call.progress"
+  | "call.settled"
+  | "turn.paused";
 
 function stayQuiet<T extends StatusEvent>(): SlackRenderHandler<T> {
-  return async (data, channel, _ctx, next) => {
-    if (isQuietTurn(quietKey(channel))) return;
-    await next(data);
+  return async (event, ctx, next) => {
+    if (isQuietTurn(quietKey(ctx.channel))) return;
+    await next(event);
   };
 }
+
+// Eve names a content part's kind on its first delta only, so the renderer remembers it. A part
+// ends with its content.completed, which removes it.
+const partKinds = new Map<string, string>();
+
+// Eve's default turn.started resets this per-turn bookkeeping before it shows "Thinking...". Eve
+// 0.87 took the fields out of the public state type, so a quiet turn resets them through this view.
+type TurnBookkeeping = { pendingTaskResults?: unknown; pendingToolCallMessage?: unknown };
 
 const symRenderer = defineSlackRenderer({
   // Eve's default sets "Thinking..." as soon as a message arrives. The persona's list replaces it.
@@ -309,7 +316,8 @@ const symRenderer = defineSlackRenderer({
     await showLoadingMessages(channel);
   },
   events: {
-    async "turn.started"(event, channel, ctx, next) {
+    async "turn.started"(event, ctx, next) {
+      const channel = ctx.channel;
       const { channelId, threadTs, teamId, triggeringUserId } = channel.state;
       const quiet = isQuietTurn(quietKey(channel));
       if (channelId) {
@@ -334,55 +342,66 @@ const symRenderer = defineSlackRenderer({
       // Eve's handler resets the turn state and shows "Thinking...". A quiet turn keeps the
       // reset and skips the status.
       if (quiet) {
-        channel.state.pendingTaskResults = null;
-        channel.state.pendingToolCallMessage = null;
+        const state = channel.state as TurnBookkeeping;
+        state.pendingTaskResults = null;
+        state.pendingToolCallMessage = null;
         return;
       }
       await next(event);
       await showLoadingMessages(channel);
     },
-    "step.started": stayQuiet<"step.started">(),
-    "reasoning.appended": stayQuiet<"reasoning.appended">(),
-    "reasoning.completed": stayQuiet<"reasoning.completed">(),
-    "action.partial": stayQuiet<"action.partial">(),
-    "action.result": stayQuiet<"action.result">(),
-    "turn.waiting": stayQuiet<"turn.waiting">(),
-    async "actions.requested"(event, channel, _ctx, next) {
-      const key = quietKey(channel);
+    "model.started": stayQuiet<"model.started">(),
+    "call.started": stayQuiet<"call.started">(),
+    "call.progress": stayQuiet<"call.progress">(),
+    "call.settled": stayQuiet<"call.settled">(),
+    "turn.paused": stayQuiet<"turn.paused">(),
+    async "call.requested"(event, ctx, next) {
+      const key = quietKey(ctx.channel);
       if (isQuietTurn(key)) {
-        const real = event.actions.some((a) => !("toolName" in a) || a.toolName !== "no_reply");
-        if (!real) return;
+        if (event.data.capability.name === "no_reply") return;
         endQuietTurn(key);
       }
       await next(event);
     },
-    async "message.appended"(event, channel, _ctx, next) {
-      if (isQuietTurn(quietKey(channel)) && event.messageDelta.trim() === "") return;
-      endQuietTurn(quietKey(channel));
+    // Reasoning keeps a quiet turn quiet. Reply text that is not blank ends it.
+    async "content.delta"(event, ctx, next) {
+      const { partId, kind, delta } = event.data;
+      if (kind) partKinds.set(partId, kind);
+      const key = quietKey(ctx.channel);
+      if (isQuietTurn(key)) {
+        if (partKinds.get(partId) !== "text" || delta.trim() === "") return;
+        endQuietTurn(key);
+      }
       await next(event);
     },
-    async "turn.completed"(event, channel, _ctx, next) {
-      const quiet = isQuietTurn(quietKey(channel));
-      endQuietTurn(quietKey(channel));
-      if (!quiet) await next(event);
+    async "turn.settled"(event, ctx, next) {
+      const quiet = isQuietTurn(quietKey(ctx.channel));
+      endQuietTurn(quietKey(ctx.channel));
+      // A failed or cancelled quiet turn still gets Eve's notice.
+      if (!quiet || event.data.outcome !== "completed") await next(event);
     },
     // Feedback buttons ride inside each final reply (docs/learning.md), so they add no message
     // and no notification. postCompletedSlackReply keeps Eve's fallbacks: a refused or long
     // reply still goes out as plain Markdown or a snippet, without the buttons.
-    async "message.completed"(event, channel, _ctx, next) {
-      if (event.finishReason === "tool-calls" || !event.message) return next();
-      endQuietTurn(quietKey(channel));
-      await postCompletedSlackReply(channel, {
-        blocks: [{ type: "markdown", text: event.message }, ...feedbackBlocks()] as never,
-        markdown: event.message,
+    async "content.completed"(event, ctx, next) {
+      const { partId, kind, phase, value } = event.data;
+      partKinds.delete(partId);
+      if (kind === "reasoning" && isQuietTurn(quietKey(ctx.channel))) return;
+      if (phase !== "reply" || kind !== "text" || typeof value !== "string" || !value) {
+        return next(event);
+      }
+      endQuietTurn(quietKey(ctx.channel));
+      await postCompletedSlackReply(ctx.channel, {
+        blocks: [{ type: "markdown", text: value }, ...feedbackBlocks()] as never,
+        markdown: value,
       });
     },
   },
-  taskCard(view, next) {
-    const tasks = view.tasks.filter((task) => task.name !== "worker_job");
-    if (tasks.length === view.tasks.length) return next(view);
-    if (tasks.length === 0) return null;
-    return next({ ...view, tasks });
+  taskCard(card, next) {
+    const calls = card.calls.filter((call) => call.name !== "worker_job");
+    if (calls.length === card.calls.length) return next(card);
+    // Eve's default returns null for a card with no task left.
+    return next({ ...card, calls });
   },
 });
 
@@ -555,7 +574,7 @@ export default slackChannel({
   },
   // Answers count from allowed people. A tool approval is an owner decision, so it counts only
   // from the owner (lib/owner.ts). Without a configured owner, the allow-list decides.
-  onInputResponse(ctx, submission) {
+  onAnswers(ctx, submission) {
     if (!isAllowed(submission.user.id)) return null;
     if (isApprovalSubmission(submission) && !mayDecideAsOwner(submission.user.id, pack())) {
       return null;

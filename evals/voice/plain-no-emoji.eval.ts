@@ -14,7 +14,7 @@ export default defineEval({
     const turn = await session.send("what can you do? keep it friendly.");
     t.succeeded();
     t.check(
-      turn.message ?? "",
+      turn.reply ?? "",
       satisfies(
         (message) => !EMOJI.test(String(message).replace(/[✅☐]/gu, "")),
         "the reply has no emoji besides the checklist marks",

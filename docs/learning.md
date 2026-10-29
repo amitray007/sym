@@ -59,7 +59,7 @@ Only one version of a name is approved at a time, and approving a new version re
 approves with `playbook_review`, which shows the exact body that will load. An approved playbook
 also has a start mode, `ask` or `auto`, for the trust ladder. `playbook_retire`
 retires a row or rejects a proposal. `agent/instructions/playbooks.ts` loads approved rows as
-system instructions at `session.started`, rules first, at most 8000 characters in total, inside a
+system instructions once per session, rules first, at most 8000 characters in total, inside a
 frame that says they are reviewed guidance and cannot override the base rules.
 
 MCP connections are owner rows too (decision 045). A connection loads only after the owner

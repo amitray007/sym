@@ -179,6 +179,44 @@ export function blockActionsRequest(
   };
 }
 
+// A submitted modal. Slack sends the view back with each input's value under
+// `state.values[blockId][actionId]`.
+export function viewSubmissionRequest(
+  input: EventContext & {
+    user: string;
+    view: Record<string, unknown>;
+    values: Record<string, Record<string, string>>;
+  },
+): SlackRequestParts {
+  const values = Object.fromEntries(
+    Object.entries(input.values).map(([blockId, actions]) => [
+      blockId,
+      Object.fromEntries(
+        Object.entries(actions).map(([actionId, value]) => [
+          actionId,
+          { type: "plain_text_input", value },
+        ]),
+      ),
+    ]),
+  );
+  const payload = {
+    type: "view_submission",
+    user: { id: input.user, username: input.user.toLowerCase(), team_id: input.teamId ?? "T0FAKE" },
+    api_app_id: input.appId ?? "A0FAKE",
+    team: { id: input.teamId ?? "T0FAKE" },
+    trigger_id: "1337.43.fake",
+    view: { ...input.view, state: { values } },
+  };
+  const body = new URLSearchParams({ payload: JSON.stringify(payload) }).toString();
+  return {
+    body,
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      ...signSlackRequest(body, input.signingSecret, input.timestamp),
+    },
+  };
+}
+
 // A slash command invocation. Slack sends it form-encoded.
 export function slashCommandRequest(
   input: EventContext & {

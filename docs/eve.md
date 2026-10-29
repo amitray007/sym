@@ -2,7 +2,7 @@
 
 Sym runs on [Eve](https://eve.dev) (npm `eve`, Apache-2.0, Node 24 or later). This page records
 which Eve features Sym uses and the limits that shape the design. Source: the Eve docs corpus at
-https://eve.dev/llms-full.txt, read 2026-10-19 against version 0.81.0. Pin the Eve version in
+https://eve.dev/llms-full.txt, read 2026-10-19 against version 0.81.0, and the upgrade to 0.88.0 on 2026-10-29 (decision 065). Pin the Eve version in
 `package.json`.
 
 Legend: **Use** = part of the design. **Later** = after milestone 1 or in the team phase.
@@ -13,9 +13,9 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Feature | API | Decision | How Sym uses it | Limits |
 |---|---|---|---|---|
 | Agent definition | `agent/agent.ts` `defineAgent` | Use | Model, limits, compaction | Self-hosted upgrades strand running sessions |
-| Model | Gateway model ID from `SYM_MODEL`, set at `session.started` (decision 018) | Use | Chat, briefs, triage, summaries. Workers do heavy work | Needs `AI_GATEWAY_API_KEY` off Vercel. The model is fixed per session |
-| Dynamic model | `defineDynamic` on `turn.started` | Later | Cheap model for status, stronger model for planning | Switching mid-session loses the prompt cache |
-| Spend limits | `limits.maxTokenCostUsdPerSession` | Use | $2 of brain model cost per session, then Eve asks to continue or stop (`agent/agent.ts`) | Cost tracking needs reported cost |
+| Model | Gateway model ID from `SYM_MODEL`, read by `defineDynamic` before each model call (decision 018) | Use | Chat, briefs, triage, summaries. Workers do heavy work | Needs `AI_GATEWAY_API_KEY` off Vercel. The model is fixed per session |
+| Dynamic model | `defineDynamic(ctx => model)` with a turn-keyed `ctx.memo` | Later | Cheap model for status, stronger model for planning | Switching mid-session loses the prompt cache |
+| Spend limits | `limits.sessionUsage` | Use | $2 of brain model cost per window, then Eve asks to continue or stop; Continue starts a new window (`agent/agent.ts`) | Cost tracking needs reported cost |
 | Instructions | `agent/instructions.md`, `instructions/` | Use | Persona, trust ladder, Slack style | TS instructions evaluate at build time |
 | Skills | `agent/skills/*.md` | Use | Pack playbooks through the overlay (decision 035). The brief rules live in `agent/instructions.md`, and the progress and result rules in code (`lib/jobs/progress.ts`, `lib/jobs/verify.ts`) | Supporting files need a sandbox |
 
@@ -24,7 +24,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Feature | API | Decision | How Sym uses it | Limits |
 |---|---|---|---|---|
 | Plain tools | `defineTool` | Use | `jobs_status`, `worker_projects`, `schedule_*`, memory tools | Not retried. Interrupted steps re-run, so use idempotency keys |
-| Approvals | `approval: never/once/always/policy` | Use | Gate launches with write intent, schedule deletes, merges | Default `never`. Check the clicker in `onInputResponse` |
+| Approvals | `approval: never/once/always/policy` | Use | Gate launches with write intent, schedule deletes, merges | Default `never`. Check the clicker in `onAnswers` |
 | Workflow task | `defineWorkflowTool({ task })` | Use | `worker_job`: one worker thread from launch to checked result | 32 working tasks per session. Result capped at 50 KB |
 | Progress | `async *task` + `yield` | Use | The thread status line | The task card row does not show yields. `serve` tasks cannot yield |
 | Questions | `ctx.ask` | Use | Worker questions become Slack buttons | `unavailable` in Markdown schedule sessions |
@@ -74,7 +74,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Session state | `defineState` | Use lightly | Per-thread scratch | Lost with the session |
 | Hooks | `agent/hooks/*.ts` `defineHook` | Later | An audit log of turns, tool calls, and results in Postgres. Jobs already keep their own rows | Observe-only, at-least-once |
 | MCP connections | `defineDynamic` in `agent/connections/rows.ts` with `defineMcpClientConnection` | Use | Owner-approved MCP servers load as connections at each turn (decision 045). `tools.block` hides tools; an `approval` request policy asks for `ask` tools; `ownerResponse` lets only the owner approve | Names allow only lowercase letters, digits, and dashes. An approval prompt reads only the tool input. Eve's interactive OAuth is user-scoped and posts in the thread, so Sym runs its own sign-in and passes the token through `getToken`. Eve does not show a server's `initialize` instructions or let a connection set a call timeout, so Sym appends the instructions to `description` (decision 048). Code-mode servers (few tools such as `search` and `execute`) connect like any server; their `execute` starts in `ask` mode unless the server marks it read-only, and `connection_tools` switches it. Without a `tool`, `connection_tools` sets a connection-wide default mode (decision 049): a tool's own mode, then that default, then the read-only hint |
-| Dynamic capabilities | `defineDynamic` in `agent/instructions/playbooks.ts` | Use | Load approved playbooks and rules as system instructions on `session.started` (learning layer 2, decision 033) | Resolvers may re-run, so it is a pure read of approved rows, capped at 8000 characters |
+| Dynamic capabilities | `defineDynamic` in `agent/instructions/playbooks.ts` | Use | Load approved playbooks and rules as system instructions once per session, through a session-keyed `ctx.memo` (learning layer 2, decision 033) | Eve evaluates resolvers before every model call and may re-run them, so each is a pure read, capped at 8000 characters |
 | Compaction | `compaction`, `clear` | Use defaults | Long job threads stay usable | |
 
 ## Quality and operations

@@ -20,7 +20,7 @@ export default defineEval({
     t.calledTool("no_reply");
     for (const tool of WRITE_TOOLS) t.notCalledTool(tool);
     t.check(
-      turn.message ?? "",
+      turn.reply ?? "",
       satisfies((message) => String(message ?? "").trim() === "", "the reply is empty"),
     );
   },

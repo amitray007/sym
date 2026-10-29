@@ -173,8 +173,8 @@ importers:
         specifier: ^7.0.137
         version: 7.0.143(zod@4.5.4)
       eve:
-        specifier: 0.81.0
-        version: 0.81.0(ai@7.0.143(zod@4.5.4))
+        specifier: 0.88.0
+        version: 0.88.0(ai@7.0.143(zod@4.5.4))(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1))
       postgres:
         specifier: 3.4.9
         version: 3.4.9
@@ -850,20 +850,36 @@ packages:
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
 
-  eve@0.81.0:
-    resolution: {integrity: sha512-Zz15bJ+r0BWfGEFymdFRwX+LypD383MzF63nGoeedePWcQ8p+yUMuYZJZxHk8tfQnI6AhK7yCyMDLjHbNFp2DA==}
+  eve@0.88.0:
+    resolution: {integrity: sha512-vXf6c4/uHlqza+Jm6Rml4z8abh5LFeZxRpsFXRJRB0mwpyH3nnei8SXUnfOYjOT54sA3kBaPu0+Couo0FoglWA==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
+      '@linqapp/sdk': ^0.47.1
+      '@nuxt/kit': ^4.0.0
+      '@nuxt/schema': ^4.0.0
       '@opentelemetry/api': ^1.0.0
+      '@vercel/connect': ^2.5.2
       ai: ^7.0.137
       braintrust: ^3.0.0
       chat: ^4.42.0
       dd-trace: ^6.13.0
-      just-bash: ^3.1.0
-      microsandbox: ^0.5.0
+      just-bash: ^3.6.0
+      next: ^16.0.0
+      react: ^19.0.0
+      svelte: ^5.0.0
+      vite: ^8.3.1
+      vue: ^3.5.0
     peerDependenciesMeta:
+      '@linqapp/sdk':
+        optional: true
+      '@nuxt/kit':
+        optional: true
+      '@nuxt/schema':
+        optional: true
       '@opentelemetry/api':
+        optional: true
+      '@vercel/connect':
         optional: true
       braintrust:
         optional: true
@@ -873,7 +889,15 @@ packages:
         optional: true
       just-bash:
         optional: true
-      microsandbox:
+      next:
+        optional: true
+      react:
+        optional: true
+      svelte:
+        optional: true
+      vite:
+        optional: true
+      vue:
         optional: true
 
   eventsource-parser@3.1.1:
@@ -1689,11 +1713,13 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.9
 
-  eve@0.81.0(ai@7.0.143(zod@4.5.4)):
+  eve@0.88.0(ai@7.0.143(zod@4.5.4))(vite@8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)):
     dependencies:
       ai: 7.0.143(zod@4.5.4)
       nitro: 3.0.260903-beta
       undici: 8.10.2
+    optionalDependencies:
+      vite: 8.3.4(@types/node@24.19.2)(jiti@2.7.0)(yaml@2.9.1)
 
   eventsource-parser@3.1.1: {}
 

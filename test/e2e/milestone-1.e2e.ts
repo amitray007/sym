@@ -300,8 +300,7 @@ describe("milestone 1", () => {
 
     await c.click(approval, "Edit");
     const ask = await c.waitForPrompt(new RegExp(`What should change in ${ref}`));
-    expect(ask).toBeDefined();
-    await c.reply("Only touch the retry module, and keep the batch size.");
+    await c.typeAnswer(ask, "Only touch the retry module, and keep the batch size.");
     const closed = await waitForJobStatus(h.sql, job.id, "cancelled");
 
     expect(closed.lastSummary).toBe("Brief edited");

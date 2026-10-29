@@ -60,11 +60,11 @@ export default defineSchedule({
             try {
               // No root message: a scheduled run posts only when something needs attention, and
               // its first post opens the thread (decision 031).
-              const session = await to(slack, { channelId: schedule.channel }).send(
+              const delivery = await to(slack, { channelId: schedule.channel }).send(
                 dispatchMessage(schedule),
                 { auth: appAuth },
               );
-              await attachSession(sql, run.id, session.id);
+              await attachSession(sql, run.id, delivery.sessionId);
             } catch {
               await finishRun(sql, run.id, "failed");
             }

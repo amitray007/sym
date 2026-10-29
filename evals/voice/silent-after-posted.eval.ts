@@ -20,7 +20,7 @@ export default defineEval({
     t.calledTool("no_reply", { count: 1 });
     t.toolOrder(["worker_job", "no_reply"]);
     t.check(
-      turn.message ?? "",
+      turn.reply ?? "",
       satisfies((message) => String(message).trim().length === 0, "the reply has no visible text"),
     );
   },

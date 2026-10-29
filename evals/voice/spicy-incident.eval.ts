@@ -17,9 +17,9 @@ export default defineEval({
       "the deploy of example-app failed at 14:05 UTC with exit code 137 and customers see errors. what should I check first?",
     );
     t.succeeded();
-    t.check(turn.message, includes(/137/));
+    t.check(turn.reply, includes(/137/));
     t.check(
-      turn.message ?? "",
+      turn.reply ?? "",
       satisfies((message) => !TEASING.test(String(message)), "the reply has no teasing words"),
     );
   },

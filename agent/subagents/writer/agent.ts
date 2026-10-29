@@ -12,9 +12,5 @@ export default defineAgent({
   tool: false,
   // It only writes. It changes nothing, so it gets no tools.
   defaultTools: false,
-  model: defineDynamic({
-    events: {
-      "step.started": () => stepModel(fixtureWriter, "low"),
-    },
-  }),
+  model: defineDynamic(() => stepModel(fixtureWriter, "low")),
 });
