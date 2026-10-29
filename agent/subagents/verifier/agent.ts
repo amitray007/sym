@@ -13,9 +13,5 @@ export default defineAgent({
   tool: false,
   // It reads and judges. It changes nothing, so it gets no tools.
   defaultTools: false,
-  model: defineDynamic({
-    events: {
-      "step.started": () => stepModel(fixtureVerifier, "medium"),
-    },
-  }),
+  model: defineDynamic(() => stepModel(fixtureVerifier, "medium")),
 });

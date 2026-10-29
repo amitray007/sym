@@ -11,6 +11,6 @@ export default defineEval({
     t.succeeded();
     t.calledTool("jobs_status", { input: { job: /^J-12$/i }, count: 1 });
     t.notCalledTool("worker_job");
-    t.check(turn.message ?? "", includes(/J-12|running|step 3/i));
+    t.check(turn.reply ?? "", includes(/J-12|running|step 3/i));
   },
 });

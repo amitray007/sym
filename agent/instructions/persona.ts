@@ -8,22 +8,20 @@ import { ledger, pack } from "../../lib/runtime.ts";
 // setting, else the persona named by SYM_PERSONA (default casual). Worker threads get none. A
 // failed setting read falls back to the environment with one warning. A failed file read adds
 // nothing, and the shared Voice rules in instructions.md still apply.
-export default defineDynamic({
-  events: {
-    "session.started": async (_event, ctx) => {
-      if (isWorkerCaller(ctx.session.auth.current)) return null;
-      try {
-        const stored = await storedPersonaOrNone(ledger);
-        const content = personaInstructions({
-          stored,
-          env: process.env.SYM_PERSONA,
-          pack: pack(),
-        });
-        return content ? defineInstructions({ content }) : null;
-      } catch (error) {
-        console.warn("persona: could not load the persona", error);
-        return null;
-      }
-    },
-  },
+// Eve evaluates this before every model call, so the memo keeps one read per session.
+export default defineDynamic(async (ctx) => {
+  if (isWorkerCaller(ctx.session.auth.current)) return null;
+  try {
+    const content = await ctx.memo(ctx.session.id, async () =>
+      personaInstructions({
+        stored: await storedPersonaOrNone(ledger),
+        env: process.env.SYM_PERSONA,
+        pack: pack(),
+      }),
+    );
+    return content ? defineInstructions({ content }) : null;
+  } catch (error) {
+    console.warn("persona: could not load the persona", error);
+    return null;
+  }
 });

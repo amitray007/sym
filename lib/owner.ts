@@ -30,8 +30,9 @@ export function mayDecideAsOwner(
 export const OWNER_ONLY = "Only the owner can decide this.";
 
 // Eve marks the buttons of a tool approval with a `tool-approval:` action ID prefix, after an
-// optional route. Question buttons and modal answers carry no such prefix.
-const APPROVAL_ACTION = /^eve_input:(?:route:[^:]+:[^:]+:)?tool-approval:/;
+// optional route: a thread route, or a code channel route since Eve 0.85. Question buttons and
+// modal answers carry no such prefix.
+const APPROVAL_ACTION = /^eve_input:(?:route:[^:]+:[^:]+:|code:[^:]+:)?tool-approval:/;
 export function isApprovalAction(actionId: string): boolean {
   return APPROVAL_ACTION.test(actionId);
 }

@@ -1,7 +1,7 @@
 import type { SessionAuthContext } from "eve/context";
 import { isScheduleAuth } from "eve/schedules";
 import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
-import { createWebhook, FatalError, sleep } from "workflow";
+import { createWebhook, FatalError, sleep } from "eve/workflow";
 import type { Brief } from "../../lib/jobs/brief.ts";
 import { callbackFor } from "../../lib/jobs/callback.ts";
 import { parseOutputContract } from "../../lib/jobs/contract.ts";

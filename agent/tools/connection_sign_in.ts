@@ -1,6 +1,6 @@
 import type { SessionAuthContext } from "eve/context";
 import { defineWorkflowTool } from "eve/tools";
-import { createWebhook, sleep } from "workflow";
+import { createWebhook, sleep } from "eve/workflow";
 import { z } from "zod";
 import { relistTools } from "../../lib/connections/add.ts";
 import { saveConnectionCredential } from "../../lib/connections/credentials.ts";

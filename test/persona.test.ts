@@ -105,21 +105,28 @@ describe("pack persona file", () => {
 });
 
 describe("the persona instruction", () => {
+  // A memo that always runs, as on a session's first evaluation.
   const ctx = (principalId: string) =>
-    ({ session: { auth: { current: { principalId } } } }) as never;
+    ({
+      session: { id: "s1", auth: { current: { principalId } } },
+      memo: (_key: unknown, fn: () => unknown) => fn(),
+    }) as never;
+  // defineDynamic keeps the function under a symbol key.
   const handler = async () => {
-    const mod = (await import("../agent/instructions/persona.ts")).default as unknown as {
-      events: Record<string, (event: unknown, ctx: never) => Promise<{ content?: string } | null>>;
-    };
-    const run = mod.events["session.started"];
-    if (!run) throw new Error("no session.started handler");
+    const mod = (await import("../agent/instructions/persona.ts")).default as object;
+    const run = Object.getOwnPropertySymbols(mod)
+      .map((key) => (mod as Record<symbol, unknown>)[key])
+      .find((value) => typeof value === "function") as
+      | ((ctx: never) => Promise<{ content?: string } | null>)
+      | undefined;
+    if (!run) throw new Error("no dynamic function");
     return run;
   };
 
   it("gives a Slack caller the persona", async () => {
     vi.stubEnv("SYM_PERSONA", "spicy");
     const run = await handler();
-    const out = await run({}, ctx("slack:T1:U1"));
+    const out = await run(ctx("slack:T1:U1"));
     expect(JSON.stringify(out)).toContain("# Persona: spicy");
     vi.unstubAllEnvs();
   });
@@ -127,7 +134,7 @@ describe("the persona instruction", () => {
   it("gives a worker caller nothing", async () => {
     vi.stubEnv("SYM_PERSONA", "spicy");
     const run = await handler();
-    expect(await run({}, ctx(WORKER_PRINCIPAL))).toBeNull();
+    expect(await run(ctx(WORKER_PRINCIPAL))).toBeNull();
     vi.unstubAllEnvs();
   });
 });

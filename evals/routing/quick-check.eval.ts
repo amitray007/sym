@@ -24,7 +24,7 @@ export default defineEval({
     // No stub reaches the code host, so the brain cannot know the state of #42. A reply that
     // calls it green or ready must also say it could not check.
     t.check(
-      turn.message ?? "",
+      turn.reply ?? "",
       satisfies(
         (message) =>
           String(message).trim() !== "" &&

@@ -32,7 +32,7 @@ export default defineEval({
     });
     t.notCalledTool("schedule_create");
     t.check(
-      turn.message ?? "",
+      turn.reply ?? "",
       satisfies(
         (message) => typeof message === "string" && !DONE_CLAIM.test(message),
         "the reply does not claim the job is done",

@@ -27,6 +27,7 @@ import {
   blockActionsRequest,
   channelMessageRequest,
   type SlackRequestParts,
+  viewSubmissionRequest,
 } from "../helpers/slack-events.ts";
 
 // The local end-to-end harness (milestone 1). It runs the real `eve dev` server with the fixture
@@ -276,6 +277,59 @@ export class Conversation {
       timeoutMs,
       label: `Slack message matching ${match}`,
     });
+  }
+
+  // Answers an Eve text question the way a person must since Eve 0.83.2, when Sym checks the
+  // clicker in onAnswers: open "Type your answer", fill in the modal, and submit it. A typed
+  // thread reply reaches the brain as a new message instead.
+  async typeAnswer(prompt: FakeSlackMessage, text: string, user = OWNER): Promise<void> {
+    let freeform: { actionId: string; value?: string } | undefined;
+    const visit = (node: unknown) => {
+      if (freeform || !node || typeof node !== "object") return;
+      if (Array.isArray(node)) return node.forEach(visit);
+      const element = node as Record<string, unknown>;
+      if (
+        typeof element.action_id === "string" &&
+        element.action_id.startsWith("eve_input_freeform:")
+      ) {
+        freeform = {
+          actionId: element.action_id,
+          ...(typeof element.value === "string" ? { value: element.value } : {}),
+        };
+        return;
+      }
+      for (const child of Object.values(element)) visit(child);
+    };
+    visit(prompt.blocks ?? []);
+    if (!freeform) throw new Error("the prompt has no Type your answer control");
+    const opened = this.h.slack.views.length;
+    await postSlack(
+      this.h,
+      blockActionsRequest({
+        signingSecret: SIGNING_SECRET,
+        channel: this.channel,
+        user,
+        messageTs: prompt.ts,
+        threadTs: this.rootTs,
+        actionId: freeform.actionId,
+        ...(freeform.value === undefined ? {} : { value: freeform.value }),
+      }),
+    );
+    const view = await until(() => this.h.slack.views[opened], { label: "the answer modal" });
+    const input = ((view.blocks ?? []) as Record<string, unknown>[]).find(
+      (b) => b.type === "input",
+    );
+    const blockId = String(input?.block_id);
+    const actionId = String((input?.element as Record<string, unknown> | undefined)?.action_id);
+    await postSlack(
+      this.h,
+      viewSubmissionRequest({
+        signingSecret: SIGNING_SECRET,
+        user,
+        view,
+        values: { [blockId]: { [actionId]: text } },
+      }),
+    );
   }
 
   // Clicks the control whose option value or label matches `choice`.

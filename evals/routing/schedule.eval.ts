@@ -11,7 +11,7 @@ export default defineEval({
         "which ones have waited more than two days for a review.",
     );
     // schedule_create needs the owner's approval, so the call stays pending and the run parks.
-    t.parked();
+    t.awaitingInput();
     t.calledTool("schedule_create", {
       status: "pending",
       input: {

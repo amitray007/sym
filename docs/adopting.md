@@ -123,7 +123,7 @@ that leaves the file is deleted. A deleted key that returns waits for approval a
 - **Start:** Sym reads `sym.config.yaml` from `SYM_PACK_DIR`, validates it, and refuses to start
   on an error that names the file and the field. It reads the optional `schedules.yaml` the same
   way. The first dispatcher tick then seeds its rows (see "Seeding schedules").
-- **Session start:** `defineDynamic` adds approved learning-layer-2 rows from Postgres on top.
+- **Session start:** `defineDynamic`, memoized once per session, adds approved learning-layer-2 rows from Postgres on top.
 
 Milestone 1 checked this split: Eve 0.81.0 compiles pack instructions and playbooks from the
 overlay, in `eve build` and in `docker build`.

@@ -39,7 +39,7 @@ export default defineEval({
     if (briefs.length === 0) {
       // No job started, so the brain must have asked or declined in words.
       t.check(
-        turn.message ?? "",
+        turn.reply ?? "",
         satisfies(
           (message) => typeof message === "string" && message.trim().length > 0,
           "the brain replied instead of acting",
