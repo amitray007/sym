@@ -54,6 +54,8 @@ export interface LaunchRequest {
   branch?: string;
   // Options are `{ id, value }` pairs such as the reasoning effort.
   model?: { providerId: string; model: string; options?: { id: string; value: string }[] };
+  // Images from the request's Slack thread, sent with the first message (decision 075).
+  images?: { name: string; mimeType: string; bytes: Uint8Array }[];
 }
 
 export interface WaitResult {

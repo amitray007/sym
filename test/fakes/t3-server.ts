@@ -110,6 +110,8 @@ export interface FakeT3 {
   url: string;
   token: string;
   threads: Map<string, FakeT3Thread>;
+  // Attachment uploads by pending ID. `bytes` is set once the client POSTs the file.
+  attachments: Map<string, { name: string; mimeType: string; sizeBytes: number; bytes?: Buffer }>;
   // Every tool call the server received, in order.
   calls: { name: string; args: Record<string, unknown> }[];
   // Requests the server refused for a missing or wrong token.
@@ -156,6 +158,7 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
   const drops: string[] = [];
   const watchFailures: string[] = [];
   const threads = new Map<string, FakeT3Thread>();
+  const attachments: FakeT3["attachments"] = new Map();
   const oauthTokenSeconds = options.oauthTokenSeconds ?? 30 * 86_400;
   let denyNext = false;
   let wrongIssuer: string | undefined;
@@ -168,6 +171,7 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
     url: "",
     token,
     threads,
+    attachments,
     calls: [],
     unauthorized: 0,
     oauth: {
@@ -319,6 +323,36 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
       },
     );
 
+    // Like T3: a signed upload URL the client POSTs the file's exact bytes to.
+    tool(
+      "t3_attachment_prepare_upload",
+      {
+        upload: z.object({
+          type: z.enum(["image", "file"]),
+          name: z.string(),
+          mimeType: z.string(),
+          sizeBytes: z
+            .number()
+            .int()
+            .min(1)
+            .max(10 * 1024 * 1024),
+        }),
+      },
+      (args) => {
+        const attachmentId = `pending-${attachments.size + 1}`;
+        attachments.set(attachmentId, {
+          name: args.upload.name,
+          mimeType: args.upload.mimeType,
+          sizeBytes: args.upload.sizeBytes,
+        });
+        return {
+          attachmentId,
+          relativeUrl: `/api/attachments/upload/signed-${attachmentId}`,
+          expiresAt: Date.now() + 600_000,
+        };
+      },
+    );
+
     tool(
       "t3_thread_launch",
       {
@@ -327,10 +361,28 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
         message: z.string(),
         workspaceStrategy: z.unknown().optional(),
         modelSelection: z.unknown().optional(),
+        attachments: z
+          .array(
+            z.object({
+              type: z.enum(["image", "file"]),
+              id: z.string(),
+              name: z.string(),
+              mimeType: z.string(),
+              sizeBytes: z.number(),
+            }),
+          )
+          .max(8)
+          .optional(),
       },
       (args) => {
         if (!projects.some((project) => project.id === args.projectId)) {
           throw new Error(`Project ${args.projectId} was not found.`);
+        }
+        // Like T3: an attachment must be a pending upload whose bytes arrived.
+        for (const attachment of args.attachments ?? []) {
+          if (!attachments.get(attachment.id)?.bytes) {
+            throw new Error("Attachments must be pending uploads.");
+          }
         }
         const thread: FakeT3Thread = {
           threadId: `thread-${nextThread++}`,
@@ -626,6 +678,7 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
 
   async function serve(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (await serveOAuth(req, res)) return;
+    if (await serveUpload(req, res)) return;
     const bearer = req.headers.authorization;
     const issuedToken = state.oauth.issued.some((issued) => bearer === `Bearer ${issued}`);
     if (issuedToken) state.oauth.oauthCalls++;
@@ -671,6 +724,23 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
       res.write(value);
     }
     res.end();
+  }
+
+  // The signed upload route. Like T3 it needs no bearer: the path is the credential.
+  async function serveUpload(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+    const match = /^\/api\/attachments\/upload\/signed-(pending-\d+)$/.exec(req.url ?? "");
+    if (!match || req.method !== "POST") return false;
+    const pending = attachments.get(match[1] as string);
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const body = Buffer.concat(chunks);
+    if (!pending || body.byteLength !== pending.sizeBytes) {
+      res.writeHead(pending ? 400 : 404).end();
+      return true;
+    }
+    pending.bytes = body;
+    res.writeHead(200, { "content-type": "application/json" }).end("{}");
+    return true;
   }
 
   // The OAuth endpoints. Returns false for any other path.

@@ -36,7 +36,7 @@ export async function workerCallbackInstructions(sql: Sql, jobId: number, endpoi
   const credential = await issueWorkerCapability(sql, jobId, endpoint);
   return `Worker tools for ${jobRef(jobId)}: connect an MCP client to ${credential.endpoint}
 with Authorization: Bearer ${credential.token}
-Use sym_post_progress or sym_ask_owner with job "${jobRef(jobId)}". This credential can update
-only this job and stops working when it ends. Keep it private: never put it in files, commits,
+Use sym_post_progress, sym_ask_owner, or sym_read_thread with job "${jobRef(jobId)}". This
+credential can reach only this job and stops working when it ends. Keep it private: never put it in files, commits,
 logs, Slack, or your report. It replaces any earlier job credential in this thread.`;
 }

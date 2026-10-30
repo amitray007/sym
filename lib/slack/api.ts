@@ -5,6 +5,9 @@ export interface SlackApi {
   // Calls a Web API method. Resolves with the response body when Slack answers `ok: true`.
   // Throws SlackApiError when Slack answers `ok: false`.
   call(method: string, body: Record<string, unknown>): Promise<Record<string, unknown>>;
+  // Downloads a private Slack file with the bot token (decision 075). Refuses a URL outside
+  // Slack's file host, so the token never leaves Slack, and a file larger than `maxBytes`.
+  download?(url: string, maxBytes: number): Promise<Uint8Array>;
 }
 
 export class SlackApiError extends Error {

@@ -468,7 +468,8 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     await launchOrAdopt(deps, fresh.id, CALLBACK);
 
     expect(slack.posts()).toHaveLength(1);
-    expect(slack.calls.filter((call) => call.method === "chat.getPermalink")).toHaveLength(1);
+    // One link for the card, one for the worker's first message (decision 075).
+    expect(slack.calls.filter((call) => call.method === "chat.getPermalink")).toHaveLength(2);
     const post = slack.posts()[0]?.body;
     expect(post).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });
     const blocks = post?.blocks as { type: string; title: string }[];
@@ -486,7 +487,8 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     await launchOrAdopt(deps, fresh.id, CALLBACK);
 
     expect(slack.posts()).toHaveLength(1);
-    expect(slack.calls.filter((call) => call.method === "chat.getPermalink")).toHaveLength(1);
+    // One link for the card, one for the worker's first message (decision 075).
+    expect(slack.calls.filter((call) => call.method === "chat.getPermalink")).toHaveLength(2);
     expect(slack.posts()[0]?.body).toMatchObject({
       channel: CHANNEL,
       thread_ts: THREAD_TS,

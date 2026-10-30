@@ -177,6 +177,9 @@ export function briefPrompt(brief: Brief, _ref?: string, modelLine?: string): st
 export function fullBrief(brief: Brief): string {
   return lines([
     escapeMrkdwn(brief.goal),
+    brief.context?.length
+      ? `What I'll pass on: ${brief.context.map(escapeMrkdwn).join("; ")}.`
+      : null,
     `I'll work in ${escapeMrkdwn(brief.project)}${brief.baseRef ? ` from ${escapeMrkdwn(brief.baseRef)}` : ""} and ${deliveryOf(brief)}.`,
     ...brief.constraints.map(escapeMrkdwn),
     `I'll check: ${brief.doneWhen.map(escapeMrkdwn).join("; ")}.`,
