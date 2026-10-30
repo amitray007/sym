@@ -44,6 +44,10 @@ export async function handleCodeChannelAction(
     return;
   }
   const text = await closeCodeChannel(deps, channel, user);
+  // A successful close archives the channel, and Slack refuses posts there. The archive is the
+  // confirmation; only a refusal needs words in the still-open channel.
+  const info = await slack.call("conversations.info", { channel }).catch(() => undefined);
+  if ((info?.channel as { is_archived?: boolean } | undefined)?.is_archived) return;
   await queueReply(deps.sql, slack, {
     key: `code-channel-close:${eventId}`,
     channel,

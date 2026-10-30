@@ -194,6 +194,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
     }),
     "chat.postMessage": (b) => {
       if (!b.channel) throw "channel_not_found";
+      if (codeChannels.some((c) => c.id === String(b.channel) && c.archived)) throw "is_archived";
       const message = store({
         channel: String(b.channel),
         thread_ts: b.thread_ts === undefined ? undefined : String(b.thread_ts),

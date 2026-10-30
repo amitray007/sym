@@ -88,6 +88,26 @@ describe.skipIf(!hasDatabase)("close any code channel", () => {
     expect(slack.codeChannels.find((c) => c.id === id)?.archived).toBe(false);
   });
 
+  it("answers a refused click in the still-open channel", async () => {
+    const d = deps();
+    const id = await channel();
+    const job = await createJob(d.sql, {
+      requestKey: `click-${id}`,
+      kind: "code-change",
+      title: "Retry work",
+      brief: {},
+      worker: "fake",
+      slackChannel: id,
+    });
+    await updateJob(d.sql, job.id, { status: "running", codeChannel: true });
+    await handleCodeChannelAction(d, { key: "close", channel: id, user: "U1" }, `click-${id}`);
+    expect(slack.codeChannels.find((c) => c.id === id)?.archived).toBe(false);
+    expect(slack.messages.at(-1)).toMatchObject({
+      channel: id,
+      text: "I'm still working on this. Stop it first.",
+    });
+  });
+
   it("refuses an unauthorized requester before any Slack call", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const d = deps();
@@ -152,13 +172,11 @@ describe.skipIf(!hasDatabase)("close any code channel", () => {
       id,
     );
     expect(slack.codeChannels.find((c) => c.id === id)?.archived).toBe(true);
-    expect(slack.messages.at(-1)).toMatchObject({
-      channel: id,
-      text: "Closed this and archived its channel.",
-    });
-    const [post] =
-      await d.sql`select status, display from outbox where idempotency_key = ${`code-channel-close:${id}`}`;
-    expect(post).toMatchObject({ status: "sent", display: { level: 1 } });
+    // Slack refuses posts in an archived channel; the archive itself is the confirmation.
+    expect(slack.messages.filter((m) => m.channel === id)).toHaveLength(0);
+    const posts =
+      await d.sql`select 1 from outbox where idempotency_key = ${`code-channel-close:${id}`}`;
+    expect(posts).toHaveLength(0);
   });
 
   it("sends only an ephemeral refusal for a denied click", async () => {

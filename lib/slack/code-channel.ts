@@ -148,6 +148,7 @@ export async function ensureConversationBar(deps: Deps, channelId: string): Prom
       code_channel: { context_bar_items: [CLOSE_ITEM] },
     });
   } catch (error) {
+    conversationBars.delete(channelId);
     console.warn("Sym could not set the context bar of a code channel.", slackCode(error));
   }
 }

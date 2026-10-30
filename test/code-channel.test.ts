@@ -117,19 +117,35 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
 
   it("gives a conversation channel a bar with only Close, once per process", async () => {
     const sql = ledger.sql();
+    const created = await api.call("agents.conversations.create", { name: "Conversation" });
+    const id = String(created.channel_id);
     const before = slack.callsTo("agents.conversations.setProperties").length;
-    await ensureConversationBar({ sql, slack: api }, "CCONV1");
-    await ensureConversationBar({ sql, slack: api }, "CCONV1");
+    await ensureConversationBar({ sql, slack: api }, id);
+    await ensureConversationBar({ sql, slack: api }, id);
     const calls = slack.callsTo("agents.conversations.setProperties").slice(before);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.body).toMatchObject({
-      channel_id: "CCONV1",
+      channel_id: id,
       code_channel: {
         context_bar_items: [
           { key: "close", label: "Close channel", icon: "lock", item_type: "action" },
         ],
       },
     });
+  });
+
+  it("retries a conversation bar after a failed write", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const sql = ledger.sql();
+    const created = await api.call("agents.conversations.create", { name: "Conversation" });
+    const id = String(created.channel_id);
+    const before = slack.callsTo("agents.conversations.setProperties").length;
+    slack.failNext("agents.conversations.setProperties", "ratelimited");
+    await ensureConversationBar({ sql, slack: api }, id);
+    await ensureConversationBar({ sql, slack: api }, id);
+    await ensureConversationBar({ sql, slack: api }, id);
+    expect(slack.callsTo("agents.conversations.setProperties").slice(before)).toHaveLength(2);
+    expect(slack.codeChannels.find((c) => c.id === id)?.contextBar).toHaveLength(1);
   });
 
   it("retries a taken title once with a numeric suffix and preserves privacy and replay", async () => {
