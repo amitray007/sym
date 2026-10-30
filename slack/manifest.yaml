@@ -50,6 +50,9 @@ oauth_config:
       - channels:read
       - groups:read
       - mpim:read
+      # Invite people only on request (decision 074). Reinstall the app for these scopes.
+      - channels:write.invites
+      - groups:write.invites
 settings:
   event_subscriptions:
     request_url: https://sym.example.com/eve/v1/slack

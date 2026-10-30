@@ -19,6 +19,13 @@ const workerJobDone = {
 } as const;
 
 export const writeToolStubs = [
+  {
+    id: "code-channel-invite",
+    tool: "code_channel_invite",
+    outcome: {
+      response: { work: "Retry work", results: [{ person: "<@U0TEAMMATE>", status: "invited" }] },
+    },
+  },
   { id: "worker-job", tool: "worker_job", outcome: { response: workerJobDone } },
   { id: "schedule-create", tool: "schedule_create", outcome: { response: NOTHING_RAN } },
   { id: "schedule-delete", tool: "schedule_delete", outcome: { response: NOTHING_RAN } },

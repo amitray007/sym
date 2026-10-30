@@ -12,6 +12,7 @@ export default defineEval({
     t.succeeded();
     t.calledTool("jobs_status", { input: { job: /^J-12$/i }, count: 1 });
     t.notCalledTool("worker_job");
+    t.notCalledTool("code_channel_invite");
     t.check(turn.reply ?? "", includes(/running|step 3/i));
   },
 });

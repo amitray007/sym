@@ -209,6 +209,25 @@ describe("code channel conversations", () => {
     });
   });
 
+  it("invites a mentioned teammate into this job's channel on request", async () => {
+    const { channel, thread, job } = await running("Invite teammate");
+    const before = h.slack.callsTo("conversations.invite").length;
+    expect(h.slack.members[channel.id] ?? []).not.toContain("UTEAMMATE");
+    await sayInChannel(h, channel.id, "fixture-invite <@UTEAMMATE>");
+    await until(() => h.slack.members[channel.id]?.includes("UTEAMMATE"), {
+      label: "teammate invited",
+    });
+    await workerAdvance(h, thread, finishedSteps());
+    await waitForJobStatus(h.sql, job.id, "done");
+    await settle(h);
+    expect(
+      h.slack
+        .callsTo("conversations.invite")
+        .slice(before)
+        .map((call) => call.body),
+    ).toEqual([{ channel: channel.id, users: "UTEAMMATE" }]);
+  });
+
   it("adopts an existing conversation channel for a new job", async () => {
     const c = newConversation(h);
     const before = h.slack.codeChannels.length;

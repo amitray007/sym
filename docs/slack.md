@@ -161,6 +161,7 @@ with the public host before you import it.
 | `commands` | `/sym` |
 | `users:read` | Resolve the approver for DM routing, and display names in a shared thread |
 | `code_channels:manage` | Create, archive, and label a job's code channel (decision 067) |
+| `channels:write.invites`, `groups:write.invites` | Invite mentioned people into code channels on request (decision 074); reinstall the app to grant these scopes |
 | `channels:read`, `groups:read`, `mpim:read` | Tell a code channel apart (`conversations.info`) |
 
 Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reaction_added`, `app_home_opened`,
@@ -195,6 +196,17 @@ in a DM, and any job Slack refuses stay in their thread.
 A person can also ask Sym to move a conversation into a code channel. The brain's `code_channel`
 tool opens one through Eve, copies the conversation, and continues there (decision 068). A job
 started inside a code channel uses that channel instead of opening another.
+
+A person can ask Sym to bring @-mentioned people into the work's code channel (decision 074).
+`code_channel_invite` accepts an optional job handle and 1 to 10 Slack user IDs or @-mentions.
+Without a handle, it uses the current code channel's job or the job of the current origin thread.
+Sym never adds people on its own. A name without an @-mention needs clarification. The requester
+must pass the pack or `SYM_SLACK_USERS` allow-list. Closed work and archived channels refuse invites.
+For a private code channel, invitees must already be members of the origin channel; otherwise Sym
+refuses that person with "not in the original channel". Membership reads use all pages and fail
+closed. Sym reports invited, already there, or Slack's refusal code per person. One failure does
+not block the others. The owner must reinstall the Slack app for `channels:write.invites` and
+`groups:write.invites`. Private-channel creation still passes `is_private: true` for a private origin.
 
 ## Threads with several people
 
