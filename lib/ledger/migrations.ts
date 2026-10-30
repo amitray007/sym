@@ -287,4 +287,14 @@ export const migrations: Migration[] = [
       -- Existing sent children have no echo boundary. Their current cursor is the safe fallback.
       update jobs set followup_boundary = cursor where followup_sent_at is not null;`,
   },
+  {
+    // Decision 079: the thread a conversation code channel came from, by its Eve session.
+    version: "032_code_channel_origins",
+    sql: `create table code_channel_origins (
+      session_id text primary key,
+      origin_channel text not null,
+      origin_thread_ts text not null,
+      created_at timestamptz not null default now()
+    );`,
+  },
 ];

@@ -334,19 +334,10 @@ async function insertFollowUp(sql: Sql, parent: Job, requestKey: string, brief: 
   });
 }
 
-// The longest summary Sym shares in the original thread.
-const SUMMARY_SHARE_MAX = 3000;
-
-export async function closeJob(
-  deps: JobDeps,
-  ref: string,
-  by: string,
-  options: { summary?: string } = {},
-): Promise<string> {
+export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<string> {
   const job = await getJobByRef(deps.sql, ref);
   if (!job) return "I couldn't find that work.";
   if (!TERMINAL.includes(job.status)) return "I'm still working on this. Stop it first.";
-  const summary = options.summary?.trim().slice(0, SUMMARY_SHARE_MAX) ?? "";
   const refusal = await deps.sql.begin(async (transaction) => {
     const sql = transaction as unknown as Sql;
     // Follow-up insertion takes this same parent lock. Closing cannot settle a child that
@@ -363,53 +354,12 @@ export async function closeJob(
       where id = ${job.id}
     `;
     await sql`update conversation_choices set expires_at = least(expires_at, now()) where job_id = ${job.id}`;
-    // Decision 078: the summary commits with the close, so a lost session cannot archive
-    // without it. The outbox sends it even if this call ends early.
-    if (summary && canShare(current)) await enqueueSummary(sql, current, summary);
     return undefined;
   });
   if (refusal) return refusal;
-  if (summary && canShare(job)) await deliverNow(deps);
   const answer = await completeClosure(deps, job.id);
   await deliverNow(deps);
-  const shared = summary ? await summaryAnswer(deps, job) : "";
-  return shared ? `${answer} ${shared}` : answer;
-}
-
-const canShare = (job: Job) =>
-  job.codeChannel && Boolean(job.originChannel) && Boolean(job.originThreadTs);
-
-// Posts the brain's summary as a reply in the thread the work was asked in. Slack's own
-// `summary_message_ts` only labels the archived channel; it posts nothing in the thread.
-async function enqueueSummary(sql: Sql, job: Job, text: string): Promise<void> {
-  const channel = job.originChannel as string;
-  await enqueuePost(sql, {
-    idempotencyKey: `${jobRef(job.id)}:origin-summary`,
-    jobId: job.id,
-    method: "chat.postMessage",
-    payload: { channel, thread_ts: job.originThreadTs, text },
-    display: chooseDisplay({
-      kind: job.kind,
-      needsAction: false,
-      isNew: true,
-      estMinutes: 0,
-      steps: 0,
-      lines: text.split("\n").length,
-      surface: /^D/.test(channel) ? "dm" : "channel",
-      quiet: false,
-    }),
-  });
-}
-
-async function summaryAnswer(deps: JobDeps, job: Job): Promise<string> {
-  if (!job.codeChannel) return "This work is in its thread already, so reply there instead.";
-  if (!canShare(job)) return "I couldn't share the summary: this channel has no original thread.";
-  const post = await latestPost(deps.sql, job.id, `${jobRef(job.id)}:origin-summary`);
-  if (post?.status === "sent") return "I posted the summary in the original thread.";
-  if (post?.status === "pending") {
-    return "The summary will post in the original thread once Slack accepts it.";
-  }
-  return "I couldn't post the summary in the original thread. Slack refused it.";
+  return answer;
 }
 
 // Close acceptance stops PR following through closed_at. External settlement and archive are
@@ -441,11 +391,8 @@ async function completeClosure(deps: JobDeps, id: number): Promise<string> {
         : !deps.slack
           ? "missing_client"
           : null;
-      const [end] = await deps.sql<{ slackTs: string | null }[]>`
-      select slack_ts from outbox where job_id = ${id} and idempotency_key = ${`${ref}:end`} and status = 'sent'
-    `;
-      const archived =
-        !missing && (await archiveCodeChannel(deps, requested, end?.slackTs ?? null));
+      // Decision 079: no summary on archive. Sym posts in the main thread only when asked.
+      const archived = !missing && (await archiveCodeChannel(deps, requested));
       if (archived) {
         await deps.sql`update jobs set archive_state = 'archived', archive_error = null where id = ${id}`;
       } else {

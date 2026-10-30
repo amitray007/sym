@@ -490,7 +490,7 @@ async function jobConversationNote(job: Job): Promise<string> {
   const ref = jobRef(job.id);
   const questions = await pendingQuestionContext({ sql: ledger() }, job.id);
   return [
-    `This conversation is about ${ref} (${JSON.stringify(job.title)}), now ${job.status}. Job and schedule references are handles for tools; never write them to people. Name the work in a few words, or say "this" here. Accept a reference if a person types one. Read each message in context. Choose chat, job_steer for explicit direction or a pending answer, job_followup to propose more work after completion, job_stop for an explicit stop request, job_close when the person is done, or no_reply for side talk. Do not turn every reply into steering. Follow-ups always need a stored Start approval.`,
+    `This conversation is about ${ref} (${JSON.stringify(job.title)}), now ${job.status}. Job and schedule references are handles for tools; never write them to people. Name the work in a few words, or say "this" here. Accept a reference if a person types one. Read each message in context. Choose chat, job_steer for explicit direction or a pending answer, job_followup to propose more work after completion, job_stop for an explicit stop request, job_close when the person is done, main_thread_post when the person asks to post or summarize in the main thread, or no_reply for side talk. Do not turn every reply into steering. Follow-ups always need a stored Start approval.`,
     `Stored job scope (details on request): ${fullBrief(Brief.parse(job.brief))}`,
     questions,
   ]

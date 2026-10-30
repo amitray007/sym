@@ -1,6 +1,6 @@
 # 078. Post the close summary in the original thread
 
-Status: accepted
+Status: superseded by [079](079-main-thread-posts-on-request.md)
 Date: 2026-10-30
 
 ## Context

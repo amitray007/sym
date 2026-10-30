@@ -9,7 +9,7 @@ import { codeChannelsOn } from "./slack/code-channel.ts";
 export function capabilityInstructions(env: Record<string, string | undefined> = process.env) {
   const codeChannels = codeChannelsOn(env)
     ? [
-        "- Code channels are on. When you call `worker_job`, Sym opens the job's own Slack code channel and posts the brief and Start there, not in the thread. Slack links the channel in the thread. Say nothing more in the thread. Direct messages and Slack Connect channels keep the brief in the thread.",
+        "- Code channels are on. When you call `worker_job`, Sym opens the job's own Slack code channel and posts the brief and Start there, not in the thread. Slack links the channel in the thread. Say nothing more in the thread. Direct messages and Slack Connect channels keep the brief in the thread. A code channel is the same agent as its thread; when a person asks, `main_thread_post` posts in the thread it came from.",
         "- The `code_channel` tool moves the current conversation into a new code channel. Use it only when a person explicitly asks for a code channel. Never use it on your own, not even for long or multi-step work. Coding work goes through `worker_job`, which opens its own channel. It does nothing inside a code channel.",
         "- Sym cannot create, rename, or archive any other Slack channel.",
       ]

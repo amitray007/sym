@@ -186,51 +186,23 @@ export async function setChannelStatus(deps: Deps, job: Job, status: SessionStat
   }
 }
 
-// Archives a closed job's channel. The result post becomes the summary Slack shares in the
-// origin thread. A channel Slack opened without an origin takes no summary, so Sym archives it
-// without one.
-export async function archiveCodeChannel(
-  deps: Deps,
-  job: Job,
-  summaryTs: string | null,
-): Promise<boolean> {
+// Archives a closed job's channel. It passes no summary: Slack would label the session card in the
+// main thread with it, and Sym posts there only when a person asks (decision 079).
+export async function archiveCodeChannel(deps: Deps, job: Job): Promise<boolean> {
   const slack = deps.slack;
   const channel = job.slackChannel;
   if (!job.codeChannel || !channel || !slack) return false;
-  const archive = (summary: string | null) =>
-    slack.call("agents.conversations.archive", {
-      channel_id: channel,
-      ...(summary ? { summary_message_ts: summary } : {}),
-    });
   try {
-    await archive(summaryTs);
-    await setChannelStatus(deps, job, "closed");
-    return true;
+    await slack.call("agents.conversations.archive", { channel_id: channel });
   } catch (error) {
     const code = slackCode(error);
-    if (code === "already_archived") {
-      await setChannelStatus(deps, job, "closed");
-      return true;
+    if (code !== "already_archived") {
+      console.warn(`Sym could not archive the channel of ${jobRef(job.id)}.`, code);
+      return false;
     }
-    if (summaryTs && (code === "no_origin_link" || code === "summary_message_not_found")) {
-      return archive(null).then(
-        async () => {
-          await setChannelStatus(deps, job, "closed");
-          return true;
-        },
-        async (retry: unknown) => {
-          if (slackCode(retry) === "already_archived") {
-            await setChannelStatus(deps, job, "closed");
-            return true;
-          }
-          console.warn(`Sym could not archive the channel of ${jobRef(job.id)}.`, slackCode(retry));
-          return false;
-        },
-      );
-    }
-    console.warn(`Sym could not archive the channel of ${jobRef(job.id)}.`, code);
-    return false;
   }
+  await setChannelStatus(deps, job, "closed");
+  return true;
 }
 
 // The session status that matches a job: working, waiting on a person, or done. Undefined for a
