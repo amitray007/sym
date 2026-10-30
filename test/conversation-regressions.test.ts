@@ -225,6 +225,11 @@ describe.skipIf(!hasDatabase)("conversation recovery regressions", () => {
     expect(posted).toBeLessThan(methods.indexOf("agents.conversations.archive"));
     await closeJob(s.deps, `J-${s.job.id}`, "U1", { summary: "again" });
     expect(s.calls.filter(toOrigin)).toHaveLength(1);
+    // A summary Slack refused for good is reported as not shared.
+    await s.sql`update outbox set status = 'failed' where idempotency_key = ${`J-${s.job.id}:origin-summary`}`;
+    expect(await closeJob(s.deps, `J-${s.job.id}`, "U1", { summary: "again" })).toContain(
+      "I couldn't post the summary in the original thread.",
+    );
   });
 
   it("replaces stale archive retry facts in the result after recovery", async () => {

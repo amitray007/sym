@@ -17,8 +17,8 @@ channel, so the brain could not do the second half of the request.
 1. `job_close` takes an optional `summary`. The brain writes it only when the person asks to share
    a summary or the result in the main or original thread.
 2. For a job in a code channel with a known origin thread, Sym posts the summary there through
-   the outbox, delivers it at once, and then settles and archives. The reply says "posted" only
-   after Slack confirms the post. One summary per job: a repeat close posts nothing new.
+   the outbox in the same transaction that records the close, delivers it at once, and then settles and archives. A lost session cannot archive without it. The reply says "posted" only
+   after Slack confirms the post, and says it was not shared when Slack refused it for good. One summary per job: a repeat close posts nothing new.
 3. A job that lives in its thread already, and a conversation channel with no stored origin, get a
    plain answer that the summary was not shared.
 4. The brain's instructions tell it to plan a multi-part request before acting: anything that
