@@ -189,13 +189,31 @@ Slack links the new channel there. The channel uses the work's title alone. An e
 `name_taken` response retries once with a numeric suffix such as `Billing sync retry #142`.
 The card, result, and buttons post top-level in the channel.
 Worker questions post in the current job conversation, including code channels. The context bar
-shows its project and pull request. The channel's status follows the job. Everything said in the channel reaches Sym with no tag and is about that job.
+shows its project, pull request, and a final Close channel action (decision 076). The channel's status follows the job. Everything said in the channel reaches Sym with no tag and is about that job.
 `job_close` requests settlement and archive, with the result shared in the original thread. A scheduled check, a job
 in a DM, and any job Slack refuses stay in their thread.
 
 A person can also ask Sym to move a conversation into a code channel. The brain's `code_channel`
 tool opens one through Eve, copies the conversation, and continues there (decision 068). A job
 started inside a code channel uses that channel instead of opening another.
+
+"Close this channel" calls `job_close` without a job handle. A job channel uses the existing
+settlement and archive path, including refusal while work runs. A conversation channel checks
+`conversations.info` for `record_type === "agent_channel"` and archives without a summary.
+It reports success only after Slack confirms it, says "Already closed." for archived channels,
+and reports Slack refusal codes. Conversation channels have no ledger retry; ask again after
+a failure. A database lock prevents double clicks from double-archiving them.
+
+The context bar's Close channel item uses `item_type: "action"` and the `lock` icon. A
+conversation channel gets a bar with only that item on the first turn Sym handles there. The manifest
+subscribes to `code_channel_action`. Slack documents the item type but not the event payload;
+the owner must update the subscription and confirm the shape live. Sym accepts `channel` or
+`channel_id`, `user` or `user_id`, and `key`, `item_key`, `action_id`, `item.key`, or `action.key`.
+Unknown shapes log field names only; other keys are ignored. The pack or environment allow-list
+applies to chat and clicks. Denied clicks get a private ephemeral line. Allowed answers use
+`chooseDisplay` and the outbox. Eve's `openCodeChannel` returns no channel ID, so the conversation
+tool cannot set its Close-only bar yet. Job bars include Close after project and PR, at most
+three items; each update replaces the whole bar.
 
 A person can ask Sym to bring @-mentioned people into the work's code channel (decision 074).
 `code_channel_invite` accepts an optional job handle and 1 to 10 Slack user IDs or @-mentions.

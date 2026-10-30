@@ -28,6 +28,7 @@ import {
   appMentionRequest,
   blockActionsRequest,
   channelMessageRequest,
+  codeChannelActionRequest,
   type SlackRequestParts,
   viewSubmissionRequest,
 } from "../helpers/slack-events.ts";
@@ -47,6 +48,13 @@ export const OWNER = "UOWNER";
 export const BOT = "UBOT";
 const SIGNING_SECRET = "e2e-signing-secret";
 const BOT_TOKEN = "xoxb-e2e-fake";
+
+export async function clickCodeChannelClose(h: Harness, channel: string, user = OWNER) {
+  await postSlack(
+    h,
+    codeChannelActionRequest({ signingSecret: SIGNING_SECRET, channel, user, key: "close" }),
+  );
+}
 
 export interface HarnessOptions {
   // The database the run creates and drops.

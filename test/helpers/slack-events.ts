@@ -42,6 +42,21 @@ interface EventContext {
   timestamp?: number;
 }
 
+export function codeChannelActionRequest(
+  input: EventContext & { channel: string; user: string; key: string },
+): SlackRequestParts {
+  return jsonRequest(
+    envelope(input, {
+      type: "code_channel_action",
+      channel: input.channel,
+      user: input.user,
+      key: input.key,
+    }),
+    input.signingSecret,
+    input.timestamp,
+  );
+}
+
 function envelope(ctx: EventContext, event: Record<string, unknown>) {
   const now = ctx.timestamp ?? Math.floor(Date.now() / 1000);
   return {

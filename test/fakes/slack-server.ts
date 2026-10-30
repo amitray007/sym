@@ -194,6 +194,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
     }),
     "chat.postMessage": (b) => {
       if (!b.channel) throw "channel_not_found";
+      if (codeChannels.some((c) => c.id === String(b.channel) && c.archived)) throw "is_archived";
       const message = store({
         channel: String(b.channel),
         thread_ts: b.thread_ts === undefined ? undefined : String(b.thread_ts),
@@ -317,7 +318,10 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
     "agents.conversations.setProperties": (b) => {
       const channel = codeChannel(b.channel_id);
       const props = b.code_channel as { context_bar_items?: unknown[] } | undefined;
-      if (props?.context_bar_items) channel.contextBar = props.context_bar_items.slice(0, 5);
+      if (props?.context_bar_items) {
+        if (props.context_bar_items.length > 5) throw "too_many_items";
+        channel.contextBar = props.context_bar_items;
+      }
       changed();
       return { channel_id: channel.id };
     },

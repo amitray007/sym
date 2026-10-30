@@ -21,6 +21,7 @@ import {
 } from "../../lib/feedback/feedback.ts";
 import { publishLiveHome } from "../../lib/home/live.ts";
 import { Brief } from "../../lib/jobs/brief.ts";
+import { closeJob } from "../../lib/jobs/followup.ts";
 import { fullBrief } from "../../lib/jobs/messages.ts";
 import { pendingQuestionContext } from "../../lib/jobs/questions.ts";
 import { jobListAnswer } from "../../lib/jobs/status.ts";
@@ -44,17 +45,19 @@ import {
   recordThreadMessage,
   recordTurnMessage,
 } from "../../lib/reactions/react.ts";
-import { ledger, pack, slackFromEnv, withJobDeps } from "../../lib/runtime.ts";
+import { ledger, ledgerDeps, pack, slackFromEnv, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
 import { listSchedules } from "../../lib/schedules/rows.ts";
 import { namesBot, threadPeople, triageThreadMessage } from "../../lib/slack/addressing.ts";
 import { SlackApiError } from "../../lib/slack/api.ts";
 import {
   codeChannelsOn,
+  ensureConversationBar,
   jobOfCodeChannel,
   jobSessionStatus,
   setChannelStatus,
 } from "../../lib/slack/code-channel.ts";
+import { handleCodeChannelAction } from "../../lib/slack/code-channel-actions.ts";
 import { isSlackUserAllowed, sayPrivately } from "../../lib/slack/guard.ts";
 import {
   handleJobAction,
@@ -472,8 +475,10 @@ async function restoreJobStatus(channelId: string): Promise<void> {
 async function codeChannelNote(channelId: string): Promise<string | undefined> {
   try {
     const job = await jobOfCodeChannel(ledger(), channelId);
-    if (!job) return undefined;
-    return jobConversationNote(job);
+    if (job) return jobConversationNote(job);
+    const slack = slackFromEnv();
+    if (slack) await ensureConversationBar({ sql: ledger(), slack }, channelId);
+    return undefined;
   } catch (error) {
     console.warn("Sym could not read the job of a code channel.", String(error));
     return undefined;
@@ -787,6 +792,17 @@ export default slackChannel({
   },
   // Reactions on Sym's messages are feedback. A reaction on another message is not.
   async onEvent(ctx, event) {
+    if (event.type === "code_channel_action") {
+      await handleCodeChannelAction(
+        {
+          ...ledgerDeps(),
+          closeJob: (ref, by) => withJobDeps((deps) => closeJob(deps, ref, by)),
+        },
+        event,
+        ctx.envelope.event_id ?? crypto.randomUUID(),
+      );
+      return;
+    }
     // Opening the Home tab publishes the dashboard (decision 052).
     if (event.type === "app_home_opened") {
       if (event.tab === "home" && typeof event.user === "string") {
