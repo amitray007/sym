@@ -44,6 +44,11 @@ export const writeToolStubs = [
     tool: "job_close",
     outcome: { response: { job: "J-12", status: "closed", archived: false } },
   },
+  {
+    id: "main-thread-post",
+    tool: "main_thread_post",
+    outcome: { response: "Posted in the main thread." },
+  },
   { id: "offer-choices", tool: "offer_choices", outcome: { response: { posted: true } } },
   { id: "worker-sign-in", tool: "worker_sign_in", outcome: { response: NOTHING_RAN } },
   { id: "playbook-propose", tool: "playbook_propose", outcome: { response: NOTHING_RAN } },

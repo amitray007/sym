@@ -270,7 +270,7 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
     expect(slack.codeChannels).toHaveLength(before);
   });
 
-  it("archives with the result as the summary, once", async () => {
+  it("archives once, with no summary for the main thread", async () => {
     vi.stubEnv("SYM_CODE_CHANNELS", "on");
     const sql = ledger.sql();
     const moved = await moveToCodeChannel({ sql, slack: api }, await newJob());
@@ -278,24 +278,14 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
       status: "done",
       prUrl: "https://example.com/pr/1",
     });
-    const posted = await api.call("chat.postMessage", { channel: done.slackChannel, text: "Done" });
-    const summaryTs = String(posted.ts);
+    await api.call("chat.postMessage", { channel: done.slackChannel, text: "Done" });
     await setChannelStatus({ sql, slack: api }, done, "active");
-    await archiveCodeChannel({ sql, slack: api }, done, summaryTs);
-    await archiveCodeChannel({ sql, slack: api }, done, summaryTs);
+    await archiveCodeChannel({ sql, slack: api }, done);
+    await archiveCodeChannel({ sql, slack: api }, done);
 
     const channel = slack.codeChannels.find((c) => c.id === done.slackChannel);
-    expect(channel).toMatchObject({ archived: true, summaryTs });
-    expect(channel?.statuses).toEqual(["processing", "active", "closed", "closed"]);
-  });
-
-  it("archives without a summary when Slack cannot find it", async () => {
-    vi.stubEnv("SYM_CODE_CHANNELS", "on");
-    const sql = ledger.sql();
-    const moved = await moveToCodeChannel({ sql, slack: api }, await newJob());
-    await archiveCodeChannel({ sql, slack: api }, moved, "1700000000.999999");
-    const channel = slack.codeChannels.find((c) => c.id === moved.slackChannel);
     expect(channel).toMatchObject({ archived: true, summaryTs: undefined });
+    expect(channel?.statuses).toEqual(["processing", "active", "closed", "closed"]);
   });
 
   it("finds a moved job from a button in the thread it left", async () => {
@@ -310,7 +300,7 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
     const before = slack.calls.length;
     const job = await newJob();
     await setChannelStatus({ sql: ledger.sql(), slack: api }, job, "active");
-    await archiveCodeChannel({ sql: ledger.sql(), slack: api }, job, null);
+    await archiveCodeChannel({ sql: ledger.sql(), slack: api }, job);
     expect(slack.calls).toHaveLength(before);
   });
 });

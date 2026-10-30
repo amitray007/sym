@@ -39,7 +39,7 @@ come from the channel's agent bot or a member. A call on a normal channel fails 
 | Method | Purpose | Key arguments and limits |
 |---|---|---|
 | `agents.conversations.create` | Creates a code channel | `name`, `session_id` (idempotency: the same ID returns the same channel), `origin_channel_id` + `origin_message_ts`, `is_private`. Refuses a Slack Connect, DM, or group DM origin. Errors include `feature_disabled`, `user_not_enabled`, `invalid_origin_link`, `origin_channel_externally_shared`, `restricted_action` |
-| `agents.conversations.archive` | Archives the channel | `summary_message_ts`: a message Slack stores as the channel's `summary_message` property and shows on the session card. It posts nothing in the origin thread (decision 078). Errors include `already_archived`, `no_origin_link`, `summary_message_not_found` |
+| `agents.conversations.archive` | Archives the channel | `summary_message_ts`: a message Slack stores as the channel's `summary_message` property and shows on the session card. It posts nothing in the origin thread. Sym does not pass it (decision 079). Errors include `already_archived`, `no_origin_link`, `summary_message_not_found` |
 | `agents.conversations.setProperties` | Context bar and resource details | `code_channel.context_bar_items`: at most 5; each call replaces the whole bar. Item: `key` (64), `label` (128), `icon` (`branch`, `folder`, `hierarchy`, `life-ring`, `link`, `globe`, `terminal`, `code`, `search`, `lock`), `url` (2048), `item_type` (`info` or `action`) |
 | `agents.conversations.setCommands` | Per-channel slash commands | At most 10 per channel. Name 1 to 31 characters, no leading slash |
 | `agents.conversations.setView` | Adds or updates a tab | Types `html`, `diff`, `block_kit`, `canvas`, `pull_request` (`pr_url`). At most 5 views, one diff. `content` up to 1,000,000 bytes. Keyed by `view_key` |
@@ -79,7 +79,7 @@ Sym keeps the job in its thread when that happens.
 | Context bar | The job, its project, and its pull request |
 | Status | `processing` while the worker runs, `suspended` while a question waits, `active` when the job ends, `closed` before archive |
 | Privacy | A private thread asks for a private channel; a public result is archived and the job stays put |
-| `archive` | On Close, with the result post as the summary |
+| `archive` | On Close, with no summary (decision 079) |
 | Eve `codeChannels` | Eve serves the channel as one session, so messages need no tag |
 | Eve `openCodeChannel()` | The brain's `code_channel` tool moves a conversation into a channel on request (decision 068) |
 

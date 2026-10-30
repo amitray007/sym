@@ -82,4 +82,5 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [075](075-request-context-for-workers.md) | The brief carries the request's exact facts; the worker gets the source thread link, its images as attachments, and `sym_read_thread` |
 | [076](076-close-any-code-channel.md) | Close job or conversation code channels through chat or a context-bar action, with allow-list checks and confirmed archive answers |
 | [077](077-start-in-the-code-channel.md) | With code channels on, the brief and Start post in the job's code channel, not the thread; Sym ignores Slack's origin quote there |
-| [078](078-close-summary-in-origin-thread.md) | `job_close` can post a summary in the original thread before it archives the code channel; the brain plans multi-part requests |
+| [078](078-close-summary-in-origin-thread.md) | Superseded by 079. `job_close` could post a summary in the original thread before it archives the code channel; the brain plans multi-part requests |
+| [079](079-main-thread-posts-on-request.md) | A code channel posts in its main thread with `main_thread_post` whenever a person asks; close posts no summary |

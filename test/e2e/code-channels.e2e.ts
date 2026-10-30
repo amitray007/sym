@@ -140,7 +140,8 @@ describe("code channel conversations", () => {
     );
     await sayInChannel(h, channel.id, `fixture-close ${ref}`);
     await until(() => (channel.archived ? true : undefined), { label: "confirmed archive" });
-    expect(channel.summaryTs).toBe(result.ts);
+    // Decision 079: close labels nothing in the main thread.
+    expect(channel.summaryTs).toBeUndefined();
     expect(
       (await h.sql`select archive_state from jobs where id = ${job.id}`)[0]?.archiveState,
     ).toBe("archived");
@@ -249,17 +250,15 @@ describe("code channel conversations", () => {
       label: "archive recovered after restart",
     });
     await settle(h);
-    expect(channel.summaryTs).toBe(result.ts);
+    // Decision 079: close labels nothing in the main thread.
+    expect(channel.summaryTs).toBeUndefined();
     expect(thread.organized.filter((action) => action === "settle")).toHaveLength(1);
     expect(messageText(notice)).toContain("I've archived");
     expect(messageText(notice)).not.toContain("I'll retry");
     expect(messageText(result)).toContain("I've closed this and archived its channel.");
     expect(messageText(result)).not.toContain("couldn't archive");
     const archives = h.slack.callsTo("agents.conversations.archive");
-    expect(archives.at(-1)?.body).toMatchObject({
-      channel_id: channel.id,
-      summary_message_ts: result.ts,
-    });
+    expect(archives.at(-1)?.body).toEqual({ channel_id: channel.id });
   });
 
   it("invites a mentioned teammate into this job's channel on request", async () => {

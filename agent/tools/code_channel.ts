@@ -2,7 +2,9 @@ import { openCodeChannel } from "eve/channels/slack";
 import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller } from "../../lib/callers.ts";
+import { ledger } from "../../lib/runtime.ts";
 import { codeChannelsOn } from "../../lib/slack/code-channel.ts";
+import { recordChannelOrigin } from "../../lib/slack/main-thread.ts";
 import slack from "../channels/slack.ts";
 
 // Moves the conversation into a new Slack code channel when a person asks (decision 068). Only
@@ -26,7 +28,17 @@ export default defineDynamic((ctx) => {
     }),
     async execute({ message, name }, toolCtx) {
       try {
-        return await openCodeChannel(toolCtx, slack, message, { name });
+        const opened = await openCodeChannel(toolCtx, slack, message, { name });
+        // Decision 079: remember the thread it came from, so the channel can post there on request.
+        const { channelId, threadTs } = toolCtx.channel.metadata ?? {};
+        if (
+          opened.status === "opened" &&
+          typeof channelId === "string" &&
+          typeof threadTs === "string"
+        ) {
+          await recordChannelOrigin(ledger(), opened.sessionId, { channel: channelId, threadTs });
+        }
+        return opened;
       } catch (error) {
         return { status: "refused" as const, reason: errorText(error) };
       }
