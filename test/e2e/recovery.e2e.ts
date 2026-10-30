@@ -80,11 +80,11 @@ describe("recovery", () => {
     expect(result.text).toContain(SAMPLE_CONTRACT.pr_url);
     expect(done.prUrl).toBe(SAMPLE_CONTRACT.pr_url);
     // The same card collapsed in place. No second card, and one result message.
-    expect(messageText(card)).toContain(`[${ref}] Restart job · Done`);
-    expect(c.botMessages().filter((m) => (m.text ?? "").startsWith(`✅ *${ref} · `))).toHaveLength(
-      1,
-    );
-    expect(h.slack.messages.filter((m) => messageText(m).includes(`[${ref}]`))).toHaveLength(1);
+    expect(messageText(card)).toContain("Restart job · Done");
+    expect(
+      c.botMessages().filter((m) => (m.text ?? "").includes(SAMPLE_CONTRACT.summary)),
+    ).toHaveLength(1);
+    expect(h.slack.messages.some((m) => messageText(m).includes(ref))).toBe(false);
     expect(launchesOf(h, ref)).toHaveLength(1);
   });
 });

@@ -44,6 +44,7 @@ type Completed =
 
 export default defineWorkflowTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Sign Sym in to its worker when the owner asks, or when the sign-in expired. " +
     "Only the owner can use it. Sym sends the owner a private approval link and waits up to " +
     "10 minutes. Runs as a task: you get a receipt now and the result later. If the status says " +
@@ -165,8 +166,8 @@ async function sendLink(
     owner,
     idempotencyKey: `signin-link:${key}`,
     text:
-      `Approve Sym on the ${workerNoun()}: <${authorizationUrl}|open the sign-in page>. ` +
-      "Pick the access level there. The link works for 10 minutes. Do not share it.",
+      `I need you to approve my ${workerNoun()} sign-in: <${authorizationUrl}|open the sign-in page>. ` +
+      "Choose the access level there. This private link expires in 10 minutes. Please do not share it.",
   });
 }
 

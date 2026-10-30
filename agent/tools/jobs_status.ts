@@ -1,14 +1,15 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { checkJob } from "../../lib/jobs/run.ts";
-import { jobAnswer, jobListAnswer } from "../../lib/jobs/status.ts";
-import { getJobByRef, recentJobs } from "../../lib/ledger/jobs.ts";
-import { ledger, withJobDeps } from "../../lib/runtime.ts";
+import { freshJobStatus, jobListAnswer } from "../../lib/jobs/status.ts";
+import { jobRef, recentJobs } from "../../lib/ledger/jobs.ts";
+import { getSessionThread } from "../../lib/ledger/threads.ts";
+import { slackUserOfPrincipal } from "../../lib/owner.ts";
+import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
+import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
 
 // "What's the update?" (docs/architecture.md, flow 5). The ledger answers; for one running job,
 // one fresh worker read first, so the answer is current.
-
-const ACTIVE = new Set(["running", "waiting_input", "waiting_permission", "quiet", "checking"]);
 
 export default defineTool({
   description:
@@ -17,21 +18,32 @@ export default defineTool({
   inputSchema: z.object({
     job: z.string().optional().describe("A job reference such as J-142."),
   }),
-  label: { start: ({ job }) => (job ? `Check ${job}` : "Check jobs") },
-  async execute({ job: ref }) {
+  label: { start: () => "Check work" },
+  async execute({ job: ref }, ctx) {
     const sql = ledger();
     const now = new Date();
     if (!ref) {
       const today = new Date(now);
       today.setUTCHours(0, 0, 0, 0);
-      return jobListAnswer(await recentJobs(sql, today), now);
+      const jobs = await recentJobs(sql, today);
+      return {
+        answer: jobListAnswer(jobs, now),
+        jobs: jobs.map((job) => ({ job: jobRef(job.id), title: job.title, status: job.status })),
+      };
     }
-    const job = await getJobByRef(sql, ref);
-    if (!job) return `There is no job ${ref}.`;
-    if (ACTIVE.has(job.status) && job.workerThreadId) {
-      // A failed fresh read still answers from the ledger.
-      await withJobDeps((deps) => checkJob(deps, job.id, 1_000)).catch(() => undefined);
-    }
-    return jobAnswer((await getJobByRef(sql, ref)) ?? job, now);
+    const status = await freshJobStatus(
+      sql,
+      ref,
+      now,
+      (jobId) => withJobDeps((deps) => checkJob(deps, jobId, 1_000)),
+      (await getSessionThread(sql, ctx.session.id)) ?? undefined,
+    );
+    if (!status) return { status: "not_found", job: ref };
+    const by = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    if (by && isSlackUserAllowed(pack(), process.env.SYM_SLACK_USERS, by)) return status;
+    // Shared status readers keep their existing summary access. Full briefs belong to the
+    // allowed Slack conversation and can contain instructions outside that read capability.
+    const { brief: _brief, ...summary } = status;
+    return summary;
   },
 });

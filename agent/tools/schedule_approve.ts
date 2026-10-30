@@ -16,6 +16,7 @@ import { approveSchedule, getSchedule, parseScheduleRef } from "../../lib/schedu
 // and the brief from schedule_list, and execute refuses when they differ from the stored row.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Approve a schedule that waits for approval. Pass the reference, the cron, and the exact " +
     "brief from schedule_list. The owner approves the call once, and the approval covers every run.",
   inputSchema: z.object({
@@ -28,34 +29,38 @@ export default defineTool({
     response: ownerResponse(pack),
     prompt: ({ input }) =>
       [
-        `Approve schedule ${input.ref}?`,
+        `Approve schedule "${input.brief.title}"?`,
         `Cron (UTC): ${input.cron}`,
         `Project: ${input.brief.project}`,
         `Goal: ${input.brief.goal}`,
         `Done when: ${input.brief.doneWhen.join("; ")}`,
+        `Full scope for each run: ${JSON.stringify(input.brief)}`,
         "Runs without asking again. Production and customer data stay read-only.",
       ].join("\n"),
   },
-  label: { start: ({ ref }) => `Approve ${ref}` },
+  label: { start: ({ brief }) => `Approve ${brief.title}` },
   async execute(input, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
     const id = parseScheduleRef(input.ref);
-    if (id === undefined) return `"${input.ref}" is not a schedule reference.`;
+    if (id === undefined) return "I couldn't identify that schedule.";
     const sql = ledger();
     const thread = await getSessionThread(sql, ctx.session.id);
     if (!thread?.userId) return "Sym cannot tell who approves this. Ask in Slack.";
     const row = await getSchedule(sql, id);
-    if (!row) return `S-${id} does not exist.`;
+    if (!row) return "I couldn't find that schedule.";
     if (row.status !== "pending_approval") {
       return `${scheduleLine(row)} is not waiting for approval.`;
     }
     if (!sameAsStored(row, input)) {
-      return `The cron or brief of S-${id} differs from what was shown. Nothing was approved.`;
+      return `The cron or brief of ${row.title} differs from what was shown. Nothing was approved.`;
     }
     const project = (row.brief as { project?: unknown } | null)?.project;
     const refusal = checkProject(allowedFromEnv(), typeof project === "string" ? project : "");
     if (refusal) return refusal;
     const active = await approveSchedule(sql, id, thread.userId, new Date());
-    return active ? `Approved ${scheduleLine(active)}` : `S-${id} was not approved.`;
+    return {
+      schedule: input.ref,
+      answer: active ? `Approved ${scheduleLine(active)}` : `${row.title} was not approved.`,
+    };
   },
 });

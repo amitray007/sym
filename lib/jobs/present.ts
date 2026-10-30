@@ -2,30 +2,27 @@ import type { Sql } from "../db.ts";
 import { CARD_VERSION_FIELD } from "../delivery/deliver.ts";
 import { chooseDisplay, type Surface } from "../display.ts";
 import { recordOutcome } from "../learning/trust.ts";
+import { choiceBlocks, storeChoices } from "../ledger/choices.ts";
 import { type Job, type JobStatus, jobRef, setJobCard, updateJob } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
+import { proposalBlocks, propose } from "../ledger/proposals.ts";
+import { ownerUserId } from "../owner.ts";
 import type { Pack } from "../pack/load.ts";
 import { resolvePackProject } from "../pack/policy.ts";
 import { isQuiet } from "../quiet/quiet.ts";
 import { workerLabel } from "../worker-label.ts";
-import {
-  type BlockPost,
-  clipText,
-  failurePost,
-  resultPost,
-  SECTION_MAX,
-  writtenPost,
-} from "./blocks.ts";
+import { type BlockPost, failurePost, resultPost, writtenPost } from "./blocks.ts";
 import { Brief } from "./brief.ts";
-import {
-  BRIEF_ACTION_ID,
-  jobButton,
-  jobCardSteps,
-  renderCollapsedCard,
-  renderJobCard,
-} from "./card.ts";
+import { renderCollapsedCard, renderJobCard } from "./card.ts";
 import type { OutputContract } from "./contract.ts";
-import { briefPrompt, type JobFacts, permissionBlockMessage, quietNotice } from "./messages.ts";
+import {
+  briefPrompt,
+  escapeMrkdwn,
+  type JobFacts,
+  permissionBlockMessage,
+  quietNotice,
+} from "./messages.ts";
+import { jobName, sentenceTitle } from "./names.ts";
 import type { ProgressEvent } from "./progress.ts";
 import {
   checkResult,
@@ -35,6 +32,7 @@ import {
   openPrUrl,
   verdictLine,
 } from "./verify.ts";
+import type { WriterOutput } from "./writer.ts";
 
 // How a job shows in Slack (docs/display.md, docs/slack.md). Every post goes through
 // chooseDisplay and the outbox. The card is Sym's own message: the job row holds the card Sym
@@ -52,15 +50,10 @@ export const SCHEDULED_CHECK = "scheduled-check";
 // characters, so the brief is Sym's own message in the job thread. It names the job, the
 // project, and the delivery; its Full brief button shows the goal, constraints, and done-when
 // list (decision 060). A brief needs an action, so quiet mode never hides it.
-export async function presentBrief(
-  sql: Sql,
-  job: Job,
-  modelLine?: string,
-  playbook?: { name: string; trusted: boolean },
-): Promise<void> {
+export async function presentBrief(sql: Sql, job: Job, modelLine?: string): Promise<void> {
   if (!job.slackChannel) return;
   const ref = jobRef(job.id);
-  const text = briefPrompt(Brief.parse(job.brief), ref, modelLine, playbook);
+  const text = briefPrompt(Brief.parse(job.brief), ref, modelLine);
   const display = chooseDisplay({
     kind: job.kind,
     needsAction: true,
@@ -68,8 +61,16 @@ export async function presentBrief(
     estMinutes: 0,
     steps: 0,
     lines: text.split("\n").length,
+    characters: text.length,
     surface: surfaceOf(job.slackChannel),
     quiet: false,
+  });
+  const proposal = await propose(sql, {
+    key: `${ref}:start`,
+    job,
+    kind: "start",
+    payload: job.brief,
+    message: text,
   });
   await enqueuePost(sql, {
     idempotencyKey: `${ref}:brief`,
@@ -78,16 +79,8 @@ export async function presentBrief(
     payload: {
       ...target(job),
       text,
-      blocks: [
-        { type: "section", text: { type: "mrkdwn", text: clipText(text, SECTION_MAX) } },
-        {
-          type: "actions",
-          block_id: `job-${ref}-brief`,
-          elements: [jobButton(BRIEF_ACTION_ID, "Full brief", ref)],
-        },
-      ],
+      blocks: proposalBlocks(proposal),
     },
-    // The Start buttons are Eve's prompt below this message, so the brief stays in the thread.
     display: { ...display, target: "thread" },
   });
 }
@@ -142,7 +135,7 @@ export async function presentStart(
     method: "chat.postMessage",
     payload: {
       ...target(withDisplay),
-      text: `Started ${jobRef(job.id)}: ${job.title}${modelNote ? `\n${modelNote}` : ""}`,
+      text: `On it: ${escapeMrkdwn(sentenceTitle(job.title))}.${modelNote ? `\n${modelNote}` : ""}`,
     },
     display,
   });
@@ -168,33 +161,33 @@ export async function presentProgress(
   for (const event of events) {
     switch (event.type) {
       case "pr_opened":
-        // At the end the result message carries the PR, so the thread gets one end message. A
-        // job in `checking` has ended its work, and its result message follows. A scheduled run
-        // reports only at its end.
-        if (!ended && job.status !== "checking" && !scheduled) {
-          await post(
-            sql,
-            job,
-            `${ref}:pr`,
-            `${ref} opened a pull request: <${event.url}>`,
-            false,
-            quiet,
-          );
-        }
+        // PR progress belongs in the note. The result carries its external link.
         break;
       case "needs_permission":
         // A permission prompt blocks until a person approves it on the worker. Only the owner
         // can do that, so the notice goes to the owner's DM.
-        await post(sql, job, `${ref}:permission:${step}`, permissionBlockMessage(ref), true, quiet);
+        {
+          const owner = job.owner ?? ownerUserId(pack) ?? null;
+          await post(
+            sql,
+            { ...job, owner },
+            `${ref}:permission:${step}`,
+            owner
+              ? permissionBlockMessage(jobName(job))
+              : "I need an owner configured before I can route this permission request privately.",
+            true,
+            quiet,
+          );
+        }
         break;
       case "quiet":
         if (scheduled) break;
         await post(
           sql,
           job,
-          `${ref}:quiet:${step}`,
+          `${ref}:quiet`,
           quietNotice(facts(job, now), quietFor(job, now)),
-          false,
+          true,
           quiet,
         );
         break;
@@ -218,11 +211,11 @@ export async function presentEnd(
   now: Date,
   pack?: Pack,
   check?: ModelCheck,
-  written?: string,
+  written?: string | WriterOutput,
 ): Promise<void> {
   await presentEndOnce(sql, job, contract, now, pack, check, written);
   if (TERMINAL.includes(job.status)) {
-    // The trust ladder counts the same checks the result shows (decision 059). It records once,
+    // Playbook outcomes use the same checks the result shows (decisions 059 and 071). Record once,
     // before the end mark, so recovery re-presents a job whose outcome a crash lost.
     const clean =
       job.status === "done" &&
@@ -241,7 +234,7 @@ async function presentEndOnce(
   now: Date,
   pack?: Pack,
   check?: ModelCheck,
-  written?: string,
+  written?: string | WriterOutput,
 ): Promise<void> {
   if (!job.slackChannel || !TERMINAL.includes(job.status)) return;
   const ref = jobRef(job.id);
@@ -281,7 +274,25 @@ async function presentEndOnce(
         ? resultPost(facts(job, now), contract, concerns, verdictLine(check, concerns))
         : job.status === "failed"
           ? failurePost(facts(job, now), job.lastSummary)
-          : { text: `🚫 ${ref} was cancelled.`, blocks: [] };
+          : { text: "Stopped it. I haven't checked or reverted its changes.", blocks: [] };
+  if (
+    job.status === "done" &&
+    written &&
+    typeof written !== "string" &&
+    written.choices &&
+    job.slackChannel
+  ) {
+    const choices = await storeChoices(sql, {
+      key: `${ref}:result-choices`,
+      jobId: job.id,
+      channel: job.slackChannel,
+      threadTs: job.slackThreadTs,
+      message: message.text,
+      choices: written.choices,
+    });
+    message.blocks.push(...choiceBlocks(choices));
+    message.text += `\n\n${written.choices.join(" / ")}. You can also reply in your own words.`;
+  }
   // A failure notifies even in quiet mode (docs/display.md).
   const quiet = await isQuiet(sql, pack, now);
   await post(
@@ -299,8 +310,8 @@ async function presentEndOnce(
 // A result that names no PR gets the thread's open PR from the worker's facts, so the message
 // still links it (decision 057). The missing report shows as a concern.
 function withFactsPr(job: Job, contract: OutputContract | null): OutputContract | null {
-  if (!contract || contract.prUrl || job.prUrl) return contract;
-  const url = openPrUrl(job.prFacts);
+  if (!contract || contract.prUrl) return contract;
+  const url = job.prUrl ?? openPrUrl(job.prFacts);
   return url ? { ...contract, prUrl: url } : contract;
 }
 
@@ -345,25 +356,17 @@ async function refreshCard(sql: Sql, job: Job, now: Date): Promise<void> {
 }
 
 function liveCard(job: Job, now: Date, version = job.cardVersion + 1) {
-  const brief = Brief.parse(job.brief);
   return renderJobCard({
     ref: jobRef(job.id),
     title: job.title,
     status: job.status,
-    steps: jobCardSteps({
-      status: job.status,
-      threadStarted: job.workerThreadId !== null,
-      doneWhen: brief.doneWhen,
-      latestSummary: job.lastSummary,
-    }),
+    latestSummary: job.lastSummary,
+    skipping: job.skipping,
     startedAt: job.startedAt ?? job.createdAt,
+    lastActivityAt: job.lastActivityAt ?? job.startedAt ?? job.createdAt,
     now,
     prUrl: job.prUrl,
-    footer: {
-      worker: workerLabel(),
-      threadId: job.workerThreadId,
-      updatedAt: job.lastActivityAt ?? job.updatedAt,
-    },
+    worker: workerLabel(),
     version,
   });
 }
@@ -386,11 +389,12 @@ async function post(
     estMinutes: 0,
     steps: 0,
     lines: text.split("\n").length,
+    characters: text.length,
     surface: surfaceOf(job.slackChannel ?? ""),
     quiet,
   });
   if (display.level === 0) return;
-  const dm = toOwner && job.owner !== null;
+  const dm = toOwner && !key.endsWith(":quiet") && job.owner !== null;
   await enqueuePost(sql, {
     idempotencyKey: key,
     jobId: job.id,

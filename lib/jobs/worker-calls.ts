@@ -74,7 +74,7 @@ async function sendNow(deps: WorkerCallDeps): Promise<void> {
 // Records the worker's one-line progress on the job row and refreshes the card.
 export async function postProgress(
   deps: WorkerCallDeps,
-  input: { job: string; summary: string },
+  input: { job: string; summary: string; skipping?: string | undefined },
   caller: Caller,
 ): Promise<WorkerCallResult> {
   const found = await activeJob(deps.sql, input.job, caller);
@@ -85,6 +85,7 @@ export async function postProgress(
   const now = (deps.now ?? (() => new Date()))();
   const job = await updateJob(deps.sql, found.job.id, {
     lastSummary: summary,
+    ...(input.skipping !== undefined ? { skipping: capText(input.skipping, 200) || null } : {}),
     lastActivityAt: now,
   });
   await presentProgress(deps.sql, job, [], `worker-progress:${shortHash(summary)}`, now, deps.pack);
@@ -126,7 +127,7 @@ export async function askOwner(
     payload: {
       channel: job.slackChannel,
       ...(job.slackThreadTs ? { thread_ts: job.slackThreadTs } : {}),
-      text: `*${ref} needs an answer:* ${escapeMrkdwn(question)}`,
+      text: `${escapeMrkdwn(question)}\nReply here and I'll pass your answer on.`,
     },
     display,
   });

@@ -1,7 +1,7 @@
-import { formatDuration } from "../jobs/card.ts";
-import { STATUS_EMOJI, statusWords } from "../jobs/status.ts";
-import { type Job, jobRef } from "../ledger/jobs.ts";
-import { type Schedule, scheduleRef } from "../schedules/rows.ts";
+import { jobName } from "../jobs/names.ts";
+import { statusWords } from "../jobs/status.ts";
+import type { Job } from "../ledger/jobs.ts";
+import type { Schedule } from "../schedules/rows.ts";
 import { workerLabel } from "../worker-label.ts";
 
 // The App Home tab (decision 052). Pure: data in, Block Kit out. The caller decides who gets which
@@ -39,6 +39,8 @@ export interface HomeData {
   persona: { name: string; source: string };
   worker: WorkerHealth;
   active: Job[];
+  closures?: Job[];
+  approvedStarts?: number[];
   finished: { done: number; failed: number; cancelled: number; latest: Job[] };
   schedules: Schedule[];
   // The allow-list names only. The collector never reads any other project.
@@ -57,7 +59,7 @@ export interface HomeView {
   blocks: Block[];
 }
 
-export const NOT_SET_UP = "Sym isn't set up for you.";
+export const NOT_SET_UP = "I'm not set up to help you yet. Ask the owner for access.";
 
 /** Escapes the three characters Slack reads as markup. */
 export function esc(text: string): string {
@@ -92,50 +94,51 @@ function listLines(lines: string[], max: number): string {
   return shown.join("\n");
 }
 
-// A Slack deep link to a thread, or to a job's own code channel (decision 067). It works in any
-// workspace the reader is signed in to.
-function threadLink(job: Job): string | undefined {
-  if (job.codeChannel && job.slackChannel) {
-    return `https://slack.com/app_redirect?channel=${encodeURIComponent(job.slackChannel)}`;
-  }
-  if (!job.slackChannel || !job.slackThreadTs) return undefined;
-  const channel = encodeURIComponent(job.slackChannel);
-  const ts = encodeURIComponent(job.slackThreadTs);
-  return `https://slack.com/app_redirect?channel=${channel}&message_ts=${ts}`;
+function duration(ms: number): string {
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  if (minutes >= 1440) return `${Math.floor(minutes / 1440)} days`;
+  if (minutes >= 60) return `${Math.floor(minutes / 60)} hours`;
+  return `${minutes} minutes`;
 }
-
-function jobAge(job: Job, now: Date): string {
-  if (job.finishedAt) return `${formatDuration(now.getTime() - job.finishedAt.getTime())} ago`;
-  const since = job.startedAt ?? job.createdAt;
-  return formatDuration(now.getTime() - since.getTime());
+function needsYou(job: Job, now: Date): boolean {
+  return (
+    ["launching", "waiting_input", "waiting_permission", "worker_offline"].includes(job.status) ||
+    Boolean(
+      job.closedAt &&
+        (!job.workerSettledAt || (job.codeChannel && job.archiveState !== "archived")),
+    ) ||
+    ["pending", "repair"].includes(job.archiveState) ||
+    (!job.finishedAt &&
+      now.getTime() - (job.lastActivityAt ?? job.startedAt ?? job.createdAt).getTime() >=
+        86_400_000)
+  );
 }
-
-function jobLine(job: Job, now: Date): string {
-  const link = threadLink(job);
-  const ref = link ? `<${link}|${esc(jobRef(job.id))}>` : esc(jobRef(job.id));
-  const title = esc(clip(job.title, MAX_TITLE_CHARS));
-  return `${STATUS_EMOJI[job.status]} ${ref} · ${title} · ${statusWords()[job.status]} · ${jobAge(job, now)}`;
-}
-
-// Jobs that wait for a person come first, then the rest by reference.
-const NEEDS_YOU = new Set(["waiting_input", "waiting_permission"]);
-function byAttention(a: Job, b: Job): number {
-  const need = Number(NEEDS_YOU.has(b.status)) - Number(NEEDS_YOU.has(a.status));
-  return need !== 0 ? need : a.id - b.id;
+function jobLine(job: Job, now: Date, approvedStarts: number[] = []): string {
+  const name = jobName({ ...job, title: clip(job.title, MAX_TITLE_CHARS) });
+  const since = job.finishedAt ?? job.lastActivityAt ?? job.startedAt ?? job.createdAt;
+  const age = duration(now.getTime() - since.getTime());
+  const state =
+    job.closedAt && job.codeChannel && job.archiveState !== "archived"
+      ? job.archiveState === "repair" || job.archiveError
+        ? "channel archive failed; needs repair"
+        : "channel archive pending"
+      : job.closedAt && !job.workerSettledAt
+        ? "worker settlement pending"
+        : job.status === "launching"
+          ? approvedStarts.includes(job.id)
+            ? "starting"
+            : "waiting for you to start it"
+          : job.status === "worker_offline"
+            ? "worker is offline"
+            : !job.finishedAt && needsYou(job, now) && !job.status.startsWith("waiting")
+              ? `no activity for ${age}`
+              : statusWords()[job.status];
+  return `${name} · ${state} · ${age}${job.finishedAt ? " ago" : ""}`;
 }
 
 // Slack shows the time in the reader's own zone.
 function slackDate(at: Date): string {
   return `<!date^${Math.floor(at.getTime() / 1000)}^{date_short_pretty} {time}|${at.toISOString()}>`;
-}
-
-function scheduleLine(schedule: Schedule): string {
-  const ref = scheduleRef(schedule.id);
-  const title = esc(clip(schedule.title, MAX_TITLE_CHARS));
-  if (schedule.status === "paused") return `⏸ ${ref} · ${title} · paused`;
-  if (schedule.status === "pending_approval") return `⏳ ${ref} · ${title} · waiting for approval`;
-  const next = schedule.nextFireAt ? `next ${slackDate(schedule.nextFireAt)}` : "no next run";
-  return `🗓 ${ref} · ${title} · ${next}`;
 }
 
 function expiryText(expiresAt: Date | null, now: Date): string {
@@ -150,20 +153,25 @@ function workerLine(worker: WorkerHealth, now: Date): string {
   const label = esc(workerLabel());
   switch (worker.state) {
     case "reachable":
-      return `*${label}:* ✅ reachable, signed in · ${expiryText(worker.expiresAt, now)}`;
+      return `*${label}:* signed in · ${expiryText(worker.expiresAt, now)}`;
     case "not_signed_in":
-      return `*${label}:* ⚠️ not signed in`;
+      return `*${label}:* not signed in`;
     case "unknown":
-      return `*${label}:* ❔ status unknown · ${expiryText(worker.expiresAt, now)}`;
+      return `*${label}:* status unknown · ${expiryText(worker.expiresAt, now)}`;
   }
 }
 
 function connectionLine(connection: HomeConnection): string {
-  const mode = connection.defaultMode
-    ? `default mode ${connection.defaultMode}`
-    : "default mode by tool hints";
+  const mode =
+    connection.defaultMode === "hidden"
+      ? "tools hidden"
+      : connection.defaultMode === "auto"
+        ? "runs without asking"
+        : connection.defaultMode === "ask"
+          ? "asks before each call"
+          : "reads tools marked read-only, asks before other calls";
   return clip(
-    `• \`${esc(connection.name)}\` · ${connection.status} · ${esc(connection.auth)} · ${mode}`,
+    `${esc(connection.name)}: ${mode}; individual tool settings still apply. ${esc(connection.auth)}.`,
     MAX_LINE_CHARS,
   );
 }
@@ -180,82 +188,81 @@ export function homeView(role: HomeRole, data?: HomeData): HomeView {
     return { type: "home", blocks: [section(NOT_SET_UP)] };
   }
   const { now } = data;
-  const blocks: Block[] = [
-    { type: "header", text: { type: "plain_text", text: "Sym" } },
-    section(`*Persona:* ${esc(data.persona.name)}\n${workerLine(data.worker, now)}`),
-    { type: "divider" },
+  const attention = [
+    ...new Map(
+      [...data.active, ...(data.closures ?? []), ...data.finished.latest]
+        .filter((job) => needsYou(job, now))
+        .map((job) => [job.id, job]),
+    ).values(),
   ];
-
-  const active = [...data.active].sort(byAttention);
-  blocks.push(heading(`Running and waiting (${active.length})`));
-  blocks.push(
-    section(
-      active.length === 0
-        ? "_No active jobs._"
-        : listLines(
-            active.map((job) => jobLine(job, now)),
-            MAX_ACTIVE_JOBS,
-          ),
-    ),
+  const pendingSchedules = data.schedules.filter(
+    (schedule) => schedule.status === "pending_approval",
   );
-
-  const { finished } = data;
-  const total = finished.done + finished.failed + finished.cancelled;
-  blocks.push(heading("Finished in the last 24 hours"));
-  blocks.push(
+  const count = attention.length + pendingSchedules.length;
+  const running = data.active.filter((job) => !needsYou(job, now));
+  const blocks: Block[] = [
     section(
-      total === 0
-        ? "_None._"
-        : [
-            `✅ ${finished.done} done · ❌ ${finished.failed} failed` +
-              (finished.cancelled > 0 ? ` · 🚫 ${finished.cancelled} cancelled` : ""),
-            listLines(
-              finished.latest.map((job) => jobLine(job, now)),
-              MAX_FINISHED_JOBS,
-            ),
-          ].join("\n"),
+      count === 0
+        ? "Nothing needs you."
+        : `${count === 1 ? "One item needs" : `${count} items need`} you.`,
     ),
-  );
-
-  blocks.push(heading(`Schedules (${data.schedules.length})`));
-  blocks.push(
-    section(
-      data.schedules.length === 0
-        ? "_No schedules._"
-        : listLines(data.schedules.map(scheduleLine), MAX_SCHEDULES),
-    ),
-  );
-
-  blocks.push(heading("Projects Sym works on"));
-  blocks.push(
-    section(
-      data.projects.length === 0
-        ? "_None configured._"
-        : listLines(
-            data.projects.map((name) => `• ${esc(clip(name, MAX_TITLE_CHARS))}`),
-            MAX_PROJECTS,
-          ),
-    ),
-  );
-
-  if (role === "owner" && data.owner) {
-    blocks.push({ type: "divider" });
-    blocks.push(heading(`Connections (${data.owner.connections.length})`));
+  ];
+  const jobs = (label: string, rows: Job[], limit: number) => {
+    if (!rows.length) return;
+    blocks.push(heading(label));
     blocks.push(
       section(
-        data.owner.connections.length === 0
-          ? "_No MCP connections._"
-          : listLines(data.owner.connections.map(connectionLine), MAX_SCHEDULES),
+        listLines(
+          rows.map((job) => jobLine(job, now, data.approvedStarts)),
+          limit,
+        ),
       ),
     );
-    blocks.push(heading("Settings"));
+  };
+  if (count) {
+    blocks.push(heading("Needs you"));
     blocks.push(
       section(
-        `Persona ${esc(data.persona.name)} (${esc(data.persona.source)}) · ${quietText(data.owner.quietUntil, now)}`,
+        listLines(
+          [
+            ...attention.map((job) => jobLine(job, now, data.approvedStarts)),
+            ...pendingSchedules.map(
+              (schedule) => `${esc(clip(schedule.title, MAX_TITLE_CHARS))} · waiting for approval`,
+            ),
+          ],
+          MAX_ACTIVE_JOBS,
+        ),
       ),
     );
   }
-
+  jobs("Running", running, MAX_ACTIVE_JOBS);
+  jobs(
+    "Finished today",
+    data.finished.latest.filter((job) => !attention.some((item) => item.id === job.id)),
+    MAX_FINISHED_JOBS,
+  );
+  if (!count && !data.active.length && !data.finished.latest.length)
+    blocks.push(section("Ask me to start something."));
+  if (role === "owner" && data.owner) {
+    blocks.push(heading("Setup"));
+    blocks.push(
+      section(
+        [
+          workerLine(data.worker, now),
+          `Persona ${esc(data.persona.name)} · ${quietText(data.owner.quietUntil, now)}`,
+          `Projects: ${
+            data.projects.length
+              ? data.projects
+                  .slice(0, MAX_PROJECTS)
+                  .map((name) => esc(clip(name, MAX_TITLE_CHARS)))
+                  .join(", ")
+              : "none configured"
+          }`,
+          ...data.owner.connections.slice(0, MAX_SCHEDULES).map(connectionLine),
+        ].join("\n"),
+      ),
+    );
+  }
   blocks.push({
     type: "context",
     elements: [{ type: "mrkdwn", text: `Updated ${slackDate(now)}` }],

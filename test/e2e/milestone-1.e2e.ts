@@ -50,7 +50,7 @@ describe("milestone 1", () => {
     // A later allowed brief proves the server handled the refused one first.
     const allowed = newConversation(h);
     await allowed.mention(briefMention("Allowed work"));
-    await allowed.waitForControls(/Start J-\d+:/);
+    await allowed.waitForControls(/Want me to start\?/);
     await settle(h);
 
     const jobs = await h.sql<{ title: string }[]>`select title from jobs order by id`;
@@ -66,13 +66,10 @@ describe("milestone 1", () => {
     const c = newConversation(h);
     const { approval, job, ref } = await startJob(h, c, "Sync retry");
     expect(job.status).toBe("launching");
-    expect(approval.controls.map((control) => control.label)).toEqual(["Start", "Edit", "Cancel"]);
-    // Eve's prompt card is short, so the brief is Sym's own message above it. It is the short
-    // form: the goal and the done-when list sit behind its Full brief button (decision 060).
-    const brief = c.botMessages().find((m) => messageText(m).startsWith(`📋 *${ref} · `));
-    expect(brief && messageText(brief)).toContain("*delivery*");
-    expect(brief && messageText(brief)).not.toContain("*goal*");
-    expect(JSON.stringify(brief?.blocks)).toContain('"action_id":"sym_job_brief"');
+    expect(approval.controls.map((control) => control.label)).toEqual(["Start", "Not now"]);
+    expect(messageText(approval.message)).toContain("Want me to start?");
+    expect(messageText(approval.message)).toContain("read-only");
+    expect(JSON.stringify(approval.message.blocks)).not.toContain("sym_job_brief");
     const beforeStart = c.botMessages().map((m) => m.ts);
 
     await c.click(approval, "Start");
@@ -110,7 +107,7 @@ describe("milestone 1", () => {
     // Card progress went only through chat.update on the card, and the card ends collapsed.
     const cardEdits = h.slack.callsTo("chat.update").filter((call) => call.body.ts === card.ts);
     expect(cardEdits.length).toBeGreaterThanOrEqual(2);
-    expect(messageText(card)).toContain(`[${ref}] Sync retry · Done`);
+    expect(messageText(card)).toContain("Sync retry · Done");
     expect(isCard(card)).toBe(false);
     // The result carries the summary and the PR link.
     expect(result.text).toContain(SAMPLE_CONTRACT.summary);
@@ -118,18 +115,18 @@ describe("milestone 1", () => {
     expect(done.prUrl).toBe(SAMPLE_CONTRACT.pr_url);
     expect(done.lastMessage).toContain(SAMPLE_CONTRACT.summary);
     // The verifier subagent checked the result before it posted (flow 4, decision 032).
-    expect(result.text).toContain("✅ verifier: matches the brief (90% sure)");
+    expect(result.text).not.toContain("% sure");
     expect(result.text).not.toContain("check before merge");
     // The result is Block Kit with the text above as its fallback (decision 047).
     const blocks = (result.blocks ?? []) as { type: string; elements?: { url?: string }[] }[];
-    expect(blocks[0]?.type).toBe("header");
+    expect(blocks[0]?.type).toBe("markdown");
     expect(JSON.stringify(blocks)).toContain(SAMPLE_CONTRACT.summary);
     expect(blocks.find((block) => block.type === "actions")?.elements?.[0]?.url).toBe(
       SAMPLE_CONTRACT.pr_url,
     );
     // Decision 043: the worker has its label, and no Slack call names the software behind it.
     const slackBodies = JSON.stringify(h.slack.calls.map((call) => call.body));
-    expect(slackBodies).toContain("Builder thread");
+    expect(slackBodies).toContain("Builder");
     expect(slackBodies).not.toMatch(/\bT3\b/i);
   });
 
@@ -137,7 +134,7 @@ describe("milestone 1", () => {
     const c = newConversation(h);
     // The brief allows no pull request, and the worker opens one anyway.
     await c.mention(briefMention("No PR job", { openPullRequest: false }));
-    const approval = await c.waitForControls(/Start J-\d+:/);
+    const approval = await c.waitForControls(/Want me to start\?/);
     const job = await jobInThread(h.sql, c.channel, c.rootTs);
     const ref = `J-${job.id}`;
     await c.click(approval, "Start");
@@ -155,11 +152,11 @@ describe("milestone 1", () => {
 
     expect(newSince(c, before).map((m) => m.ts)).toEqual([result.ts]);
     const concern = "worker opened a PR the job didn't allow.";
-    expect(result.text).toContain("*⚠️ check before merge* (60% sure)");
-    expect(result.text).toContain(`*⚠️ check before merge* (60% sure)\n1. ${concern}`);
+    expect(result.text).not.toContain("% sure");
+    expect(result.text).toContain(concern);
     // The fixture verifier repeats the rule-check concern; the message lists it once.
     expect(result.text?.split(concern)).toHaveLength(2);
-    expect(JSON.stringify(result.blocks)).toContain('"style":"ordered"');
+    expect(JSON.stringify(result.blocks)).not.toContain('"style":"ordered"');
     expect(JSON.stringify(result.blocks)?.split(concern)).toHaveLength(2);
   });
 
@@ -188,7 +185,7 @@ describe("milestone 1", () => {
     expect(c.botMessages().filter(isCard)).toHaveLength(0); // collapsed by now
     expect(
       h.slack.messages.filter(
-        (m) => m.channel === c.channel && messageText(m).includes(`[${ref}]`),
+        (m) => m.channel === c.channel && messageText(m).includes("Lost launch · Done"),
       ),
     ).toHaveLength(1);
   });
@@ -246,7 +243,9 @@ describe("milestone 1", () => {
     await workerAdvance(h, thread, [{ status: "waiting" }]);
     await waitForJobStatus(h.sql, job.id, "waiting_permission");
     const dms = () =>
-      h.slack.messages.filter((m) => m.channel === OWNER && (m.text ?? "").includes(ref));
+      h.slack.messages.filter(
+        (m) => m.channel === OWNER && (m.text ?? "").includes("|Permission job> is waiting"),
+      );
     await until(() => dms()[0], { label: "the permission DM" });
     // More checks see the same block. None of them posts again.
     const waits = () => h.t3.calls.filter((call) => call.name === "t3_thread_wait").length;
@@ -256,7 +255,9 @@ describe("milestone 1", () => {
       timeoutMs: 30_000,
     });
     expect(dms()).toHaveLength(1);
-    expect(dms()[0]?.text).toContain("permission prompt");
+    expect(dms()[0]?.text).toBe(
+      `<https://slack.com/app_redirect?channel=${c.channel}&message_ts=${c.rootTs}|Permission job> is waiting on a permission in Builder. I can't approve that from Slack.`,
+    );
     expect(c.botMessages().some((m) => (m.text ?? "").includes("permission prompt"))).toBe(false);
 
     await workerAdvance(h, thread, finishedSteps());
@@ -283,10 +284,10 @@ describe("milestone 1", () => {
     const before = c.botMessages().map((m) => m.ts);
     await c.reply(`<@${BOT}> what's the update?`);
     const answer = await until(
-      () => newSince(c, before).find((m) => messageText(m).includes(`${ref} Status job`)),
+      () => newSince(c, before).find((m) => messageText(m).includes("This is running")),
       { label: "the status answer", timeoutMs: 60_000 },
     );
-    expect(messageText(answer)).toContain(`${ref} Status job: running`);
+    expect(messageText(answer)).toContain("This is running");
     expect(messageText(answer)).toContain("Running the test suite");
 
     await workerAdvance(h, thread, finishedSteps());
@@ -294,17 +295,18 @@ describe("milestone 1", () => {
     await resultMessage(c, ref);
   });
 
-  it("Edit asks for the changes and hands them back without launching", async () => {
+  it("a revised brief replaces the old proposal without launching it", async () => {
     const c = newConversation(h);
-    const { approval, job, ref } = await startJob(h, c, "Edited job");
-
-    await c.click(approval, "Edit");
-    const ask = await c.waitForPrompt(new RegExp(`What should change in ${ref}`));
-    await c.typeAnswer(ask, "Only touch the retry module, and keep the batch size.");
-    const closed = await waitForJobStatus(h.sql, job.id, "cancelled");
-
-    expect(closed.lastSummary).toBe("Brief edited");
-    expect(launchesOf(h, ref)).toHaveLength(0);
+    const first = await startJob(h, c, "Edited job");
+    await c.reply(briefMention("Revised job", { goal: "Only touch the retry module." }));
+    const ask = await c.waitForControls(/Revised job/);
+    const [proposal] = await h.sql<{ payload: { goal: string } }[]>`
+      select payload from job_proposals where channel = ${c.channel} and status = 'pending'
+    `;
+    expect(proposal?.payload.goal).toBe("Only touch the retry module.");
+    await waitForJobStatus(h.sql, first.job.id, "cancelled");
+    expect(launchesOf(h, first.ref)).toHaveLength(0);
+    await c.click(ask, "Not now");
   });
 
   it("Cancel before start launches nothing and posts no card", async () => {
@@ -312,7 +314,7 @@ describe("milestone 1", () => {
     const { approval, job, ref } = await startJob(h, c, "Cancelled job");
     const before = c.botMessages().map((m) => m.ts);
 
-    await c.click(approval, "Cancel");
+    await c.click(approval, "Not now");
     const cancelled = await waitForJobStatus(h.sql, job.id, "cancelled");
     await settle(h);
 

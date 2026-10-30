@@ -21,6 +21,9 @@ Read them in this order.
 | [decisions/](decisions/README.md) | One record per accepted decision |
 | [mockups/index.html](mockups/index.html) | Slack mockups and flow diagrams for every surface |
 
+The current Slack design is [conversational.html](mockups/conversational.html).
+The [audit](mockups/audit.html) and [current-state capture](mockups/current-state.html) provide context.
+
 ## Keep the docs current
 
 - Record each new decision in `decisions/` and add it to `decisions/README.md`.

@@ -8,7 +8,7 @@ import { allowedFromEnv, ledger, pack } from "../../lib/runtime.ts";
 import { nextFire } from "../../lib/schedules/cron.ts";
 import { scheduleLine } from "../../lib/schedules/format.ts";
 import { ScheduleInput } from "../../lib/schedules/input.ts";
-import { approveSchedule, createSchedule } from "../../lib/schedules/rows.ts";
+import { approveSchedule, createSchedule, scheduleRef } from "../../lib/schedules/rows.ts";
 
 // Creates a recurring job (docs/architecture.md, flow 2). The owner's approval of this call is
 // the approval for every fire, so the prompt shows the cron in UTC and the whole brief. The row
@@ -16,6 +16,7 @@ import { approveSchedule, createSchedule } from "../../lib/schedules/rows.ts";
 
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Schedule a recurring worker job. Convert the person's local time to UTC first and say so. " +
     "The owner approves the schedule once, and the approval covers every run. Each run opens " +
     "a new thread, and you call no_reply when a run finds nothing.",
@@ -30,6 +31,7 @@ export default defineTool({
         `Project: ${input.brief.project}`,
         `Goal: ${input.brief.goal}`,
         `Done when: ${input.brief.doneWhen.join("; ")}`,
+        `Full scope for each run: ${JSON.stringify(input.brief)}`,
         "Runs without asking again. Production and customer data stay read-only.",
       ].join("\n"),
   },
@@ -53,6 +55,9 @@ export default defineTool({
       owner: thread.userId,
     });
     const active = await approveSchedule(sql, created.id, thread.userId, new Date());
-    return active ? `Created ${scheduleLine(active)}` : "The schedule was not approved.";
+    return {
+      schedule: scheduleRef(created.id),
+      answer: active ? `Created ${scheduleLine(active)}` : "The schedule was not approved.",
+    };
   },
 });

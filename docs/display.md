@@ -46,12 +46,27 @@ learned preferences, and shared channels are planned.
   taking longer. Tracking it here."). When a card job ends, the card collapses to one line and the
   result posts as text.
 
-The result message has a fixed shape: a status emoji and title, a one-line tl;dr, a numbered
-concerns list, an open-questions checklist, and a footer (docs/slack.md, Voice; decision 044).
-When a `t3_job` result says `posted: true`, the brain posts nothing more.
+The job card is now a working note: explicit progress, optional skipped scope, and a muted
+time/worker/PR line. It has no controls. Updates are silent edits. The result posts separately.
 
-Sym never shows a visual just to look busy. Reactions mark only requests that became jobs. Buttons
-appear only with a real choice. A card never repeats what the result message says.
+Results use human sentences in a `markdown` block, with no fixed headings, confidence score,
+concern list, or checklist. Code expands inline {{c1}}, {{q1}}, {{tests}}, and {{pr}} tokens to
+exact facts, then appends only missing concerns, open decisions, PR and test facts in one paragraph.
+Contradictory test prose uses the plain fallback. Only the duration stays in the muted context line.
+Job and schedule references stay in tool fields, worker messages, and recovery keys. Messages
+name the work with a linked title outside its conversation, or say "this" inside it (decision 073).
+Notifications retain the result facts. Results can include PR/CI links, two or three conversation
+choices, and optional feedback. Chat replies have no feedback controls. Choices never approve work.
+
+`offer_choices` stores the conversation and consumes a click once. Typed replies still work.
+Interactive work and follow-ups always show Start / Not now, including trusted playbooks.
+Approved schedules start without a click (decision 024). The trust ladder no longer auto-starts jobs. Stop keeps owner confirmation.
+A `posted: true` result suppresses only a duplicate reply to that tool result.
+
+Plain sentences are the default. Lists, tables, quotes, checkboxes, and code fit only content
+with that shape. Images become links. Lists stay flat. Slack markdown blocks hold 12,000
+characters. Longer completed brain replies use a Markdown file and their first paragraph as the comment through the
+outbox. Reactions are rare responses to a person's message, with code-owned limits.
 
 ## Implementation
 

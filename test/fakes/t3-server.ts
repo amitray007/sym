@@ -527,6 +527,7 @@ export async function startFakeT3(options: FakeT3Options = {}): Promise<FakeT3> 
         const earlier = key ? sendResults.get(key) : undefined;
         if (earlier) return earlier as Record<string, unknown>;
         thread.sends.push({ message, mode: mode ?? "auto", clientRequestId });
+        thread.items.push({ position: thread.items.length, type: "user_message", text: message });
         const active = !TERMINAL.has(thread.status) && thread.status !== "idle";
         const delivery = !active ? "started" : mode === "queue" ? "queued" : "steered";
         if (!active) thread.status = "running";

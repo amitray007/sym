@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { jobAnswer, jobListAnswer } from "../lib/jobs/status.ts";
+import { jobReply } from "../lib/jobs/names.ts";
+import { freshJobStatus, jobAnswer, jobListAnswer } from "../lib/jobs/status.ts";
 import {
   createJob,
   getJobByRef,
@@ -8,6 +9,7 @@ import {
   recentJobs,
   updateJob,
 } from "../lib/ledger/jobs.ts";
+import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
 const NOW = new Date("2026-03-02T12:00:00.000Z");
@@ -16,6 +18,11 @@ const minutesAgo = (m: number) => new Date(NOW.getTime() - m * 60_000);
 function job(overrides: Partial<Job> = {}): Job {
   return {
     id: 12,
+    parentJobId: null,
+    followupSentAt: null,
+    followupBoundary: null,
+    followupChecks: 0,
+    followupObserved: false,
     requestKey: "k",
     sessionId: null,
     kind: "code-change",
@@ -25,6 +32,10 @@ function job(overrides: Partial<Job> = {}): Job {
     slackChannel: null,
     slackThreadTs: null,
     codeChannel: false,
+    closedAt: null,
+    workerSettledAt: null,
+    archiveState: "none",
+    archiveError: null,
     originChannel: null,
     originThreadTs: null,
     brief: {},
@@ -35,6 +46,7 @@ function job(overrides: Partial<Job> = {}): Job {
     workerModel: null,
     cursor: null,
     lastSummary: null,
+    skipping: null,
     lastMessage: null,
     cardTs: null,
     card: null,
@@ -60,28 +72,35 @@ function job(overrides: Partial<Job> = {}): Job {
 describe("jobAnswer", () => {
   it("answers for a running job with its last summary", () => {
     const answer = jobAnswer(job({ lastSummary: "Writing the retry loop" }), NOW);
-    expect(answer).toBe(
-      "🔄 J-12 Billing sync retry: running for 14m.\nlast: Writing the retry loop",
+    expect(answer).toBe("Billing sync retry: running for 14m.\nWriting the retry loop");
+  });
+
+  it("uses this in the job's own conversation and a linked title elsewhere", () => {
+    const named = job({ slackChannel: "C1", slackThreadTs: "170.1" });
+    expect(jobAnswer(named, NOW, true)).toBe("This is running for 14m.");
+    expect(jobAnswer(named, NOW)).toBe(
+      "<https://slack.com/app_redirect?channel=C1&message_ts=170.1|Billing sync retry>: running for 14m.",
+    );
+    expect(jobListAnswer([named], NOW)).toBe(
+      "<https://slack.com/app_redirect?channel=C1&message_ts=170.1|Billing sync retry>: running for 14m.",
     );
   });
 
   it("measures from creation when the job never started", () => {
-    expect(jobAnswer(job({ startedAt: null }), NOW)).toBe(
-      "🔄 J-12 Billing sync retry: running for 15m.",
-    );
+    expect(jobAnswer(job({ startedAt: null }), NOW)).toBe("Billing sync retry: running for 15m.");
   });
 
   it("says what a job waiting for an answer needs", () => {
     expect(jobAnswer(job({ status: "waiting_input" }), NOW)).toBe(
-      "🙋 J-12 Billing sync retry: waiting for you for 14m.\n" +
+      "Billing sync retry: waiting for you for 14m.\n" +
         "Waiting for your answer to the worker's question.",
     );
   });
 
   it("says what a job blocked on a permission prompt needs", () => {
     expect(jobAnswer(job({ status: "waiting_permission", lastSummary: "Needs shell" }), NOW)).toBe(
-      "🔒 J-12 Billing sync retry: blocked on a permission prompt for 14m.\n" +
-        "last: Needs shell\n" +
+      "Billing sync retry: blocked on a permission prompt for 14m.\n" +
+        "Needs shell\n" +
         "Waiting for a permission prompt on the worker. Approve it in the worker.",
     );
   });
@@ -97,9 +116,9 @@ describe("jobAnswer", () => {
       NOW,
     );
     expect(answer).toBe(
-      "✅ J-12 Billing sync retry: done 3m ago.\n" +
-        "last: Added retry\n" +
-        "🔗 https://github.com/example/widgets/pull/42",
+      "Billing sync retry: done 3m ago.\n" +
+        "Added retry\n" +
+        "https://github.com/example/widgets/pull/42",
     );
   });
 
@@ -112,15 +131,13 @@ describe("jobAnswer", () => {
       }),
       NOW,
     );
-    expect(answer).toBe(
-      "❌ J-12 Billing sync retry: failed 1h 30m ago.\nlast: Worker thread interrupted",
-    );
+    expect(answer).toBe("Billing sync retry: failed 1h 30m ago.\nWorker thread interrupted");
   });
 
   it.each<[JobStatus, string]>([
-    ["launching", "Waiting for Start on the brief."],
+    ["launching", "Waiting for you to start it."],
     ["worker_offline", "Waiting for the worker to come back."],
-    ["quiet", "No new worker activity for a while."],
+    ["quiet", "I haven't heard from the worker. I'm still checking."],
   ])("adds a waiting line for %s", (status, line) => {
     expect(jobAnswer(job({ status }), NOW).split("\n").at(-1)).toBe(line);
   });
@@ -145,8 +162,8 @@ describe("jobListAnswer", () => {
       NOW,
     );
     expect(list).toBe(
-      "🙋 J-13 Docs pass: waiting for you for 14m · Asked a question\n" +
-        "✅ J-12 Billing sync retry: done 5m ago",
+      "Docs pass: waiting for you for 14m. · Asked a question\n" +
+        "Billing sync retry: done 5m ago.",
     );
   });
 });
@@ -162,6 +179,66 @@ describe.skipIf(!hasDatabase)("job lookups", () => {
       brief: {},
       worker: "t3",
     });
+
+  it("labels a failed refresh as last-known data without changing saved facts", async () => {
+    const sql = ledger.sql();
+    const created = await make("refresh-failed");
+    const running = await updateJob(sql, created.id, {
+      status: "running",
+      workerThreadId: "thread-refresh",
+      lastSummary: "Running tests",
+    });
+    const status = await freshJobStatus(sql, `J-${created.id}`, NOW, async () => {
+      throw new Error("offline");
+    });
+    expect(status).toMatchObject({
+      freshRead: "failed",
+      ledgerStatus: "running",
+      updatedAt: running.updatedAt.toISOString(),
+    });
+    expect(status?.answer).toContain("last saved update");
+    expect((await getJobByRef(sql, `J-${created.id}`))?.updatedAt).toEqual(running.updatedAt);
+  });
+
+  it("keeps the tool handle separate from a contextual status answer", async () => {
+    const sql = ledger.sql();
+    const created = await createJob(sql, {
+      requestKey: "contextual-status",
+      kind: "code-change",
+      title: "Billing sync retry",
+      brief: {},
+      worker: "t3",
+      slackChannel: "C1",
+      slackThreadTs: "170.1",
+    });
+    const read = (conversation?: { channelId: string; threadTs: string | null }) =>
+      freshJobStatus(sql, `J-${created.id}`, NOW, async () => {}, conversation);
+    const own = await read({ channelId: "C1", threadTs: "170.1" });
+    await recordSessionThread(sql, {
+      sessionId: "own-action",
+      teamId: "T1",
+      channelId: "C1",
+      threadTs: "170.1",
+      userId: "U1",
+    });
+    expect(
+      await jobReply(sql, `J-${created.id}`, "own-action", "This can't take a follow-up now."),
+    ).toBe("This can't take a follow-up now.");
+    expect(
+      await jobReply(sql, `J-${created.id}`, "elsewhere", "This can't take a follow-up now."),
+    ).toBe(
+      "<https://slack.com/app_redirect?channel=C1&message_ts=170.1|Billing sync retry>: This can't take a follow-up now.",
+    );
+    expect(own?.job).toBe(`J-${created.id}`);
+    expect(own?.answer).toMatch(/^This is not started/);
+    expect((await read({ channelId: "D1", threadTs: null }))?.answer).toMatch(
+      /^<https:.*\|Billing sync retry>:/,
+    );
+    await updateJob(sql, created.id, { codeChannel: true, slackThreadTs: null });
+    expect((await read({ channelId: "C1", threadTs: "180.1" }))?.answer).toMatch(
+      /^This is not started/,
+    );
+  });
 
   describe("getJobByRef", () => {
     it("finds a job by J-n, n, and a lowercase reference", async () => {

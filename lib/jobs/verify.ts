@@ -197,24 +197,18 @@ export function mergeConcerns(deterministic: string[], model: string[] = []): st
 
 // The model check's concerns, or none when it gave no verdict.
 export function modelConcerns(check: ModelCheck | undefined): string[] {
-  return check?.status === "checked" ? check.output.concerns : [];
+  return check?.status === "checked"
+    ? check.output.concerns
+    : check?.status === "unavailable"
+      ? ["I couldn't run the independent check; only the rule checks ran."]
+      : [];
 }
 
-// The header of the concerns list in the result message. The model check's confidence joins it.
-export const CONCERNS_HEADER = "*⚠️ check before merge*";
-
-// The model check's note in the result message. Only a job that tried the model check gets one.
-// A clean verdict is one line. With concerns, the verdict is the header of the concerns list.
-export function verdictLine(check: ModelCheck | undefined, concerns: string[]): string | null {
-  if (!check) return null;
-  if (check.status === "unavailable") {
-    return "verifier unavailable, only the rule checks ran";
-  }
-  const confidence = `${Math.round(check.output.confidence * 100)}% sure`;
-  const pass = check.output.verdict === "pass" && concerns.length === 0;
-  return pass
-    ? `✅ verifier: matches the brief (${confidence})`
-    : `${CONCERNS_HEADER} (${confidence})`;
+// The verifier's verdict and confidence stay internal. Unavailability is a required concern.
+export function verdictLine(check: ModelCheck | undefined, _concerns: string[]): string | null {
+  return check?.status === "unavailable"
+    ? "I couldn't run the independent check; only the rule checks ran."
+    : null;
 }
 
 export interface VerifierRequest {

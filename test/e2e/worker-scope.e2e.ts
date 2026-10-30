@@ -68,6 +68,9 @@ it("provisions scoped callbacks on launch and Fix and enforces scope through the
     await call("fake-shared-read-token", "sym_post_progress", { job: ref, summary: "Injected" }),
   ).toContain("job-scoped");
   expect(await call("fake-shared-read-token", "jobs_status", {})).toContain("Victim job");
+  expect(await call("fake-shared-read-token", "jobs_status", { job: ref })).not.toContain(
+    '"brief"',
+  );
   expect((await getJob(h.sql, victim.id))?.lastSummary).toBeNull();
   expect(
     (await pendingPosts(h.sql)).some(

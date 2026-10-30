@@ -11,6 +11,7 @@ import {
   NOT_SET_UP,
 } from "../lib/home/view.ts";
 import { createJob, type Job, type JobStatus, updateJob } from "../lib/ledger/jobs.ts";
+import { propose } from "../lib/ledger/proposals.ts";
 import { setQuietUntil } from "../lib/quiet/quiet.ts";
 import { approveSchedule, createSchedule, pauseSchedule } from "../lib/schedules/rows.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
@@ -23,6 +24,11 @@ const minutesAgo = (m: number) => new Date(NOW.getTime() - m * 60_000);
 function job(id: number, overrides: Partial<Job> = {}): Job {
   return {
     id,
+    parentJobId: null,
+    followupSentAt: null,
+    followupBoundary: null,
+    followupChecks: 0,
+    followupObserved: false,
     requestKey: `k${id}`,
     sessionId: null,
     kind: "code-change",
@@ -32,6 +38,10 @@ function job(id: number, overrides: Partial<Job> = {}): Job {
     slackChannel: "C1",
     slackThreadTs: "1700000000.000100",
     codeChannel: false,
+    closedAt: null,
+    workerSettledAt: null,
+    archiveState: "none",
+    archiveError: null,
     originChannel: null,
     originThreadTs: null,
     brief: {},
@@ -42,6 +52,7 @@ function job(id: number, overrides: Partial<Job> = {}): Job {
     workerModel: null,
     cursor: null,
     lastSummary: null,
+    skipping: null,
     lastMessage: null,
     cardTs: null,
     card: null,
@@ -89,6 +100,36 @@ const ownerData = (overrides: Partial<HomeData> = {}) =>
 const textOf = (view: { blocks: unknown[] }) => JSON.stringify(view.blocks);
 
 describe("homeView by role", () => {
+  it("shows an approved launch as starting", () => {
+    const text = textOf(
+      homeView(
+        "member",
+        data({ active: [job(91, { status: "launching" })], approvedStarts: [91] }),
+      ),
+    );
+    expect(text).toContain("starting");
+    expect(text).not.toContain("waiting for you to start it");
+  });
+
+  it("links stuck jobs without Retry or Stop controls", () => {
+    const text = textOf(
+      homeView("owner", ownerData({ active: [job(91, { status: "worker_offline" })] })),
+    );
+    expect(text).toContain(
+      "https://slack.com/app_redirect?channel=C1&message_ts=1700000000.000100",
+    );
+    expect(text).not.toContain('"type":"button"');
+    expect(text).not.toContain('"type":"actions"');
+  });
+
+  it("puts stale work in Needs you with human days", () => {
+    const text = textOf(
+      homeView("member", data({ active: [job(91, { lastActivityAt: minutesAgo(8 * 1440) })] })),
+    );
+    expect(text).toContain("Needs you");
+    expect(text).toContain("no activity for 8 days");
+    expect(text).not.toContain("*Running*");
+  });
   it("shows one short line to a user who is not allowed", () => {
     const view = homeView("denied");
     expect(view.type).toBe("home");
@@ -99,9 +140,9 @@ describe("homeView by role", () => {
   it("shows the dashboard to an allowed user without owner sections", () => {
     const view = homeView("member", ownerData());
     const text = textOf(view);
-    expect(text).toContain("Running and waiting");
-    expect(text).toContain("Schedules");
-    expect(text).toContain("Projects Sym works on");
+    expect(text).toContain("Nothing needs you.");
+    expect(text).not.toContain("Schedules");
+    expect(text).not.toContain("Projects Sym works on");
     expect(text).not.toContain("sym_home_refresh");
     expect(text).not.toContain("Connections");
     expect(text).not.toContain("Settings");
@@ -110,16 +151,16 @@ describe("homeView by role", () => {
 
   it("adds connections and settings for the owner", () => {
     const text = textOf(homeView("owner", ownerData()));
-    expect(text).toContain("Connections (1)");
-    expect(text).toContain("default mode ask");
+    expect(text).toContain("Setup");
+    expect(text).toContain("asks before each call");
     expect(text).toContain("quiet mode off");
-    expect(text).toContain("Persona casual (default)");
+    expect(text).toContain("Persona casual");
   });
 
   it("shows the persona, the worker label, the sign-in expiry, and the update time", () => {
-    const text = textOf(homeView("member", data()));
-    expect(text).toContain("*Persona:* casual");
-    expect(text).toContain("*Worker:* ✅ reachable, signed in");
+    const text = textOf(homeView("owner", ownerData()));
+    expect(text).toContain("Persona casual");
+    expect(text).toContain("*Worker:* signed in");
     expect(text).toContain("sign-in expires in 12 days");
     expect(text).toContain("Updated <!date^");
   });
@@ -132,12 +173,12 @@ describe("homeView by role", () => {
       }),
     );
     const text = textOf(view);
-    expect(text.indexOf("J-2")).toBeLessThan(text.indexOf("J-3"));
-    expect(text).toContain("🙋");
+    expect(text.indexOf("Needs &lt;you&gt; &amp; more")).toBeLessThan(text.indexOf("Job 3"));
+    expect(text).not.toContain("🙋");
     expect(text).toContain("Needs &lt;you&gt; &amp; more");
     expect(text).toContain("waiting for you");
     expect(text).toContain("app_redirect?channel=C1&message_ts=1700000000.000100");
-    expect(text).toContain("14m");
+    expect(text).toContain("14 minutes");
   });
 
   it("links a job in its own code channel to the channel", () => {
@@ -151,7 +192,60 @@ describe("homeView by role", () => {
     expect(textOf(view)).not.toContain("message_ts");
   });
 
-  it("shows paused and waiting schedules", () => {
+  it("puts a fresh Start wait in Needs you and changes the opening summary", () => {
+    const view = homeView("member", data({ active: [job(12, { status: "launching" })] }));
+    expect(JSON.stringify(view.blocks[0])).toContain("One item needs you.");
+    expect(textOf(view)).toContain("*Needs you*");
+    expect(textOf(view)).toContain("waiting for you to start it");
+    expect(textOf(view)).not.toContain("*Running*");
+  });
+
+  it.each(["pending", "repair"] as const)(
+    "shows an old %s closure under Needs you",
+    (archiveState) => {
+      const closure = job(13, {
+        status: "done",
+        closedAt: minutesAgo(3000),
+        workerSettledAt: minutesAgo(3000),
+        codeChannel: true,
+        archiveState,
+        finishedAt: minutesAgo(3000),
+      });
+      const view = homeView("member", data({ closures: [closure] }));
+      expect(JSON.stringify(view.blocks[0])).toContain("One item needs you.");
+      expect(textOf(view)).toContain(
+        archiveState === "repair"
+          ? "channel archive failed; needs repair"
+          : "channel archive pending",
+      );
+      expect(textOf(view)).not.toContain("Ask me to start something");
+    },
+  );
+
+  it("labels failed and cancelled work in Finished today", () => {
+    const text = textOf(
+      homeView(
+        "member",
+        data({
+          finished: {
+            done: 0,
+            failed: 1,
+            cancelled: 1,
+            latest: [
+              job(14, { status: "failed", finishedAt: minutesAgo(5) }),
+              job(15, { status: "cancelled", finishedAt: minutesAgo(6) }),
+            ],
+          },
+        }),
+      ),
+    );
+    expect(text).toContain("Finished today");
+    expect(text).toContain("failed");
+    expect(text).toContain("cancelled");
+    expect(text).toContain("Nothing needs you.");
+  });
+
+  it("shows only schedules waiting for approval under Needs you", () => {
     const schedule = {
       id: 1,
       cron: "0 9 * * *",
@@ -174,6 +268,7 @@ describe("homeView by role", () => {
         data({
           schedules: [
             schedule,
+            { ...schedule, id: 3, status: "pending_approval" },
             {
               ...schedule,
               id: 2,
@@ -184,8 +279,11 @@ describe("homeView by role", () => {
         }),
       ),
     );
-    expect(text).toContain("S-1 · Morning check · paused");
-    expect(text).toContain("S-2 · Morning check · next <!date^");
+    expect(text).not.toContain("S-1");
+    expect(text).not.toContain("S-2");
+    expect(text).toContain("One item needs you.");
+    expect(text).toContain("*Needs you*");
+    expect(text).toContain("Morning check · waiting for approval");
   });
 });
 
@@ -194,9 +292,9 @@ describe("homeView limits", () => {
     const active = Array.from({ length: 25 }, (_, i) => job(i + 1));
     const view = homeView("member", data({ active }));
     const text = textOf(view);
-    expect(text).toContain("Running and waiting (25)");
-    expect(text).toContain(`J-${MAX_ACTIVE_JOBS}`);
-    expect(text).not.toContain("J-11 ");
+    expect(text).toContain("Running");
+    expect(text).toContain(`Job ${MAX_ACTIVE_JOBS}>`);
+    expect(text).not.toContain("Job 11>");
     expect(text).toContain("+15 more");
   });
 
@@ -207,9 +305,9 @@ describe("homeView limits", () => {
     const text = textOf(
       homeView("member", data({ finished: { done: 8, failed: 2, cancelled: 0, latest } })),
     );
-    expect(text).toContain("✅ 8 done · ❌ 2 failed");
+    expect(text).toContain("Finished today");
     expect(text).toContain("+3 more");
-    expect(text).toContain("5m ago");
+    expect(text).toContain("5 minutes ago");
   });
 
   it("keeps every section under 3000 characters and the view under 100 blocks", () => {
@@ -226,12 +324,12 @@ describe("homeView limits", () => {
 
 describe("worker state", () => {
   it("shows unknown when the worker check fails", async () => {
-    const view = homeView("member", data({ worker: { state: "unknown", expiresAt: null } }));
+    const view = homeView("owner", ownerData({ worker: { state: "unknown", expiresAt: null } }));
     expect(textOf(view)).toContain("status unknown");
   });
 
   it("shows not signed in", () => {
-    const text = textOf(homeView("member", data({ worker: { state: "not_signed_in" } })));
+    const text = textOf(homeView("owner", ownerData({ worker: { state: "not_signed_in" } })));
     expect(text).toContain("not signed in");
   });
 });
@@ -276,6 +374,59 @@ describe.skipIf(!hasDatabase)("worker state from the worker", () => {
       "member",
     );
     expect(broken.worker.state).toBe("unknown");
+  });
+
+  it("collects only the latest Start decision for Home", async () => {
+    const sql = ledger.sql();
+    const created = await createJob(sql, {
+      requestKey: "home-start",
+      kind: "code-change",
+      title: "Start retry",
+      brief: {},
+      worker: "fake",
+      slackChannel: "C1",
+    });
+    const first = await propose(sql, {
+      key: "home-start-first",
+      job: created,
+      kind: "start",
+      payload: {},
+      message: "Start?",
+    });
+    let collected = await collectHome(base(), "member");
+    expect(textOf(homeView("member", collected))).toContain("waiting for you to start it");
+    await sql`update job_proposals set status = 'approved' where id = ${first.id}::bigint`;
+    collected = await collectHome(base(), "member");
+    expect(textOf(homeView("member", collected))).toContain("starting");
+    expect(textOf(homeView("member", collected))).not.toContain("waiting for you to start it");
+    await propose(sql, {
+      key: "home-start-later",
+      job: created,
+      kind: "start",
+      payload: {},
+      message: "Start revised?",
+    });
+    collected = await collectHome(base(), "member");
+    expect(textOf(homeView("member", collected))).toContain("waiting for you to start it");
+  });
+
+  it("collects closure repairs older than today and beyond the recent list", async () => {
+    const created = await createJob(ledger.sql(), {
+      requestKey: "old-closure",
+      kind: "code-change",
+      title: "Archive retry",
+      brief: {},
+      worker: "t3",
+    });
+    await ledger.sql()`update jobs set status = 'done', finished_at = ${minutesAgo(3000)}, closed_at = ${minutesAgo(2900)}, worker_settled_at = ${minutesAgo(2900)}, code_channel = true, archive_state = 'repair' where id = ${created.id}`;
+    const collected = await collectHome(base(), "member");
+    expect(collected.finished.latest.some((row) => row.id === created.id)).toBe(false);
+    expect(collected.closures?.map((row) => row.id)).toContain(created.id);
+    const text = textOf(homeView("member", collected));
+    expect(text).toContain("Needs you");
+    expect(text).toContain("Archive retry");
+    await ledger.sql()`update jobs set archive_state = 'archived' where id = ${created.id}`;
+    expect((await collectHome(base(), "member")).closures).toEqual([]);
   });
 
   it("reads no owner data for a member and only the allow-listed projects", async () => {
@@ -348,7 +499,7 @@ describe.skipIf(!hasDatabase)("publishHome", () => {
     await publishHome(api(), deps(), "UOTHER");
     const text = JSON.stringify(slack.homeViews.UOTHER);
     expect(text).toContain(NOT_SET_UP);
-    expect(text).not.toContain("Running and waiting");
+    expect(text).not.toContain("Nothing needs you.");
   });
 
   it("publishes the dashboard for a member and the owner sections for the owner only", async () => {
@@ -392,21 +543,21 @@ describe.skipIf(!hasDatabase)("publishHome", () => {
     await publishHome(api(), deps(), "UOWNER");
 
     const member = JSON.stringify(slack.homeViews.UMEMBER);
-    expect(member).toContain("J-");
+    expect(member).not.toMatch(/J-\d+/);
     expect(member).toContain("Retry loop");
     expect(member).toContain("waiting for you");
-    expect(member).toContain("✅ 1 done · ❌ 1 failed");
-    expect(member).toContain("Morning check");
-    expect(member).toContain("Paused one · paused");
-    expect(member).toContain("alpha");
-    expect(member).toContain("expires in 3 days");
+    expect(member).toContain("Finished today");
+    expect(member).not.toContain("Morning check");
+    expect(member).not.toContain("Paused one · paused");
+    expect(member).not.toContain("alpha");
+    expect(member).not.toContain("expires in 3 days");
     expect(member).not.toContain("Connections");
     expect(member).not.toContain("docs\\`");
 
     const owner = JSON.stringify(slack.homeViews.UOWNER);
-    expect(owner).toContain("Connections (1)");
+    expect(owner).toContain("Setup");
     expect(owner).toContain("docs");
-    expect(owner).toContain("default mode ask");
+    expect(owner).toContain("asks before each call");
     expect(owner).toContain("quiet until");
   });
 

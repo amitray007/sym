@@ -20,10 +20,8 @@ export async function recordThreadMessage(
   threadTs: string,
   messageTs: string,
 ): Promise<void> {
-  await sql`
-    update session_threads set message_ts = ${messageTs}
-    where channel_id = ${channelId} and thread_ts = ${threadTs}
-  `;
+  await sql`update session_threads set message_ts = ${messageTs}
+    where channel_id = ${channelId} and thread_ts = ${threadTs}`;
 }
 
 export async function recordTurnMessage(
@@ -46,11 +44,28 @@ async function turnMessageTs(sql: Sql, sessionId: string): Promise<string | null
   return row?.messageTs ?? null;
 }
 
+// Snapshot before model work starts. Later inbound messages may update the thread row.
+const turnTargets = new Map<string, string | null>();
+export async function captureReactionTarget(
+  sql: Sql,
+  sessionId: string,
+  turnId: string,
+): Promise<void> {
+  const key = `${sessionId}:${turnId}`;
+  if (turnTargets.has(key)) return;
+  turnTargets.set(key, await turnMessageTs(sql, sessionId));
+  if (turnTargets.size > 2000) turnTargets.delete(turnTargets.keys().next().value as string);
+}
+export function reactionTarget(sessionId: string, turnId: string): string | null {
+  return turnTargets.get(`${sessionId}:${turnId}`) ?? null;
+}
+
 export interface ReactDeps {
   sql: Sql;
   // Undefined when the deployment has no bot token.
   api: SlackApi | undefined;
   now?: Date;
+  messageTs?: string | null;
 }
 
 // Returns a short sentence for the model. It never throws on a Slack refusal.
@@ -64,26 +79,32 @@ export async function reactToTurn(
   if (!deps.api) return "Sym has no Slack access, so it cannot react.";
 
   const thread = await getSessionThread(deps.sql, sessionId);
-  const messageTs = thread ? await turnMessageTs(deps.sql, sessionId) : null;
+  const messageTs = thread
+    ? deps.messageTs === undefined
+      ? await turnMessageTs(deps.sql, sessionId)
+      : deps.messageTs
+    : null;
   if (!thread || !messageTs) return "This conversation has no Slack message to react to.";
   const threadTs = thread.threadTs ?? messageTs;
   const since = new Date((deps.now ?? new Date()).getTime() - THREAD_WINDOW_MS);
 
-  const [recent] = await deps.sql<{ count: number }[]>`
-    select count(*)::int as count from reactions
-    where channel_id = ${thread.channelId} and thread_ts = ${threadTs} and created_at > ${since}
-  `;
-  if ((recent?.count ?? 0) >= THREAD_CAP) {
+  const claim = await deps.sql.begin(async (tx) => {
+    await tx`select pg_advisory_xact_lock(hashtextextended(${`${thread.channelId}:${threadTs}`}, 0))`;
+    const [recent] = await tx<{ count: number }[]>`
+      select count(*)::int as count from reactions
+      where channel_id = ${thread.channelId} and thread_ts = ${threadTs} and created_at > ${since}
+    `;
+    if ((recent?.count ?? 0) >= THREAD_CAP) return "cap";
+    const claimed = await tx`
+      insert into reactions (channel_id, message_ts, thread_ts, name)
+      values (${thread.channelId}, ${messageTs}, ${threadTs}, ${normalized.name})
+      on conflict do nothing returning message_ts
+    `;
+    return claimed.length ? "ok" : "duplicate";
+  });
+  if (claim === "cap")
     return "Sym has used its reactions for this thread this hour. Reply in text or stay silent.";
-  }
-  // The row is the claim: the key allows one reaction per message.
-  const claimed = await deps.sql`
-    insert into reactions (channel_id, message_ts, thread_ts, name)
-    values (${thread.channelId}, ${messageTs}, ${threadTs}, ${normalized.name})
-    on conflict do nothing
-    returning message_ts
-  `;
-  if (claimed.length === 0) return "Sym already reacted to this message. Do not react again.";
+  if (claim === "duplicate") return "Sym already reacted to this message. Do not react again.";
 
   try {
     await deps.api.call("reactions.add", {
@@ -101,7 +122,7 @@ export async function reactToTurn(
     `;
     console.warn(`Sym could not add a reaction: ${code}`);
     if (code === "invalid_name") {
-      return `Slack does not know :${normalized.name}:. Call slack_emoji to find a custom emoji, or pick a standard name.`;
+      return `Slack does not know :${normalized.name}:. Look up a custom emoji, or pick a standard name.`;
     }
     return `Slack refused the reaction (${code}). Do not retry.`;
   }

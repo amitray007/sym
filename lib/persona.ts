@@ -57,12 +57,13 @@ export function personaSource(sources: PersonaSources): PersonaSource {
   return sources.env?.trim() ? "env" : "default";
 }
 
-// Status lines for Slack's thinking indicator, one list per persona. Slack rotates them while
-// the brain works. Each is short (the status line is cut at 50 characters) and generic.
+// Fallback for the initial thinking indicator, before a real step is known (decision 071).
+// Tool labels and workflow yields replace it with the current step. Do not rotate invented
+// activities, jokes, or time promises here: receiving a message proves none of those things.
 export const LOADING_MESSAGES: Record<PersonaName, readonly string[]> = {
   plain: ["Working..."],
-  casual: ["on it...", "thinking...", "one sec...", "looking into it..."],
-  spicy: ["cooking...", "reading your mess...", "bestie hold on...", "give me a sec, chief..."],
+  casual: ["Working..."],
+  spicy: ["Working..."],
 };
 
 /** The status lines for a persona. A pack persona is custom text, so it gets the neutral list. */

@@ -45,6 +45,7 @@ export interface FakeSlackReaction {
 // A code channel the fake created with agents.conversations.create.
 export interface FakeCodeChannel {
   id: string;
+  name: string;
   sessionId: string | undefined;
   originChannel: string | undefined;
   originTs: string | undefined;
@@ -293,6 +294,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
       const id = `CCODE${codeChannels.length + 1}`;
       codeChannels.push({
         id,
+        name: String(b.name),
         sessionId,
         originChannel: b.origin_channel_id === undefined ? undefined : String(b.origin_channel_id),
         originTs: b.origin_message_ts === undefined ? undefined : String(b.origin_message_ts),
@@ -322,11 +324,11 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
       const channel = codeChannel(b.channel_id);
       if (channel.archived) throw "already_archived";
       if (b.summary_message_ts && !channel.originTs) throw "no_origin_link";
-      if (b.summary_message_ts && !find(channel.id, b.summary_message_ts)) {
-        throw "summary_message_not_found";
-      }
       channel.archived = true;
-      channel.summaryTs = b.summary_message_ts ? String(b.summary_message_ts) : undefined;
+      channel.summaryTs =
+        b.summary_message_ts && find(channel.id, b.summary_message_ts)
+          ? String(b.summary_message_ts)
+          : undefined;
       changed();
       return {};
     },
@@ -418,7 +420,9 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
     const upload = /^\/upload\/(F\d+)$/.exec(path);
     if (upload) {
       const fileId = upload[1] as string;
-      if (!authorized || !pendingUploads.has(fileId)) {
+      // The returned upload URL authorizes this request. Slack's raw-byte POST needs no
+      // bearer header: https://docs.slack.dev/messaging/working-with-files/
+      if (!pendingUploads.has(fileId)) {
         res.writeHead(403).end("denied");
         return;
       }

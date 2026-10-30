@@ -11,6 +11,7 @@ import { ledger } from "../../lib/runtime.ts";
 // is there, and tool counts. It never shows a token.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "List the MCP connections: name, status, whether the token or sign-in is present, and " +
     "tool counts and the default mode. Give a name to also see each tool with read or write, its mode, and whether the owner set that mode for the tool alone.",
   inputSchema: z.object({ name: z.string().optional() }),

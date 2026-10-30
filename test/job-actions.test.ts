@@ -1,16 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Sql } from "../lib/db.ts";
 import { deliver } from "../lib/delivery/deliver.ts";
 import type { Brief } from "../lib/jobs/brief.ts";
+import { closeJob, retryClosures, startFollowUp } from "../lib/jobs/followup.ts";
 import { jobsToWatch } from "../lib/jobs/pr-wakes.ts";
-import { promptPost, refOfPrompt } from "../lib/jobs/prompts.ts";
+import { refOfPrompt } from "../lib/jobs/prompts.ts";
 import { reconcileJobs } from "../lib/jobs/reconcile.ts";
 import { checkJob, type JobDeps, launchOrAdopt, startJob } from "../lib/jobs/run.ts";
 import { getJob, type Job } from "../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import type { Pack } from "../lib/pack/load.ts";
 import { packSchema } from "../lib/pack/schema.ts";
-import type { SlackApi } from "../lib/slack/api.ts";
+import { type SlackApi, SlackApiError } from "../lib/slack/api.ts";
 import { handleJobAction, type JobAction } from "../lib/slack/job-actions.ts";
 import { type FakeStep, FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
@@ -40,17 +41,6 @@ const CHANNEL = "C1";
 
 describe("prompt blocks", () => {
   it("put the job reference in the block ID and send on Enter", () => {
-    const post = promptPost("fix", "J-7");
-    expect(post.blocks[0]).toMatchObject({
-      type: "input",
-      block_id: "fix-J-7",
-      dispatch_action: true,
-      element: {
-        type: "plain_text_input",
-        action_id: "sym_job_fix_text",
-        dispatch_action_config: { trigger_actions_on: ["on_enter_pressed"] },
-      },
-    });
     expect(refOfPrompt("fix", "fix-J-7")).toBe("J-7");
     expect(refOfPrompt("steer", "fix-J-7")).toBeUndefined();
     expect(refOfPrompt("fix", "fix-J-7-x")).toBeUndefined();
@@ -96,6 +86,16 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
 
   const click = (deps: JobDeps, action: Partial<JobAction> & { actionId: string }) => {
     const replies: string[] = [];
+    if (action.actionId === "sym_job_fix_text") {
+      const ref = action.blockId?.replace(/^fix-/, "") ?? "";
+      return startFollowUp(
+        deps,
+        ref,
+        action.value ?? "",
+        "U1",
+        `${CHANNEL}:${action.messageTs}`,
+      ).then((result) => ({ answer: result.answer, replies }));
+    }
     return handleJobAction(deps, { user: { id: "U1" }, ...action }, CHANNEL, async (text) => {
       replies.push(text);
     }).then((answer) => ({ answer, replies }));
@@ -114,7 +114,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     const ref = `J-${job.id}`;
     const first = await click(deps, { actionId: "sym_job_ok", value: ref, messageTs: "1.1" });
     await click(deps, { actionId: "sym_job_ok", value: ref, messageTs: "1.1" });
-    expect(first.replies).toEqual([`Noted: ${ref} looks good.`]);
+    expect(first.replies).toEqual(["Thanks, I recorded your feedback."]);
     const rows = await sql`select kind, value from feedback where job_id = ${job.id}`;
     expect(rows).toEqual([{ kind: "thumbs_up", value: "looks_good" }]);
   });
@@ -127,8 +127,8 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     await sql`update jobs set brief = brief || '{"goal": "Retry 5xx & 429."}' where id = ${job.id}`;
     const shown = await click(deps, { actionId: "sym_job_brief", value: ref });
     expect(shown.replies).toHaveLength(1);
-    expect(shown.replies[0]).toContain("*goal* Retry 5xx &amp; 429.");
-    expect(shown.replies[0]).toContain("*done when*\n☐ Tests pass");
+    expect(shown.replies[0]).toContain("Retry 5xx &amp; 429.");
+    expect(shown.replies[0]).toContain("I'll check: Tests pass.");
 
     const elsewhere = await handleJobAction(
       deps,
@@ -136,9 +136,9 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       "C-other",
       async () => {},
     );
-    expect(elsewhere).toBe(`There is no job ${ref}.`);
+    expect(elsewhere).toBe("I couldn't find that work.");
     expect((await click(deps, { actionId: "sym_job_brief", value: "J-99999" })).answer).toBe(
-      "There is no job J-99999.",
+      "I couldn't find that work.",
     );
   });
 
@@ -151,7 +151,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
 
     await click(deps, { actionId: "sym_job_fix", value: ref });
     const [prompt] = await outbox(sql, `${ref}:fix-prompt:U1:`);
-    expect(JSON.stringify(prompt?.payload)).toContain(`"block_id":"fix-${ref}"`);
+    expect(prompt).toBeUndefined();
 
     const sent = await click(deps, {
       actionId: "sym_job_fix_text",
@@ -166,10 +166,10 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       parentJobId: job.id,
       workerThreadId: job.workerThreadId,
       status: "running",
-      cursor: job.cursor,
+      cursor: "1",
     });
     const childRef = `J-${child?.id}`;
-    expect(sent.answer).toBe(`Sent to the worker as ${childRef}.`);
+    expect(sent.answer).toBe("I sent the follow-up to the worker.");
     expect(worker.sends).toEqual([
       expect.objectContaining({ threadId: job.workerThreadId, mode: "auto" }),
     ]);
@@ -178,12 +178,10 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     expect(await sql`select kind, value from feedback where job_id = ${job.id}`).toEqual([
       { kind: "fix", value: "Also cover the empty list." },
     ]);
-    // The text box becomes the person's words, and the parent's result loses its buttons.
-    const [answered] = await outbox(sql, `prompt-answer:${CHANNEL}:1700000099.1`);
-    expect(answered?.method).toBe("chat.update");
+    // A follow-up records the continuation on the parent's result.
     const [edit] = await outbox(sql, `${ref}:end-edit:`);
     expect(JSON.stringify(edit?.payload)).not.toContain("sym_job_fix");
-    expect(JSON.stringify(edit?.payload)).toContain(`Fix sent as ${childRef}`);
+    expect(JSON.stringify(edit?.payload)).toContain("I sent the follow-up on the same branch.");
 
     // The same Enter again sends nothing new.
     const again = await click(deps, {
@@ -192,7 +190,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       value: "Also cover the empty list.",
       messageTs: "1700000099.1",
     });
-    expect(again.answer).toBe(`Already sent as ${childRef}.`);
+    expect(again.answer).toBe("I already sent that follow-up.");
     expect(worker.sends).toHaveLength(1);
 
     // A short lease keeps reconcile away until the send lands; then reconcile drives it.
@@ -207,16 +205,136 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     expect(done?.status).toBe("done");
     expect(done?.lastMessage).toContain("Fixed the edge case");
     const [end] = await outbox(sql, `${childRef}:end`);
-    expect(JSON.stringify(end?.payload)).toContain("sym_job_fix");
+    expect(JSON.stringify(end?.payload)).not.toContain("sym_job_fix");
 
     // The parent's thread now belongs to the follow-up: no second Fix or Close on the parent.
     const fixParent = await click(deps, { actionId: "sym_job_fix", value: ref });
-    expect(fixParent.replies).toEqual([
-      `${childRef} continued this thread. Use its buttons instead.`,
-    ]);
+    expect(fixParent.replies).toEqual(["A follow-up continued this thread. Use the latest work."]);
     const closeParent = await click(deps, { actionId: "sym_job_close", value: ref });
-    expect(closeParent.replies).toEqual([`${childRef} continued this thread. Close it instead.`]);
+    expect(closeParent.replies).toEqual([
+      "A follow-up continued this thread. Close the latest work instead.",
+    ]);
     expect(worker.settled).toEqual([]);
+  });
+
+  it.each(["failed", "interrupted"] as const)(
+    "ends a sent follow-up on a new %s without an assistant message",
+    async (status) => {
+      const { deps, job, sql } = await finishedJob(`early-${status}`, [
+        { status: "completed", items: [result("Parent done")] },
+        { status },
+      ]);
+      const child = await startFollowUp(deps, `J-${job.id}`, "add a test", "U1", `early-${status}`);
+      if (!child.job) throw new Error(child.answer);
+      expect((await checkJob(deps, child.job.id, 1)).status).toBe("failed");
+      expect((await getJob(sql, child.job.id))?.lastMessage).toBeNull();
+      const [end] = await outbox(sql, `J-${child.job.id}:end`);
+      expect(end?.payload.text).toContain("didn't finish");
+      expect(end?.payload.text).not.toContain("Parent done");
+    },
+  );
+
+  it("waits past the echoed follow-up and stale parent completion, then reads the new result", async () => {
+    const { deps, worker, job, sql } = await finishedJob("echo-boundary", [
+      { status: "completed", items: [result("Parent done")] },
+      { status: "completed" },
+      { status: "completed", items: [result("Child done")] },
+    ]);
+    // Activity from the old run that arrived after the parent's last check must stay old.
+    worker.addWake(job.workerThreadId as string, "Old run notification");
+    const child = await startFollowUp(deps, `J-${job.id}`, "add a test", "U1", "echo-boundary");
+    if (!child.job) throw new Error(child.answer);
+    const echo = (await worker.readActivity(job.workerThreadId as string, null)).items.at(-1);
+    expect(echo?.type).toBe("user_message");
+    expect((await checkJob(deps, child.job.id, 1)).status).toBe("running");
+    expect((await getJob(sql, child.job.id))?.lastMessage).toBeNull();
+    expect((await checkJob(deps, child.job.id, 1)).status).toBe("done");
+    expect((await getJob(sql, child.job.id))?.lastMessage).toContain("Child done");
+  });
+
+  it.each(["completed", "failed"] as const)(
+    "bounds empty completed follow-ups after an empty %s parent",
+    async (parentStatus) => {
+      const { deps, job, sql } = await finishedJob(`bounded-${parentStatus}`, [
+        { status: parentStatus },
+        { status: "completed" },
+      ]);
+      const child = await startFollowUp(
+        deps,
+        `J-${job.id}`,
+        "retry",
+        "U1",
+        `bounded-${parentStatus}`,
+      );
+      if (!child.job) throw new Error(child.answer);
+      for (let check = 0; check < 3; check++) {
+        expect((await checkJob({ ...deps }, child.job.id, 1)).status).toBe("running");
+      }
+      expect((await checkJob({ ...deps }, child.job.id, 1)).status).toBe("done");
+      expect((await getJob(sql, child.job.id))?.lastMessage).toBeNull();
+      const [end] = await outbox(sql, `J-${child.job.id}:end`);
+      expect(end?.payload.text).toContain("without a result summary");
+    },
+  );
+
+  it("expires empty completion grace after five minutes even on the first check", async () => {
+    const { deps, job } = await finishedJob("grace-time", [
+      { status: "completed" },
+      { status: "completed" },
+    ]);
+    const child = await startFollowUp(deps, `J-${job.id}`, "retry", "U1", "grace-time");
+    if (!child.job) throw new Error(child.answer);
+    const late = { ...deps, now: () => new Date(Date.now() + 301_000) };
+    expect((await checkJob(late, child.job.id, 1)).status).toBe("done");
+  });
+
+  it.each([
+    ["completed", "failed"],
+    ["completed", "interrupted"],
+    ["failed", "failed"],
+    ["failed", "interrupted"],
+  ] as const)("ends an empty %s parent's follow-up on %s", async (parentStatus, outcome) => {
+    const key = `empty-${parentStatus}-${outcome}`;
+    const { deps, worker, job, sql } = await finishedJob(key, [
+      { status: parentStatus },
+      { status: outcome },
+    ]);
+    const child = await startFollowUp(deps, `J-${job.id}`, "retry", "U1", key);
+    if (!child.job) throw new Error(child.answer);
+    // The server can report the new failure before returning any activity (even the echo).
+    vi.spyOn(worker, "readActivity").mockResolvedValue({
+      status: outcome,
+      items: [],
+      cursor: null,
+      pendingRequests: 0,
+      hasMore: false,
+    });
+    expect((await checkJob(deps, child.job.id, 1)).status).toBe("failed");
+    expect((await getJob(sql, child.job.id))?.lastMessage).toBeNull();
+    expect(await outbox(sql, `J-${child.job.id}:end`)).toHaveLength(1);
+  });
+
+  it("accepts completion after a worker item even without an assistant summary", async () => {
+    const { deps, worker, job } = await finishedJob("worker-observed", [
+      { status: "completed" },
+      { status: "running" },
+      { status: "completed" },
+    ]);
+    const child = await startFollowUp(deps, `J-${job.id}`, "retry", "U1", "worker-observed");
+    if (!child.job) throw new Error(child.answer);
+    worker.addWake(job.workerThreadId as string, "New run notification");
+    expect((await checkJob(deps, child.job.id, 1)).status).toBe("running");
+    expect((await checkJob(deps, child.job.id, 1)).status).toBe("done");
+  });
+
+  it("closes a job without claiming a PR watch it never had", async () => {
+    const { deps, job, sql } = await finishedJob("no-watch", [
+      { status: "completed", items: ['```json\n{"summary":"Done","tests":"passed"}\n```'] },
+    ]);
+    await closeJob(deps, `J-${job.id}`, "U1");
+    const edits = await outbox(sql, `J-${job.id}:end-edit`);
+    expect(JSON.stringify(edits)).not.toContain("stopped following its PR");
+    expect(JSON.stringify(edits)).toContain("I've closed this.");
   });
 
   it("refuses a Fix when its project has been removed, before creating or sending a job", async () => {
@@ -325,7 +443,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
         messageTs: "2.3",
       },
     );
-    expect(sent.answer).toContain("Sent to the worker as");
+    expect(sent.answer).toContain("I sent the follow-up to the worker.");
     expect(worker.sends[0]?.text).toContain("Change only files that match: docs/**.");
     expect(worker.sends[0]?.text).toContain("Keep docs clear");
     expect(worker.sends[0]?.text).toContain("Do not push and do not open a pull request.");
@@ -351,7 +469,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
   });
 
   it("refuses a Fix while another job works in the thread, and on a running job", async () => {
-    const { deps, job } = await finishedJob("busy", [
+    const { deps, job, sql } = await finishedJob("busy", [
       { status: "completed", items: [result("One")] },
       { status: "running", items: [] },
     ]);
@@ -362,17 +480,22 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       value: "Change A",
       messageTs: "2.1",
     });
-    expect(first.answer).toMatch(/^Sent to the worker as J-\d+\.$/);
-    const childRef = first.answer?.match(/J-\d+/)?.[0] ?? "";
+    expect(first.answer).toBe("I sent the follow-up to the worker.");
+    const [child] = await sql<
+      { id: number }[]
+    >`select id::int from jobs where parent_job_id = ${job.id}`;
+    const childRef = `J-${child?.id}`;
     const second = await click(deps, {
       actionId: "sym_job_fix_text",
       blockId: `fix-${ref}`,
       value: "Change B",
       messageTs: "2.2",
     });
-    expect(second.answer).toBe(`${childRef} is still working in this thread. Steer it instead.`);
+    expect(second.answer).toBe(
+      "I'm still working on this. Tell me what to change and I'll pass it on.",
+    );
     const onRunning = await click(deps, { actionId: "sym_job_fix", value: childRef });
-    expect(onRunning.replies).toEqual([`${childRef} cannot take a fix now.`]);
+    expect(onRunning.replies).toEqual(["This cannot take a fix now."]);
   });
 
   it("closes a finished job once: settles the thread, edits the result, stops PR follow", async () => {
@@ -382,19 +505,125 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     const ref = `J-${job.id}`;
     expect((await jobsToWatch(deps, new Date(0))).map((j) => j.id)).toContain(job.id);
 
+    await sql`update jobs set pr_watched_url = ${PR} where id = ${job.id}`;
     await click(deps, { actionId: "sym_job_ok", value: ref, messageTs: "4.1" });
     const closed = await click(deps, { actionId: "sym_job_close", value: ref });
-    expect(closed.replies).toEqual([`Closed ${ref}.`]);
+    expect(closed.replies).toEqual(["Closed this."]);
     expect(worker.settled).toEqual([job.workerThreadId]);
     const [edit] = await outbox(sql, `${ref}:end-edit:`);
-    expect(JSON.stringify(edit?.payload)).toContain("Closed by <@U1>.");
+    expect(JSON.stringify(edit?.payload)).toContain(
+      "I've closed this. I stopped following its PR.",
+    );
     expect(JSON.stringify(edit?.payload)).toContain("sym_job_pr");
     expect((await jobsToWatch(deps, new Date(0))).map((j) => j.id)).not.toContain(job.id);
 
     const again = await click(deps, { actionId: "sym_job_close", value: ref });
-    expect(again.replies).toEqual([`${ref} is already closed.`]);
+    expect(again.replies).toEqual(["Closed this."]);
     const fix = await click(deps, { actionId: "sym_job_fix", value: ref });
-    expect(fix.replies).toEqual([`${ref} is closed.`]);
+    expect(fix.replies).toEqual(["This is closed."]);
+  });
+
+  it("never settles an active follow-up when Close races its Start", async () => {
+    const { deps, worker, job, sql } = await finishedJob("close-followup-race", [
+      { status: "completed", items: [result("Done")] },
+      { status: "running", items: [] },
+    ]);
+    await Promise.allSettled([
+      startFollowUp(deps, `J-${job.id}`, "add a test", "U1", "close-race"),
+      closeJob(deps, `J-${job.id}`, "U1"),
+    ]);
+    const children = await sql`select id from jobs where parent_job_id = ${job.id}`;
+    const current = await getJob(sql, job.id);
+    if (children.length) {
+      expect(current?.closedAt).toBeNull();
+      expect(worker.settled).toEqual([]);
+    } else {
+      expect(current?.closedAt).not.toBeNull();
+      expect(worker.settled).toEqual([job.workerThreadId]);
+    }
+  });
+
+  it("retries a failed archive after restart without settling twice or claiming success", async () => {
+    const { deps, worker, job, sql } = await finishedJob("archive-recovery", [
+      { status: "completed", items: [result("Done")] },
+    ]);
+    const ref = `J-${job.id}`;
+    await sql`update jobs set code_channel = true, slack_channel = 'C-code', slack_thread_ts = null,
+      origin_channel = 'C1', origin_thread_ts = '1.1' where id = ${job.id}`;
+    const calls: { method: string; body: Record<string, unknown> }[] = [];
+    let fail = true;
+    const api: SlackApi = {
+      async call(method, body) {
+        calls.push({ method, body });
+        if (method === "agents.conversations.archive" && fail) {
+          fail = false;
+          throw new SlackApiError(method, "internal_error");
+        }
+        return slack.call(method, body);
+      },
+    };
+    const answer = await closeJob({ ...deps, slack: api }, ref, "U1");
+    expect(answer).toContain("couldn't archive");
+    expect(answer).not.toContain("Closed this");
+    expect(calls.filter((c) => c.method === "agents.sessions.setStatus")).toEqual([]);
+    expect(await getJob(sql, job.id)).toMatchObject({ archiveState: "pending" });
+    await retryClosures({ ...deps, slack: api });
+    await deliver(sql, api);
+    expect(worker.settled).toEqual([job.workerThreadId]);
+    expect(await getJob(sql, job.id)).toMatchObject({
+      archiveState: "archived",
+      archiveError: null,
+    });
+    const archives = calls.filter((c) => c.method === "agents.conversations.archive");
+    const [end] = await sql<
+      { slackTs: string }[]
+    >`select slack_ts from outbox where idempotency_key = ${`${ref}:end`}`;
+    expect(archives.map((c) => c.body)).toEqual([
+      { channel_id: "C-code", summary_message_ts: end?.slackTs },
+      { channel_id: "C-code", summary_message_ts: end?.slackTs },
+    ]);
+    const [repaired] = await outbox(sql, `${ref}:archive-recovered`);
+    expect(repaired?.payload).toMatchObject({ text: "I've archived this channel." });
+    await retryClosures({ ...deps, slack: api });
+    expect(worker.settled).toHaveLength(1);
+    expect(calls.filter((c) => c.method === "agents.conversations.archive")).toHaveLength(2);
+  });
+
+  it("repairs an interrupted close, missing client and missing channel without false success", async () => {
+    const { deps, worker, job, sql } = await finishedJob("archive-missing", [
+      { status: "completed", items: [result("Done")] },
+    ]);
+    const ref = `J-${job.id}`;
+    // Simulate death just after accepting Close, before settlement or archive.
+    await sql`update jobs set closed_at = now(), code_channel = true, archive_state = 'pending'
+      where id = ${job.id}`;
+    const { slack: _slack, ...withoutSlack } = deps;
+    await retryClosures(withoutSlack);
+    expect(await getJob(sql, job.id)).toMatchObject({
+      archiveState: "repair",
+      archiveError: "missing_client",
+    });
+    await sql`update jobs set slack_channel = null, origin_channel = 'C-origin', origin_thread_ts = '7.1'
+      where id = ${job.id}`;
+    expect(await closeJob(deps, ref, "U1")).toContain("channel ID is missing");
+    expect(await getJob(sql, job.id)).toMatchObject({
+      archiveState: "repair",
+      archiveError: "missing_channel",
+    });
+    await sql`update jobs set slack_channel = 'C-repaired' where id = ${job.id}`;
+    const api: SlackApi = {
+      async call(method, body) {
+        if (method === "agents.conversations.archive")
+          throw new SlackApiError(method, "already_archived");
+        if (method === "chat.update") throw new SlackApiError(method, "internal_error");
+        return slack.call(method, body);
+      },
+    };
+    expect(await closeJob({ ...deps, slack: api }, ref, "U1")).toBe(
+      "Closed this and archived its channel.",
+    );
+    expect(await getJob(sql, job.id)).toMatchObject({ archiveState: "archived" });
+    expect(worker.settled).toEqual([job.workerThreadId]);
   });
 
   it("steers a running job from its text box", async () => {
@@ -413,9 +642,9 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     const ref = `J-${job.id}`;
 
     const box = await click(deps, { actionId: "sym_job_steer", value: ref });
-    expect(box.replies).toEqual([]);
+    expect(box.replies[0]).toContain("Reply here with the direction");
     const [prompt] = await outbox(sql, `${ref}:steer-prompt:U1:`);
-    expect(JSON.stringify(prompt?.payload)).toContain("sym_job_steer_text");
+    expect(prompt).toBeUndefined();
 
     const steered = await click(deps, {
       actionId: "sym_job_steer_text",

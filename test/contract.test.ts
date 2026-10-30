@@ -12,6 +12,7 @@ describe("parseOutputContract", () => {
       summary: "Retry added",
       prUrl: "https://github.com/o/r/pull/812",
       tests: "12 passed",
+      testsStatus: "passed",
       filesChanged: ["a.ts", "b.ts"],
       openQuestions: ["Cap at 5?"],
     });
@@ -22,9 +23,22 @@ describe("parseOutputContract", () => {
       summary: "ok",
       prUrl: null,
       tests: "",
+      testsStatus: "unknown",
       filesChanged: [],
       openQuestions: [],
     });
+  });
+
+  it.each([
+    ["passed", "12 passed"],
+    ["failed", "1 failed"],
+    ["not_run", "not run"],
+    ["unknown", "4 new tests"],
+    ["none", "none"],
+  ])("recognizes legacy %s test truth", (status, tests) => {
+    expect(
+      parseOutputContract(block(JSON.stringify({ summary: "done", tests })))?.testsStatus,
+    ).toBe(status);
   });
 
   it("takes the last json block", () => {

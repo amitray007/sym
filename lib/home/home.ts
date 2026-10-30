@@ -2,7 +2,7 @@ import { signInStates } from "../connections/credentials.ts";
 import { hasTokenEnv } from "../connections/names.ts";
 import { listConnections } from "../connections/rows.ts";
 import type { Sql } from "../db.ts";
-import { activeJobs, finishedSince } from "../ledger/jobs.ts";
+import { activeJobs, finishedSince, getJob, type Job } from "../ledger/jobs.ts";
 import { ownerUserId } from "../owner.ts";
 import type { Pack } from "../pack/load.ts";
 import { getStoredPersona, personaStatus } from "../persona-setting.ts";
@@ -97,22 +97,40 @@ async function connectionRows(sql: Sql, env: Env, now: Date): Promise<HomeConnec
   });
 }
 
+// Closures can need repair long after they leave the finished-today list.
+async function incompleteClosures(sql: Sql): Promise<Job[]> {
+  const rows = await sql<{ id: number }[]>`
+    select id from jobs where closed_at is not null
+      and (worker_settled_at is null or archive_state in ('pending', 'repair')
+        or (code_channel and archive_state != 'archived'))
+    order by id
+  `;
+  const jobs = await Promise.all(rows.map((row) => getJob(sql, Number(row.id))));
+  return jobs.filter((job): job is Job => Boolean(job));
+}
+
 /** Reads everything one role may see. Only the allow-listed project names ever leave here. */
 export async function collectHome(deps: HomeDeps, role: HomeRole): Promise<HomeData> {
   const now = (deps.now ?? (() => new Date()))();
   const { sql } = deps;
-  const [worker, active, finished, schedules, stored] = await Promise.all([
+  const [worker, active, finished, schedules, stored, closures] = await Promise.all([
     workerHealth(deps),
     activeJobs(sql),
     finishedSince(sql, new Date(now.getTime() - DAY_MS)),
     listSchedules(sql),
     getStoredPersona(sql).catch(() => undefined),
+    incompleteClosures(sql),
   ]);
+  const starts = await sql<{ jobId: number }[]>`select p.job_id from job_proposals p
+    where p.kind = 'start' and p.status = 'approved'
+    and p.id = (select max(latest.id) from job_proposals latest where latest.job_id = p.job_id and latest.kind = 'start')`;
   const data: HomeData = {
     now,
     persona: personaStatus(deps.pack, stored, deps.env.SYM_PERSONA, () => {}),
     worker,
     active,
+    approvedStarts: starts.map((row) => Number(row.jobId)),
+    closures,
     finished,
     schedules,
     projects: allowedProjects(deps.pack, deps.env.SYM_PROJECTS).map((p) => p.name),

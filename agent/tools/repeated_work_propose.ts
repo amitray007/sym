@@ -4,7 +4,7 @@ import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { deliver } from "../../lib/delivery/deliver.ts";
 import { digestChannel } from "../../lib/digest/post.ts";
-import { playbookDetail } from "../../lib/learning/format.ts";
+import { jobEvidenceNames, playbookDetail } from "../../lib/learning/format.ts";
 import { proposeRepeated, queueRepeatNotice } from "../../lib/learning/repeat.ts";
 import {
   MAX_BODY_CHARS,
@@ -33,6 +33,7 @@ const Proposal = z.object({
 
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Propose playbooks for work that people asked for at least 3 times, after reading " +
     "repeated_work. Send every pattern of one review in one call. Name the pattern, not one job. " +
     "Write each body in your own words as steps a future brief can follow: what to ask for, " +
@@ -67,7 +68,7 @@ export default defineTool({
       }
       saved.push(row);
       lines.push(
-        `Proposed ${playbookRef(row.id)}. It loads only after the owner approves it.\n${playbookDetail(row)}`,
+        `Proposed ${playbookRef(row.id)}. It loads only after the owner approves it.\n${playbookDetail(row, await jobEvidenceNames(sql, row.evidence))}`,
       );
     }
     const target = digestChannel(pack()) ?? ownerUserId(pack());

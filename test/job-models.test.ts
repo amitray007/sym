@@ -158,7 +158,7 @@ describe.skipIf(!hasDatabase)("the brief's model line", () => {
   }
 
   it("shows the default the job will use", async () => {
-    expect(await posted(brief())).toContain("Model: claude-sonnet-5-5 (medium) · default");
+    expect(await posted(brief())).not.toContain("Model:");
   });
 
   it("shows the brief's model and reason", async () => {
@@ -170,6 +170,6 @@ describe.skipIf(!hasDatabase)("the brief's model line", () => {
 
   it("shows the pack project's model", async () => {
     const text = await posted(brief(), { pack: pack({ model: "claudeAgent/claude-sonnet-5-5" }) });
-    expect(text).toContain("Model: claude-sonnet-5-5 (medium) · set for this project");
+    expect(text).not.toContain("Model:");
   });
 });

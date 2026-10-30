@@ -20,7 +20,8 @@ Check each done-when item:
    the final message.
 2. If the evidence is missing, vague, or contradicts the item, add a concern.
 3. Add a concern when the changed files do not fit the goal or break a constraint.
-4. Add a concern when the tests failed, did not run, or do not cover the change.
+4. Add a concern when the tests failed, did not run, are unknown, or do not cover the change.
+   A count of added tests is not evidence that tests passed.
 
 Also judge the risk of the change. Add a concern when the brief, the changed files, and the pull
 request facts together suggest the change touches production configuration, production or
@@ -39,4 +40,4 @@ Reply with:
 - `verdict`: `pass` when every done-when item has evidence and you have no concerns, otherwise
   `concerns`.
 - `concerns`: the list, empty for a pass.
-- `confidence`: a number from 0 to 1 for how sure you are of the verdict.
+- `confidence`: an internal number from 0 to 1. It never appears in the Slack result.

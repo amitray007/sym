@@ -62,7 +62,7 @@ describe.skipIf(!hasDatabase)("seedPackSchedules", () => {
     expect(posts).toHaveLength(1);
     const payload = posts[0]?.payload as { channel: string; text: string };
     expect(payload.channel).toBe("U0OWNER01");
-    expect(payload.text).toContain(`S-${row?.id}: Weekday check - 0 9 * * 1-5 UTC`);
+    expect(payload.text).toContain("Weekday check - 0 9 * * 1-5 UTC");
     expect(payload.text).toContain("approve");
     expect(posts[0]?.display).toMatchObject({ target: "dm" });
   });
@@ -145,8 +145,8 @@ describe.skipIf(!hasDatabase)("seedPackSchedules", () => {
     const row = await theRow();
     expect(row.status).toBe("pending_approval");
     const text = scheduleList([row]);
-    expect(text).toContain("schedule_approve");
-    expect(text).toContain('"goal"');
+    expect(text).not.toContain("schedule_approve");
+    expect(text).not.toContain('"goal"');
 
     const shown = { cron: row.cron, brief: row.brief };
     expect(sameAsStored(row, shown)).toBe(true);

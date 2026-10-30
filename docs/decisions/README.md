@@ -64,7 +64,7 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [056](056-result-buttons.md) | The card has Steer and the result has Looks good, Fix, and Close; Steer and Fix post a text box, a Fix runs as a follow-up job on the same worker thread, and Close settles it |
 | [057](057-pr-fact-checks.md) | A finished code job stores the worker's pull request facts and runs generic rule checks on them; the verifier judges production-touching changes; CI status comes only from PR-follow wakes |
 | [058](058-repeated-work.md) | A weekly review lets the brain find repeated work in recent briefs and draft playbooks for the owner to approve |
-| [059](059-trust-ladder.md) | An approved playbook is a job class; after clean runs the owner can trust it with `playbook_trust`, its jobs then start without the click, and any concern, 👎, or Fix puts it back to asking |
+| [059](059-trust-ladder.md) | Playbook links and outcomes; auto-start and promotion superseded in part by 071 |
 | [060](060-short-brief.md) | The brief post shows the title, project, delivery, model, and playbook; a Full brief button sends the goal, constraints, and done-when list privately |
 | [061](061-whole-last-message.md) | The job check reads the worker's last message whole, because its result block comes last; it keeps the last 20,000 characters, and a failed read keeps the cut text |
 | [062](062-written-results.md) | The `writer` subagent writes a finished code job's result in the persona's voice with no template; Sym keeps the concerns list, a footer, and the buttons; the brain's Voice rules drop the fixed shape |
@@ -74,3 +74,7 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [066](066-eve-088.md) | Eve 0.88.0, for Slack code channels: dynamic capabilities with `ctx.memo`, the `sessionUsage` limit, a v27 Slack renderer, and `onAnswers`; free-text answers go through Eve's answer box |
 | [067](067-code-channels.md) | With `SYM_CODE_CHANNELS` on, a started job moves into its own Slack code channel with a status and context bar; Close archives it; a Slack refusal keeps the job in its thread |
 | [068](068-capabilities-and-code-channel-tool.md) | A dynamic instruction tells the brain which opt-in features are on; with code channels on, a `code_channel` tool moves a conversation into a code channel, and a job started there adopts it |
+| [070](070-conversational-jobs.md) | Conversational jobs: working notes, human results, stored choices, follow-up proposals, and recoverable closure |
+| [071](071-voice-and-builder-consent.md) | One colleague voice and explicit consent before Builder work, including investigations |
+| [072](072-followup-run-boundaries.md) | Follow-ups store a run boundary, bound empty completion, and preserve same-key children |
+| [073](073-name-the-work.md) | People see work titles; job and schedule references remain internal handles |

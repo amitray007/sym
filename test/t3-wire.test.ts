@@ -207,6 +207,9 @@ describe("t3 over the wire", () => {
     expect(t3.threads.get(thread.id)?.sends).toEqual([
       { message: "Use the retry helper", mode: "steer", clientRequestId: "send-J-6-1" },
     ]);
+    expect((await worker.readActivity(thread.id, null)).items).toEqual([
+      { position: 0, type: "user_message", text: "Use the retry helper" },
+    ]);
   });
 
   it("reports a tool error for an unknown thread", async () => {

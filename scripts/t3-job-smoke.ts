@@ -50,7 +50,7 @@ try {
     }),
   );
   const ref = jobRef(job.id);
-  console.info(statusLine(ref, "Launching worker thread"));
+  console.info(`${ref}: ${statusLine("Launching worker thread")}`);
 
   const launched = await withJobDeps((deps) => launchOrAdopt(deps, job.id, callbackUrl));
   console.info(`${ref}: worker thread ${launched.workerThreadId}`);
@@ -63,7 +63,7 @@ try {
     }
     const check = await withJobDeps((deps) => checkJob(deps, job.id, WAIT_MS));
     console.info(
-      `${statusLine(ref, check.summary)}  [${check.status}${calledBack ? ", called back" : ""}]`,
+      `${statusLine(`${ref}: ${check.summary}`)}  [${check.status}${calledBack ? ", called back" : ""}]`,
     );
     if (check.terminal) {
       console.info(`\nFinal status: ${check.status}`);

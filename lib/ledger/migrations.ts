@@ -208,4 +208,83 @@ export const migrations: Migration[] = [
   workerIdentityMigration,
   workerCapabilitiesMigration,
   jobCodeChannelMigration,
+  {
+    version: "025_job_closure",
+    sql: `
+      alter table jobs add column worker_settled_at timestamptz;
+      alter table jobs add column archive_state text not null default 'none'
+        check (archive_state in ('none', 'pending', 'repair', 'archived'));
+      alter table jobs add column archive_error text;
+      update jobs set archive_state = 'pending' where code_channel and closed_at is not null;
+      create index jobs_pending_closure on jobs (id)
+        where closed_at is not null and (archive_state in ('pending', 'repair') or worker_settled_at is null);
+    `,
+  },
+  {
+    version: "026_conversation_choices",
+    sql: `
+      create table conversation_choices (
+        id bigint generated always as identity primary key,
+        request_key text not null unique,
+        job_id bigint references jobs(id),
+        channel text not null,
+        thread_ts text,
+        message text not null,
+        choices jsonb not null,
+        chosen_by text,
+        chosen_index int,
+        expires_at timestamptz not null default now() + interval '1 day',
+        created_at timestamptz not null default now()
+      );
+    `,
+  },
+  { version: "027_job_skipping", sql: "alter table jobs add column skipping text;" },
+  {
+    version: "028_conversational_job_gates",
+    sql: `
+      alter table jobs add column followup_sent_at timestamptz;
+      alter table conversation_choices add column message_ts text;
+      alter table conversation_choices add column dispatched_at timestamptz;
+      create table job_proposals (
+        id bigint generated always as identity primary key,
+        request_key text not null unique,
+        job_id bigint not null references jobs(id),
+        kind text not null check (kind in ('start', 'followup')),
+        payload jsonb not null,
+        revision int not null,
+        channel text not null,
+        thread_ts text,
+        message text not null,
+        message_ts text,
+        status text not null default 'pending' check (status in ('pending', 'approved', 'dismissed', 'expired')),
+        decided_by text,
+        executed_at timestamptz,
+        expires_at timestamptz not null default now() + interval '1 day',
+        created_at timestamptz not null default now()
+      );
+      create unique index job_proposal_pending on job_proposals(job_id) where status = 'pending';
+      create table job_questions (
+        job_id bigint not null references jobs(id), request_id text not null,
+        question jsonb not null, answered_at timestamptz,
+        primary key (job_id, request_id)
+      );
+    `,
+  },
+  {
+    version: "029_job_start_callback",
+    sql: `create table job_start_callbacks (job_id bigint primary key references jobs(id), callback_url text not null);`,
+  },
+  {
+    version: "030_outbox_documents",
+    sql: `alter table outbox drop constraint outbox_method_check;
+      alter table outbox add constraint outbox_method_check check (method in ('chat.postMessage', 'chat.update', 'sym.document'));`,
+  },
+  {
+    version: "031_followup_run_boundary",
+    sql: `alter table jobs add column followup_boundary text;
+      alter table jobs add column followup_checks int not null default 0;
+      alter table jobs add column followup_observed boolean not null default false;
+      -- Existing sent children have no echo boundary. Their current cursor is the safe fallback.
+      update jobs set followup_boundary = cursor where followup_sent_at is not null;`,
+  },
 ];

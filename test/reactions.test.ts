@@ -5,6 +5,8 @@ import { NOT_FOR_WORKERS, WORKER_PRINCIPAL } from "../lib/callers.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { createEmojiCache, EMOJI_TTL_MS, normalizeEmoji } from "../lib/reactions/emoji.ts";
 import {
+  captureReactionTarget,
+  reactionTarget,
   reactToTurn,
   recordThreadMessage,
   recordTurnMessage,
@@ -143,6 +145,35 @@ describe.skipIf(!hasDatabase)("reactToTurn", () => {
   const react = (sessionId: string, emoji: string, now?: Date) =>
     reactToTurn({ sql: ledger.sql(), api: api(), ...(now ? { now } : {}) }, sessionId, emoji);
 
+  it("keeps an explicit turn target when another message arrives", async () => {
+    const s = await session();
+    await captureReactionTarget(ledger.sql(), s.sessionId, "turn-a");
+    await nextTurn(s);
+    await captureReactionTarget(ledger.sql(), s.sessionId, "turn-a");
+    await reactToTurn(
+      { sql: ledger.sql(), api: api(), messageTs: reactionTarget(s.sessionId, "turn-a") },
+      s.sessionId,
+      "tada",
+    );
+    expect(slack.reactions).toContainEqual({
+      channel: s.channel,
+      timestamp: s.root.ts,
+      name: "tada",
+    });
+  });
+
+  it("claims at most three concurrent reactions in one thread", async () => {
+    const s = await session();
+    const targets = [s.root.ts];
+    for (let i = 0; i < 7; i++) targets.push((await nextTurn(s)).ts);
+    const outcomes = await Promise.all(
+      targets.map((messageTs) =>
+        reactToTurn({ sql: ledger.sql(), api: api(), messageTs }, s.sessionId, "tada"),
+      ),
+    );
+    expect(outcomes.filter((outcome) => outcome.startsWith("Reacted"))).toHaveLength(THREAD_CAP);
+  });
+
   it("reacts on the message that started the turn, with colons stripped", async () => {
     const s = await session();
     expect(await react(s.sessionId, ":tada:")).toBe("Reacted with :tada:.");
@@ -201,7 +232,7 @@ describe.skipIf(!hasDatabase)("reactToTurn", () => {
   it("explains an invalid name and frees the message for another try", async () => {
     const s = await session();
     slack.failNext("reactions.add", "invalid_name");
-    expect(await react(s.sessionId, "not_an_emoji")).toContain("slack_emoji");
+    expect(await react(s.sessionId, "not_an_emoji")).toContain("custom emoji");
     expect(await react(s.sessionId, "tada")).toContain("Reacted");
   });
 

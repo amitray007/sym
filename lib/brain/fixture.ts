@@ -39,10 +39,13 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   }
   if (since.some((message) => message.role === "tool")) {
     const result = request.toolResults.at(-1);
-    if (result?.name === "jobs_status") return String(result.output);
+    if (result?.name === "jobs_status") {
+      const output = toolData(result.output) as { answer?: string };
+      return output.answer ?? String(result.output);
+    }
     // A reaction stands in for the reply.
     if (result?.name === "slack_react") return quiet(request);
-    if (result?.name === "repeated_work") return proposeRepeated(request, String(result.output));
+    if (result?.name === "repeated_work") return proposeRepeated(request, result.output);
     if (result?.name === "repeated_work_propose") return quiet(request);
     if (result?.name === "code_channel")
       return `Code channel: ${String(result.output).slice(0, 200)}`;
@@ -88,11 +91,12 @@ function quiet(request: MockModelRequest): MockModelResponse {
     : { text: "" };
 }
 
-// Groups the review's job lines by title and proposes the first title seen 3 or more times.
-function proposeRepeated(request: MockModelRequest, output: string): MockModelResponse {
+// Groups the review's structured jobs by title and proposes the first title seen 3 or more times.
+function proposeRepeated(request: MockModelRequest, output: unknown): MockModelResponse {
   const byTitle = new Map<string, string[]>();
-  for (const [, ref, title] of output.matchAll(/^(J-\d+) \[[^\]]*\] (.+)$/gm)) {
-    if (ref && title) byTitle.set(title, [...(byTitle.get(title) ?? []), ref]);
+  const data = toolData(output) as { jobs?: { ref: string; title: string }[] };
+  for (const { ref, title } of data.jobs ?? []) {
+    byTitle.set(title, [...(byTitle.get(title) ?? []), ref]);
   }
   const [title, jobs] = [...byTitle].find(([, refs]) => refs.length >= 3) ?? [];
   if (!title || !jobs) return quiet(request);
@@ -115,5 +119,14 @@ function briefIn(text: string): Record<string, unknown> | undefined {
     return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function toolData(output: unknown): unknown {
+  if (typeof output !== "string") return output;
+  try {
+    return JSON.parse(output);
+  } catch {
+    return output;
   }
 }

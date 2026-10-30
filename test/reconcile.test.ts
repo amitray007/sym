@@ -137,9 +137,7 @@ describe.skipIf(!hasDatabase)("reconcileJobs", () => {
     const done = await getJob(s.sql, s.job.id);
     expect(done?.status).toBe("done");
     expect(done?.finishedAt).not.toBeNull();
-    expect(done?.card?.text).toMatch(
-      new RegExp(`^\\[${s.ref}\\] Billing sync retry · Done in \\ds$`),
-    );
+    expect(done?.card?.text).toMatch(/^Billing sync retry · Done in \ds$/);
     const results = s.newPosts().filter((p) => String(p.text).includes(SUMMARY));
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });
@@ -199,16 +197,15 @@ describe.skipIf(!hasDatabase)("reconcileJobs", () => {
     expect(first).toEqual({ checked: 0, finished: 0, offline: 1 });
     expect(await getJob(s.sql, s.job.id)).toMatchObject({
       status: "worker_offline",
-      lastSummary: "The worker is unreachable",
+      lastSummary: "I can't reach the worker. I'll keep checking.",
     });
-    expect(textsOf(s.newPosts())).toEqual([
-      `${s.ref}: the worker is unreachable. Sym keeps checking and posts when it is back.`,
-    ]);
+    expect(s.newPosts()).toEqual([]);
+    expect(String(s.updates().at(-1)?.text)).toContain("I can't reach the worker");
 
     const second = await reconcileJobs(s.deps);
     await s.send();
     expect(second).toEqual({ checked: 0, finished: 0, offline: 1 });
-    expect(s.newPosts()).toHaveLength(1);
+    expect(s.newPosts()).toHaveLength(0);
 
     s.worker.down = false;
     const third = await reconcileJobs(s.deps);
@@ -216,10 +213,8 @@ describe.skipIf(!hasDatabase)("reconcileJobs", () => {
     expect(third.checked).toBe(1);
     expect(third.offline).toBe(0);
     // Back is a silent edit of the outage notice, not a new message.
-    expect(s.newPosts()).toHaveLength(1);
-    const backEdits = s.updates().filter((u) => String(u.text).includes("The worker is back"));
-    expect(backEdits).toHaveLength(1);
-    expect(backEdits[0]).toMatchObject({ channel: CHANNEL });
+    expect(s.newPosts()).toHaveLength(0);
+    expect(String(s.updates().at(-1)?.text)).toContain("Working");
     expect((await getJob(s.sql, s.job.id))?.status).toBe("running");
   });
 
@@ -251,12 +246,12 @@ describe.skipIf(!hasDatabase)("reconcileJobs", () => {
 
     await reconcileJobs(s.deps);
     await s.send();
-    const asked = () => textsOf(s.newPosts()).filter((t) => t.includes("has a question"));
+    const asked = () => textsOf(s.newPosts()).filter((t) => t.includes("Reply here and"));
     expect(asked()).toHaveLength(2);
     expect(asked().join("\n")).toContain("Use exponential backoff?");
     expect(asked().join("\n")).toContain("Add jitter?");
-    expect(asked()[0]).toContain(`${s.ref} has a question on the worker`);
-    expect(asked()[0]).toContain(String((await getJob(s.sql, s.job.id))?.workerThreadId));
+    expect(asked()[0]).toContain("Reply here and");
+    expect(asked()[0]).not.toContain("Answer it in the worker thread");
     expect((await getJob(s.sql, s.job.id))?.status).toBe("waiting_input");
 
     await expireLease(s.job);

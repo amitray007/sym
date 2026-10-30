@@ -142,7 +142,7 @@ describe.skipIf(!hasDatabase)("worker calls", () => {
       expect(post?.payload).toMatchObject({
         channel: "C1",
         thread_ts: "1700000000.0001",
-        text: `*${ref} needs an answer:* Which branch?`,
+        text: "Which branch?\nReply here and I'll pass your answer on.",
       });
     });
 

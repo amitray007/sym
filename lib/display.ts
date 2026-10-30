@@ -20,6 +20,8 @@ export interface DisplayInput {
   steps: number;
   /** Answer length in lines. */
   lines: number;
+  /** Exact Markdown length, when known. Slack permits 12,000 characters. */
+  characters?: number;
   /** Rows in the largest table of the answer. */
   tableRows?: number;
   surface: Surface;
@@ -66,7 +68,9 @@ export function chooseDisplay(input: DisplayInput): DisplayChoice {
 
   // Step 4: long answers become a summary and a file.
   const longAnswer =
-    input.lines > DOCUMENT_MIN_LINES || (input.tableRows ?? 0) > DOCUMENT_MIN_TABLE_ROWS;
+    input.characters === undefined
+      ? input.lines > DOCUMENT_MIN_LINES || (input.tableRows ?? 0) > DOCUMENT_MIN_TABLE_ROWS
+      : input.characters > 12000;
   if (longAnswer) return { level: 4, target, reason: "long answer" };
 
   const why = long

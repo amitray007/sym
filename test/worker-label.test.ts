@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jobCardSteps } from "../lib/jobs/card.ts";
+import { renderJobCard } from "../lib/jobs/card.ts";
 import { permissionBlockMessage } from "../lib/jobs/messages.ts";
 import { workerLabel, workerLabelInstructions, workerNoun } from "../lib/worker-label.ts";
 import { signInText } from "../lib/workers/expiry.ts";
@@ -40,13 +40,15 @@ describe("messages with a custom label", () => {
           now: new Date("2026-11-06T00:00:00Z"),
         } as never),
         JSON.stringify(
-          jobCardSteps({
+          renderJobCard({
+            ref: "J-1",
+            title: "Retry",
             status: "waiting_permission",
-            threadStarted: true,
-            latestSummary: null,
-            doneWhen: [],
-            checkState: "pending",
-          } as never),
+            worker: "Builder",
+            startedAt: 0,
+            now: 60_000,
+            version: 1,
+          }),
         ),
       ];
       for (const text of texts) {
@@ -54,7 +56,7 @@ describe("messages with a custom label", () => {
         expect(text).not.toMatch(/T3/i);
       }
       expect(permissionBlockMessage("J-1")).toBe(
-        "🔒 J-1 is waiting for a permission prompt on the builder. Approve it in the builder.",
+        "J-1 is waiting on a permission in Builder. I can't approve that from Slack.",
       );
     } finally {
       delete process.env.SYM_WORKER_LABEL;

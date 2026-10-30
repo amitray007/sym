@@ -1,17 +1,15 @@
 import type { SessionAuthContext } from "eve/context";
 import { isScheduleAuth } from "eve/schedules";
 import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
-import { createWebhook, FatalError, sleep } from "eve/workflow";
+import { createHook, createWebhook, FatalError, sleep } from "eve/workflow";
 import type { Brief } from "../../lib/jobs/brief.ts";
 import { callbackFor } from "../../lib/jobs/callback.ts";
 import { parseOutputContract } from "../../lib/jobs/contract.ts";
 import { resultConcerns } from "../../lib/jobs/present.ts";
 import {
-  answerQuestion,
   cancelJob,
   checkJob,
   closeUnlaunched,
-  deliverNow,
   failJob,
   finishJob,
   launchOrAdopt,
@@ -27,9 +25,9 @@ import { type ModelCheck, VerifierOutput, verifierEnabled } from "../../lib/jobs
 import { WriterOutput, writerEnabled } from "../../lib/jobs/writer.ts";
 import { sessionInstructions } from "../../lib/learning/format.ts";
 import { approvedForSession } from "../../lib/learning/rows.ts";
-import { linkPlaybook, markAutoStarted, trustedPlaybookOf } from "../../lib/learning/trust.ts";
+import { linkPlaybook } from "../../lib/learning/trust.ts";
 import { getJob, jobRef } from "../../lib/ledger/jobs.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
+import { proposalStatus, startWakeToken } from "../../lib/ledger/proposals.ts";
 import { personaInstructions } from "../../lib/persona.ts";
 import { storedPersonaOrNone } from "../../lib/persona-setting.ts";
 import { checkProject } from "../../lib/projects/allowed.ts";
@@ -45,13 +43,11 @@ import {
 } from "../../lib/schedules/rows.ts";
 import {
   moveToCodeChannel,
-  pointToQuestion,
   type SessionStatus,
   setChannelStatus,
   setContextBar,
 } from "../../lib/slack/code-channel.ts";
 import { workerLabel, workerNoun } from "../../lib/worker-label.ts";
-import type { WorkerAnswers, WorkerQuestion } from "../../lib/workers/types.ts";
 
 // One worker job from brief to result (docs/architecture.md, flows 1 and 3, decision 017). It
 // runs as a task, so the conversation stays open while the worker runs. The owner starts each
@@ -71,12 +67,6 @@ const WRITER_SECONDS = 120;
 // With the writer after it, both stay under the watch lease (see jobTiming). Local end-to-end
 // runs can change it with SYM_VERIFIER_TIMEOUT_SECONDS.
 const VERIFIER_SECONDS = 300;
-
-const START_OPTIONS = [
-  { id: "start", label: "Start", style: "primary" as const },
-  { id: "edit", label: "Edit" },
-  { id: "cancel", label: "Cancel", style: "danger" as const },
-];
 
 // Sym posts each result in the job thread itself, so a lost session cannot lose it (decision
 // 044). The result gives the brain no summary to repeat, only `posted: true`: when the result
@@ -120,6 +110,11 @@ export default defineWorkflowTool({
     });
 
     try {
+      const callback = createWebhook();
+      const startWake = createHook({ token: startWakeToken(`${ctx.session.id}:${ctx.callId}`) });
+      // Register before publishing Start, so even an immediate decision can wake this task.
+      await startWake.getConflict();
+      await rememberCallback(job.id, callback.url);
       // Decision 024: only an approved schedule run skips the click. The step checks the
       // session's initiator, the schedule row, and the brief, so the model cannot widen it.
       const preApproved = await isPreApproved(
@@ -129,76 +124,31 @@ export default defineWorkflowTool({
         ctx.session.id,
         job.id,
       );
-      // Decision 059: a brief that follows a playbook the owner trusts skips the click. The step
-      // reads the trust from the ledger, so the model cannot grant it.
-      const trusted = preApproved ? null : await trustedStart(job.id, ctx.session.auth.current);
       if (preApproved) {
         // A scheduled check speaks only when something needs attention (decision 031).
         await markScheduled(job.id);
         await linkRun(ctx.session.id, job.id);
       } else {
         // The brief is Sym's own post; Eve's prompt card keeps only about 200 characters.
-        await postBrief(job.id, trusted);
+        await postBrief(job.id);
       }
       yield {
-        status: statusLine(
-          ref,
-          preApproved ? "Starting scheduled run" : trusted ? "Starting" : "Waiting for Start",
-        ),
+        status: statusLine(preApproved ? "Starting scheduled run" : "Waiting for Start"),
       };
-      const decision =
-        preApproved || trusted
-          ? ({ status: "answered", optionId: "start" } as const)
-          : await Promise.race([
-              ctx.ask({
-                prompt: `Start ${ref}: ${brief.title}? The Full brief button is above.`,
-                display: "confirmation",
-                options: START_OPTIONS,
-              }),
-              stopped,
-            ]);
-      if (decision === "stopped") {
-        await closeBeforeStart(job.id, "Cancelled before start");
-        return { job: ref, status: "cancelled" };
-      }
-      if (decision.status === "unavailable") {
-        // A session without a person, such as a schedule, cannot approve. Fail closed.
-        await closeBeforeStart(job.id, "No one could approve the brief");
-        await endRun(ctx.session.id, job.id, "cancelled", null);
-        return { job: ref, status: "not_started", reason: "This session cannot ask for approval." };
-      }
-      if (decision.status !== "answered" || decision.optionId === "cancel") {
-        await closeBeforeStart(job.id, "Cancelled before start");
-        return { job: ref, status: "cancelled" };
-      }
-      if (decision.optionId === "edit") {
-        const edits = await Promise.race([
-          ctx.ask({ prompt: `What should change in ${ref}?`, display: "text" }),
-          stopped,
-        ]);
-        await closeBeforeStart(job.id, "Brief edited");
-        if (edits === "stopped" || edits.status !== "answered") {
-          return { job: ref, status: "cancelled" };
-        }
-        return {
-          job: ref,
-          status: "edit_requested",
-          edits: edits.text ?? edits.optionId ?? "",
-          next: "Rewrite the brief with these edits and call worker_job again.",
-        };
-      }
-      if (decision.optionId !== "start") {
-        await closeBeforeStart(job.id, "Cancelled before start");
+      const decision = preApproved ? "approved" : await waitForStart(job.id, stopped, startWake);
+      startWake.dispose();
+      if (decision === "pending") return { job: ref, status: "awaiting_start", ...POSTED };
+      if (decision !== "approved") {
+        await closeBeforeStart(job.id, "Not started");
         return { job: ref, status: "cancelled" };
       }
 
       // Decision 067: a job a person started moves into its own code channel, when that is on.
       // A scheduled check stays quiet in its thread.
       const inChannel = preApproved ? false : await toCodeChannel(job.id);
-      yield { status: statusLine(ref, `Launching ${workerNoun()} thread`) };
-      const callback = createWebhook();
+      yield { status: statusLine(`Launching ${workerNoun()} thread`) };
       const threadId = await launch(job.id, callback.url);
-      yield { status: statusLine(ref, `${workerLabel()} thread started`) };
+      yield { status: statusLine(`${workerLabel()} thread started`) };
 
       let calledBack = false;
       for (;;) {
@@ -211,15 +161,15 @@ export default defineWorkflowTool({
           ...(calledBack ? [] : [callback.then(() => "callback" as const)]),
         ]);
         if (woke === "stopped") {
-          await cancel(job.id);
-          await endRun(ctx.session.id, job.id, "cancelled", null);
+          const outcome = await cancel(job.id);
+          await endRun(ctx.session.id, job.id, outcome.status, outcome.lastMessage);
           if (inChannel) await channelStatus(job.id, "active");
-          return { job: ref, status: "cancelled", threadId, ...POSTED };
+          return { job: ref, status: outcome.status, threadId, ...POSTED };
         }
         if (woke === "callback") calledBack = true;
 
         const result = await check(job.id, timing.verify, timing.write ?? false);
-        yield { status: statusLine(ref, result.summary) };
+        yield { status: statusLine(result.summary) };
 
         // The worker finished a code job. With SYM_VERIFIER=on, the `verifier` subagent checks
         // the result (flow 4, decisions 032 and 054). Then the `writer` subagent writes the one
@@ -229,13 +179,13 @@ export default defineWorkflowTool({
           // A run that started before the writer existed replays a timing with no `verify`; it
           // held the job in `checking` only for the verifier.
           if (timing.verify ?? true) {
-            yield { status: statusLine(ref, "Checking the result") };
+            yield { status: statusLine("Checking the result") };
             verdict = await runVerifier(ctx, job.id, stopped, timing.verifierMs);
           }
           const modelCheck = verdict === "stopped" ? undefined : verdict;
-          let written: string | undefined | "stopped";
+          let written: WriterOutput | undefined | "stopped";
           if (timing.write && timing.writerMs > 0 && verdict !== "stopped") {
-            yield { status: statusLine(ref, "Writing the result") };
+            yield { status: statusLine("Writing the result") };
             written = await runWriter(ctx, job.id, modelCheck, stopped, timing.writerMs);
           }
           // Stopped while checking or writing: the work is done, so it ends as done with what
@@ -251,17 +201,6 @@ export default defineWorkflowTool({
           };
         }
 
-        if (inChannel && result.questions.length > 0) await channelStatus(job.id, "suspended");
-        for (const question of result.questions) {
-          if (inChannel) await linkQuestion(job.id, question);
-          const answers = await askQuestion(ctx.ask, ref, question, stopped);
-          if (answers === "stopped") {
-            await cancel(job.id);
-            if (inChannel) await channelStatus(job.id, "active");
-            return { job: ref, status: "cancelled", threadId, ...POSTED };
-          }
-          if (answers) await answer(job.id, question.requestId, answers);
-        }
         // Eve sets the channel's status for each brain turn there, so the job sets its own again
         // after every check.
         if (inChannel && !result.terminal) await channelStatus(job.id, "processing");
@@ -289,8 +228,6 @@ export default defineWorkflowTool({
     }
   },
 });
-
-type Ask = WorkflowToolContext["ask"];
 
 // Runs the `verifier` subagent in the workflow body: `ctx.agent` is not available in a step. A
 // failure, a malformed reply, or a timeout gives an unavailable check, so the result still posts.
@@ -336,7 +273,7 @@ async function runWriter(
   check: ModelCheck | undefined,
   stopped: Promise<"stopped">,
   timeoutMs: number,
-): Promise<string | undefined | "stopped"> {
+): Promise<WriterOutput | undefined | "stopped"> {
   // A failed input read, such as an unreadable persona file, gets the template.
   const message = await writerInput(jobId, check).catch(() => null);
   if (!message) return undefined;
@@ -356,7 +293,7 @@ async function runWriter(
     if (outcome === "stopped") return "stopped";
     if (outcome === "timeout" || outcome.status === "failed") return undefined;
     // finishJob parses the text again, so a wrong shape gets the template.
-    return (outcome.data as WriterOutput | undefined)?.text;
+    return outcome.data as WriterOutput | undefined;
   } catch {
     return undefined;
   }
@@ -366,34 +303,30 @@ function unavailable(reason: string): ModelCheck {
   return { status: "unavailable", reason };
 }
 
-// Asks each part of a worker question as Slack buttons, with free text for other answers.
-// Returns nothing when a person dismissed a part, so the worker keeps waiting for the owner.
-async function askQuestion(
-  ask: Ask,
-  ref: string,
-  question: WorkerQuestion,
+async function waitForStart(
+  jobId: number,
   stopped: Promise<"stopped">,
-): Promise<WorkerAnswers | "stopped" | undefined> {
-  const answers: WorkerAnswers = {};
-  for (const part of question.questions) {
-    const reply = await Promise.race([
-      ask({
-        prompt: `${ref} asks: ${part.header ? `${part.header}: ` : ""}${part.prompt}`,
-        display: part.options.length > 0 ? "select" : "text",
-        options: part.options.map((option) => ({
-          id: option.label,
-          label: option.label,
-          ...(option.description ? { description: option.description } : {}),
-        })),
-        allowFreeform: true,
-      }),
-      stopped,
-    ]);
-    if (reply === "stopped") return "stopped";
-    if (reply.status !== "answered") return undefined;
-    answers[part.id] = reply.optionId ?? reply.text ?? "";
+  wake: PromiseLike<unknown>,
+): Promise<string> {
+  const decided = Promise.resolve(wake).then(() => "decision" as const);
+  // At most twelve waits and thirteen reads. Late approvals belong to reconcile, so an idle
+  // day-long proposal cannot accumulate a day of workflow events.
+  for (let attempt = 0; attempt <= 12; attempt++) {
+    const status = await startDecision(jobId);
+    if (!status) return "unavailable";
+    if (status !== "pending" || attempt === 12) return status;
+    if (
+      (await Promise.race([sleep(300_000).then(() => "wait" as const), stopped, decided])) ===
+      "stopped"
+    )
+      return "dismissed";
   }
-  return answers;
+  return "pending";
+}
+
+async function startDecision(jobId: number) {
+  "use step";
+  return proposalStatus(ledger(), jobId);
 }
 
 // Read in a step, so a replay of the body sees the same values.
@@ -422,6 +355,12 @@ async function jobTiming() {
   };
 }
 
+async function rememberCallback(jobId: number, webhookUrl: string) {
+  "use step";
+  const callbackUrl = callbackFor(webhookUrl, process.env.SYM_CALLBACK_URL);
+  await ledger()`insert into job_start_callbacks (job_id, callback_url) values (${jobId}, ${callbackUrl}) on conflict do nothing`;
+}
+
 async function projectRefusal(project: string): Promise<string | undefined> {
   "use step";
   return checkProject(allowedFromEnv(), project);
@@ -438,24 +377,9 @@ async function recordJob(brief: Brief, callId: string, sessionId: string) {
   // A tool call ID is unique only inside its session, so the session scopes the key.
   const requestKey = `${sessionId}:${callId}`;
   const job = await startJob(ledger(), { requestKey, sessionId, brief });
-  // The job class for the trust ladder: the approved playbook the brief names, if any.
+  // Link the reviewed playbook for outcome tracking, without granting Start.
   await linkPlaybook(ledger(), job.id, brief.playbook);
   return { id: job.id };
-}
-
-// The name of the trusted playbook that lets this job start without the click, or null. Only a
-// person's turn qualifies: a worker thread or an app session never starts a trusted job.
-async function trustedStart(
-  jobId: number,
-  caller: SessionAuthContext | null | undefined,
-): Promise<string | null> {
-  "use step";
-  if (!slackUserOfPrincipal(caller?.principalId)) return null;
-  const sql = ledger();
-  const playbook = await trustedPlaybookOf(sql, jobId);
-  if (!playbook) return null;
-  await markAutoStarted(sql, jobId);
-  return playbook.name;
 }
 
 async function markScheduled(jobId: number) {
@@ -463,9 +387,9 @@ async function markScheduled(jobId: number) {
   await markScheduledCheck(ledger(), jobId);
 }
 
-async function postBrief(jobId: number, trustedPlaybook: string | null) {
+async function postBrief(jobId: number) {
   "use step";
-  await showBrief(ledgerDeps(), jobId, trustedPlaybook ?? undefined);
+  await showBrief(ledgerDeps(), jobId);
 }
 
 async function launch(jobId: number, webhookUrl: string): Promise<string> {
@@ -525,15 +449,6 @@ async function toCodeChannel(jobId: number): Promise<boolean> {
   return job ? (await moveToCodeChannel(deps, job)).codeChannel : false;
 }
 
-async function linkQuestion(jobId: number, question: WorkerQuestion) {
-  "use step";
-  const deps = ledgerDeps();
-  const job = await getJob(deps.sql, jobId);
-  if (!job?.codeChannel) return;
-  await pointToQuestion(deps, job, question.requestId, question.questions[0]?.prompt ?? "");
-  await deliverNow(deps);
-}
-
 // The code channel's status follows the job; at the end the context bar gains the pull request.
 async function channelStatus(jobId: number, status: SessionStatus) {
   "use step";
@@ -544,19 +459,14 @@ async function channelStatus(jobId: number, status: SessionStatus) {
   if (status === "active") await setContextBar(deps, job);
 }
 
-async function finish(jobId: number, verdict: ModelCheck | undefined, written?: string) {
+async function finish(jobId: number, verdict: ModelCheck | undefined, written?: WriterOutput) {
   "use step";
   return finishJob(ledgerDeps(), jobId, verdict, written);
 }
 
-async function answer(jobId: number, requestId: string, answers: WorkerAnswers) {
-  "use step";
-  await withJobDeps((deps) => answerQuestion(deps, jobId, requestId, answers));
-}
-
 async function cancel(jobId: number) {
   "use step";
-  await withJobDeps((deps) => cancelJob(deps, jobId));
+  return withJobDeps((deps) => cancelJob(deps, jobId));
 }
 
 async function closeBeforeStart(jobId: number, reason: string) {

@@ -15,6 +15,7 @@ import { ledger, pack } from "../../lib/runtime.ts";
 // Removes a connection (decision 045): the row turns disabled and its stored sign-in is deleted.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Remove an MCP connection when the owner asks. Sym stops loading it and deletes its " +
     "stored sign-in. The owner approves the removal.",
   inputSchema: z.object({ name: z.string().describe("The connection name.") }),

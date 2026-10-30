@@ -211,8 +211,12 @@ export class FakeWorker implements WorkerAdapter {
   }
 
   async send(threadId: string, text: string, mode: SendMode, requestId: string): Promise<void> {
-    this.get(threadId);
+    const fake = this.get(threadId);
+    const repeated = this.sends.some(
+      (send) => send.threadId === threadId && send.requestId === requestId,
+    );
     this.sends.push({ threadId, text, mode, requestId });
+    if (!repeated) fake.items.push({ position: fake.items.length, type: "user_message", text });
   }
 
   async settle(threadId: string): Promise<void> {

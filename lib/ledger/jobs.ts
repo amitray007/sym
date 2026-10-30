@@ -31,6 +31,10 @@ export interface Job {
   slackThreadTs: string | null;
   // True when the job moved into its own Slack code channel (decision 067).
   codeChannel: boolean;
+  closedAt: Date | null;
+  workerSettledAt: Date | null;
+  archiveState: "none" | "pending" | "repair" | "archived";
+  archiveError: string | null;
   // The thread a moved job came from. Null for a job that never moved.
   originChannel: string | null;
   originThreadTs: string | null;
@@ -43,7 +47,13 @@ export interface Job {
   // The model the worker thread runs, as `<provider>/<model>`. Null when the worker's default applies.
   workerModel: string | null;
   cursor: string | null;
+  parentJobId: number | null;
+  followupSentAt: Date | null;
+  followupBoundary: string | null;
+  followupChecks: number;
+  followupObserved: boolean;
   lastSummary: string | null;
+  skipping: string | null;
   lastMessage: string | null;
   cardTs: string | null;
   // The card Sym wants Slack to show, and the versions wanted and shown.
@@ -94,7 +104,10 @@ export type JobUpdate = Partial<
     | "workerIdentity"
     | "workerModel"
     | "cursor"
+    | "followupChecks"
+    | "followupObserved"
     | "lastSummary"
+    | "skipping"
     | "lastMessage"
     | "cardTs"
     | "display"

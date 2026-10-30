@@ -6,7 +6,7 @@ import { json } from "./jobs.ts";
 // enqueues it once. Each post carries its chooseDisplay result, and the outbox refuses a post
 // without one (AGENTS.md invariant). A database check backs up this rule.
 
-export type OutboxMethod = "chat.postMessage" | "chat.update";
+export type OutboxMethod = "chat.postMessage" | "chat.update" | "sym.document";
 // A `card` post is a job card. Its Slack ts is saved on the job row, so later edits find it.
 export type OutboxPurpose = "message" | "card";
 export type OutboxStatus = "pending" | "sent" | "failed";
@@ -46,10 +46,16 @@ export async function enqueuePost(sql: Sql, post: NewPost): Promise<OutboxPost> 
     throw new Error("Display level 0 posts nothing. Leave it to the digest.");
   }
 
+  // Every threaded post uses the same deleted-root guard, regardless of its caller.
+  const payload = post.payload as Record<string, unknown>;
+  const guarded =
+    (post.method === "chat.postMessage" || post.method === "sym.document") && payload?.thread_ts
+      ? { ...payload, sym_thread_reply: true }
+      : post.payload;
   const [inserted] = await sql<OutboxPost[]>`
     insert into outbox (idempotency_key, job_id, method, payload, display, purpose)
     values (
-      ${post.idempotencyKey}, ${post.jobId ?? null}, ${post.method}, ${json(sql, post.payload)},
+      ${post.idempotencyKey}, ${post.jobId ?? null}, ${post.method}, ${json(sql, guarded)},
       ${json(sql, display)}, ${post.purpose ?? "message"}
     )
     on conflict (idempotency_key) do nothing
@@ -118,7 +124,7 @@ export async function dropPost(sql: Sql, id: number, reason: string): Promise<vo
   `;
 }
 
-export async function markPostSent(sql: Sql, id: number, slackTs: string): Promise<void> {
+export async function markPostSent(sql: Sql, id: number, slackTs: string | null): Promise<void> {
   await sql`
     update outbox set status = 'sent', slack_ts = ${slackTs}, sent_at = now(),
       attempts = attempts + 1

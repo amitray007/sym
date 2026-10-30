@@ -49,6 +49,7 @@ import {
   SCHEDULED_CHECK,
 } from "./present.ts";
 import { detectEvents } from "./progress.ts";
+import { finishQuestionPresentation, presentQuestions } from "./questions.ts";
 import { type ModelCheck, VerifierOutput, verifierMessage } from "./verify.ts";
 import { workerCallbackInstructions } from "./worker-capabilities.ts";
 import { WriterOutput, writerMessage } from "./writer.ts";
@@ -164,6 +165,7 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
     // connection while holding this one could deadlock the pool under concurrent launches.
     const job = await mustGetJob(lock, jobId);
     if (job.workerThreadId) return job;
+    if (TERMINAL.includes(job.status)) throw new JobSetupError("This job already ended.");
 
     if (job.workerIdentity && job.workerIdentity !== deps.workerIdentity) {
       throw new JobSetupError("The worker changed before this job could start. Ask for a new job.");
@@ -267,14 +269,35 @@ export async function checkJob(
   // A job in `checking` has nothing more to read from the worker.
   if (TERMINAL.includes(job.status) || job.status === "checking") return toCheck(job, []);
 
+  const followup = job.parentJobId !== null;
+  // Recovery sends an unsent child before its watcher can consume the parent's state.
+  if (followup && !job.followupSentAt) return toCheck(job, []);
+
   await deps.worker.wait(job.workerThreadId, waitMs);
   const activity = await readNewActivity(deps.worker, job.workerThreadId, job.cursor);
-  // A waiting worker asks a question or waits on a permission prompt. Only questions are listed.
+  if (followup) {
+    activity.items = activity.items.filter(
+      (item) =>
+        item.type !== "user_message" &&
+        (job.followupBoundary === null || item.position > Number(job.followupBoundary)),
+    );
+  }
+  const observed = job.followupObserved || activity.items.length > 0;
+  const at = now(deps);
+  // Completion without evidence of this run gets at most three checks or five minutes.
+  // Send starts a run on a terminal thread, so failure/interruption needs no activity evidence.
+  const completionGrace =
+    followup &&
+    !observed &&
+    activity.status === "completed" &&
+    job.followupChecks < 3 &&
+    job.followupSentAt !== null &&
+    at.getTime() - job.followupSentAt.getTime() < 5 * 60_000;
   const questions =
-    activity.status === "waiting"
-      ? await deps.worker.pendingQuestions(job.workerThreadId).catch(() => [])
-      : [];
-  const worked = toJobStatus(activity.status, questions.length > 0, job.status);
+    activity.status === "waiting" ? await deps.worker.pendingQuestions(job.workerThreadId) : [];
+  const worked = completionGrace
+    ? "running"
+    : toJobStatus(activity.status, questions.length > 0, job.status);
   const hold = (options.verify === true || options.write === true) && job.kind !== SCHEDULED_CHECK;
   const status: JobStatus = worked === "done" && hold ? "checking" : worked;
   // Read once, as the code job ends, and keep it on the row (decision 057). A scheduled check
@@ -283,7 +306,6 @@ export async function checkJob(
     worked === "done" && job.kind !== SCHEDULED_CHECK
       ? await readPullRequests(deps.worker, job.workerThreadId)
       : undefined;
-  const at = now(deps);
   const progress = detectEvents(
     {
       status: job.status,
@@ -293,15 +315,15 @@ export async function checkJob(
     },
     { status, newItems: activity.items, now: at.getTime() },
   );
-  const latest = latestText(activity.items);
+  const latest = latestAssistant(activity.items);
   const message = await wholeMessage(
     deps.worker,
     job.workerThreadId,
     latestAssistantItem(activity.items),
   );
   const summary =
-    status === "failed" && activity.status === "interrupted"
-      ? `${workerLabel()} thread interrupted`
+    status === "failed"
+      ? `${workerLabel()} thread ${activity.status === "interrupted" ? "interrupted" : "failed"}`
       : status === "waiting_permission"
         ? `Waiting for a permission prompt on the ${workerNoun()}`
         : (firstLine(latest) ?? job.lastSummary ?? "Working");
@@ -320,6 +342,7 @@ export async function checkJob(
       ...(prFacts ? { prFacts } : {}),
       ...(progress.state.prUrl ? { prUrl: progress.state.prUrl } : {}),
       ...(activity.items.length > 0 ? { lastActivityAt: at } : {}),
+      ...(followup ? { followupChecks: job.followupChecks + 1, followupObserved: observed } : {}),
       ...(progress.state.lastQuietPostAt
         ? { quietNoticedAt: new Date(progress.state.lastQuietPostAt) }
         : {}),
@@ -339,6 +362,7 @@ export async function checkJob(
     at,
     deps.pack,
   );
+  await presentQuestions(deps, updated, questions);
   if (TERMINAL.includes(updated.status)) {
     await presentEnd(deps.sql, updated, parseOutputContract(updated.lastMessage), at, deps.pack);
   } else {
@@ -398,7 +422,6 @@ export async function writerRequest(
   const brief = Brief.parse(job.brief);
   const started = job.startedAt ?? job.createdAt;
   return writerMessage({
-    ref: jobRef(job.id),
     title: job.title,
     project: brief.project,
     goal: brief.goal,
@@ -425,13 +448,15 @@ export async function finishJob(
   deps: LedgerDeps,
   jobId: number,
   check?: ModelCheck,
-  written?: string,
+  written?: string | WriterOutput,
 ): Promise<FinishedJob> {
   const job = await mustGetJob(deps.sql, jobId);
   const contract = parseOutputContract(job.lastMessage);
   const model = parseModelCheck(check);
   // The text crossed the workflow boundary, so check its shape again; a bad one gets the template.
-  const text = WriterOutput.safeParse({ text: written }).data?.text;
+  const text = WriterOutput.safeParse(
+    typeof written === "string" ? { text: written } : written,
+  ).data;
   if (job.status !== "checking") {
     return { ...toCheck(job, []), concerns: endConcerns(job, contract, deps.pack, model) };
   }
@@ -462,17 +487,39 @@ export async function answerQuestion(
   jobId: number,
   requestId: string,
   answers: WorkerAnswers,
-): Promise<void> {
-  const job = await mustGetJob(deps.sql, jobId);
-  if (!job.workerThreadId) throw new Error(`${jobRef(job.id)} has no worker thread`);
-  // T3 has no retry key for an answer. A re-run step finds the question gone and stops.
-  const pending = await deps.worker.pendingQuestions(job.workerThreadId);
-  if (!pending.some((question) => question.requestId === requestId)) return;
-  await deps.worker.answer(job.workerThreadId, requestId, answers);
-  await updateJob(deps.sql, job.id, {
-    status: "running",
-    lastSummary: `Answer sent to the ${workerNoun()}`,
+): Promise<boolean> {
+  const sent = await deps.sql.begin(async (transaction) => {
+    const sql = transaction as unknown as Sql;
+    await sql`select id from jobs where id = ${jobId} for update`;
+    const job = await mustGetJob(sql, jobId);
+    if (!job.workerThreadId || TERMINAL.includes(job.status) || job.status === "checking")
+      return false;
+    const pending = await deps.worker.pendingQuestions(job.workerThreadId);
+    const question = pending.find((question) => question.requestId === requestId);
+    if (!question) return false;
+    const ids = question.questions.map((part) => part.id);
+    if (
+      ids.length !== Object.keys(answers).length ||
+      ids.some((id) => {
+        const value = answers[id];
+        return Array.isArray(value)
+          ? value.length === 0 || value.some((v) => !v.trim())
+          : !value?.trim();
+      })
+    ) {
+      throw new Error("Please answer each part of the worker's question.");
+    }
+    await deps.worker.answer(job.workerThreadId, requestId, answers);
+    await sql`update job_questions set answered_at = now() where job_id = ${jobId} and request_id = ${requestId}`;
+    await finishQuestionPresentation(sql, job, requestId);
+    await updateJob(sql, jobId, {
+      status: "running",
+      lastSummary: `I passed your answer to the ${workerNoun()}.`,
+    });
+    return true;
   });
+  if (sent) await deliverNow(deps);
+  return sent;
 }
 
 // Stops the worker thread and records the job as cancelled. A job in `checking` already has its
@@ -511,12 +558,7 @@ export async function markScheduledCheck(sql: Sql, jobId: number): Promise<void>
 }
 
 // Shows the owner the short brief in the job thread before the Start prompt (decision 060).
-// `trustedPlaybook` names the trusted playbook when the job starts without the click.
-export async function showBrief(
-  deps: LedgerDeps,
-  jobId: number,
-  trustedPlaybook?: string,
-): Promise<void> {
+export async function showBrief(deps: LedgerDeps, jobId: number): Promise<void> {
   const job = await mustGetJob(deps.sql, jobId);
   const brief = Brief.parse(job.brief);
   const { models, projectModel } = modelsFor(deps, brief.project);
@@ -525,15 +567,13 @@ export async function showBrief(
     briefModel: brief.model,
     ...(brief.modelReason ? { reason: brief.modelReason } : {}),
   });
-  // The owner sees which playbook a brief follows before trusting it (decision 059).
-  const [linked] = await deps.sql<{ name: string }[]>`
-    select p.name from jobs j join playbooks p on p.id = j.playbook_id where j.id = ${job.id}
-  `;
   await presentBrief(
     deps.sql,
     job,
-    line,
-    linked ? { name: linked.name, trusted: trustedPlaybook === linked.name } : undefined,
+    brief.modelReason &&
+      chooseModel(models, { projectModel, briefModel: brief.model }).entry.id !== models.defaultId
+      ? line
+      : undefined,
   );
   await deliverNow(deps);
 }
@@ -555,19 +595,28 @@ export async function endWithoutWorker(
   reason: string,
 ): Promise<JobCheck> {
   const wasRunning = !TERMINAL.includes(job.status);
-  const ended = await updateJob(deps.sql, job.id, {
-    status,
-    lastSummary: reason.slice(0, SUMMARY_MAX),
-  });
-  if (wasRunning && ended.workerThreadId) {
+  if (!wasRunning) return toCheck(job, []);
+  let ended: Job;
+  try {
+    ended = await updateJob(
+      deps.sql,
+      job.id,
+      { status, lastSummary: reason.slice(0, SUMMARY_MAX) },
+      { revision: job.revision },
+    );
+  } catch (error) {
+    if (!(error instanceof StaleJobError)) throw error;
+    return endWithoutWorker(deps, await mustGetJob(deps.sql, job.id), status, reason);
+  }
+  if (wasRunning && ended.slackChannel) {
     await presentEnd(deps.sql, ended, null, now(deps), deps.pack);
     await deliverNow(deps);
   }
   return toCheck(ended, []);
 }
 
-export function statusLine(ref: string, summary: string): string {
-  const line = `${ref}: ${summary.trim()}`;
+export function statusLine(summary: string): string {
+  const line = summary.trim();
   return line.length <= STATUS_LINE_MAX ? line : `${line.slice(0, STATUS_LINE_MAX - 1)}…`;
 }
 
@@ -575,7 +624,7 @@ function toCheck(job: Job, questions: WorkerQuestion[]): JobCheck {
   const terminal = TERMINAL.includes(job.status);
   return {
     status: job.status,
-    summary: job.lastSummary ?? "",
+    summary: job.status === "checking" ? "Checking the result" : (job.lastSummary ?? ""),
     terminal,
     lastMessage: terminal || job.status === "checking" ? job.lastMessage : null,
     questions,
@@ -650,10 +699,6 @@ async function wholeMessage(
     console.warn("Sym could not read the rest of the worker message.", String(error));
     return item.text;
   }
-}
-
-function latestText(items: ActivityItem[]): string | undefined {
-  return latestAssistant(items) ?? withText(items).at(-1)?.text;
 }
 
 function firstLine(text: string | undefined): string | undefined {

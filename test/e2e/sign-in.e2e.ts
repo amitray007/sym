@@ -47,7 +47,7 @@ describe("worker sign-in", () => {
     const dm = await until(
       () =>
         h.slack.messages.find(
-          (m) => m.channel === OWNER && /Approve Sym on the builder/.test(messageText(m)),
+          (m) => m.channel === OWNER && /approve my builder sign-in/.test(messageText(m)),
         ),
       { label: "the sign-in DM", timeoutMs: 60_000 },
     );

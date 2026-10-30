@@ -43,7 +43,7 @@ strands running sessions, so every job keeps enough state to continue in a new s
 | `outbox` | Pending Slack posts with an idempotency key and the `chooseDisplay` result. Refuses level 0 and missing choices |
 | `feedback` | Buttons, reactions, "Fix" replies, brief edits, linked to a job |
 | `memory` | Facts and preferences (learning layer 1) |
-| `playbooks` | Approved playbooks and rules with version history (learning layer 2), and each playbook's start mode for the trust ladder |
+| `playbooks` | Approved playbooks and rules with version history (learning layer 2), historical trust fields |
 
 Job statuses: `launching`, `running`, `waiting_input`, `waiting_permission`, `quiet`,
 `worker_offline`, `checking`, `done`, `failed`, `cancelled`.
@@ -52,11 +52,11 @@ Job statuses: `launching`, `running`, `waiting_input`, `waiting_permission`, `qu
 
 Example: "@sym add retry with backoff to the billing sync in sync-service, open a draft PR".
 
-Not every request becomes a job (decision 063). The brain answers a quick check itself with its
-own tools and the owner's connections, such as the state of a pull request, its checks, or a
-release, within the Projects list. It hands the worker work that changes code or files, needs
-the repository checked out, or is a long investigation. It never changes a repository itself,
-even through a connection. The steps below are for a request that becomes a job.
+The brain checks read-only facts with its own tools first. A problem report does not grant
+Builder consent (decision 071). A job needs an explicit Builder request or acceptance of a
+specific offer, including for repository investigations. Sym never edits repositories itself.
+Interactive chat requests show Start / Not now, even for trusted playbooks. Approved schedules
+start without a click (decision 024). The trust ladder no longer auto-starts jobs.
 
 1. `onAppMention` checks the sender against the allow-list and starts a session for the thread.
 2. The model loads the `task-brief` playbook and writes a brief: project, goal, constraints, a
@@ -64,9 +64,11 @@ even through a connection. The steps below are for a request that becomes a job.
    `pr_url`, `tests`, `files_changed`, and `open_questions`.
 3. The model calls `worker_job`, an Eve task, so the conversation stays open. It writes a `jobs` row
    with status `launching`, keyed on the tool call ID, and takes the Slack thread of the session.
-4. Code changes need approval. Sym posts a short brief (title, project, delivery) with a Full
-   brief button, then Start, Edit, and Cancel buttons; typed text means "edit" and goes back to
-   the model for a new brief (decisions 021 and 060). After Start:
+4. Sym posts a short brief with Start / Not now. Typed approval binds to one current proposal.
+   A revised brief expires the old proposal. Start rechecks current project policy. The ledger
+   keeps the callback so reconcile can recover an approved start. A committed click or addressed
+   typed decision wakes a separate Start hook immediately. The task reads the ledger again before
+   launching. Its twelve five-minute fallback waits still bound idle workflow events. After Start:
    - It looks for a worker thread whose title holds the job ID. If one exists, it adopts it. This
      stops a re-run step from launching twice.
    - It launches the thread: title `[J-142] Billing sync retry`, a new worktree, the model the
@@ -107,25 +109,25 @@ loop:
   worker.wait(threadId, 60 s)            -> status, timedOut
   worker.readActivity(threadId, cursor)  -> new items, next cursor
   if status == waiting:
-      worker.pendingQuestions() -> questions? -> ctx.ask in Slack -> worker.answer()
+      worker.pendingQuestions() -> questions? -> ledger-backed question in current conversation -> worker.answer()
                                 -> none?      -> permission prompt -> DM the owner once
   update the job card (chat.update), yield a short status line
   if material change:            post (through chooseDisplay)
-  if no new activity for 20 min: mark the card "quiet"; post once
+  if no new activity for 20 min: edit the working note
+  if no new activity for 45 min: ask once whether to stop
   if terminal: break
 ```
 
-A short rule set in the `progress` playbook decides "material change", not a model call per loop.
-Only these post a new message: a PR opened, tests failed then passed, a question, a permission
-block, the job went quiet, the job finished or failed. Everything else edits the job card.
+Progress silently edits the working note. A PR opening creates no new post. Questions,
+permission blocks, the long quiet notice, completion, and failures can notify.
 
 The ledger row gets `status`, `cursor`, and `last_summary` on every loop. That makes "what's the
 update?" cheap and lets a new session continue the job.
 
 ## Flow 4: checking the result
 
-1. The worker finishes. For a code job, `checkJob` moves the job to `checking`, and the card shows
-   "Check result" in progress. Nothing posts yet.
+1. The worker finishes. For a code job, `checkJob` moves the job to `checking`, and the working note says
+   Sym is checking the result. Nothing posts yet.
 2. Read the final message and parse the output contract block.
 3. Run the deterministic rule checks first (`lib/jobs/verify.ts`): changed files sit inside the
    allowed paths, and a PR opened only when the job allowed one. When the job ends, one step asks
@@ -145,27 +147,25 @@ update?" cheap and lets a new session continue the job.
    subagent (decision 062). It gets the persona, the approved playbooks and rules, the job facts,
    the concerns from both checks, and the worker's result and report as untrusted data, and
    writes the result text with no template. It has no tools.
-6. `finishJob` sets `done`, collapses the card, and posts one message. A written result is the
-   writer's text, the verifier line, the concerns, the open questions, a footer, and the buttons. Otherwise it is the
-   template of decision 044: a status emoji and title, a one-line tl;dr, the concerns from both checks without repeats as a numbered
-   list under "check before merge" with the verifier's confidence, open questions as a checklist,
-   and a footer with the PR link, tests, and file count, then Open PR, Looks good, Fix, and Close
-   (decision 056). Fix sends the person's words to the same worker thread as a follow-up job:
-   a new ledger row with the parent's thread, cursor, and PR watch. No task watches it, so
-   reconcile drives it to its own result. Before creating it, Sym applies current project and pack
-   policy and checks the original worker identity and project ID. It sends current limits and a
-   new job-scoped callback credential (decision 065). One job per worker thread is active at a time.
+6. `finishJob` marks the result, collapses the working note, and posts human text. Code adds
+   exact sentences from inline fact tokens, then only missing concerns, open decisions, PR and test facts. Results have links, optional choices,
+   and optional native feedback. No fixed result checklist or confidence score is shown.
+   `job_followup` proposes a change on the finished thread and branch. Start checks the stored
+   revision, actor, current project policy, and worker identity. The new job gets its own scoped
+   credential. One job per worker thread is active at a time.
 7. With `SYM_PR_FOLLOW=on` (decision 054), if a PR opened, ask the worker to watch it, so the
    worker agent can fix CI failures and answer review comments. Reconcile reports those wakes in
    the job thread.
-8. When a person clicks Close, Sym records it on the job, settles the worker thread
-   (`t3_thread_organize`), stops following its PR, and edits the result.
+8. `job_close` records a close request, settles the worker, stops PR following, and requests
+   code-channel archive. Reconcile retries unfinished closure. Archive success requires Slack
+   confirmation; refusals leave a retry control. Discussion stays chat, running redirects use
+   `job_steer`, and explicit stops use owner-confirmed `job_stop`.
 
 The model check is skipped, and the job ends with the rule checks alone, when `SYM_VERIFIER` is
 not on (the result then has no verifier line), when reconcile finishes
 an orphaned job (including one left in `checking`), for a scheduled check, when the task stops or
 fails while checking, and when the verifier fails or times out. In the last case the result says
-"Model check unavailable". The writer is skipped in the same cases, for a Fix follow-up, and when
+"Model check unavailable". The writer is skipped in the same cases, for a follow-up, and when
 it fails or times out; the result then uses the template.
 
 ## Flow 5: "what's the update?"
@@ -176,7 +176,7 @@ it fails or times out; the result then uses the template.
   each, with links to their threads.
 - **`/sym status`:** the same list as an ephemeral message.
 - **Steering:** "skip the staging test" in a job thread steers the worker thread, and so does the
-  card's Steer box. "Stop it" interrupts it.
+  conversational `job_steer` path. "Stop it" uses owner-confirmed `job_stop`.
 
 ## Proactive updates
 

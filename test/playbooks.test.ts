@@ -4,7 +4,7 @@ import playbookPropose from "../agent/tools/playbook_propose.ts";
 import playbookRetire from "../agent/tools/playbook_retire.ts";
 import playbookReview from "../agent/tools/playbook_review.ts";
 import { recordFeedback } from "../lib/feedback/feedback.ts";
-import { sessionInstructions } from "../lib/learning/format.ts";
+import { playbookLine, sessionInstructions } from "../lib/learning/format.ts";
 import { groupFeedback, runLearn } from "../lib/learning/learn.ts";
 import { learningMigration } from "../lib/learning/migration.ts";
 import {
@@ -64,6 +64,25 @@ describe("groupFeedback", () => {
 });
 
 describe("session text", () => {
+  it("shows historical auto rows as approved guidance without a trusted label", () => {
+    expect(
+      playbookLine({
+        id: 8,
+        name: "retry",
+        kind: "playbook",
+        body: "Add retries.",
+        status: "approved",
+        version: 1,
+        source: "owner",
+        evidence: [],
+        proposedAt: NOW,
+        decidedBy: "U1",
+        decidedAt: NOW,
+        startMode: "auto",
+      }),
+    ).toBe("P-8: retry v1 - playbook - approved - owner");
+  });
+
   it("frames rows as guidance under the base rules", () => {
     expect(sessionInstructions([])).toBeNull();
     const text = sessionInstructions([

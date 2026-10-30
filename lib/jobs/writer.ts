@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { envSwitch } from "../env-switch.ts";
+import { ChoiceLabels } from "../ledger/choices.ts";
 import type { OutputContract } from "./contract.ts";
+import { resultFacts } from "./messages.ts";
 
 // The written result (decision 062). When a code job ends in a live session, the `writer`
 // subagent writes the result message in the persona's voice, with no template. Sym's code still
@@ -14,9 +16,17 @@ export const WRITTEN_MAX = 6_000;
 const MAX_REPORT = 12_000;
 
 export const WriterOutput = z.object({
-  text: z.string().trim().min(1).max(WRITTEN_MAX),
+  text: z
+    .string()
+    .trim()
+    .min(1)
+    .max(WRITTEN_MAX)
+    .describe(
+      "Result prose with inline {{c1}}, {{q1}}, {{tests}}, {{pr}}, {{ci}}, and {{files}} tokens. Code expands each to the exact fact and appends missing facts.",
+    ),
+  choices: ChoiceLabels.optional(),
 });
-export type WriterOutput = z.infer<typeof WriterOutput>;
+export type WriterOutput = z.input<typeof WriterOutput>;
 
 // On by default; `SYM_RESULT_WRITER=off` keeps the template for every result.
 export function writerEnabled(env: Record<string, string | undefined> = process.env): boolean {
@@ -24,7 +34,6 @@ export function writerEnabled(env: Record<string, string | undefined> = process.
 }
 
 export interface WriterRequest {
-  ref: string;
   title: string;
   project: string;
   goal: string;
@@ -52,24 +61,59 @@ function data(value: unknown): string {
 export function writerMessage(request: WriterRequest): string {
   const report = request.workerMessage ?? "";
   return [
-    `Write the message that tells the team how job ${request.ref} ended.`,
+    `Write the message that tells the team how the work ended: ${request.title}.`,
     `<voice>\n${request.persona ?? "No persona is set. Write plainly."}\n</voice>`,
     ...(request.learned ? [`<learned>\n${request.learned}\n</learned>`] : []),
     `<job>\n${data({
-      ref: request.ref,
       title: request.title,
       project: request.project,
       goal: request.goal,
       duration: request.duration,
       pr_url: request.prUrl,
     })}\n</job>`,
-    `<check_concerns>\n${data(request.concerns)}\n</check_concerns>`,
+    `<fact_tokens>\n${data(resultTokens(request.contract, request.concerns, request.prUrl))}\n</fact_tokens>`,
+    `<check_concerns>\n${data(requiredConcerns(request.contract, request.concerns))}\n</check_concerns>`,
     `<worker_result untrusted="true">\n${data({
       summary: request.contract.summary,
       tests: request.contract.tests,
+      tests_status: request.contract.testsStatus ?? "unknown",
+      ci_status: request.contract.ciStatus ?? "unknown",
       files_changed: request.contract.filesChanged,
       open_questions: request.contract.openQuestions,
       report: report.length > MAX_REPORT ? `${report.slice(0, MAX_REPORT)}…` : report,
     })}\n</worker_result>`,
   ].join("\n\n");
+}
+
+export function requiredConcerns(
+  contract: OutputContract,
+  concerns: string[],
+): { id: string; text: string }[] {
+  return [
+    ...concerns.map((text, i) => ({ id: `c${i + 1}`, text })),
+    ...contract.openQuestions.map((text, i) => ({ id: `q${i + 1}`, text })),
+  ];
+}
+
+/** The only source of sentences expanded into a written result. */
+export function resultTokens(
+  contract: OutputContract,
+  concerns: string[],
+  prUrl = contract.prUrl,
+): Record<string, string> {
+  const facts = resultFacts(contract, prUrl);
+  const tokens = Object.fromEntries(
+    requiredConcerns(contract, concerns).map(({ id, text }) => [id, text]),
+  );
+  for (const fact of facts) {
+    const id = fact.startsWith("<")
+      ? "pr"
+      : fact.startsWith("CI ")
+        ? "ci"
+        : /^\d+ files? changed/.test(fact)
+          ? "files"
+          : "tests";
+    tokens[id] = fact;
+  }
+  return tokens;
 }

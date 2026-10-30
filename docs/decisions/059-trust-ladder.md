@@ -1,6 +1,6 @@
 # 059. The trust ladder: an approved playbook earns a start without the click
 
-Status: accepted
+Status: superseded in part by 071. Playbook links and outcomes remain; auto-start and promotion are retired.
 Date: 2026-10-21
 
 ## Context

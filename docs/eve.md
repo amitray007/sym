@@ -16,7 +16,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Model | Gateway model ID from `SYM_MODEL`, read by `defineDynamic` before each model call (decision 018) | Use | Chat, briefs, triage, summaries. Workers do heavy work | Needs `AI_GATEWAY_API_KEY` off Vercel. The model is fixed per session |
 | Dynamic model | `defineDynamic(ctx => model)` with a turn-keyed `ctx.memo` | Later | Cheap model for status, stronger model for planning | Switching mid-session loses the prompt cache |
 | Spend limits | `limits.sessionUsage` | Use | $2 of brain model cost per window, then Eve asks to continue or stop; Continue starts a new window (`agent/agent.ts`) | Cost tracking needs reported cost |
-| Instructions | `agent/instructions.md`, `instructions/` | Use | Persona, trust ladder, Slack style | TS instructions evaluate at build time |
+| Instructions | `agent/instructions.md`, `instructions/` | Use | Persona, consent, Slack style | TS instructions evaluate at build time |
 | Skills | `agent/skills/*.md` | Use | Pack playbooks through the overlay (decision 035). The brief rules live in `agent/instructions.md`, and the progress and result rules in code (`lib/jobs/progress.ts`, `lib/jobs/verify.ts`) | Supporting files need a sandbox |
 
 ## Tools and durable work
@@ -50,7 +50,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Task card | automatic, `taskCard` renderer | Use | Short non-job tasks. Hidden for `worker_job` | Rows show no progress. Schedule sessions get no card |
 | Status line | tool `label.start`, `label.delta` | Use | "Launching worker thread", "Tests running" | Cut at 50 characters. Cleared after 2 min idle |
 | Approval routing | `approvalChannel: "direct-message"` | Later | Approvals stay in the job thread for the owner-only allow-list; a DM route comes with team use | Fails closed if the user cannot be resolved |
-| Renderers | `defineSlackRenderer` | Use | Feedback buttons inside each reply, the session's Slack thread, hiding Eve's card for `worker_job` | Clicks arrive in `onInteraction` |
+| Renderers | `defineSlackRenderer` | Use | Feedback buttons on job results only, the session's Slack thread, hiding Eve's card for `worker_job` | Clicks arrive in `onInteraction` |
 | Events | `onEvent` | Use | `reaction_added` for feedback. `app_home_opened` publishes the Home tab (decision 052) | |
 | Slash commands | `onSlashCommand` | Use | `/sym status`, `/sym jobs`, `/sym schedules`, `/sym quiet`, answered ephemerally with `ctx.slack.request` | No model call |
 | Shortcuts | `onShortcut` | Later | "Send to Sym" on any message | `trigger_id` valid about 3 s |
@@ -102,3 +102,17 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 Connection proposals probe anonymously, including token-backed servers (decision 065). Only after
 owner approval binds the endpoint and token reference does the active-row refresh list
 authenticated tools and server instructions. Active-name conflicts are refused before probing.
+
+## Conversational jobs
+
+The renderer keeps worker progress in a silent working note. Results use human text and inline tokens expanded to exact code-owned
+facts; missing facts are appended once. `offer_choices` starts an ordinary turn from a stored choice; it grants no authority.
+`job_followup` proposes work, `job_close` requests settlement and archive, and `job_stop` keeps
+owner confirmation. Old Fix submissions now propose work. Questions live in the job's current
+conversation, including code channels. Completed brain replies use the outbox and display rule.
+
+Decision 071 adds evals for vague problems, a vague report matching a trusted playbook, explicit
+Builder requests, acceptance of an offer,
+finished-job discussion, follow-ups, closure, short answers, lists, and persona recaps. Fixture
+checks prove wiring only. The owner runs real-model evals. Interactive Builder requests show Start / Not now even for trusted playbooks. Approved schedules
+start without a click (decision 024). The trust ladder no longer auto-starts jobs.

@@ -66,11 +66,13 @@ ${list([...brief.constraints, "Work only in this worktree.", ...rules])}
 Done when:
 ${list(brief.doneWhen)}
 
-When you finish, write your report in whatever form suits it. Then end your last message with
+When you finish, write a short human report: what changed, what you checked, and what you left alone. Then end your last message with
 one JSON block in this shape. Sym's code reads it as data, so keep the shape exact:
 \`\`\`json
-{"summary": "", "pr_url": null, "tests": "", "files_changed": [], "open_questions": []}
+{"summary": "", "pr_url": null, "tests": "", "tests_status": "unknown", "ci_status": "unknown", "files_changed": [], "open_questions": []}
 \`\`\`
+Set tests_status to passed, failed, not_run, unknown, or none (explicitly no tests apply).
+New test counts alone do not prove a passing run. Set ci_status only from observed checks.
 Put only decisions a person must make in open_questions. Notes and follow-ups go in the summary.
 
 Then tell Sym you are done. Run this exactly once:

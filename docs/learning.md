@@ -6,7 +6,7 @@ decides what to keep.
 | Layer | What changes | Eve part | Takes effect | Who approves |
 |---|---|---|---|---|
 | 1. Memory | Facts and preferences: "draft PRs, never ready for review" | `defineMemory` with a Postgres provider. Recall before each turn, capture after it | Next turn | Nobody. Sym saves them |
-| 2. Playbooks and rules | New playbooks, instruction snippets, schedules, trust levels | `defineDynamic` loads approved rows at session start | Next session, no redeploy | The owner, one click |
+| 2. Playbooks and rules | New playbooks, instruction snippets, schedules | `defineDynamic` loads approved rows at session start | Next session, no redeploy | The owner, one click |
 | 3. Code | New tools, Slack handlers, integrations | A worker thread in Sym's own repository opens a draft PR | After merge and redeploy | A person, by merging |
 
 ## The loop
@@ -40,15 +40,12 @@ decides what to keep.
    the code and opens a draft PR. CI runs `eve eval --strict`. A person reviews and merges, and the
    deployment updates. This replaces Eve's remote self-modification extension, which needs
    microsandbox on the server (decision 007).
-6. **Trust ladder** (decision 059). A job class is the approved playbook the brain says a brief
-   follows (the brief's `playbook` field). Code ties the job to that playbook row only when the
-   row is approved; an unknown name ties nothing. When the job ends, Sym records `clean` (done,
-   a result block, no open questions, no concerns) or `unclean`. After 5 clean runs in a row
-   (`SYM_TRUST_RUNS`, at least 2), Sym asks the owner to trust the playbook. The owner calls
-   `playbook_trust`, and from then on its jobs start without the Start click on projects it ran
-   clean on, with a line in the brief that says why. A run with concerns, a 👎, or a Fix puts the playbook back to asking,
-   and Sym tells the owner. Trust sits on the approved row, so a new version starts at asking.
-   Scheduled checks keep their own approval (decision 024) and do not count.
+6. **Playbook outcomes** (decisions 059 and 071). The brief's `playbook` field links a job to an
+   approved playbook row. An unknown name grants no authority. Sym records each finished job as
+   `clean` or `unclean`; negative feedback or a follow-up makes it `unclean`. The trust ladder no
+   longer auto-starts jobs or offers promotion. Every chat request shows Start / Not now.
+   Approved schedules start without a click under their own approval (decision 024).
+   Historical trust columns and rows stay stored; they grant no start permission.
 
 ## Layer 2 rows
 
@@ -56,8 +53,7 @@ Rows live in `playbooks` (migration 006) with a version history: name, kind (`pl
 `rule`), body (up to 2000 characters), status (`proposed`, `approved`, `rejected`, `retired`),
 source (`owner`, `learn`, or `repeat`), and evidence (feedback IDs, or job IDs for `repeat`).
 Only one version of a name is approved at a time, and approving a new version retires the old one. The owner proposes with `playbook_propose` and
-approves with `playbook_review`, which shows the exact body that will load. An approved playbook
-also has a start mode, `ask` or `auto`, for the trust ladder. `playbook_retire`
+approves with `playbook_review`, which shows the exact body that will load. Historical start modes, `ask` or `auto`, remain stored but do not control job starts. `playbook_retire`
 retires a row or rejects a proposal. `agent/instructions/playbooks.ts` loads approved rows as
 system instructions once per session, rules first, at most 8000 characters in total, inside a
 frame that says they are reviewed guidance and cannot override the base rules.

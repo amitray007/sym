@@ -7,6 +7,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -15,6 +16,7 @@ import postgres from "postgres";
 import { connect, type Sql } from "../../lib/db.ts";
 import { type Job, jobRef } from "../../lib/ledger/jobs.ts";
 import { migrate } from "../../lib/ledger/migrate.ts";
+import { conversationBrain, conversationFixturePath } from "../fakes/conversation-brain.ts";
 import { type FakeSlack, type FakeSlackMessage, startFakeSlack } from "../fakes/slack-server.ts";
 import {
   type FakeT3,
@@ -251,6 +253,13 @@ export class Conversation {
     );
   }
 
+  async result(ref: string): Promise<FakeSlackMessage | undefined> {
+    const [post] = await this.h.sql<
+      { slackTs: string | null }[]
+    >`select slack_ts from outbox where idempotency_key = ${`${ref}:end`} and status = 'sent'`;
+    return this.botMessages().find((message) => message.ts === post?.slackTs);
+  }
+
   botMessages(): FakeSlackMessage[] {
     return this.messages().filter((m) => m.user === BOT);
   }
@@ -436,7 +445,12 @@ export function hitlControls(blocks: unknown[]): HitlControl[] {
     if (!node || typeof node !== "object") return;
     const element = node as Record<string, unknown>;
     const actionId = element.action_id;
-    if (typeof actionId === "string" && actionId.startsWith("eve_input:")) {
+    if (
+      typeof actionId === "string" &&
+      (actionId.startsWith("eve_input:") ||
+        actionId.startsWith("sym_proposal_") ||
+        actionId.startsWith("sym_choice_"))
+    ) {
       const type = String(element.type ?? "button");
       if (Array.isArray(element.options)) {
         for (const option of element.options as Record<string, unknown>[]) {
@@ -558,7 +572,7 @@ export function briefMention(title: string, extra: Record<string, unknown> = {})
 // Mentions Sym with a brief and waits for Eve's approval prompt and the job row.
 export async function startJob(h: Harness, c: Conversation, title: string) {
   await c.mention(briefMention(title));
-  const approval = await c.waitForControls(/Start J-\d+:/);
+  const approval = await c.waitForControls(/Want me to start\?/);
   const job = await jobInThread(h.sql, c.channel, c.rootTs);
   return { approval, job, ref: jobRef(job.id) };
 }
@@ -575,15 +589,14 @@ export function threadsOf(h: Harness, ref: string): FakeT3Thread[] {
 
 // A live job card: Sym's message with a plan block.
 export function isCard(message: FakeSlackMessage): boolean {
-  return (message.blocks ?? []).some((block) => (block as { type?: string }).type === "plan");
+  return (message.blocks ?? []).some((block) => {
+    const b = block as { type?: string; block_id?: string };
+    return b.type === "section" && /^job-J-\d+-v/.test(b.block_id ?? "");
+  });
 }
 
 export async function resultMessage(c: Conversation, ref: string): Promise<FakeSlackMessage> {
-  // The result headline is "<status emoji> *J-3 · title* · 1m"; the job card has no emoji prefix.
-  const headline = new RegExp(`^(✅|⚠️) \\*${ref} · `);
-  return until(() => c.botMessages().find((m) => headline.test(m.text ?? "")), {
-    label: `${ref} result message`,
-  });
+  return until(() => c.result(ref), { label: `${ref} result message` });
 }
 
 // Waits until Slack sees no new calls for a few seconds, so late posts would show up.
@@ -653,6 +666,14 @@ function copyApp(): string {
   for (const entry of ["agent", "lib", "package.json", "tsconfig.json"]) {
     cpSync(join(REPO, entry), join(dir, entry), { recursive: true });
   }
+  const original = join(dir, "lib/brain/fixture.ts");
+  cpSync(original, join(dir, "lib/brain/fixture-base.ts"));
+  writeFileSync(
+    original,
+    readFileSync(conversationFixturePath, "utf8")
+      .replace("../../lib/brain/fixture.ts", "./fixture-base.ts")
+      .replace(`function ${conversationBrain.name}(`, "function fixtureBrain("),
+  );
   symlinkSync(join(REPO, "node_modules"), join(dir, "node_modules"));
   return dir;
 }

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { briefsText, recentBriefs } from "../../lib/learning/repeat.ts";
 import { listPlaybooks } from "../../lib/learning/rows.ts";
+import { jobRef } from "../../lib/ledger/jobs.ts";
 import { mayDecideAsOwner, OWNER_ONLY, slackUserOfPrincipal } from "../../lib/owner.ts";
 import { ledger, pack } from "../../lib/runtime.ts";
 
@@ -11,6 +12,7 @@ import { ledger, pack } from "../../lib/runtime.ts";
 // read. The weekly `repeat` schedule calls it as the app principal; the owner can ask for it too.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Read the briefs of recent finished jobs to find work people ask for again and again. Use " +
     "it for the weekly repeated-work review, or when the owner asks what work keeps coming back. " +
     "Then propose a playbook for each real pattern with repeated_work_propose.",
@@ -32,6 +34,9 @@ export default defineTool({
       listPlaybooks(sql, "proposed"),
       listPlaybooks(sql, "approved"),
     ]);
-    return briefsText(briefs, [...approved, ...proposed]);
+    return {
+      answer: briefsText(briefs, [...approved, ...proposed]),
+      jobs: briefs.map((brief) => ({ ...brief, ref: jobRef(brief.id) })),
+    };
   },
 });

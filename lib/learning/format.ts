@@ -1,3 +1,5 @@
+import type { Sql } from "../db.ts";
+import { jobName, type NamedJob } from "../jobs/names.ts";
 import { type Playbook, playbookRef } from "./rows.ts";
 
 // Text for the session and for the owner. Approved rows are reviewed guidance. The frame below
@@ -19,21 +21,35 @@ export function sessionInstructions(rows: Playbook[]): string | null {
 }
 
 export function playbookLine(row: Playbook): string {
-  const trust = row.status === "approved" && row.startMode === "auto" ? " - trusted" : "";
-  return `${playbookRef(row.id)}: ${row.name} v${row.version} - ${row.kind} - ${row.status} - ${row.source}${trust}`;
+  return `${playbookRef(row.id)}: ${row.name} v${row.version} - ${row.kind} - ${row.status} - ${row.source}`;
 }
 
-export function playbookDetail(row: Playbook): string {
+export function playbookDetail(
+  row: Playbook,
+  evidenceNames: Map<number, string> = new Map(),
+): string {
   // A repeated-work proposal cites jobs (decision 058); a learned rule cites feedback rows.
   const cited =
     row.source === "repeat"
-      ? row.evidence.map((id) => `J-${id}`).join(", ")
+      ? row.evidence.map((id) => evidenceNames.get(id) ?? "Earlier work").join(", ")
       : `feedback ${row.evidence.join(", ")}`;
   const evidence = row.evidence.length > 0 ? `\nEvidence: ${cited}` : "";
   return `${playbookLine(row)}${evidence}\n${row.body}`;
 }
 
-export function playbookList(rows: Playbook[]): string {
+export function playbookList(
+  rows: Playbook[],
+  evidenceNames: Map<number, string> = new Map(),
+): string {
   if (rows.length === 0) return "There are no playbooks or rules.";
-  return rows.map(playbookDetail).join("\n\n");
+  return rows.map((row) => playbookDetail(row, evidenceNames)).join("\n\n");
+}
+
+// Resolve evidence at the read boundary so deleted jobs never leak an internal handle.
+export async function jobEvidenceNames(sql: Sql, ids: number[]): Promise<Map<number, string>> {
+  if (!ids.length) return new Map();
+  const jobs = await sql<(NamedJob & { id: number })[]>`
+    select id, title, slack_channel, slack_thread_ts, code_channel from jobs where id in ${sql(ids)}
+  `;
+  return new Map(jobs.map((job) => [Number(job.id), jobName(job)]));
 }

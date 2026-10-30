@@ -328,6 +328,15 @@ describe.skipIf(!hasDatabase)("pull request facts on a finished job", () => {
     expect(JSON.stringify(post?.blocks)).toContain(PR);
   });
 
+  it("keeps a PR seen in earlier progress when the final report and facts omit it", async () => {
+    const s = await launched(final(null), { facts: [] });
+    await updateJob(s.sql, s.job.id, { prUrl: PR });
+    await checkJob(s.deps, s.job.id, 1000);
+    const post = s.posts()[0];
+    expect(String(post?.text)).toContain(PR);
+    expect(JSON.stringify(post?.blocks)).toContain(PR);
+  });
+
   it("shows the same result when the end is presented again, with no new worker call", async () => {
     const s = await launched(final(PR), { facts: [pr({ baseBranch: "develop" })] });
     await checkJob(s.deps, s.job.id, 1000);

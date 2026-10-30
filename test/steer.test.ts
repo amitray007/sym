@@ -77,9 +77,9 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
     expect(s.worker.sends[0]?.text).toContain("skip the staging test");
     // Without a tool call ID, the text keys the request, so the worker deduplicates a retry.
     expect(s.worker.sends[1]?.requestId).toBe(s.worker.sends[0]?.requestId);
-    expect(s.worker.sends[0]?.requestId).toMatch(new RegExp(`^steer-J-${job.id}-[0-9a-f]{12}$`));
+    expect(s.worker.sends[0]?.requestId).toMatch(new RegExp(`^steer-J-${job.id}-[0-9a-f]{14}$`));
     expect((await getJob(ledger.sql(), job.id))?.lastSummary).toBe(
-      "Steered: skip the staging test",
+      "I passed on: skip the staging test",
     );
 
     await steerJob(s.deps, `J-${job.id}`, "also skip lint");
@@ -102,7 +102,7 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
 
   it("refuses unknown, unlaunched, and finished jobs", async () => {
     const s = setup();
-    expect(await steerJob(s.deps, "J-999999", "go")).toContain("no job");
+    expect(await steerJob(s.deps, "J-999999", "go")).toContain("couldn't find that work");
 
     const unlaunched = await newJob("steer-unlaunched");
     expect(await steerJob(s.deps, `J-${unlaunched.id}`, "go")).toContain("not started");
@@ -118,6 +118,37 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
     expect(s.worker.interrupts).toEqual([]);
   });
 
+  it("reports completion instead of cancellation while checking", async () => {
+    const s = setup();
+    const job = await newJob("stop-checking");
+    await launchOrAdopt(s.deps, job.id, CALLBACK);
+    await updateJob(ledger.sql(), job.id, {
+      status: "checking",
+      lastMessage: '```json\n{"summary":"Finished work","tests":"passed"}\n```',
+    });
+    expect(await stopJob(s.deps, `J-${job.id}`)).toBe(
+      "This finished before I could stop it. I kept its result.",
+    );
+    expect((await getJob(ledger.sql(), job.id))?.status).toBe("done");
+    expect(s.worker.interrupts).toEqual([]);
+    expect(s.posts().some((p) => String(p.body.text).includes("was cancelled"))).toBe(false);
+  });
+
+  it("keeps a concurrently finished result when Stop reaches a stale running row", async () => {
+    const s = setup();
+    const sql = ledger.sql();
+    const job = await newJob("stop-race");
+    await launchOrAdopt(s.deps, job.id, CALLBACK);
+    s.worker.interrupt = async () => {
+      await updateJob(sql, job.id, { status: "done", lastSummary: "Finished and checked" });
+    };
+    expect(await stopJob(s.deps, `J-${job.id}`)).toContain("finished before I could stop it");
+    expect(await getJob(sql, job.id)).toMatchObject({
+      status: "done",
+      lastSummary: "Finished and checked",
+    });
+  });
+
   it("stops a running job: one interrupt and one cancel post", async () => {
     const s = setup();
     const job = await newJob("stop");
@@ -127,7 +158,7 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
     const answer = await stopJob(s.deps, `J-${job.id}`);
     const again = await stopJob(s.deps, `J-${job.id}`);
 
-    expect(answer).toBe(`Stopped J-${job.id}.`);
+    expect(answer).toBe("Stopped it.");
     expect(again).toContain("already finished");
     expect(s.worker.interrupts).toHaveLength(1);
     expect(s.posts().length - before).toBe(1);

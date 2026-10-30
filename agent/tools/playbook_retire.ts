@@ -22,6 +22,7 @@ import { ledger, pack } from "../../lib/runtime.ts";
 // proposal. The row stays in the history.
 export default defineTool({
   description:
+    "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Retire an approved playbook or rule so new sessions stop loading it, or reject a proposed " +
     "one. The owner approves the call.",
   inputSchema: z.object({ id: z.number().int().positive() }),

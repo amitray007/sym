@@ -13,6 +13,11 @@ export default defineTool({
     "Sym job. Use the job reference from your first message, such as J-142.",
   inputSchema: z.object({
     job: z.string().max(40).describe("Your job reference, such as J-142."),
+    skipping: z
+      .string()
+      .max(1000)
+      .optional()
+      .describe("What you are leaving alone, when relevant."),
     summary: z
       .string()
       .max(4000)

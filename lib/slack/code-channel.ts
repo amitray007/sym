@@ -1,8 +1,6 @@
 import type { Sql } from "../db.ts";
-import { chooseDisplay } from "../display.ts";
 import { envSwitch } from "../env-switch.ts";
 import { getJob, type Job, jobRef, updateJob } from "../ledger/jobs.ts";
-import { enqueuePost } from "../ledger/outbox.ts";
 import { type SlackApi, SlackApiError } from "./api.ts";
 
 // Slack code channels for worker jobs (decision 067, docs/slack-code.md). With SYM_CODE_CHANNELS
@@ -23,9 +21,9 @@ interface Deps {
   slack?: SlackApi;
 }
 
-// Slack names a channel from its title. The ref keeps it unique and findable.
+// Use the work's title. Add a numeric suffix only after an explicit name collision.
 export function codeChannelName(job: Pick<Job, "id" | "title">): string {
-  return `${jobRef(job.id)} ${job.title}`.slice(0, 80);
+  return job.title.slice(0, 80);
 }
 
 // The message the channel starts from: the person's latest message in the thread, else the
@@ -65,13 +63,22 @@ export async function moveToCodeChannel(deps: Deps, job: Job): Promise<Job> {
   try {
     if (from.is_im || from.is_mpim || from.is_ext_shared) return job;
     const isPrivate = from.is_private === true;
-    const created = await slack.call("agents.conversations.create", {
-      name: codeChannelName(job),
-      session_id: `sym-${jobRef(job.id)}`,
-      origin_channel_id: channel,
-      origin_message_ts: origin,
-      ...(isPrivate ? { is_private: true } : {}),
-    });
+    const create = (name: string) =>
+      slack.call("agents.conversations.create", {
+        name,
+        session_id: `sym-${jobRef(job.id)}`,
+        origin_channel_id: channel,
+        origin_message_ts: origin,
+        ...(isPrivate ? { is_private: true } : {}),
+      });
+    let created: Record<string, unknown>;
+    try {
+      created = await create(codeChannelName(job));
+    } catch (error) {
+      if (slackCode(error) !== "name_taken") throw error;
+      const suffix = ` #${job.id}`;
+      created = await create(`${job.title.slice(0, 80 - suffix.length)}${suffix}`);
+    }
     if (typeof created.channel_id !== "string" || !created.channel_id) return job;
     channelId = created.channel_id;
     if (isPrivate && (await conversation(slack, channelId)).is_private !== true) {
@@ -123,51 +130,12 @@ function isCodeChannel(info: ConversationInfo): boolean {
   return info.properties?.record_channel?.record_type === "agent_channel";
 }
 
-// Eve asks a moved job's questions in the thread it came from, because the job's task runs in that
-// thread's session. The channel shows the question with a link there, so people find it. A job
-// that adopted its channel has no origin: Eve asks in the channel itself, so there is no link.
-export async function pointToQuestion(
-  deps: Deps,
-  job: Job,
-  requestId: string,
-  prompt: string,
-): Promise<void> {
-  if (!job.codeChannel || !job.slackChannel || !job.originChannel) return;
-  const ref = jobRef(job.id);
-  let link: string | undefined;
-  if (deps.slack && job.originChannel && job.originThreadTs) {
-    const permalink = await deps.slack
-      .call("chat.getPermalink", { channel: job.originChannel, message_ts: job.originThreadTs })
-      .catch(() => undefined);
-    if (typeof permalink?.permalink === "string") link = permalink.permalink;
-  }
-  const where = link ? `<${link}|the thread where it started>` : "the thread where it started";
-  const text = `${ref} has a question: ${prompt.slice(0, 500)}\nAnswer it in ${where}.`;
-  await enqueuePost(deps.sql, {
-    idempotencyKey: `${ref}:question-link:${requestId}`,
-    jobId: job.id,
-    method: "chat.postMessage",
-    payload: { channel: job.slackChannel, text },
-    display: chooseDisplay({
-      kind: job.kind,
-      needsAction: true,
-      isNew: true,
-      estMinutes: 0,
-      steps: 0,
-      lines: 2,
-      surface: "channel",
-      quiet: false,
-    }),
-  });
-}
-
-// The context bar: the job, its project, and its pull request once there is one. Slack keeps at
+// The context bar: its project and its pull request once there is one. Slack keeps at
 // most five items and replaces the whole bar on each call.
 export async function setContextBar(deps: Deps, job: Job, project?: string): Promise<void> {
   if (!job.codeChannel || !job.slackChannel || !deps.slack) return;
   const name = project ?? projectOf(job);
   const items = [
-    { key: "job", label: jobRef(job.id), icon: "code" },
     ...(name ? [{ key: "project", label: name, icon: "folder" }] : []),
     ...(job.prUrl ? [{ key: "pr", label: "Pull request", icon: "branch", url: job.prUrl }] : []),
   ];
@@ -201,7 +169,6 @@ export async function archiveCodeChannel(
   const slack = deps.slack;
   const channel = job.slackChannel;
   if (!job.codeChannel || !channel || !slack) return false;
-  await setChannelStatus(deps, job, "closed");
   const archive = (summary: string | null) =>
     slack.call("agents.conversations.archive", {
       channel_id: channel,
@@ -209,14 +176,25 @@ export async function archiveCodeChannel(
     });
   try {
     await archive(summaryTs);
+    await setChannelStatus(deps, job, "closed");
     return true;
   } catch (error) {
     const code = slackCode(error);
-    if (code === "already_archived") return true;
+    if (code === "already_archived") {
+      await setChannelStatus(deps, job, "closed");
+      return true;
+    }
     if (summaryTs && (code === "no_origin_link" || code === "summary_message_not_found")) {
       return archive(null).then(
-        () => true,
-        (retry: unknown) => {
+        async () => {
+          await setChannelStatus(deps, job, "closed");
+          return true;
+        },
+        async (retry: unknown) => {
+          if (slackCode(retry) === "already_archived") {
+            await setChannelStatus(deps, job, "closed");
+            return true;
+          }
           console.warn(`Sym could not archive the channel of ${jobRef(job.id)}.`, slackCode(retry));
           return false;
         },
@@ -231,6 +209,7 @@ export async function archiveCodeChannel(
 // job with no session to show.
 export function jobSessionStatus(job: Job): SessionStatus | undefined {
   if (!job.codeChannel) return undefined;
+  if (job.archiveState === "archived") return "closed";
   if (job.status === "waiting_input" || job.status === "waiting_permission") return "suspended";
   if (job.status === "done" || job.status === "failed" || job.status === "cancelled") {
     return "active";

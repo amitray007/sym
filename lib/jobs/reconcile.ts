@@ -1,10 +1,15 @@
 import { chooseDisplay } from "../display.ts";
 import { getJob, type Job, jobRef, orphanedJobs, updateJob } from "../ledger/jobs.ts";
 import { dropPost, enqueuePost, latestPost } from "../ledger/outbox.ts";
-import { setChannelStatus } from "../slack/code-channel.ts";
+import { moveToCodeChannel, setChannelStatus } from "../slack/code-channel.ts";
+import { isSlackUserAllowed } from "../slack/guard.ts";
+import { retryFollowupProposals } from "../slack/job-actions.ts";
 import { workerNoun } from "../worker-label.ts";
 import type { WorkerAdapter } from "../workers/types.ts";
+import { callbackFor } from "./callback.ts";
 import { parseOutputContract } from "./contract.ts";
+import { retryClosures } from "./followup.ts";
+import { jobName } from "./names.ts";
 import {
   checkPrWakes,
   ensurePrWatched,
@@ -12,8 +17,17 @@ import {
   prFollowEnabled,
   watchedPrJobs,
 } from "./pr-wakes.ts";
-import { presentEnd } from "./present.ts";
-import { checkJob, finishJob, type JobDeps, type LedgerDeps } from "./run.ts";
+import { presentEnd, presentProgress } from "./present.ts";
+import {
+  checkJob,
+  closeUnlaunched,
+  deliverNow,
+  finishJob,
+  type JobDeps,
+  JobSetupError,
+  type LedgerDeps,
+  launchOrAdopt,
+} from "./run.ts";
 import type { ModelCheck } from "./verify.ts";
 
 // The safety net (docs/architecture.md, "Proactive updates"). Every few minutes it takes over
@@ -35,6 +49,9 @@ export interface ReconcileReport {
 }
 
 export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
+  await recoverAcceptedStarts(deps);
+  await retryClosures(deps);
+  await retryFollowupProposals(deps);
   const report: ReconcileReport = { checked: 0, finished: 0, offline: 0 };
   for (const job of await orphanedJobs(deps.sql)) {
     try {
@@ -58,10 +75,6 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
         report.finished++;
         await settleChannel(deps, job);
       }
-      // No task is here to turn a question into buttons, so tell the thread once per question.
-      for (const question of check.questions) {
-        await postQuestion(deps, job, question.requestId, question.questions[0]?.prompt ?? "");
-      }
     } catch {
       report.offline++;
       await markOffline(deps, job);
@@ -70,6 +83,60 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
   await followPullRequests(deps);
   await presentMissingEnds(deps);
   return report;
+}
+
+// An accepted Start can outlive its Eve task before the worker exists. Keep the callback and
+// approval in the ledger, then use the same launch lock and title adoption as a live task.
+async function recoverAcceptedStarts(deps: JobDeps): Promise<void> {
+  await deps.sql`update job_proposals set status = 'expired'
+    where status = 'pending' and expires_at <= now()`;
+  await deps.sql`update jobs set status = 'cancelled', finished_at = coalesce(finished_at, now())
+    where status = 'launching' and worker_thread_id is null and (
+      select p.status from job_proposals p where p.job_id = jobs.id and p.kind = 'start'
+      order by p.id desc limit 1
+    ) in ('dismissed', 'expired')`;
+  const rows = await deps.sql<{ id: number; decidedBy: string; callbackUrl: string }[]>`
+    select j.id, p.decided_by, c.callback_url from jobs j
+    join job_proposals p on p.job_id = j.id and p.kind = 'start' and p.status = 'approved'
+    join job_start_callbacks c on c.job_id = j.id
+    where j.worker_thread_id is null and j.status = 'launching' and j.closed_at is null
+      and j.brief = p.payload and p.created_at < now() - interval '1 minute'
+    order by j.id limit 20
+  `;
+  for (const row of rows) {
+    if (!isSlackUserAllowed(deps.pack, process.env.SYM_SLACK_USERS, row.decidedBy)) continue;
+    try {
+      const job = await getJob(deps.sql, Number(row.id));
+      if (!job) continue;
+      await moveToCodeChannel(deps, job);
+      await launchOrAdopt(deps, job.id, callbackFor(row.callbackUrl, process.env.SYM_CALLBACK_URL));
+      await deps.sql`update jobs set watch_until = now() + interval '2 minutes' where id = ${job.id}`;
+    } catch (error) {
+      if (!(error instanceof JobSetupError)) continue;
+      await closeUnlaunched(deps, Number(row.id), error.message);
+      const job = await getJob(deps.sql, Number(row.id));
+      await enqueuePost(deps.sql, {
+        idempotencyKey: `${jobRef(Number(row.id))}:start-refused`,
+        jobId: Number(row.id),
+        method: "chat.postMessage",
+        payload: {
+          channel: row.decidedBy,
+          text: `I couldn't start ${job ? jobName(job) : "that work"}: ${error.message}`,
+        },
+        display: chooseDisplay({
+          kind: "conversation",
+          needsAction: true,
+          isNew: true,
+          estMinutes: 0,
+          steps: 0,
+          lines: 1,
+          surface: "dm",
+          quiet: false,
+        }),
+      });
+      await deliverNow(deps);
+    }
+  }
 }
 
 // A crash between a job's terminal status and its end post would lose the result message, and
@@ -117,6 +184,7 @@ export async function reconcileWorkerPass(
   warn: (message: string) => void = console.warn,
 ): Promise<ReconcileReport | "not_configured"> {
   if (!withWorker) {
+    await retryClosures({ ...deps, worker: unreachableWorker });
     warn(WORKER_NOT_CONFIGURED);
     return "not_configured";
   }
@@ -171,52 +239,23 @@ async function settleChannel(deps: JobDeps, job: Job): Promise<void> {
   if (job.codeChannel) await setChannelStatus(deps, job, "active");
 }
 
-async function postQuestion(deps: JobDeps, job: Job, requestId: string, prompt: string) {
-  if (!job.slackChannel) return;
-  const ref = jobRef(job.id);
-  const text = `${ref} has a question on the ${workerNoun()}: ${prompt}\nAnswer it in the ${workerNoun()} thread ${job.workerThreadId}.`;
-  await enqueuePost(deps.sql, {
-    idempotencyKey: `${ref}:question:${requestId}`,
-    jobId: job.id,
-    method: "chat.postMessage",
-    payload: {
-      channel: job.slackChannel,
-      ...(job.slackThreadTs ? { thread_ts: job.slackThreadTs } : {}),
-      text,
-    },
-    display: chooseDisplay({
-      kind: job.kind,
-      needsAction: true,
-      isNew: true,
-      estMinutes: 0,
-      steps: 0,
-      lines: 2,
-      surface: "channel",
-      quiet: false,
-    }),
-  });
-}
-
 // The worker did not answer. Post once when a job goes offline; the next good check moves it
 // back to running.
 async function markOffline(deps: JobDeps, job: Job) {
   if (job.status === "worker_offline") return;
-  await updateJob(deps.sql, job.id, {
+  const offline = await updateJob(deps.sql, job.id, {
     status: "worker_offline",
-    lastSummary: `The ${workerNoun()} is unreachable`,
+    lastSummary: `I can't reach the ${workerNoun()}. I'll keep checking.`,
   });
-  await notice(
-    deps,
-    job,
-    `offline:${job.cursor ?? "start"}`,
-    `${jobRef(job.id)}: the ${workerNoun()} is unreachable. Sym keeps checking and posts when it is back.`,
-  );
+  await presentProgress(deps.sql, offline, [], "offline", deps.now?.() ?? new Date(), deps.pack);
 }
 
 // The outage notice turns into a silent edit when the worker is back (docs/mockups: "one post,
 // edited later"). A notice that never went out is dropped instead.
 async function markBack(deps: JobDeps, job: Job) {
   const ref = jobRef(job.id);
+  const current = await getJob(deps.sql, job.id);
+  const state = current?.status ?? job.status;
   const outage = await latestPost(deps.sql, job.id, `${ref}:offline:`);
   if (!outage) return;
   if (outage.status === "pending") {
@@ -231,34 +270,8 @@ async function markBack(deps: JobDeps, job: Job) {
     payload: {
       channel: job.slackChannel,
       ts: outage.slackTs,
-      text: `~${ref}: the ${workerNoun()} was unreachable.~ The ${workerNoun()} is back, and ${ref} continues.`,
+      text: `The ${workerNoun()} is back. I checked this: ${state}.`,
     },
     display: outage.display,
-  });
-}
-
-async function notice(deps: JobDeps, job: Job, key: string, text: string) {
-  if (!job.slackChannel) return;
-  await enqueuePost(deps.sql, {
-    idempotencyKey: `${jobRef(job.id)}:${key}`,
-    jobId: job.id,
-    method: "chat.postMessage",
-    payload: {
-      channel: job.slackChannel,
-      ...(job.slackThreadTs ? { thread_ts: job.slackThreadTs } : {}),
-      text,
-    },
-    display: chooseDisplay({
-      kind: job.kind,
-      needsAction: false,
-      isNew: true,
-      // Outages post even in quiet mode, like failures (docs/architecture.md).
-      failed: true,
-      estMinutes: 0,
-      steps: 0,
-      lines: 1,
-      surface: "channel",
-      quiet: false,
-    }),
   });
 }

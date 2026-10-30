@@ -167,11 +167,10 @@ describe("sym_persona tool", () => {
 });
 
 describe("loading messages", () => {
-  it("has a short generic list for each persona", () => {
+  it("uses one honest fallback until a real tool step replaces it", () => {
     for (const name of PERSONAS) {
       const list = LOADING_MESSAGES[name];
-      expect(list.length).toBeGreaterThan(0);
-      expect(list.length).toBeLessThanOrEqual(8);
+      expect(list).toEqual(["Working..."]);
       for (const line of list) expect(line.length).toBeLessThanOrEqual(50);
     }
   });

@@ -1,5 +1,5 @@
+import { jobName, type NamedJob } from "../jobs/names.ts";
 import type { Job } from "../ledger/jobs.ts";
-import { jobRef } from "../ledger/jobs.ts";
 import type { RunOutcome } from "../schedules/rows.ts";
 
 // The daily digest text (docs/architecture.md, "Proactive updates"). The digest carries what the
@@ -12,7 +12,7 @@ export interface DigestRun {
 
 export interface DigestInput {
   day: string;
-  jobs: Pick<Job, "id" | "title" | "status">[];
+  jobs: (Pick<Job, "id" | "status"> & NamedJob)[];
   runs: DigestRun[];
 }
 
@@ -35,22 +35,17 @@ export function digestMessage(input: DigestInput): string | undefined {
   );
 
   const lines: string[] = [];
-  const section = (label: string, list: typeof jobs) => {
-    if (list.length === 0) return;
-    lines.push(`${label} (${list.length}):`);
-    for (const job of list) lines.push(`- ${jobRef(job.id)} ${job.title}`);
-  };
-  section("Finished", done);
-  section("Failed", failed);
-  section("Waiting for you", waiting);
-  if (running.length > 0) lines.push(`Still running: ${running.length}`);
-
-  for (const [title, outcomes] of groupRuns(input.runs)) {
-    lines.push(`${title}: ${describeOutcomes(outcomes)}`);
-  }
-
-  if (lines.length === 0) return undefined;
-  return [`Daily digest for ${input.day}`, ...lines].join("\n");
+  const describe = (list: typeof jobs) => list.map((job) => jobName(job)).join(", ");
+  if (waiting.length)
+    lines.push(`${describe(waiting)} ${waiting.length === 1 ? "needs" : "need"} you.`);
+  if (failed.length) lines.push(`${describe(failed)} failed.`);
+  if (done.length) lines.push(`${describe(done)} finished.`);
+  if (running.length)
+    lines.push(`${describe(running)} ${running.length === 1 ? "is" : "are"} still running.`);
+  for (const [title, outcomes] of groupRuns(input.runs))
+    lines.push(`${title}: ${describeOutcomes(outcomes)}.`);
+  if (!lines.length) return undefined;
+  return [...lines, "Ask me for the details."].join("\n");
 }
 
 function groupRuns(runs: DigestRun[]): Map<string, RunOutcome[]> {

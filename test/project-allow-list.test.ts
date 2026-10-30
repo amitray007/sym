@@ -181,25 +181,39 @@ describe("Slack allow-list logging", () => {
     expect(warn.mock.calls[0]?.[0]).toContain("UOTHER");
   });
 
+  it("reports successful private delivery", async () => {
+    expect(
+      await sayPrivately(
+        { request: async () => ({ ok: true }) },
+        { channel: "C1", user: "U1" },
+        "Access line",
+      ),
+    ).toBe(true);
+  });
+
   it("logs Slack's error code, never the message text", async () => {
     const warn = vi.fn();
     const where = { channel: "C1", user: "U1" };
-    await sayPrivately(
-      { request: async () => ({ ok: false, error: "channel_not_found" }) },
-      where,
-      "private text",
-      warn,
-    );
-    await sayPrivately(
-      {
-        request: async () => {
-          throw new Error("failed with private text");
+    expect(
+      await sayPrivately(
+        { request: async () => ({ ok: false, error: "channel_not_found" }) },
+        where,
+        "private text",
+        warn,
+      ),
+    ).toBe(false);
+    expect(
+      await sayPrivately(
+        {
+          request: async () => {
+            throw new Error("failed with private text");
+          },
         },
-      },
-      where,
-      "private text",
-      warn,
-    );
+        where,
+        "private text",
+        warn,
+      ),
+    ).toBe(false);
     expect(warn.mock.calls[0]?.[0]).toContain("channel_not_found");
     expect(warn).toHaveBeenCalledTimes(2);
     for (const call of warn.mock.calls) expect(String(call[0])).not.toContain("private text");

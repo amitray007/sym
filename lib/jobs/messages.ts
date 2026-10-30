@@ -1,9 +1,12 @@
 import { workerLabel, workerNoun } from "../worker-label.ts";
 import type { Brief } from "./brief.ts";
 import { formatDuration, prLabel } from "./card.ts";
-import type { OutputContract } from "./contract.ts";
-import { nearDuplicate } from "./similar.ts";
-import { CONCERNS_HEADER } from "./verify.ts";
+import {
+  contradictsTestReport,
+  type OutputContract,
+  reportedTestStatus,
+  safeHttpUrl,
+} from "./contract.ts";
 
 // Text for Sym's own Slack messages. Short, and the result comes first. Worker text is
 // untrusted, so every piece of it goes through escapeMrkdwn.
@@ -64,143 +67,94 @@ export function tldr(summary: string, max = TLDR_MAX): string {
   return clip(first, max);
 }
 
-// The first clause of the tests line, so a long note does not bury the footer.
-function testsNote(tests: string): string {
-  return clip(tests.replace(/\s+/g, " ").trim().split(/;\s/)[0] ?? "", 80);
-}
-
-function headline(emoji: string, job: JobFacts, tail?: string): string {
-  return `${emoji} *${escapeMrkdwn(job.ref)} · ${escapeMrkdwn(job.title)}*${tail ? ` · ${tail}` : ""}`;
-}
-
 export function duration(job: JobFacts): string | undefined {
   return job.durationMs === undefined ? undefined : formatDuration(job.durationMs);
 }
 
-/** The facts of a result message, before any Slack formatting. Values are raw worker text. */
-export interface ResultView {
-  emoji: string;
-  /** The model verdict line that stands alone under the gist. */
-  verdict: string | null;
-  gist: string;
-  /** The header of the concerns list, which carries the verdict when there is one. */
-  concernsHeader: string | null;
-  concerns: string[];
-  questions: string[];
-  pr: { url: string; label: string } | null;
-  tests: string;
-  filesChanged: number;
-  duration: string | undefined;
-  /** The worker returned no result block, so there is no summary to show. */
-  noResult: boolean;
+export function testSentence(contract: OutputContract): string {
+  const status = reportedTestStatus(contract);
+  const note = contract.tests.trim();
+  if (status === "unknown" && /not run|skipped|didn['’]t run/i.test(note) && /pass/i.test(note))
+    return `Test report: ${escapeMrkdwn(note)}`;
+  const truth = {
+    passed: "Tests passed.",
+    failed: "Tests failed.",
+    not_run: "Tests did not run.",
+    unknown: "I don't know whether tests ran.",
+    none: "The worker reported that no tests apply.",
+  }[status];
+  // Keep conflicting notes attributed rather than presenting them as the outcome.
+  if (note && contradictsTestReport(note, contract))
+    return `${truth} Reported: ${escapeMrkdwn(note)}`;
+  return note ? `${truth.slice(0, -1)} (${escapeMrkdwn(note).replace(/[.!]+$/, "")}).` : truth;
 }
 
-// `concerns` come from the result checks (lib/jobs/verify.ts): the rule checks, then the model
-// check. `verdict` is the model check's note, when the job tried one: a clean one-line verdict,
-// or the header of the concerns list with its confidence.
-export function resultView(
-  job: JobFacts,
-  contract: OutputContract | null,
-  concerns: string[] = [],
-  verdict: string | null = null,
-): ResultView {
-  if (!contract) {
-    return {
-      emoji: "⚠️",
-      verdict,
-      gist: `the ${workerNoun()} sent no result summary. open the ${workerNoun()} thread to read the result.`,
-      concernsHeader: null,
-      concerns: [],
-      questions: [],
-      pr: null,
-      tests: "",
-      filesChanged: 0,
-      duration: duration(job),
-      noResult: true,
-    };
-  }
-  const flagged = concerns.length > 0;
-  // A concern that already says what an open question says makes the question redundant.
-  const questions = contract.openQuestions.filter(
-    (question) => !concerns.some((concern) => nearDuplicate(concern, question)),
-  );
-  // The verdict heads the concerns list when there is one, else it stands alone under the gist.
-  const headsList = flagged && verdict?.startsWith(CONCERNS_HEADER) === true;
-  return {
-    emoji: flagged ? "⚠️" : "✅",
-    verdict: headsList ? null : verdict,
-    gist: tldr(contract.summary),
-    concernsHeader: flagged ? (headsList && verdict ? verdict : CONCERNS_HEADER) : null,
-    concerns,
-    questions,
-    pr: contract.prUrl
-      ? { url: contract.prUrl, label: prLabel(contract.prUrl) ?? "pull request" }
-      : null,
-    tests: contract.tests ? testsNote(contract.tests) : "",
-    filesChanged: contract.filesChanged.length,
-    duration: duration(job),
-    noResult: false,
-  };
+export function resultFacts(contract: OutputContract, prUrl = contract.prUrl): string[] {
+  const url = prUrl ? safeHttpUrl(prUrl) : null;
+  return [
+    ...(url ? [`${link(url, prLabel(url) ?? "Pull request")} is up.`] : []),
+    testSentence(contract),
+    ...(contract.ciStatus && contract.ciStatus !== "unknown"
+      ? [
+          { passed: "CI is green.", failed: "CI failed.", running: "CI is still running." }[
+            contract.ciStatus
+          ],
+        ]
+      : []),
+    ...(contract.filesChanged.length
+      ? [
+          `${contract.filesChanged.length} ${contract.filesChanged.length === 1 ? "file" : "files"} changed.`,
+        ]
+      : []),
+  ];
 }
 
 export function resultMessage(
   job: JobFacts,
   contract: OutputContract | null,
   concerns: string[] = [],
-  verdict: string | null = null,
+  limitation: string | null = null,
 ): string {
-  const view = resultView(job, contract, concerns, verdict);
-  if (view.noResult) {
+  if (!contract)
     return sections([
-      lines([headline("⚠️", job, view.duration), `*tl;dr* ${view.gist}`, view.verdict]),
+      "The worker finished without a result summary. I can't say what changed yet.",
+      ...concerns.map(escapeMrkdwn),
+      limitation,
       threadLine(job),
     ]);
-  }
-
-  const count = view.filesChanged;
-  const facts = [
-    view.pr && `🔗 ${link(view.pr.url, view.pr.label)}`,
-    view.tests && `tests: ${escapeMrkdwn(view.tests)}`,
-    count > 0 && `${count} ${count === 1 ? "file" : "files"} changed`,
-  ].filter((part): part is string => typeof part === "string" && part !== "");
-
+  const required = [...new Set([...concerns, ...contract.openQuestions])];
+  const facts = resultFacts(contract);
+  if (facts[0]?.startsWith("<") && facts[1]?.startsWith("Tests passed"))
+    facts.splice(
+      0,
+      2,
+      `${facts[0].slice(0, -1)} and ${facts[1].charAt(0).toLowerCase() + facts[1].slice(1)}`,
+    );
+  const gist = contradictsTestReport(contract.summary, contract)
+    ? "The worker returned a result."
+    : tldr(contract.summary);
   return sections([
-    lines([
-      headline(view.emoji, job, view.duration),
-      view.gist && `*tl;dr* ${escapeMrkdwn(view.gist)}`,
-      view.verdict,
-    ]),
-    view.concernsHeader !== null &&
-      lines([
-        view.concernsHeader,
-        ...view.concerns.map((concern, index) => `${index + 1}. ${escapeMrkdwn(concern)}`),
-      ]),
-    view.questions.length > 0 &&
-      lines([
-        "*open questions*",
-        ...view.questions.map((question) => `☐ ${escapeMrkdwn(question)}`),
-      ]),
-    facts.length > 0 && facts.join(" · "),
+    `${escapeMrkdwn(/[.!?…]$/.test(gist) ? gist : `${gist}.`)} ${facts.join(" ")}`,
+    ...required.map(escapeMrkdwn),
+    limitation && !required.includes(limitation) ? limitation : null,
   ]);
 }
 
 export function failureMessage(job: JobFacts, reason?: string | null): string {
-  const time = duration(job);
   return lines([
-    headline("❌", job, time ? `failed in ${time}` : "failed"),
-    reason ? escapeMrkdwn(reason) : `the ${workerNoun()} stopped before it finished.`,
+    `This didn't finish. ${reason ? escapeMrkdwn(reason) : "The worker stopped without saying why; its thread has the log."}`,
     threadLine(job),
   ]);
 }
 
 /** The DM to the owner when the worker waits on a permission prompt. */
-export function permissionBlockMessage(ref: string): string {
-  return `🔒 ${ref} is waiting for a permission prompt on the ${workerNoun()}. Approve it in the ${workerNoun()}.`;
+export function permissionBlockMessage(name: string): string {
+  return `${name} is waiting on a permission in ${workerLabel()}. I can't approve that from Slack.`;
 }
 
 export function quietNotice(job: JobFacts, quietForMs: number): string {
   return lines([
-    `⏳ ${job.ref} has had no new activity for ${formatDuration(quietForMs)}. still running.`,
+    `I haven't heard from the ${workerNoun()} on this for ${formatDuration(quietForMs)}. Want me to stop it? If not, I'll keep watching.`,
     threadLine(job),
   ]);
 }
@@ -211,43 +165,21 @@ function deliveryOf(brief: Brief): string {
     : "commit on the worktree branch, no push, no PR";
 }
 
-function briefHeader(brief: Brief, ref?: string): string {
-  return `📋 *${ref ? `${ref} · ` : ""}${escapeMrkdwn(brief.title)}*`;
-}
-
-/**
- * The short brief, posted in the job thread above the Start, Edit, and Cancel prompt (decision
- * 060). It names the job and what it may write. The Full brief button shows the rest. The
- * brief names the playbook it follows; a trusted playbook's job starts at once, so its brief
- * says why no one is asked (decision 059).
- */
-export function briefPrompt(
-  brief: Brief,
-  ref?: string,
-  modelLine?: string,
-  playbook?: { name: string; trusted: boolean },
-): string {
+export function briefPrompt(brief: Brief, _ref?: string, modelLine?: string): string {
   return lines([
-    briefHeader(brief, ref),
-    `*project* ${escapeMrkdwn(brief.project)} · *delivery* ${deliveryOf(brief)}`,
-    modelLine && escapeMrkdwn(modelLine),
-    playbook && !playbook.trusted && `Follows the playbook ${playbook.name}.`,
-    playbook?.trusted
-      ? `Starting without Start: the owner trusts the playbook ${playbook.name}.`
-      : "press *Start* to run it, *Edit* to change it, or *Cancel*. *Full brief* shows the goal and checks.",
+    `I'd work on ${escapeMrkdwn(brief.title).replace(/[.!?]+$/, "")} in ${escapeMrkdwn(brief.project)}${brief.openPullRequest ? " on a draft PR." : ". I'll commit on a branch and won't push or open a PR."} Production and customer data stay read-only.`,
+    ...brief.constraints.map(escapeMrkdwn),
+    brief.modelReason && modelLine ? escapeMrkdwn(modelLine) : null,
+    "Want me to start?",
   ]);
 }
 
-/** The goal, constraints, and done-when list, sent privately to the person who presses Full brief. */
-export function fullBrief(brief: Brief, ref?: string): string {
-  const bullets = (items: string[]) => items.map((item) => `• ${escapeMrkdwn(item)}`).join("\n");
-  const checks = (items: string[]) => items.map((item) => `☐ ${escapeMrkdwn(item)}`).join("\n");
+export function fullBrief(brief: Brief): string {
   return lines([
-    briefHeader(brief, ref),
-    `*project* ${escapeMrkdwn(brief.project)}${brief.baseRef ? ` · *base* ${escapeMrkdwn(brief.baseRef)}` : ""}`,
-    `*goal* ${escapeMrkdwn(brief.goal)}`,
-    brief.constraints.length > 0 && `*constraints*\n${bullets(brief.constraints)}`,
-    `*done when*\n${checks(brief.doneWhen)}`,
-    `*delivery* ${deliveryOf(brief)}`,
+    escapeMrkdwn(brief.goal),
+    `I'll work in ${escapeMrkdwn(brief.project)}${brief.baseRef ? ` from ${escapeMrkdwn(brief.baseRef)}` : ""} and ${deliveryOf(brief)}.`,
+    ...brief.constraints.map(escapeMrkdwn),
+    `I'll check: ${brief.doneWhen.map(escapeMrkdwn).join("; ")}.`,
+    "Production and customer data stay read-only.",
   ]);
 }
