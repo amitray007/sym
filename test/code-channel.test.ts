@@ -6,9 +6,11 @@ import {
   archiveCodeChannel,
   codeChannelName,
   codeChannelsOn,
+  ensureConversationBar,
   jobOfCodeChannel,
   moveToCodeChannel,
   setChannelStatus,
+  setContextBar,
 } from "../lib/slack/code-channel.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
 import { type FakeSlack, startFakeSlack } from "./fakes/slack-server.ts";
@@ -96,10 +98,38 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
       slackThreadTs: null,
       codeChannel: true,
     });
-    expect(channel?.contextBar).toEqual([{ key: "project", label: "example-app", icon: "folder" }]);
+    expect(channel?.contextBar).toEqual([
+      { key: "project", label: "example-app", icon: "folder" },
+      { key: "close", label: "Close channel", icon: "lock", item_type: "action" },
+    ]);
+    const withPr = await updateJob(sql, moved.id, { prUrl: "https://example.com/pr/1" });
+    await setContextBar({ sql, slack: api }, withPr);
+    expect(channel?.contextBar).toEqual([
+      { key: "project", label: "example-app", icon: "folder" },
+      { key: "pr", label: "Pull request", icon: "branch", url: "https://example.com/pr/1" },
+      { key: "close", label: "Close channel", icon: "lock", item_type: "action" },
+    ]);
+    expect(channel?.contextBar.length).toBeLessThanOrEqual(5);
     expect(channel?.statuses).toEqual(["processing"]);
     expect(moved).toMatchObject({ originChannel: "C1", originThreadTs: "1700000000.000100" });
     expect((await jobOfCodeChannel(sql, channel?.id ?? ""))?.id).toBe(job.id);
+  });
+
+  it("gives a conversation channel a bar with only Close, once per process", async () => {
+    const sql = ledger.sql();
+    const before = slack.callsTo("agents.conversations.setProperties").length;
+    await ensureConversationBar({ sql, slack: api }, "CCONV1");
+    await ensureConversationBar({ sql, slack: api }, "CCONV1");
+    const calls = slack.callsTo("agents.conversations.setProperties").slice(before);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.body).toMatchObject({
+      channel_id: "CCONV1",
+      code_channel: {
+        context_bar_items: [
+          { key: "close", label: "Close channel", icon: "lock", item_type: "action" },
+        ],
+      },
+    });
   });
 
   it("retries a taken title once with a numeric suffix and preserves privacy and replay", async () => {

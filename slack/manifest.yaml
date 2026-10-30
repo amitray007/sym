@@ -65,6 +65,8 @@ settings:
       - app_home_opened
       # The Stop button on a code channel's session.
       - agent_session_stopped
+      # Slack documents context-bar action items, but not the event payload. Confirm it live.
+      - code_channel_action
   interactivity:
     is_enabled: true
     request_url: https://sym.example.com/eve/v1/slack

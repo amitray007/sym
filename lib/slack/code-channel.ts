@@ -130,14 +130,35 @@ function isCodeChannel(info: ConversationInfo): boolean {
   return info.properties?.record_channel?.record_type === "agent_channel";
 }
 
-// The context bar: its project and its pull request once there is one. Slack keeps at
+// The context bar: its project, its pull request once there is one, and Close. Slack keeps at
 // most five items and replaces the whole bar on each call.
+// The bar's Close action (decision 076). Slack sends a code_channel_action event on a click.
+const CLOSE_ITEM = { key: "close", label: "Close channel", icon: "lock", item_type: "action" };
+
+// A conversation channel has no job, and Eve's openCodeChannel returns no channel ID, so nothing
+// sets its bar at creation. The first turn there adds the Close item. Once per process is enough:
+// Slack keeps the bar, and a repeat after a restart rewrites the same item.
+const conversationBars = new Set<string>();
+export async function ensureConversationBar(deps: Deps, channelId: string): Promise<void> {
+  if (!deps.slack || conversationBars.has(channelId)) return;
+  conversationBars.add(channelId);
+  try {
+    await deps.slack.call("agents.conversations.setProperties", {
+      channel_id: channelId,
+      code_channel: { context_bar_items: [CLOSE_ITEM] },
+    });
+  } catch (error) {
+    console.warn("Sym could not set the context bar of a code channel.", slackCode(error));
+  }
+}
+
 export async function setContextBar(deps: Deps, job: Job, project?: string): Promise<void> {
   if (!job.codeChannel || !job.slackChannel || !deps.slack) return;
   const name = project ?? projectOf(job);
   const items = [
     ...(name ? [{ key: "project", label: name, icon: "folder" }] : []),
     ...(job.prUrl ? [{ key: "pr", label: "Pull request", icon: "branch", url: job.prUrl }] : []),
+    CLOSE_ITEM,
   ];
   try {
     await deps.slack.call("agents.conversations.setProperties", {

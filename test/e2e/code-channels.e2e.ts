@@ -3,6 +3,7 @@ import {
   BOT,
   briefMention,
   clickButton,
+  clickCodeChannelClose,
   contractMessage,
   finishedSteps,
   type Harness,
@@ -35,6 +36,36 @@ const reconcile = async () => {
 };
 
 describe("code channel conversations", () => {
+  it("closes a conversation channel from its context action and refuses strangers privately", async () => {
+    const c = newConversation(h);
+    const before = h.slack.codeChannels.length;
+    await c.mention(`<@${BOT}> move this to a code channel`);
+    const channel = await until(() => h.slack.codeChannels[before], {
+      label: "conversation channel to close",
+    });
+    await clickCodeChannelClose(h, channel.id, "USTRANGER");
+    await until(() => h.slack.ephemerals.find((m) => m.channel === channel.id), {
+      label: "private close refusal",
+    });
+    expect(channel.archived).toBe(false);
+    await clickCodeChannelClose(h, channel.id);
+    await until(() => channel.archived || undefined, { label: "conversation archive" });
+    await until(
+      () =>
+        h.slack.messages.find(
+          (m) =>
+            m.channel === channel.id &&
+            messageText(m).includes("Closed this and archived its channel."),
+        ),
+      { label: "outbox close confirmation" },
+    );
+    expect(await h.sql`select id from jobs where slack_channel = ${channel.id}`).toHaveLength(0);
+    expect(
+      h.slack
+        .callsTo("agents.conversations.archive")
+        .filter((c) => c.body.channel_id === channel.id),
+    ).toHaveLength(1);
+  });
   async function running(title: string) {
     const c = newConversation(h);
     const { approval, job, ref } = await startJob(h, c, title);

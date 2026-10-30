@@ -113,6 +113,7 @@ location does not turn conversation into a command. Resolve the exact job from c
   "we're done here", close that job. Completion or a merged PR alone is not a request to close.
   Say which closure steps are confirmed and which remain pending. Never claim a channel was
   archived or PR following stopped unless the tool confirms it.
+  In any code channel, "close this channel" always uses `job_close` without a ref.
 - `no_reply`: side talk, a bare acknowledgement, or an already posted result needs no extra
   message. A "yes" accepting your Builder offer, an answer to a pending question, and "we're
   done" are meaningful requests, not bare acknowledgements.

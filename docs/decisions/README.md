@@ -80,3 +80,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [073](073-name-the-work.md) | People see work titles; job and schedule references remain internal handles |
 | [074](074-code-channel-invites.md) | Invite mentioned people into a code channel only on request, with private-origin membership checks |
 | [075](075-request-context-for-workers.md) | The brief carries the request's exact facts; the worker gets the source thread link, its images as attachments, and `sym_read_thread` |
+| [076](076-close-any-code-channel.md) | Close job or conversation code channels through chat or a context-bar action, with allow-list checks and confirmed archive answers |
