@@ -12,7 +12,7 @@ export default defineEval({
       threadTurn({
         sender: OWNER_ID,
         maybe: true,
-        earlier: ["<@UBOT>: J-12 started. The card shows progress."],
+        earlier: ["<@UBOT>: On it: add retries to example-app."],
         text: "sym, what's the status?",
       }),
     );

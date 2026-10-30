@@ -15,7 +15,7 @@ export function personaResultEval(persona: PersonaName) {
       const session = await t.session({ stubs: [...writeToolStubs] });
       const turn = await session.send(
         afterFinishedJob(
-          "Remind me where we landed on J-12, including the concern. Keep it short.",
+          "Remind me where we landed on this, including the concern. Keep it short.",
         ),
       );
       t.succeeded();
