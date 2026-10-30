@@ -203,6 +203,30 @@ describe.skipIf(!hasDatabase)("conversation recovery regressions", () => {
     expect(s.calls.filter((c) => c.method === "agents.conversations.archive")).toHaveLength(1);
   });
 
+  it("posts the requested summary in the original thread before archiving", async () => {
+    const s = await setup("close-summary", true);
+    await s.sql`update jobs set code_channel = true, slack_channel = 'CCODE', slack_thread_ts = null,
+      origin_channel = 'C1', origin_thread_ts = '100.1' where id = ${s.job.id}`;
+    const before = s.calls.length;
+    const answer = await closeJob(s.deps, `J-${s.job.id}`, "U1", {
+      summary: "Found the cause: the image sync skips variants. PR #12 fixes it.",
+    });
+    expect(answer).toContain("I posted the summary in the original thread.");
+    const calls = s.calls.slice(before);
+    const methods = calls.map((c) => c.method);
+    const toOrigin = (c: { method: string; body: Record<string, unknown> }) =>
+      c.method === "chat.postMessage" && c.body.thread_ts === "100.1";
+    const posted = calls.findIndex(toOrigin);
+    expect(calls[posted]?.body).toMatchObject({
+      channel: "C1",
+      thread_ts: "100.1",
+      text: "Found the cause: the image sync skips variants. PR #12 fixes it.",
+    });
+    expect(posted).toBeLessThan(methods.indexOf("agents.conversations.archive"));
+    await closeJob(s.deps, `J-${s.job.id}`, "U1", { summary: "again" });
+    expect(s.calls.filter(toOrigin)).toHaveLength(1);
+  });
+
   it("replaces stale archive retry facts in the result after recovery", async () => {
     const s = await setup("archive-result-retry", true);
     const ref = `J-${s.job.id}`;

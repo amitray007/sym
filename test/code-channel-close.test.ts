@@ -67,7 +67,7 @@ describe.skipIf(!hasDatabase)("close any code channel", () => {
     });
     await updateJob(d.sql, job.id, { status: "done", codeChannel: true });
     expect(await closeCodeChannel(d, id, "U1")).toBe("Closed this and archived its channel.");
-    expect(d.closeJob).toHaveBeenCalledExactlyOnceWith(`J-${job.id}`, "U1");
+    expect(d.closeJob).toHaveBeenCalledExactlyOnceWith(`J-${job.id}`, "U1", {});
     expect(await getJob(d.sql, job.id)).toMatchObject({ archiveState: "archived", closedBy: "U1" });
   });
 

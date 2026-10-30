@@ -334,7 +334,15 @@ async function insertFollowUp(sql: Sql, parent: Job, requestKey: string, brief: 
   });
 }
 
-export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<string> {
+// The longest summary Sym shares in the original thread.
+const SUMMARY_SHARE_MAX = 3000;
+
+export async function closeJob(
+  deps: JobDeps,
+  ref: string,
+  by: string,
+  options: { summary?: string } = {},
+): Promise<string> {
   const job = await getJobByRef(deps.sql, ref);
   if (!job) return "I couldn't find that work.";
   if (!TERMINAL.includes(job.status)) return "I'm still working on this. Stop it first.";
@@ -357,9 +365,44 @@ export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<
     return undefined;
   });
   if (refusal) return refusal;
+  // Decision 078: a summary goes to the original thread before the archive, so it reaches
+  // people even if the archive needs a retry.
+  const shared = options.summary ? await shareSummary(deps, job, options.summary) : "";
   const answer = await completeClosure(deps, job.id);
   await deliverNow(deps);
-  return answer;
+  return shared ? `${answer} ${shared}` : answer;
+}
+
+// Posts the brain's summary as a reply in the thread the work was asked in. Slack's own
+// `summary_message_ts` only labels the archived channel; it posts nothing in the thread.
+async function shareSummary(deps: JobDeps, job: Job, summary: string): Promise<string> {
+  const text = summary.trim().slice(0, SUMMARY_SHARE_MAX);
+  if (!text) return "";
+  if (!job.codeChannel) return "This work is in its thread already, so reply there instead.";
+  if (!job.originChannel || !job.originThreadTs) {
+    return "I couldn't share the summary: this channel has no original thread.";
+  }
+  await enqueuePost(deps.sql, {
+    idempotencyKey: `${jobRef(job.id)}:origin-summary`,
+    jobId: job.id,
+    method: "chat.postMessage",
+    payload: { channel: job.originChannel, thread_ts: job.originThreadTs, text },
+    display: chooseDisplay({
+      kind: job.kind,
+      needsAction: false,
+      isNew: true,
+      estMinutes: 0,
+      steps: 0,
+      lines: text.split("\n").length,
+      surface: /^D/.test(job.originChannel) ? "dm" : "channel",
+      quiet: false,
+    }),
+  });
+  await deliverNow(deps);
+  const post = await latestPost(deps.sql, job.id, `${jobRef(job.id)}:origin-summary`);
+  return post?.status === "sent"
+    ? "I posted the summary in the original thread."
+    : "The summary will post in the original thread once Slack accepts it.";
 }
 
 // Close acceptance stops PR following through closed_at. External settlement and archive are
