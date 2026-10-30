@@ -34,6 +34,16 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   );
   const message =
     /<content>\s*([\s\S]*?)\s*<\/content>/.exec(withoutHistory)?.[1] ?? withoutHistory;
+  const invite = /fixture-invite\s+((?:<@[UW][A-Z0-9]+>\s*)+)/i.exec(message);
+  if (invite)
+    return {
+      toolCalls: [
+        {
+          name: "code_channel_invite",
+          input: { people: invite[1]?.match(/<@[UW][A-Z0-9]+>/g) ?? [] },
+        },
+      ],
+    };
   const action = /fixture-(steer|followup|close|stop)\s+(J-\d+)(?::\s*([\s\S]+))?/i.exec(message);
   if (action) {
     const [, kind, ref, change] = action;

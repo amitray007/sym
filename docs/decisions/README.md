@@ -78,3 +78,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [071](071-voice-and-builder-consent.md) | One colleague voice and explicit consent before Builder work, including investigations |
 | [072](072-followup-run-boundaries.md) | Follow-ups store a run boundary, bound empty completion, and preserve same-key children |
 | [073](073-name-the-work.md) | People see work titles; job and schedule references remain internal handles |
+| [074](074-code-channel-invites.md) | Invite mentioned people into a code channel only on request, with private-origin membership checks |

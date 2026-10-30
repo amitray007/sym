@@ -13,6 +13,7 @@ export interface FakeSlackOptions {
   channels?: Record<string, Record<string, unknown>>;
   // Profiles by user ID. Unlisted users get a generic profile.
   users?: Record<string, Record<string, unknown>>;
+  members?: Record<string, string[]>;
 }
 
 export interface FakeSlackCall {
@@ -62,6 +63,7 @@ export interface FakeSlack {
   codeChannels: FakeCodeChannel[];
   // When true, the fake opens every code channel as public, even when asked for a private one.
   codeChannelsPublic: boolean;
+  members: Record<string, string[]>;
   calls: FakeSlackCall[];
   messages: FakeSlackMessage[];
   ephemerals: FakeSlackMessage[];
@@ -140,6 +142,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
   const homeViews: Record<string, Record<string, unknown>> = {};
   const uploads: FakeSlack["uploads"] = [];
   const codeChannels: FakeCodeChannel[] = [];
+  const members = structuredClone(options.members ?? {});
   const flags = { codeChannelsPublic: false };
   const codeChannel = (id: unknown) => {
     const found = codeChannels.find((c) => c.id === String(id));
@@ -332,6 +335,27 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
       changed();
       return {};
     },
+    "conversations.members": (b) => {
+      const all = members[String(b.channel)] ?? [];
+      const offset = Number(b.cursor ?? 0);
+      const limit = Number(b.limit ?? 200);
+      const end = offset + limit;
+      return {
+        members: all.slice(offset, end),
+        response_metadata: { next_cursor: end < all.length ? String(end) : "" },
+      };
+    },
+    "conversations.invite": (b) => {
+      const channel = codeChannel(b.channel);
+      if (channel.archived) throw "is_archived";
+      const users = String(b.users).split(",");
+      const current = members[channel.id] ?? [];
+      members[channel.id] = current;
+      if (users.some((user) => current.includes(user))) throw "already_in_channel";
+      current.push(...users);
+      changed();
+      return { channel: { id: channel.id } };
+    },
     "conversations.info": (b) => {
       const channel = String(b.channel);
       const code = codeChannels.find((c) => c.id === channel);
@@ -341,6 +365,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
             id: channel,
             is_channel: true,
             is_private: code.isPrivate,
+            is_archived: code.archived,
             properties: { record_channel: { record_type: "agent_channel" } },
           },
         };
@@ -460,6 +485,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
   return {
     apiBaseUrl: `${origin}/api/`,
     codeChannels,
+    members,
     get codeChannelsPublic() {
       return flags.codeChannelsPublic;
     },
