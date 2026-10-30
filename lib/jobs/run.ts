@@ -21,6 +21,7 @@ import {
   matchWorkerProject,
 } from "../projects/allowed.ts";
 import type { SlackApi } from "../slack/api.ts";
+import { readThread, sourceOf, threadImages, threadLink } from "../slack/source-thread.ts";
 import { workerLabel, workerNoun } from "../worker-label.ts";
 import {
   briefModelLine,
@@ -37,7 +38,7 @@ import type {
   WorkerQuestion,
   WorkerStatus,
 } from "../workers/types.ts";
-import { Brief, workerMessage } from "./brief.ts";
+import { Brief, type BriefSource, workerMessage } from "./brief.ts";
 import { formatDuration } from "./card.ts";
 import { parseOutputContract } from "./contract.ts";
 import {
@@ -117,6 +118,20 @@ export function parseWorkerModel(value: string | undefined): WorkerModel | undef
     throw new JobSetupError(`SYM_WORKER_MODEL must look like <provider>/<model>, not "${text}".`);
   }
   return { providerId: text.slice(0, slash), model: text.slice(slash + 1) };
+}
+
+// The Slack thread the request came from: its link and its images, for the worker's first
+// message (decision 075). A Slack failure leaves them out, so the job still starts.
+async function requestSource(slack: SlackApi | undefined, job: Job) {
+  const thread = sourceOf(job);
+  if (!thread || !slack) return undefined;
+  const threadUrl = await threadLink(slack, thread).catch(() => undefined);
+  const messages = await readThread(slack, thread).catch(() => []);
+  const images = await threadImages(slack, messages);
+  return {
+    brief: { ...(threadUrl ? { threadUrl } : {}), images: images.length } satisfies BriefSource,
+    images,
+  };
 }
 
 export function threadTitle(job: Pick<Job, "id" | "title">): string {
@@ -201,14 +216,16 @@ export async function launchOrAdopt(deps: JobDeps, jobId: number, callbackUrl: s
       job.id,
       new URL("/eve/v1/mcp", callbackUrl).href,
     );
+    const source = existing ? undefined : await requestSource(deps.slack, job);
     const thread =
       existing ??
       (await deps.worker.launch({
         projectId: plan.projectId,
         title: threadTitle(job),
-        message: `${workerMessage(plan.brief, jobRef(job.id), callbackUrl, plan.guardrails)}\n\n${callbackTools}`,
+        message: `${workerMessage(plan.brief, jobRef(job.id), callbackUrl, plan.guardrails, source?.brief)}\n\n${callbackTools}`,
         baseRef: plan.baseRef,
         ...(model.selection ? { model: model.selection } : {}),
+        ...(source?.images.length ? { images: source.images } : {}),
       }));
     const projectId = plan.projectId;
 

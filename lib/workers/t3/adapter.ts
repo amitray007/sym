@@ -15,6 +15,7 @@ import type {
   WorkerStatus,
   WorkerThread,
 } from "../types.ts";
+import type { T3Connection } from "./client.ts";
 
 // Calls one T3 MCP tool and returns its structured result. `connectT3` provides the real one.
 // Tests pass a fake, so they never reach a real worker.
@@ -172,6 +173,8 @@ const toThread = (thread: z.infer<typeof Thread>): WorkerThread => ({
 export interface T3AdapterOptions {
   // When the sign-in stops working: the stored sign-in, else `T3_TOKEN_EXPIRES_AT` (decision 036).
   signInExpiresAt?: Date | null;
+  // Sends a file's bytes to a signed upload URL. Without it, a launch sends no images.
+  upload?: T3Connection["upload"];
 }
 
 export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): WorkerAdapter {
@@ -230,11 +233,13 @@ export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): Worke
     },
 
     async launch(request: LaunchRequest): Promise<WorkerThread> {
+      const attachments = await uploadImages(call, options.upload, request.images ?? []);
       const result = Launched.parse(
         await call("t3_thread_launch", {
           projectId: request.projectId,
           title: request.title,
           message: request.message,
+          ...(attachments.length > 0 ? { attachments } : {}),
           workspaceStrategy: {
             type: "worktree",
             baseRef: request.baseRef,
@@ -415,4 +420,39 @@ export function t3Adapter(call: CallTool, options: T3AdapterOptions = {}): Worke
       }
     },
   };
+}
+
+const Prepared = z.object({ attachmentId: z.string(), relativeUrl: z.string() });
+
+// Uploads each image and returns the pending attachments for `t3_thread_launch` (decision 075).
+// An image that fails is skipped, so the job still starts with the rest.
+async function uploadImages(
+  call: CallTool,
+  upload: T3AdapterOptions["upload"],
+  images: NonNullable<LaunchRequest["images"]>,
+) {
+  if (!upload) return [];
+  const attachments: {
+    type: "image";
+    id: string;
+    name: string;
+    mimeType: string;
+    sizeBytes: number;
+  }[] = [];
+  for (const image of images) {
+    const meta = { name: image.name, mimeType: image.mimeType, sizeBytes: image.bytes.byteLength };
+    try {
+      const prepared = Prepared.parse(
+        await call("t3_attachment_prepare_upload", { upload: { type: "image", ...meta } }),
+      );
+      await upload(prepared.relativeUrl, image.bytes, image.mimeType);
+      attachments.push({ type: "image", id: prepared.attachmentId, ...meta });
+    } catch (error) {
+      console.warn(
+        "Sym skipped an image it could not upload.",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+  return attachments;
 }

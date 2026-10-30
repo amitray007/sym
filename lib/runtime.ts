@@ -93,7 +93,10 @@ export async function withJobDeps<T>(fn: (deps: JobDeps) => Promise<T>): Promise
     // another worker is refused instead of running here.
     const deps = {
       ...ledgerDeps(),
-      worker: t3Adapter(connection.call, { signInExpiresAt: worker.expiresAt }),
+      worker: t3Adapter(connection.call, {
+        signInExpiresAt: worker.expiresAt,
+        upload: connection.upload,
+      }),
       workerName: worker.name,
       workerIdentity: workerIdentity(worker.name, worker.url),
     };

@@ -76,6 +76,9 @@ export interface FakeSlack {
   // The Home view last published per user (views.publish).
   homeViews: Record<string, Record<string, unknown>>;
   uploads: { fileId: string; bytes: number }[];
+  // Adds a private file and returns the Slack file object a message carries in `files`. The
+  // fake serves its bytes only with the bot token, like `url_private`.
+  addFile(file: { name: string; mimetype: string; bytes: Uint8Array }): Record<string, unknown>;
   // Calls to one method, in order.
   callsTo(method: string): FakeSlackCall[];
   // Adds a message as a human would post it (a stand-in for the Slack client).
@@ -137,6 +140,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
   const ephemerals: FakeSlackMessage[] = [];
   const reactions: FakeSlackReaction[] = [];
   const customEmoji: Record<string, string> = {};
+  const privateFiles = new Map<string, { name: string; mimetype: string; bytes: Uint8Array }>();
   const statuses: FakeSlack["statuses"] = [];
   const views: Record<string, unknown>[] = [];
   const homeViews: Record<string, Record<string, unknown>> = {};
@@ -441,6 +445,18 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
     const authorized = req.headers.authorization === `Bearer ${botToken}`;
     const path = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
 
+    // Private file downloads, like files.slack.com's url_private.
+    const download = /^\/files-pri\/(F\w+)\//.exec(path);
+    if (download) {
+      const file = privateFiles.get(download[1] as string);
+      if (!authorized || !file) {
+        res.writeHead(200, { "content-type": "text/html" }).end("<html>sign in</html>");
+        return;
+      }
+      res.writeHead(200, { "content-type": file.mimetype }).end(Buffer.from(file.bytes));
+      return;
+    }
+
     // Upload target for files.getUploadURLExternal. It takes raw bytes.
     const upload = /^\/upload\/(F\d+)$/.exec(path);
     if (upload) {
@@ -503,6 +519,17 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
     uploads,
     callsTo: (method) => calls.filter((call) => call.method === method),
     addMessage: (message) => store(message),
+    addFile(file) {
+      const id = `FPRI${privateFiles.size + 1}`;
+      privateFiles.set(id, file);
+      return {
+        id,
+        name: file.name,
+        mimetype: file.mimetype,
+        size: file.bytes.byteLength,
+        url_private: `${origin}/files-pri/${id}/${encodeURIComponent(file.name)}`,
+      };
+    },
     failNext(method, error) {
       failures.set(method, [...(failures.get(method) ?? []), error]);
     },

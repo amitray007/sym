@@ -7,6 +7,9 @@ import type { CallTool } from "./adapter.ts";
 
 export interface T3Connection {
   call: CallTool;
+  // POSTs a file's bytes to an upload URL from `t3_attachment_prepare_upload`. The URL is
+  // signed, so the request carries no token.
+  upload(relativeUrl: string, bytes: Uint8Array, mimeType: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -36,6 +39,20 @@ export async function connectT3(options: T3ConnectOptions): Promise<T3Connection
       if (result.structuredContent !== undefined) return result.structuredContent;
       // Tools without an output schema return JSON as text.
       return JSON.parse(textOf(result.content));
+    },
+    async upload(relativeUrl, bytes, mimeType) {
+      const origin = new URL(options.url).origin;
+      const target = new URL(relativeUrl, origin);
+      if (target.origin !== origin)
+        throw new Error(`The ${workerNoun()} gave an upload URL on another host.`);
+      const response = await fetch(target, {
+        method: "POST",
+        headers: { "content-type": mimeType },
+        body: bytes,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok)
+        throw new Error(`The ${workerNoun()} refused an upload: ${response.status}`);
     },
     close: () => client.close(),
   };

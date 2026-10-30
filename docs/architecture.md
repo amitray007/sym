@@ -59,9 +59,10 @@ Interactive chat requests show Start / Not now, even for trusted playbooks. Appr
 start without a click (decision 024). The trust ladder no longer auto-starts jobs.
 
 1. `onAppMention` checks the sender against the allow-list and starts a session for the thread.
-2. The model loads the `task-brief` playbook and writes a brief: project, goal, constraints, a
-   done-when list, and an output contract. The contract is a final JSON block with `summary`,
-   `pr_url`, `tests`, `files_changed`, and `open_questions`.
+2. The model loads the `task-brief` playbook and writes a brief: project, goal, the request's
+   exact facts (decision 075), constraints, a done-when list, and an output contract. The
+   contract is a final JSON block with `summary`, `pr_url`, `tests`, `files_changed`, and
+   `open_questions`.
 3. The model calls `worker_job`, an Eve task, so the conversation stays open. It writes a `jobs` row
    with status `launching`, keyed on the tool call ID, and takes the Slack thread of the session.
 4. Sym posts a short brief with Start / Not now. Typed approval binds to one current proposal.

@@ -162,8 +162,12 @@ and any environment the worker host applies to that folder.
 
 ## Worker tools and follow-ups
 
+The launch message carries the brief's request details and a link to the source Slack thread.
+People's images from that thread go with it as attachments, up to 8 (decision 075).
+
 The launch message supplies a private MCP endpoint and an independent bearer for that job
-(decision 065). The worker uses it with `sym_post_progress` and `sym_ask_owner`. Authentication
+(decision 065). The worker uses it with `sym_post_progress`, `sym_ask_owner`, and
+`sym_read_thread`, which returns the Slack thread the job came from (decision 075). Authentication
 binds the credential to the job; changing the tool's job argument cannot target another job. A
 finished job's credential stops working. The shared `SYM_MCP_TOKEN` permits status reads only.
 

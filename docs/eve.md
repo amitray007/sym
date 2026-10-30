@@ -56,7 +56,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Shortcuts | `onShortcut` | Later | "Send to Sym" on any message | `trigger_id` valid about 3 s |
 | Proactive posts | `to(slack, { channelId, threadTs? })` | Use | Schedule threads, recovery sessions, digests | Each fire is a new session unless `threadTs` is set |
 | Plain posts | `callSlackApi`, `ctx.slack.request` | Use | Outbox, job card edits, reactions | |
-| MCP channel | `channels/mcp.ts`, `tools: true` | Use | Worker threads call `sym_post_progress`, `sym_ask_owner` with a job-scoped bearer (decision 065); `SYM_MCP_TOKEN` permits status reads | HTTPS unless loopback. No tool allow-list: every plain tool is published, so tools check the caller (decision 027). Workflow tools are never published. Approval tools return `approval_required` |
+| MCP channel | `channels/mcp.ts`, `tools: true` | Use | Worker threads call `sym_post_progress`, `sym_ask_owner`, `sym_read_thread` with a job-scoped bearer (decision 065); `SYM_MCP_TOKEN` permits status reads | HTTPS unless loopback. No tool allow-list: every plain tool is published, so tools check the caller (decision 027). Workflow tools are never published. Approval tools return `approval_required` |
 | HTTP channel | `/eve/v1/session` | Use | Scripts and CI start a session | Use `operationId` for create-once |
 | GitHub channel | `githubChannel` | Later | CI and PR events instead of polling | Needs a GitHub App |
 | Custom channel | `defineChannel` | Later | Error tracker or ticket webhooks | Verify signatures. Dedupe |

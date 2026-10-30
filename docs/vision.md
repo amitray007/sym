@@ -36,7 +36,7 @@ an operations group with scheduled checks. One adopter's playbooks never shape t
 |---|---|
 | Owner | The person who installs Sym and approves its sign-ins. The phase-one allow-list holds only the owner |
 | Request | A Slack message, mention, slash command, or schedule fire that asks for work |
-| Brief | The job spec Sym writes: project, goal, constraints, done-when list, output contract |
+| Brief | The job spec Sym writes: project, goal, request facts, constraints, done-when list, output contract |
 | Job | One unit of delegated work with a ledger row, an ID such as `J-142`, and one Slack thread |
 | Worker | A system that runs agent threads, reached through a worker adapter |
 | Job card | One Slack message per long job that Sym edits in place with explicit progress and no controls |
