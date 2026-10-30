@@ -1,10 +1,10 @@
 import type { Schedule } from "./rows.ts";
 import { scheduleRef } from "./rows.ts";
 
-// One line per schedule: reference, cron in UTC, title, status, next fire.
+// One line per schedule: title, cron in UTC, status, next fire.
 export function scheduleLine(schedule: Schedule): string {
   const next = schedule.nextFireAt ? ` - next ${schedule.nextFireAt.toISOString()}` : "";
-  return `${scheduleRef(schedule.id)}: ${schedule.cron} UTC - ${schedule.title} - ${schedule.status}${next}`;
+  return `${schedule.title}: ${schedule.cron} UTC - ${schedule.status}${next}`;
 }
 
 export function scheduleList(schedules: Schedule[]): string {

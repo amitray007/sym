@@ -114,7 +114,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     const ref = `J-${job.id}`;
     const first = await click(deps, { actionId: "sym_job_ok", value: ref, messageTs: "1.1" });
     await click(deps, { actionId: "sym_job_ok", value: ref, messageTs: "1.1" });
-    expect(first.replies).toEqual([`Thanks, I recorded your feedback on ${ref}.`]);
+    expect(first.replies).toEqual(["Thanks, I recorded your feedback."]);
     const rows = await sql`select kind, value from feedback where job_id = ${job.id}`;
     expect(rows).toEqual([{ kind: "thumbs_up", value: "looks_good" }]);
   });
@@ -127,7 +127,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     await sql`update jobs set brief = brief || '{"goal": "Retry 5xx & 429."}' where id = ${job.id}`;
     const shown = await click(deps, { actionId: "sym_job_brief", value: ref });
     expect(shown.replies).toHaveLength(1);
-    expect(shown.replies[0]).toContain(`${ref}: Retry 5xx &amp; 429.`);
+    expect(shown.replies[0]).toContain("Retry 5xx &amp; 429.");
     expect(shown.replies[0]).toContain("I'll check: Tests pass.");
 
     const elsewhere = await handleJobAction(
@@ -136,9 +136,9 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       "C-other",
       async () => {},
     );
-    expect(elsewhere).toBe(`There is no job ${ref}.`);
+    expect(elsewhere).toBe("I couldn't find that work.");
     expect((await click(deps, { actionId: "sym_job_brief", value: "J-99999" })).answer).toBe(
-      "There is no job J-99999.",
+      "I couldn't find that work.",
     );
   });
 
@@ -169,7 +169,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       cursor: "1",
     });
     const childRef = `J-${child?.id}`;
-    expect(sent.answer).toBe(`Sent to the worker as ${childRef}.`);
+    expect(sent.answer).toBe("I sent the follow-up to the worker.");
     expect(worker.sends).toEqual([
       expect.objectContaining({ threadId: job.workerThreadId, mode: "auto" }),
     ]);
@@ -181,7 +181,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     // A follow-up records the continuation on the parent's result.
     const [edit] = await outbox(sql, `${ref}:end-edit:`);
     expect(JSON.stringify(edit?.payload)).not.toContain("sym_job_fix");
-    expect(JSON.stringify(edit?.payload)).toContain(`I sent the follow-up as ${childRef}`);
+    expect(JSON.stringify(edit?.payload)).toContain("I sent the follow-up on the same branch.");
 
     // The same Enter again sends nothing new.
     const again = await click(deps, {
@@ -190,7 +190,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       value: "Also cover the empty list.",
       messageTs: "1700000099.1",
     });
-    expect(again.answer).toBe(`Already sent as ${childRef}.`);
+    expect(again.answer).toBe("I already sent that follow-up.");
     expect(worker.sends).toHaveLength(1);
 
     // A short lease keeps reconcile away until the send lands; then reconcile drives it.
@@ -209,9 +209,11 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
 
     // The parent's thread now belongs to the follow-up: no second Fix or Close on the parent.
     const fixParent = await click(deps, { actionId: "sym_job_fix", value: ref });
-    expect(fixParent.replies).toEqual([`${childRef} continued this thread. Use that job.`]);
+    expect(fixParent.replies).toEqual(["A follow-up continued this thread. Use the latest work."]);
     const closeParent = await click(deps, { actionId: "sym_job_close", value: ref });
-    expect(closeParent.replies).toEqual([`${childRef} continued this thread. Close it instead.`]);
+    expect(closeParent.replies).toEqual([
+      "A follow-up continued this thread. Close the latest work instead.",
+    ]);
     expect(worker.settled).toEqual([]);
   });
 
@@ -332,7 +334,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     await closeJob(deps, `J-${job.id}`, "U1");
     const edits = await outbox(sql, `J-${job.id}:end-edit`);
     expect(JSON.stringify(edits)).not.toContain("stopped following its PR");
-    expect(JSON.stringify(edits)).toContain(`I've closed J-${job.id}.`);
+    expect(JSON.stringify(edits)).toContain("I've closed this.");
   });
 
   it("refuses a Fix when its project has been removed, before creating or sending a job", async () => {
@@ -441,7 +443,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
         messageTs: "2.3",
       },
     );
-    expect(sent.answer).toContain("Sent to the worker as");
+    expect(sent.answer).toContain("I sent the follow-up to the worker.");
     expect(worker.sends[0]?.text).toContain("Change only files that match: docs/**.");
     expect(worker.sends[0]?.text).toContain("Keep docs clear");
     expect(worker.sends[0]?.text).toContain("Do not push and do not open a pull request.");
@@ -467,7 +469,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
   });
 
   it("refuses a Fix while another job works in the thread, and on a running job", async () => {
-    const { deps, job } = await finishedJob("busy", [
+    const { deps, job, sql } = await finishedJob("busy", [
       { status: "completed", items: [result("One")] },
       { status: "running", items: [] },
     ]);
@@ -478,17 +480,22 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       value: "Change A",
       messageTs: "2.1",
     });
-    expect(first.answer).toMatch(/^Sent to the worker as J-\d+\.$/);
-    const childRef = first.answer?.match(/J-\d+/)?.[0] ?? "";
+    expect(first.answer).toBe("I sent the follow-up to the worker.");
+    const [child] = await sql<
+      { id: number }[]
+    >`select id::int from jobs where parent_job_id = ${job.id}`;
+    const childRef = `J-${child?.id}`;
     const second = await click(deps, {
       actionId: "sym_job_fix_text",
       blockId: `fix-${ref}`,
       value: "Change B",
       messageTs: "2.2",
     });
-    expect(second.answer).toBe(`${childRef} is still working in this thread. Steer it instead.`);
+    expect(second.answer).toBe(
+      "I'm still working on this. Tell me what to change and I'll pass it on.",
+    );
     const onRunning = await click(deps, { actionId: "sym_job_fix", value: childRef });
-    expect(onRunning.replies).toEqual([`${childRef} cannot take a fix now.`]);
+    expect(onRunning.replies).toEqual(["This cannot take a fix now."]);
   });
 
   it("closes a finished job once: settles the thread, edits the result, stops PR follow", async () => {
@@ -501,19 +508,19 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     await sql`update jobs set pr_watched_url = ${PR} where id = ${job.id}`;
     await click(deps, { actionId: "sym_job_ok", value: ref, messageTs: "4.1" });
     const closed = await click(deps, { actionId: "sym_job_close", value: ref });
-    expect(closed.replies).toEqual([`Closed ${ref}.`]);
+    expect(closed.replies).toEqual(["Closed this."]);
     expect(worker.settled).toEqual([job.workerThreadId]);
     const [edit] = await outbox(sql, `${ref}:end-edit:`);
     expect(JSON.stringify(edit?.payload)).toContain(
-      `I've closed ${ref}. I stopped following its PR.`,
+      "I've closed this. I stopped following its PR.",
     );
     expect(JSON.stringify(edit?.payload)).toContain("sym_job_pr");
     expect((await jobsToWatch(deps, new Date(0))).map((j) => j.id)).not.toContain(job.id);
 
     const again = await click(deps, { actionId: "sym_job_close", value: ref });
-    expect(again.replies).toEqual([`Closed ${ref}.`]);
+    expect(again.replies).toEqual(["Closed this."]);
     const fix = await click(deps, { actionId: "sym_job_fix", value: ref });
-    expect(fix.replies).toEqual([`${ref} is closed.`]);
+    expect(fix.replies).toEqual(["This is closed."]);
   });
 
   it("never settles an active follow-up when Close races its Start", async () => {
@@ -557,7 +564,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
     };
     const answer = await closeJob({ ...deps, slack: api }, ref, "U1");
     expect(answer).toContain("couldn't archive");
-    expect(answer).not.toContain(`Closed ${ref}`);
+    expect(answer).not.toContain("Closed this");
     expect(calls.filter((c) => c.method === "agents.sessions.setStatus")).toEqual([]);
     expect(await getJob(sql, job.id)).toMatchObject({ archiveState: "pending" });
     await retryClosures({ ...deps, slack: api });
@@ -576,7 +583,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       { channel_id: "C-code", summary_message_ts: end?.slackTs },
     ]);
     const [repaired] = await outbox(sql, `${ref}:archive-recovered`);
-    expect(repaired?.payload).toMatchObject({ text: `I've archived ${ref}'s channel.` });
+    expect(repaired?.payload).toMatchObject({ text: "I've archived this channel." });
     await retryClosures({ ...deps, slack: api });
     expect(worker.settled).toHaveLength(1);
     expect(calls.filter((c) => c.method === "agents.conversations.archive")).toHaveLength(2);
@@ -613,7 +620,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       },
     };
     expect(await closeJob({ ...deps, slack: api }, ref, "U1")).toBe(
-      `Closed ${ref} and archived its channel.`,
+      "Closed this and archived its channel.",
     );
     expect(await getJob(sql, job.id)).toMatchObject({ archiveState: "archived" });
     expect(worker.settled).toEqual([job.workerThreadId]);

@@ -73,11 +73,10 @@ export function wakeOf(item: ActivityItem): Wake | undefined {
 
 export function wakeText(job: Pick<Job, "id" | "prUrl">, wake: Wake): string {
   const pr = job.prUrl ? `<${job.prUrl}|PR #${wake.number}>` : `PR #${wake.number}`;
-  const ref = jobRef(job.id);
   if (/stopped watching/.test(wake.summary)) {
-    return `${ref}: ${pr} is no longer watched (${wake.summary}). Check it yourself.`;
+    return `${pr} is no longer watched (${wake.summary}). Check it yourself.`;
   }
-  return `${ref}: ${pr}: ${wake.summary}.`;
+  return `${pr}: ${wake.summary}.`;
 }
 
 // Posts one short message per wake in the activity, in the job thread. The key holds the item

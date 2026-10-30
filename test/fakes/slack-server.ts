@@ -45,6 +45,7 @@ export interface FakeSlackReaction {
 // A code channel the fake created with agents.conversations.create.
 export interface FakeCodeChannel {
   id: string;
+  name: string;
   sessionId: string | undefined;
   originChannel: string | undefined;
   originTs: string | undefined;
@@ -293,6 +294,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
       const id = `CCODE${codeChannels.length + 1}`;
       codeChannels.push({
         id,
+        name: String(b.name),
         sessionId,
         originChannel: b.origin_channel_id === undefined ? undefined : String(b.origin_channel_id),
         originTs: b.origin_message_ts === undefined ? undefined : String(b.origin_message_ts),

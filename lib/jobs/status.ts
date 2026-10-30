@@ -1,6 +1,7 @@
 import { getJobByRef, type Job, type JobStatus, jobRef } from "../ledger/jobs.ts";
 import { workerNoun } from "../worker-label.ts";
 import { formatDuration } from "./card.ts";
+import { jobName } from "./names.ts";
 
 // Answers to "what's the update?" (docs/architecture.md, flow 5): two or three lines for one job,
 // one line per job for a list. Plain text, so Slack, the eve channel, and slash commands share it.
@@ -29,8 +30,10 @@ export const statusWords = (): Record<JobStatus, string> => ({
   cancelled: "cancelled",
 });
 
-export function jobAnswer(job: Job, now: Date): string {
-  const lines = [`${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}.`];
+export function jobAnswer(job: Job, now: Date, inThread = false): string {
+  const lines = [
+    `${inThread ? "This is" : `${jobName(job)}:`} ${statusWords()[job.status]} ${age(job, now)}.`,
+  ];
   if (job.lastSummary && job.status !== "checking") lines.push(job.lastSummary);
   const waiting = waitingOn()[job.status];
   if (waiting) lines.push(waiting);
@@ -53,7 +56,7 @@ export function jobListAnswer(jobs: Job[], now: Date): string {
   return jobs
     .map((job) => {
       const summary = job.lastSummary ? ` · ${job.lastSummary}` : "";
-      return `${jobRef(job.id)} ${job.title}: ${statusWords()[job.status]} ${age(job, now)}${summary}`;
+      return `${jobName(job)}: ${statusWords()[job.status]} ${age(job, now)}.${summary}`;
     })
     .join("\n");
 }
@@ -72,6 +75,7 @@ export async function freshJobStatus(
   ref: string,
   now: Date,
   refresh: (jobId: number) => Promise<unknown>,
+  conversation?: { channelId: string; threadTs: string | null },
 ) {
   const before = await getJobByRef(sql, ref);
   if (!before) return null;
@@ -93,7 +97,7 @@ export async function freshJobStatus(
     ledgerStatus: job.status,
     updatedAt: job.updatedAt.toISOString(),
     freshRead,
-    answer: `${freshRead === "failed" ? "I couldn't refresh the worker. This is the last saved update.\n" : ""}${jobAnswer(job, now)}`,
+    answer: `${freshRead === "failed" ? "I couldn't refresh the worker. This is the last saved update.\n" : ""}${jobAnswer(job, now, conversation?.channelId === job.slackChannel && (job.codeChannel || conversation?.threadTs === job.slackThreadTs))}`,
     brief: job.brief,
     archiveState: job.archiveState,
     archiveError: job.archiveError,

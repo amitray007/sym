@@ -1,6 +1,8 @@
 import type { Sql } from "../db.ts";
 import { envSwitch } from "../env-switch.ts";
+import { jobName } from "../jobs/names.ts";
 import { markUnclean } from "../learning/trust.ts";
+import { getJob } from "../ledger/jobs.ts";
 import type { Pack } from "../pack/load.ts";
 
 // Feedback from people (docs/learning.md): feedback buttons under replies, reactions on Sym's
@@ -101,10 +103,11 @@ export async function recordFeedback(
   `;
   // A 👎 or a Fix on a job breaks its playbook's clean run (decision 059).
   if (row && input.jobId && (input.kind === "thumbs_down" || input.kind === "fix")) {
+    const job = await getJob(sql, input.jobId);
     await markUnclean(
       sql,
       input.jobId,
-      `${input.kind === "fix" ? "a Fix" : "a 👎"} on J-${input.jobId}`,
+      `${input.kind === "fix" ? "a Fix" : "a 👎"} on ${job ? jobName(job) : "that work"}`,
       pack,
     );
   }

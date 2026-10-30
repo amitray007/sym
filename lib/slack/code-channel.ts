@@ -21,9 +21,9 @@ interface Deps {
   slack?: SlackApi;
 }
 
-// Slack names a channel from its title. The ref keeps it unique and findable.
+// Use the work's title. Add a numeric suffix only after an explicit name collision.
 export function codeChannelName(job: Pick<Job, "id" | "title">): string {
-  return `${jobRef(job.id)} ${job.title}`.slice(0, 80);
+  return job.title.slice(0, 80);
 }
 
 // The message the channel starts from: the person's latest message in the thread, else the
@@ -63,13 +63,22 @@ export async function moveToCodeChannel(deps: Deps, job: Job): Promise<Job> {
   try {
     if (from.is_im || from.is_mpim || from.is_ext_shared) return job;
     const isPrivate = from.is_private === true;
-    const created = await slack.call("agents.conversations.create", {
-      name: codeChannelName(job),
-      session_id: `sym-${jobRef(job.id)}`,
-      origin_channel_id: channel,
-      origin_message_ts: origin,
-      ...(isPrivate ? { is_private: true } : {}),
-    });
+    const create = (name: string) =>
+      slack.call("agents.conversations.create", {
+        name,
+        session_id: `sym-${jobRef(job.id)}`,
+        origin_channel_id: channel,
+        origin_message_ts: origin,
+        ...(isPrivate ? { is_private: true } : {}),
+      });
+    let created: Record<string, unknown>;
+    try {
+      created = await create(codeChannelName(job));
+    } catch (error) {
+      if (slackCode(error) !== "name_taken") throw error;
+      const suffix = ` #${job.id}`;
+      created = await create(`${job.title.slice(0, 80 - suffix.length)}${suffix}`);
+    }
     if (typeof created.channel_id !== "string" || !created.channel_id) return job;
     channelId = created.channel_id;
     if (isPrivate && (await conversation(slack, channelId)).is_private !== true) {
@@ -121,13 +130,12 @@ function isCodeChannel(info: ConversationInfo): boolean {
   return info.properties?.record_channel?.record_type === "agent_channel";
 }
 
-// The context bar: the job, its project, and its pull request once there is one. Slack keeps at
+// The context bar: its project and its pull request once there is one. Slack keeps at
 // most five items and replaces the whole bar on each call.
 export async function setContextBar(deps: Deps, job: Job, project?: string): Promise<void> {
   if (!job.codeChannel || !job.slackChannel || !deps.slack) return;
   const name = project ?? projectOf(job);
   const items = [
-    { key: "job", label: jobRef(job.id), icon: "code" },
     ...(name ? [{ key: "project", label: name, icon: "folder" }] : []),
     ...(job.prUrl ? [{ key: "pr", label: "Pull request", icon: "branch", url: job.prUrl }] : []),
   ];

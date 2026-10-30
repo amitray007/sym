@@ -34,7 +34,6 @@ export function writerEnabled(env: Record<string, string | undefined> = process.
 }
 
 export interface WriterRequest {
-  ref: string;
   title: string;
   project: string;
   goal: string;
@@ -62,11 +61,10 @@ function data(value: unknown): string {
 export function writerMessage(request: WriterRequest): string {
   const report = request.workerMessage ?? "";
   return [
-    `Write the message that tells the team how job ${request.ref} ended.`,
+    `Write the message that tells the team how the work ended: ${request.title}.`,
     `<voice>\n${request.persona ?? "No persona is set. Write plainly."}\n</voice>`,
     ...(request.learned ? [`<learned>\n${request.learned}\n</learned>`] : []),
     `<job>\n${data({
-      ref: request.ref,
       title: request.title,
       project: request.project,
       goal: request.goal,

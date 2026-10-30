@@ -173,7 +173,7 @@ describe("homeView by role", () => {
       }),
     );
     const text = textOf(view);
-    expect(text.indexOf("J-2")).toBeLessThan(text.indexOf("J-3"));
+    expect(text.indexOf("Needs &lt;you&gt; &amp; more")).toBeLessThan(text.indexOf("Job 3"));
     expect(text).not.toContain("🙋");
     expect(text).toContain("Needs &lt;you&gt; &amp; more");
     expect(text).toContain("waiting for you");
@@ -283,7 +283,7 @@ describe("homeView by role", () => {
     expect(text).not.toContain("S-2");
     expect(text).toContain("One item needs you.");
     expect(text).toContain("*Needs you*");
-    expect(text).toContain("S-3 · Morning check · waiting for approval");
+    expect(text).toContain("Morning check · waiting for approval");
   });
 });
 
@@ -293,8 +293,8 @@ describe("homeView limits", () => {
     const view = homeView("member", data({ active }));
     const text = textOf(view);
     expect(text).toContain("Running");
-    expect(text).toContain(`J-${MAX_ACTIVE_JOBS}`);
-    expect(text).not.toContain("J-11 ");
+    expect(text).toContain(`Job ${MAX_ACTIVE_JOBS}>`);
+    expect(text).not.toContain("Job 11>");
     expect(text).toContain("+15 more");
   });
 
@@ -543,7 +543,7 @@ describe.skipIf(!hasDatabase)("publishHome", () => {
     await publishHome(api(), deps(), "UOWNER");
 
     const member = JSON.stringify(slack.homeViews.UMEMBER);
-    expect(member).toContain("J-");
+    expect(member).not.toMatch(/J-\d+/);
     expect(member).toContain("Retry loop");
     expect(member).toContain("waiting for you");
     expect(member).toContain("Finished today");

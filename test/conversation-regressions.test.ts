@@ -223,7 +223,7 @@ describe.skipIf(!hasDatabase)("conversation recovery regressions", () => {
     await retryClosures({ ...s.deps, slack });
     await deliver(s.sql, slack);
     const recovered = s.calls.filter((call) => call.method === "chat.update").at(-1);
-    expect(recovered?.body.text).toContain(`I've closed ${ref} and archived its channel.`);
+    expect(recovered?.body.text).toContain("I've closed this and archived its channel.");
     expect(recovered?.body.text).toContain("done");
     expect(recovered?.body.text).not.toContain("couldn't archive");
     expect(JSON.stringify(recovered?.body.blocks)).not.toContain("I'll retry");

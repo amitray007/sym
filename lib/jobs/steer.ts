@@ -33,10 +33,9 @@ type Found = { job: Job } | { answer: string };
 
 async function findActive(deps: JobDeps, ref: string): Promise<Found> {
   const job = await getJobByRef(deps.sql, ref);
-  if (!job) return { answer: `There is no job ${ref}.` };
-  const name = jobRef(job.id);
-  if (FINISHED.has(job.status)) return { answer: `${name} already finished (${job.status}).` };
-  if (!job.workerThreadId) return { answer: `${name} has not started yet. Nothing to steer.` };
+  if (!job) return { answer: "I couldn't find that work." };
+  if (FINISHED.has(job.status)) return { answer: `This already finished (${job.status}).` };
+  if (!job.workerThreadId) return { answer: "This has not started yet. Nothing to steer." };
   return { job };
 }
 
@@ -62,18 +61,17 @@ export async function steerJob(
         ? pending[0]
         : undefined;
     if (!question)
-      return `I couldn't match that to one pending question for ${name}. Ask me which question is waiting.`;
+      return "I couldn't match that to one pending question. Ask me which question is waiting.";
     const answers =
       answer?.answers ??
       (question.questions.length === 1 && question.questions[0]
         ? { [question.questions[0].id]: clean }
         : undefined);
-    if (!answers)
-      return `There are several parts to ${name}'s question. Which answers should I send?`;
+    if (!answers) return "There are several parts to this question. Which answers should I send?";
     const sent = await answerQuestion(deps, job.id, question.requestId, answers);
     return sent
-      ? `I passed your answer to ${name}'s ${workerNoun()}.`
-      : `That question for ${name} is no longer waiting.`;
+      ? `I passed your answer to the ${workerNoun()}.`
+      : "That question is no longer waiting.";
   }
   await deps.worker.send(
     job.workerThreadId as string,
@@ -84,17 +82,16 @@ export async function steerJob(
   const short =
     clean.length <= SUMMARY_TEXT_MAX ? clean : `${clean.slice(0, SUMMARY_TEXT_MAX - 1)}…`;
   await updateJob(deps.sql, job.id, { lastSummary: `I passed on: ${short}` });
-  return `Sent to ${name}'s ${workerNoun()}: ${short}`;
+  return `I passed this to the ${workerNoun()}: ${short}`;
 }
 
 export async function stopJob(deps: JobDeps, ref: string): Promise<string> {
   const found = await findActive(deps, ref);
   if ("answer" in found) return found.answer;
-  const name = jobRef(found.job.id);
   const outcome = await cancelJob(deps, found.job.id);
   return outcome.status === "cancelled"
-    ? `Stopped ${name}.`
+    ? "Stopped it."
     : outcome.status === "done"
-      ? `${name} finished before I could stop it. I kept its result.`
-      : `${name} ended as ${outcome.status}.`;
+      ? "This finished before I could stop it. I kept its result."
+      : `This ended as ${outcome.status}.`;
 }

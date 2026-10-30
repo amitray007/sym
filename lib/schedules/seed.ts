@@ -7,7 +7,7 @@ import type { Pack } from "../pack/load.ts";
 import type { PackSchedule } from "../pack/schedules.ts";
 import { ownerTarget } from "../workers/expiry.ts";
 import { sameJson } from "./match.ts";
-import { type Schedule, scheduleRef } from "./rows.ts";
+import type { Schedule } from "./rows.ts";
 
 // Seeds the pack's schedules.yaml into the schedules table (decision 055). A pack never widens
 // Sym's rules, so a new or changed row waits for the owner's approval (decision 024). Safe to
@@ -87,13 +87,13 @@ function normalize(row: Schedule): Schedule {
 }
 
 export function seedNoticeText(pending: Schedule[]): string {
-  const lines = pending.map((row) => `- ${scheduleRef(row.id)}: ${row.title} - ${row.cron} UTC`);
+  const lines = pending.map((row) => `- ${row.title} - ${row.cron} UTC`);
   return [
     pending.length === 1
       ? "The pack added a schedule that waits for your approval:"
       : "The pack added schedules that wait for your approval:",
     ...lines,
-    'To approve one, ask me to approve it, for example "approve S-1".',
+    "To approve one, ask me to approve it by name.",
   ].join("\n");
 }
 

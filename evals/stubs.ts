@@ -63,7 +63,10 @@ export const statusStub = {
   id: "jobs-status",
   tool: "jobs_status",
   outcome: {
-    response:
-      "J-12 is running. The worker is on step 3 of 5 and has run tests once. It started 20 minutes ago.",
+    response: {
+      job: "J-12",
+      answer:
+        "Billing sync retry: running for 20m. The worker is on step 3 of 5 and has run tests once.",
+    },
   },
 } satisfies ToolStub;

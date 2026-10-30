@@ -69,20 +69,19 @@ export async function startFollowUp(
   requestId: string,
 ): Promise<FollowUpResult> {
   const parent = await getJobByRef(deps.sql, parentRef);
-  if (!parent) return { refused: true, answer: `There is no job ${parentRef}.` };
-  const name = jobRef(parent.id);
+  if (!parent) return { refused: true, answer: "I couldn't find that work." };
   if (!FIXABLE.has(parent.status)) {
     return {
       refused: true,
       answer:
         parent.status === "cancelled"
-          ? `${name} was cancelled. Ask for a new job instead.`
-          : `${name} is still running. Steer it instead.`,
+          ? "This was cancelled. Ask for new work instead."
+          : "I'm still working on this. Tell me what to change and I'll pass it on.",
     };
   }
   if (!parent.workerThreadId)
-    return { refused: true, answer: `${name} never reached the ${workerNoun()}.` };
-  if (await isClosed(deps.sql, parent.id)) return { refused: true, answer: `${name} is closed.` };
+    return { refused: true, answer: `This never reached the ${workerNoun()}.` };
+  if (await isClosed(deps.sql, parent.id)) return { refused: true, answer: "This is closed." };
   const clean = cleanSteerText(text);
   if (!clean) return { refused: true, answer: "Nothing to send. Say what should change." };
 
@@ -91,7 +90,7 @@ export async function startFollowUp(
   if (earlier) {
     const existing = await getJob(deps.sql, Number(earlier.id));
     if (existing?.followupSentAt) {
-      return { answer: `Already sent as ${jobRef(existing.id)}.`, job: existing };
+      return { answer: "I already sent that follow-up.", job: existing };
     }
     if (existing?.status === "cancelled")
       return { refused: true, answer: existing.lastSummary ?? "That follow-up was cancelled." };
@@ -119,14 +118,14 @@ export async function startFollowUp(
   `;
   if (busy?.requestKey === requestKey) {
     return {
-      answer: `Already recorded as ${jobRef(Number(busy.id))}.`,
+      answer: "I already recorded that follow-up.",
       job: { ...busy, id: Number(busy.id) },
     };
   }
   if (busy) {
     return {
       refused: true,
-      answer: `${jobRef(Number(busy.id))} is still working in this thread. Steer it instead.`,
+      answer: "I'm still working on this. Tell me what to change and I'll pass it on.",
     };
   }
 
@@ -136,17 +135,17 @@ export async function startFollowUp(
     const [same] = await deps.sql<Job[]>`select * from jobs where request_key = ${requestKey}`;
     if (same)
       return {
-        answer: `Already recorded as ${jobRef(Number(same.id))}.`,
+        answer: "I already recorded that follow-up.",
         job: { ...same, id: Number(same.id) },
       };
-    return { refused: true, answer: `${later} continued this thread. Use that job.` };
+    return { refused: true, answer: "A follow-up continued this thread. Use the latest work." };
   }
 
   const brief = Brief.parse(parent.brief);
   if (!parent.workerIdentity || parent.workerIdentity !== deps.workerIdentity) {
     return {
       refused: true,
-      answer: `${name}'s worker has changed or is unknown. Ask for a new job instead.`,
+      answer: "The worker has changed or is unknown. Ask for new work instead.",
     };
   }
   let plan: Awaited<ReturnType<typeof planLaunch>>;
@@ -159,7 +158,7 @@ export async function startFollowUp(
   if (!parent.workerProjectId || parent.workerProjectId !== plan.projectId) {
     return {
       refused: true,
-      answer: `${name}'s worker project has changed. Ask for a new job instead.`,
+      answer: "The worker project has changed. Ask for new work instead.",
     };
   }
   const title = clip(`Fix: ${parent.title}`, TITLE_MAX);
@@ -178,7 +177,7 @@ export async function startFollowUp(
     const [same] = await deps.sql<Job[]>`select * from jobs where request_key = ${requestKey}`;
     if (same)
       return {
-        answer: `Already recorded as ${jobRef(Number(same.id))}.`,
+        answer: "I already recorded that follow-up.",
         job: { ...same, id: Number(same.id) },
       };
     return { refused: true, answer: "Another job just started in this thread. Steer it instead." };
@@ -208,7 +207,7 @@ async function sendFollowUp(
       };
     if (current?.followupSentAt)
       return {
-        answer: `Already sent as ${jobRef(current.id)}.`,
+        answer: "I already sent that follow-up.",
         job: current,
       };
     result = await sendFollowUpOnce(
@@ -276,7 +275,7 @@ async function sendFollowUpOnce(
   } catch (error) {
     const reason = `The ${workerNoun()} did not take the follow-up: ${(error as Error).message}`;
     await deps.sql`update jobs set last_summary = 'The follow-up could not be sent yet.', watch_until = now() + interval '1 minute' where id = ${job.id}`;
-    throw new Error(`${ref} could not start. ${reason}`);
+    throw new Error(`The follow-up could not start. ${reason}`);
   }
 
   // A fix is feedback on the parent job: the weekly learn pass groups repeated fixes.
@@ -295,9 +294,9 @@ async function sendFollowUpOnce(
   await presentStart(deps.sql, job, deps.now?.() ?? new Date(), deps.pack);
   // A follow-up in a code channel shows it is working again. Reconcile sets it back at the end.
   await setChannelStatus(deps, job, "processing");
-  await editEndPost(deps.sql, parent, `I sent the follow-up as ${ref} on the same branch.`);
+  await editEndPost(deps.sql, parent, "I sent the follow-up on the same branch.");
   return {
-    answer: `Sent to the ${workerNoun()} as ${ref}.`,
+    answer: `I sent the follow-up to the ${workerNoun()}.`,
     job: (await getJob(deps.sql, job.id)) ?? job,
   };
 }
@@ -337,9 +336,8 @@ async function insertFollowUp(sql: Sql, parent: Job, requestKey: string, brief: 
 
 export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<string> {
   const job = await getJobByRef(deps.sql, ref);
-  if (!job) return `There is no job ${ref}.`;
-  const name = jobRef(job.id);
-  if (!TERMINAL.includes(job.status)) return `${name} is still running. Stop it first.`;
+  if (!job) return "I couldn't find that work.";
+  if (!TERMINAL.includes(job.status)) return "I'm still working on this. Stop it first.";
   const refusal = await deps.sql.begin(async (transaction) => {
     const sql = transaction as unknown as Sql;
     // Follow-up insertion takes this same parent lock. Closing cannot settle a child that
@@ -347,9 +345,9 @@ export async function closeJob(deps: JobDeps, ref: string, by: string): Promise<
     await sql`select id from jobs where id = ${job.id} for update`;
     const current = await getJobByRef(sql, ref);
     if (!current || !TERMINAL.includes(current.status))
-      return `${name} is still running. Stop it first.`;
+      return "I'm still working on this. Stop it first.";
     const later = await laterJob(sql, current);
-    if (later) return `${later} continued this thread. Close it instead.`;
+    if (later) return "A follow-up continued this thread. Close the latest work instead.";
     await sql`
       update jobs set closed_at = coalesce(closed_at, now()), closed_by = coalesce(closed_by, ${by}),
         archive_state = case when code_channel and archive_state = 'none' then 'pending' else archive_state end
@@ -370,7 +368,7 @@ async function completeClosure(deps: JobDeps, id: number): Promise<string> {
   // closed_at prevents follow-up insertion. External calls hold no transaction or row lock.
   const requested = await getJobByRef(deps.sql, jobRef(id));
   const ref = jobRef(id);
-  if (!requested?.closedAt) return `${ref} has no close request.`;
+  if (!requested?.closedAt) return "This has no close request.";
   let settlementPending = false;
   const settle = async () => {
     if (!requested.workerSettledAt) {
@@ -403,10 +401,10 @@ async function completeClosure(deps: JobDeps, id: number): Promise<string> {
       } else {
         archiveError =
           missing === "missing_channel"
-            ? `I couldn't archive ${ref}: its channel ID is missing. The saved job needs repair.`
+            ? "I couldn't archive this: its channel ID is missing. The saved job needs repair."
             : missing === "missing_client"
-              ? `I couldn't archive ${ref}: the Slack connection is missing. It needs repair.`
-              : `I couldn't archive this channel for ${ref}. I'll retry.`;
+              ? "I couldn't archive this: the Slack connection is missing. It needs repair."
+              : "I couldn't archive this channel. I'll retry.";
         await deps.sql`update jobs set archive_state = ${missing ? "repair" : "pending"},
         archive_error = ${missing ?? "archive_failed"} where id = ${id} and archive_state <> 'archived'`;
       }
@@ -417,10 +415,10 @@ async function completeClosure(deps: JobDeps, id: number): Promise<string> {
   if (job.archiveState === "archived") archiveError = null;
   const closed =
     job.codeChannel && job.archiveState === "archived"
-      ? `Closed ${ref} and archived its channel.`
+      ? "Closed this and archived its channel."
       : job.codeChannel
-        ? `I stopped following ${ref}.`
-        : `Closed ${ref}.`;
+        ? "I stopped following this."
+        : "Closed this.";
   if (settlementPending || archiveError) {
     const retry = settlementPending ? "I couldn't settle the worker thread. I'll retry." : "";
     const text = [archiveError, retry].filter(Boolean).join(" ");
@@ -436,8 +434,8 @@ async function completeClosure(deps: JobDeps, id: number): Promise<string> {
     deps.sql,
     job,
     job.codeChannel
-      ? `I've closed ${ref} and archived its channel.`
-      : `I've closed ${ref}.${watch?.watched ? " I stopped following its PR." : ""}`,
+      ? "I've closed this and archived its channel."
+      : `I've closed this.${watch?.watched ? " I stopped following its PR." : ""}`,
     true,
   );
   return closed;
@@ -490,7 +488,7 @@ async function clearClosureNotice(deps: JobDeps, job: Job): Promise<void> {
       payload: {
         channel: payload.channel,
         ts: notice.slackTs,
-        text: job.codeChannel ? `I've archived ${ref}'s channel.` : `I've closed ${ref}.`,
+        text: job.codeChannel ? "I've archived this channel." : "I've closed this.",
         blocks: [],
       },
       display: promptDisplay(job, false),
@@ -575,8 +573,14 @@ function closureNoteText(block: Record<string, unknown>, ref: string): string | 
   const text = (block.elements[0] as { text?: unknown } | undefined)?.text;
   return typeof text === "string" &&
     [
+      "I stopped following this.",
+      "Closed this.",
+      "Closed this and ",
+      "I've closed this.",
+      "I've closed this and ",
       `I stopped following ${ref}.`,
       `Closed ${ref}.`,
+      `I've closed ${ref}.`,
       `Closed ${ref} and `,
       `I've closed ${ref} and `,
     ].some((prefix) => text.startsWith(prefix))
@@ -609,19 +613,18 @@ export async function postPrompt(
   _by: string,
 ): Promise<string | undefined> {
   const job = await getJobByRef(deps.sql, ref);
-  if (!job?.slackChannel) return `There is no job ${ref}.`;
-  const name = jobRef(job.id);
-  if (!job.workerThreadId) return `${name} has not started yet.`;
-  if (kind === "steer" && TERMINAL.includes(job.status)) return `${name} already finished.`;
+  if (!job?.slackChannel) return "I couldn't find that work.";
+  if (!job.workerThreadId) return "This has not started yet.";
+  if (kind === "steer" && TERMINAL.includes(job.status)) return "This already finished.";
   if (kind === "fix") {
-    if (!FIXABLE.has(job.status)) return `${name} cannot take a fix now.`;
-    if (await isClosed(deps.sql, job.id)) return `${name} is closed.`;
+    if (!FIXABLE.has(job.status)) return "This cannot take a fix now.";
+    if (await isClosed(deps.sql, job.id)) return "This is closed.";
     const later = await laterJob(deps.sql, job);
-    if (later) return `${later} continued this thread. Use that job.`;
+    if (later) return "A follow-up continued this thread. Use the latest work.";
   }
   return kind === "steer"
-    ? `Reply here with the direction for ${name}. I'll read it in context.`
-    : `Tell me what should change in ${name}. I'll propose the follow-up before starting it.`;
+    ? "Reply here with the direction. I'll read it in context."
+    : "Tell me what should change. I'll propose the follow-up before starting it.";
 }
 
 // Replaces a sent text box with what the person wrote and what Sym did with it.
@@ -665,11 +668,11 @@ export async function proposeFollowUp(
   key: string,
 ): Promise<FollowUpResult> {
   const parent = await getJobByRef(deps.sql, ref);
-  if (!parent) return { answer: `There is no job ${ref}.` };
+  if (!parent) return { answer: "I couldn't find that work." };
   if (!FIXABLE.has(parent.status) || parent.closedAt)
-    return { answer: `${jobRef(parent.id)} can't take a follow-up now.` };
+    return { answer: "This can't take a follow-up now." };
   const later = await laterJob(deps.sql, parent);
-  if (later) return { answer: `${later} continued this thread. Use that job.` };
+  if (later) return { answer: "A follow-up continued this thread. Use the latest work." };
   const clean = cleanSteerText(change);
   if (!clean) return { answer: "What should change?" };
   let plan: Awaited<ReturnType<typeof planLaunch>>;
@@ -685,7 +688,7 @@ export async function proposeFollowUp(
     parent.workerIdentity !== deps.workerIdentity ||
     parent.workerProjectId !== plan.projectId
   ) {
-    return { answer: `${jobRef(parent.id)}'s worker or project has changed. Ask for a new job.` };
+    return { answer: "The worker or project has changed. Ask for new work." };
   }
   const question =
     /\?$/.test(clean) || /^(can|could|would|will|should|do|does|is|are)\b/i.test(clean);

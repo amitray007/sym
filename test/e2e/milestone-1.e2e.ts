@@ -107,7 +107,7 @@ describe("milestone 1", () => {
     // Card progress went only through chat.update on the card, and the card ends collapsed.
     const cardEdits = h.slack.callsTo("chat.update").filter((call) => call.body.ts === card.ts);
     expect(cardEdits.length).toBeGreaterThanOrEqual(2);
-    expect(messageText(card)).toContain(`[${ref}] Sync retry · Done`);
+    expect(messageText(card)).toContain("Sync retry · Done");
     expect(isCard(card)).toBe(false);
     // The result carries the summary and the PR link.
     expect(result.text).toContain(SAMPLE_CONTRACT.summary);
@@ -185,7 +185,7 @@ describe("milestone 1", () => {
     expect(c.botMessages().filter(isCard)).toHaveLength(0); // collapsed by now
     expect(
       h.slack.messages.filter(
-        (m) => m.channel === c.channel && messageText(m).includes(`[${ref}]`),
+        (m) => m.channel === c.channel && messageText(m).includes("Lost launch · Done"),
       ),
     ).toHaveLength(1);
   });
@@ -243,7 +243,9 @@ describe("milestone 1", () => {
     await workerAdvance(h, thread, [{ status: "waiting" }]);
     await waitForJobStatus(h.sql, job.id, "waiting_permission");
     const dms = () =>
-      h.slack.messages.filter((m) => m.channel === OWNER && (m.text ?? "").includes(ref));
+      h.slack.messages.filter(
+        (m) => m.channel === OWNER && (m.text ?? "").includes("|Permission job> is waiting"),
+      );
     await until(() => dms()[0], { label: "the permission DM" });
     // More checks see the same block. None of them posts again.
     const waits = () => h.t3.calls.filter((call) => call.name === "t3_thread_wait").length;
@@ -254,7 +256,7 @@ describe("milestone 1", () => {
     });
     expect(dms()).toHaveLength(1);
     expect(dms()[0]?.text).toBe(
-      `${ref} is waiting on a permission in Builder. I can't approve that from Slack.`,
+      `<https://slack.com/app_redirect?channel=${c.channel}&message_ts=${c.rootTs}|Permission job> is waiting on a permission in Builder. I can't approve that from Slack.`,
     );
     expect(c.botMessages().some((m) => (m.text ?? "").includes("permission prompt"))).toBe(false);
 
@@ -282,10 +284,10 @@ describe("milestone 1", () => {
     const before = c.botMessages().map((m) => m.ts);
     await c.reply(`<@${BOT}> what's the update?`);
     const answer = await until(
-      () => newSince(c, before).find((m) => messageText(m).includes(`${ref} Status job`)),
+      () => newSince(c, before).find((m) => messageText(m).includes("This is running")),
       { label: "the status answer", timeoutMs: 60_000 },
     );
-    expect(messageText(answer)).toContain(`${ref} Status job: running`);
+    expect(messageText(answer)).toContain("This is running");
     expect(messageText(answer)).toContain("Running the test suite");
 
     await workerAdvance(h, thread, finishedSteps());

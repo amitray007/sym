@@ -4,6 +4,27 @@ import { digestChannel, digestEnabled, queueDigest } from "../lib/digest/post.ts
 import { createSchedule, finishRun, recordRun } from "../lib/schedules/rows.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
+it("links titles in a digest and escapes unlinked titles", () => {
+  expect(
+    digestMessage({
+      day: "2026-10-30",
+      jobs: [
+        {
+          id: 1,
+          title: "Billing sync retry",
+          status: "done",
+          slackChannel: "C1",
+          slackThreadTs: "170.1",
+        },
+        { id: 2, title: "Docs <review>", status: "failed" },
+      ],
+      runs: [],
+    }),
+  ).toBe(
+    "Docs &lt;review&gt; failed.\n<https://slack.com/app_redirect?channel=C1&message_ts=170.1|Billing sync retry> finished.\nAsk me for the details.",
+  );
+});
+
 describe("digestMessage", () => {
   it("returns nothing when nothing happened", () => {
     expect(digestMessage({ day: "2026-10-20", jobs: [], runs: [] })).toBeUndefined();
@@ -23,10 +44,10 @@ describe("digestMessage", () => {
     });
     expect(text).toBe(
       [
-        "J-3 Schema change needs you.",
-        "J-2 Flaky test failed.",
-        "J-1 Billing sync retry finished.",
-        "J-4 Docs is still running.",
+        "Schema change needs you.",
+        "Flaky test failed.",
+        "Billing sync retry finished.",
+        "Docs is still running.",
         "Ask me for the details.",
       ].join("\n"),
     );

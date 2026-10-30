@@ -47,13 +47,15 @@ learned preferences, and shared channels are planned.
   result posts as text.
 
 The job card is now a working note: explicit progress, optional skipped scope, and a muted
-job/time/worker/PR line. It has no controls. Updates are silent edits. The result posts separately.
+time/worker/PR line. It has no controls. Updates are silent edits. The result posts separately.
 
 Results use human sentences in a `markdown` block, with no fixed headings, confidence score,
 concern list, or checklist. Code expands inline {{c1}}, {{q1}}, {{tests}}, and {{pr}} tokens to
 exact facts, then appends only missing concerns, open decisions, PR and test facts in one paragraph.
-Contradictory test prose uses the plain fallback. The ref and duration stay in the muted context line.
-Notifications retain these facts. Results can include PR/CI links, two or three conversation
+Contradictory test prose uses the plain fallback. Only the duration stays in the muted context line.
+Job and schedule references stay in tool fields, worker messages, and recovery keys. Messages
+name the work with a linked title outside its conversation, or say "this" inside it (decision 073).
+Notifications retain the result facts. Results can include PR/CI links, two or three conversation
 choices, and optional feedback. Chat replies have no feedback controls. Choices never approve work.
 
 `offer_choices` stores the conversation and consumes a click once. Typed replies still work.

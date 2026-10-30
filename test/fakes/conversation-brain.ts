@@ -42,11 +42,20 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         toolCalls: [{ name: "job_followup", input: { ref, change: change ?? "add a test" } }],
       };
     if (kind === "close") return { toolCalls: [{ name: "job_close", input: { ref } }] };
+    // job_stop repeats the title its owner prompt shows. The job note carries it.
+    const notes = request.messages.map((part) => part.text).join("\n");
+    const title = new RegExp(
+      `This conversation is about ${ref} \\(("(?:[^"\\\\]|\\\\.)*")\\)`,
+    ).exec(notes)?.[1];
     return {
       toolCalls: [
         {
           name: kind === "stop" ? "job_stop" : "job_steer",
-          input: { job: ref, ...(kind === "steer" ? { text: change ?? "continue" } : {}) },
+          input: {
+            job: ref,
+            ...(kind === "steer" ? { text: change ?? "continue" } : {}),
+            ...(kind === "stop" ? { title: title ? (JSON.parse(title) as string) : "" } : {}),
+          },
         },
       ],
     };
@@ -67,6 +76,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     message,
   )?.[1];
   const answer = chosen ? (JSON.parse(chosen) as string) : message;
+  if (job && /\b(update|status)\b/i.test(answer))
+    return { toolCalls: [{ name: "jobs_status", input: { job } }] };
   if (job && /^staging[.!]?$/i.test(answer.trim()))
     return { toolCalls: [{ name: "job_steer", input: { job, text: "staging" } }] };
   const result = base(request);

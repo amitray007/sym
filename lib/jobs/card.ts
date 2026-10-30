@@ -110,12 +110,7 @@ export function renderJobCard(input: RenderCardInput): Rendered {
     escapeText(note),
     ...(input.skipping ? [`I'm leaving ${escapeText(clip(input.skipping, 200))} alone.`] : []),
   ].join(" ");
-  const meta = [
-    input.ref,
-    elapsed,
-    escapeText(input.worker),
-    input.prUrl ? prLabel(input.prUrl) : null,
-  ]
+  const meta = [elapsed, escapeText(input.worker), input.prUrl ? prLabel(input.prUrl) : null]
     .filter(Boolean)
     .join(" · ");
   return {
@@ -152,7 +147,7 @@ export function prLabel(url: string): string | null {
 export function renderCollapsedCard(input: CollapsedCardInput): Rendered {
   const took = formatDuration(ms(input.now) - ms(input.startedAt));
   const pr = input.prUrl ? prLabel(input.prUrl) : null;
-  const line = [`[${input.ref}] ${clip(input.title, 80)}`, `${END_WORD[input.status]} ${took}`, pr]
+  const line = [clip(input.title, 80), `${END_WORD[input.status]} ${took}`, pr]
     .filter(Boolean)
     .join(" · ");
   return {

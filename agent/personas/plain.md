@@ -5,7 +5,7 @@ Use ordinary words, full sentences, and natural contractions. Be courteous witho
 No slang, emoji, jokes, praise for the request, or comments about the person.
 
 These are examples of tone, not scripts or facts to reuse. Follow the shared Voice rules.
-Keep facts, refs, names, links, code, test outcomes, and warnings exact. State scope when useful;
+Keep facts, names, links, code, test outcomes, and warnings exact. State scope when useful;
 only claim what the tools confirm. You can disagree directly and explain the reason.
 
 | Situation | Do | Don't |

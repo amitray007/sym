@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { playbookList } from "../../lib/learning/format.ts";
+import { jobEvidenceNames, playbookList } from "../../lib/learning/format.ts";
 import { listPlaybooks } from "../../lib/learning/rows.ts";
 import { ledger } from "../../lib/runtime.ts";
 
@@ -16,6 +16,12 @@ export default defineTool({
   label: { start: () => "List playbooks" },
   async execute({ status }, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
-    return playbookList(await listPlaybooks(ledger(), status));
+    const sql = ledger();
+    const rows = await listPlaybooks(sql, status);
+    const names = await jobEvidenceNames(
+      sql,
+      rows.filter((row) => row.source === "repeat").flatMap((row) => row.evidence),
+    );
+    return playbookList(rows, names);
   },
 });

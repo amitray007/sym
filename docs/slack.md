@@ -5,11 +5,16 @@ buttons, and an agent surface. Eve drives some of them. Sym's own code drives th
 `ctx.slack.request` and `callSlackApi`. [display.md](display.md) decides which part each message
 uses.
 
+People see the work's title, linked to its thread or code channel when known. Inside that
+conversation, Sym says "this", "it", or just the result. Job and schedule references are internal
+tool handles. People can still type one; Sym does not repeat it (decision 073). Home schedules
+show their titles. Status lists, digests, learning evidence, and permission DMs use linked titles.
+
 ## The working note
 
 Each long job gets one working note. Sym edits it silently with explicit worker progress and
-optional scope it is leaving alone. A muted line holds the job reference, elapsed time, worker,
-and PR link. It has no controls or invented checklist. The ledger stores the desired message and
+optional scope it is leaving alone. A muted line holds elapsed time, worker, and PR link.
+It has no controls or invented checklist. The ledger stores the desired message and
 its Slack timestamp. Reconcile can keep it current after a session dies.
 
 When the job ends, the note collapses to one line. The result posts separately. A PR opening
@@ -179,9 +184,11 @@ launches need approval.
 
 With `SYM_CODE_CHANNELS` on, a job a person starts moves from its thread into its own Slack code
 channel (decision 067, [slack-code.md](slack-code.md)). The brief and Start stay in the thread;
-Slack links the new channel there. The card, result, and buttons post top-level in the channel.
-Worker questions post in the current job conversation, including code channels. The channel's context bar shows the job, its project, and its pull request, and its status
-follows the job. Everything said in the channel reaches Sym with no tag and is about that job.
+Slack links the new channel there. The channel uses the work's title alone. An explicit
+`name_taken` response retries once with a numeric suffix such as `Billing sync retry #142`.
+The card, result, and buttons post top-level in the channel.
+Worker questions post in the current job conversation, including code channels. The context bar
+shows its project and pull request. The channel's status follows the job. Everything said in the channel reaches Sym with no tag and is about that job.
 `job_close` requests settlement and archive, with the result shared in the original thread. A scheduled check, a job
 in a DM, and any job Slack refuses stay in their thread.
 

@@ -1,5 +1,6 @@
+import { jobName } from "../jobs/names.ts";
 import { statusWords } from "../jobs/status.ts";
-import { type Job, jobRef } from "../ledger/jobs.ts";
+import type { Job } from "../ledger/jobs.ts";
 import type { Schedule } from "../schedules/rows.ts";
 import { workerLabel } from "../worker-label.ts";
 
@@ -93,18 +94,6 @@ function listLines(lines: string[], max: number): string {
   return shown.join("\n");
 }
 
-// A Slack deep link to a thread, or to a job's own code channel (decision 067). It works in any
-// workspace the reader is signed in to.
-function threadLink(job: Job): string | undefined {
-  if (job.codeChannel && job.slackChannel) {
-    return `https://slack.com/app_redirect?channel=${encodeURIComponent(job.slackChannel)}`;
-  }
-  if (!job.slackChannel || !job.slackThreadTs) return undefined;
-  const channel = encodeURIComponent(job.slackChannel);
-  const ts = encodeURIComponent(job.slackThreadTs);
-  return `https://slack.com/app_redirect?channel=${channel}&message_ts=${ts}`;
-}
-
 function duration(ms: number): string {
   const minutes = Math.max(0, Math.floor(ms / 60_000));
   if (minutes >= 1440) return `${Math.floor(minutes / 1440)} days`;
@@ -125,8 +114,7 @@ function needsYou(job: Job, now: Date): boolean {
   );
 }
 function jobLine(job: Job, now: Date, approvedStarts: number[] = []): string {
-  const link = threadLink(job);
-  const ref = link ? `<${link}|${esc(jobRef(job.id))}>` : esc(jobRef(job.id));
+  const name = jobName({ ...job, title: clip(job.title, MAX_TITLE_CHARS) });
   const since = job.finishedAt ?? job.lastActivityAt ?? job.startedAt ?? job.createdAt;
   const age = duration(now.getTime() - since.getTime());
   const state =
@@ -145,7 +133,7 @@ function jobLine(job: Job, now: Date, approvedStarts: number[] = []): string {
             : !job.finishedAt && needsYou(job, now) && !job.status.startsWith("waiting")
               ? `no activity for ${age}`
               : statusWords()[job.status];
-  return `${ref} · ${esc(clip(job.title, MAX_TITLE_CHARS))} · ${state} · ${age}${job.finishedAt ? " ago" : ""}`;
+  return `${name} · ${state} · ${age}${job.finishedAt ? " ago" : ""}`;
 }
 
 // Slack shows the time in the reader's own zone.
@@ -239,8 +227,7 @@ export function homeView(role: HomeRole, data?: HomeData): HomeView {
           [
             ...attention.map((job) => jobLine(job, now, data.approvedStarts)),
             ...pendingSchedules.map(
-              (schedule) =>
-                `S-${schedule.id} · ${esc(clip(schedule.title, MAX_TITLE_CHARS))} · waiting for approval`,
+              (schedule) => `${esc(clip(schedule.title, MAX_TITLE_CHARS))} · waiting for approval`,
             ),
           ],
           MAX_ACTIVE_JOBS,

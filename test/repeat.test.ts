@@ -3,6 +3,7 @@ import repeatedWork from "../agent/tools/repeated_work.ts";
 import repeatedWorkPropose from "../agent/tools/repeated_work_propose.ts";
 import { respondAsFixture } from "../lib/brain/fixture.ts";
 import type { Sql } from "../lib/db.ts";
+import { jobEvidenceNames, playbookDetail } from "../lib/learning/format.ts";
 import {
   briefsText,
   markRepeatScan,
@@ -54,7 +55,7 @@ describe("briefsText", () => {
     expect(text).toBe(
       [
         "Finished jobs, newest first (1):",
-        "J-7 [example-app] Bump deps",
+        "[example-app] Bump deps",
         "  goal: Update",
         "  done when: ci green",
         "Existing playbooks: none",
@@ -107,7 +108,9 @@ describe.skipIf(!hasDatabase)("repeated work in the ledger", () => {
     ).toMatch(/at least 3 different jobs/);
     expect(
       await proposeRepeated(sql, { ...input, jobIds: [jobs[0] ?? 0, jobs[1] ?? 0, old] }, NOW),
-    ).toBe(`These are not recent finished jobs: J-${old}.`);
+    ).toBe(
+      "Some of that evidence is not recent finished work. Choose recent finished work instead.",
+    );
 
     const row = await proposeRepeated(sql, input, NOW);
     expect(row).toMatchObject({
@@ -146,6 +149,7 @@ describe.skipIf(!hasDatabase)("repeated work in the ledger", () => {
       NOW,
     );
     if (typeof row === "string") throw new Error(row);
+    await sql`update jobs set slack_channel = 'C1', slack_thread_ts = '170.1' where id = ${jobs[0] ?? 0}`;
     await queueRepeatNotice(sql, "U0OWNER", [row]);
     await queueRepeatNotice(sql, "U0OWNER", [row]);
     const posts = await sql<
@@ -155,7 +159,16 @@ describe.skipIf(!hasDatabase)("repeated work in the ledger", () => {
     `;
     expect(posts).toHaveLength(1);
     expect(posts[0]?.payload.channel).toBe("U0OWNER");
-    expect(posts[0]?.payload.text).toContain(`P-${row.id} sync-docs (from J-${jobs[0]}, `);
+    expect(posts[0]?.payload.text).not.toMatch(/J-\d+/);
+    const detail = playbookDetail(row, await jobEvidenceNames(sql, row.evidence));
+    expect(detail).toContain(
+      "Evidence: <https://slack.com/app_redirect?channel=C1&message_ts=170.1|Sync docs>, Sync docs, Sync docs",
+    );
+    expect(detail).not.toMatch(/J-\d+/);
+
+    expect(posts[0]?.payload.text).toContain(
+      `P-${row.id} sync-docs (from <https://slack.com/app_redirect?channel=C1&message_ts=170.1|Sync docs>, `,
+    );
     expect(posts[0]?.display.target).toBe("dm");
   });
 });
@@ -199,11 +212,9 @@ describe("fixture brain", () => {
     expect(respondAsFixture(request("Repeated-work review.\nCall repeated_work."))).toEqual({
       toolCalls: [{ name: "repeated_work", input: {} }],
     });
-    const output = [
-      "J-3 [example-app] Sync docs",
-      "J-2 [example-app] Sync docs",
-      "J-1 [example-app] Sync docs",
-    ].join("\n");
+    const output = JSON.stringify({
+      jobs: [3, 2, 1].map((id) => ({ ref: `J-${id}`, title: "Sync docs" })),
+    });
     const text = "Repeated-work review.";
     const next = respondAsFixture(
       request(text, {
@@ -222,5 +233,15 @@ describe("fixture brain", () => {
         },
       ],
     });
+    const structured = respondAsFixture(
+      request(text, {
+        messages: [
+          { role: "user", text },
+          { role: "tool", text: output },
+        ],
+        toolResults: [{ name: "repeated_work", output: JSON.parse(output) }],
+      }),
+    );
+    expect(structured).toEqual(next);
   });
 });

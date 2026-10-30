@@ -117,7 +117,7 @@ export function resultMessage(
 ): string {
   if (!contract)
     return sections([
-      `${job.ref}'s worker finished without a result summary. I can't say what changed yet.`,
+      "The worker finished without a result summary. I can't say what changed yet.",
       ...concerns.map(escapeMrkdwn),
       limitation,
       threadLine(job),
@@ -134,7 +134,7 @@ export function resultMessage(
     ? "The worker returned a result."
     : tldr(contract.summary);
   return sections([
-    `Done with ${job.ref}: ${escapeMrkdwn(/[.!?…]$/.test(gist) ? gist : `${gist}.`)} ${facts.join(" ")}`,
+    `${escapeMrkdwn(/[.!?…]$/.test(gist) ? gist : `${gist}.`)} ${facts.join(" ")}`,
     ...required.map(escapeMrkdwn),
     limitation && !required.includes(limitation) ? limitation : null,
   ]);
@@ -142,19 +142,19 @@ export function resultMessage(
 
 export function failureMessage(job: JobFacts, reason?: string | null): string {
   return lines([
-    `${job.ref} didn't finish. ${reason ? escapeMrkdwn(reason) : "The worker stopped without saying why; its thread has the log."}`,
+    `This didn't finish. ${reason ? escapeMrkdwn(reason) : "The worker stopped without saying why; its thread has the log."}`,
     threadLine(job),
   ]);
 }
 
 /** The DM to the owner when the worker waits on a permission prompt. */
-export function permissionBlockMessage(ref: string): string {
-  return `${ref} is waiting on a permission in ${workerLabel()}. I can't approve that from Slack.`;
+export function permissionBlockMessage(name: string): string {
+  return `${name} is waiting on a permission in ${workerLabel()}. I can't approve that from Slack.`;
 }
 
 export function quietNotice(job: JobFacts, quietForMs: number): string {
   return lines([
-    `I haven't heard from the ${workerNoun()} on ${job.ref} for ${formatDuration(quietForMs)}. Want me to stop it? If not, I'll keep watching.`,
+    `I haven't heard from the ${workerNoun()} on this for ${formatDuration(quietForMs)}. Want me to stop it? If not, I'll keep watching.`,
     threadLine(job),
   ]);
 }
@@ -174,9 +174,9 @@ export function briefPrompt(brief: Brief, _ref?: string, modelLine?: string): st
   ]);
 }
 
-export function fullBrief(brief: Brief, ref?: string): string {
+export function fullBrief(brief: Brief): string {
   return lines([
-    `${ref ? `${ref}: ` : ""}${escapeMrkdwn(brief.goal)}`,
+    escapeMrkdwn(brief.goal),
     `I'll work in ${escapeMrkdwn(brief.project)}${brief.baseRef ? ` from ${escapeMrkdwn(brief.baseRef)}` : ""} and ${deliveryOf(brief)}.`,
     ...brief.constraints.map(escapeMrkdwn),
     `I'll check: ${brief.doneWhen.map(escapeMrkdwn).join("; ")}.`,

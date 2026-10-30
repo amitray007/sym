@@ -137,9 +137,7 @@ describe.skipIf(!hasDatabase)("reconcileJobs", () => {
     const done = await getJob(s.sql, s.job.id);
     expect(done?.status).toBe("done");
     expect(done?.finishedAt).not.toBeNull();
-    expect(done?.card?.text).toMatch(
-      new RegExp(`^\\[${s.ref}\\] Billing sync retry · Done in \\ds$`),
-    );
+    expect(done?.card?.text).toMatch(/^Billing sync retry · Done in \ds$/);
     const results = s.newPosts().filter((p) => String(p.text).includes(SUMMARY));
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });

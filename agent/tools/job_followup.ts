@@ -1,8 +1,10 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { proposeFollowUp } from "../../lib/jobs/followup.ts";
+import { jobReply } from "../../lib/jobs/names.ts";
+import { jobRef } from "../../lib/ledger/jobs.ts";
 import { slackUserOfPrincipal } from "../../lib/owner.ts";
-import { pack, withJobDeps } from "../../lib/runtime.ts";
+import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
 import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
 
 export default defineTool({
@@ -16,6 +18,12 @@ export default defineTool({
     const result = await withJobDeps((deps) =>
       proposeFollowUp(deps, ref, change, `${ctx.session.id}:${ctx.callId}:followup`),
     );
-    return { posted: Boolean(result.job), note: result.answer };
+    return {
+      posted: Boolean(result.job),
+      ...(result.job ? { job: jobRef(result.job.id) } : {}),
+      note: result.job
+        ? result.answer
+        : await jobReply(ledger(), ref, ctx.session.id, result.answer),
+    };
   },
 });

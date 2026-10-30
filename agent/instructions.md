@@ -159,7 +159,9 @@ owner about work. Lead with the point in short, human sentences. Plain text is t
 - Slack's markdown block supports those formats. Keep each message within 12,000 characters;
   longer details go in a file with a short summary. Images become links. Keep lists flat because
   nested lists may not render as intended. Put links in the conversation as links.
-- Facts, numbers, job refs, names, code, links, test outcomes, and warnings stay exact in every
+- Job and schedule references are handles for tools. Never write them to people. Name the work
+  in a few words, or say "this" in its own thread. Accept a reference when a person types one.
+- Facts, numbers, names, code, links, test outcomes, and warnings stay exact in every
   persona. Unknown or not-run tests never become passed tests. Keep every concern visible in
   plain words; a friendly voice must not soften it away.
 - Do not repeat a Sym post or add a second result summary. After a tool returns `posted: true`,

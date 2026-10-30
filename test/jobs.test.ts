@@ -54,11 +54,11 @@ describe("workerMessage", () => {
 
 describe("statusLine", () => {
   it("keeps a short line as it is", () => {
-    expect(statusLine("J-7", "Tests running")).toBe("J-7: Tests running");
+    expect(statusLine("Tests running")).toBe("Tests running");
   });
 
   it("cuts a long line to the Slack status limit", () => {
-    const line = statusLine("J-7", "Writing code in many files across the whole repository");
+    const line = statusLine("Writing code in many files across the whole repository");
     expect(line).toHaveLength(STATUS_LINE_MAX);
     expect(line.endsWith("…")).toBe(true);
   });
@@ -473,14 +473,15 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     expect(post).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });
     const blocks = post?.blocks as { type: string; title: string }[];
     expect(blocks[0]?.type).toBe("section");
-    expect(String(post?.text)).toContain(`${ref} ·`);
+    expect(String(post?.text)).toContain("0s · Worker");
+    expect(String(post?.text)).not.toContain(ref);
     const stored = await getJob(sql, job.id);
     expect(stored?.cardTs).toBe("1700000000.1");
     expect(stored?.display?.level).toBe(3);
   });
 
   it("posts one Started line for a short job instead of a card", async () => {
-    const { deps, job: fresh, slack, sql, ref } = await setup({ brief: { estimatedMinutes: 1 } });
+    const { deps, job: fresh, slack, sql } = await setup({ brief: { estimatedMinutes: 1 } });
 
     await launchOrAdopt(deps, fresh.id, CALLBACK);
 
@@ -489,7 +490,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     expect(slack.posts()[0]?.body).toMatchObject({
       channel: CHANNEL,
       thread_ts: THREAD_TS,
-      text: `I'm on ${ref}: Billing sync retry.`,
+      text: "On it: billing sync retry.",
     });
     expect((await getJob(sql, fresh.id))?.cardTs).toBeNull();
   });
@@ -556,13 +557,14 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       const collapse = added.filter((c) => c.method === "chat.update");
       expect(collapse).toHaveLength(1);
       expect(collapse[0]?.body).toMatchObject({ channel: CHANNEL, ts: cardTs });
-      expect(collapse[0]?.body.text).toBe(`[${s.ref}] Billing sync retry · Done in 9m · PR #42`);
+      expect(collapse[0]?.body.text).toBe("Billing sync retry · Done in 9m · PR #42");
       // The thread gets one end message: the result carries the PR, so no separate PR line.
       const posts = added.filter((c) => c.method === "chat.postMessage");
       expect(posts).toHaveLength(1);
       const text = String(posts[0]?.body.text);
       expect(posts[0]?.body).toMatchObject({ channel: CHANNEL, thread_ts: THREAD_TS });
-      expect(text).toContain(`Done with ${s.ref}:`);
+      expect(text).toContain("Added retry with backoff");
+      expect(text).not.toContain(s.ref);
       expect(text).toContain("Added retry with backoff");
       expect(text).toContain(`<${PR_URL}|PR #42>`);
       expect(text).toContain("tests passed (12 passed).");
@@ -661,7 +663,9 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       expect(added).toHaveLength(1);
       expect(added[0]?.body.channel).toBe(OWNER);
       expect(added[0]?.body.thread_ts).toBeUndefined();
-      expect(String(added[0]?.body.text)).toContain(`${s.ref} is waiting on a permission`);
+      expect(String(added[0]?.body.text)).toContain(
+        "|Billing sync retry> is waiting on a permission",
+      );
     });
   });
 
@@ -688,7 +692,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
     expect(notice).toHaveLength(1);
     expect(notice[0]?.body.channel).toBe(CHANNEL);
     expect(notice[0]?.body.text).toBe(
-      `I need an owner configured before I can route ${s.ref}'s permission request privately.`,
+      "I need an owner configured before I can route this permission request privately.",
     );
     expect(String(notice[0]?.body.text)).not.toContain("Approve it in");
   });
@@ -716,7 +720,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
       const afterQuiet = s.slack.posts().slice(before);
       expect(afterQuiet).toHaveLength(1);
       expect(String(afterQuiet[0]?.body.text)).toContain(
-        `I haven't heard from the worker on ${s.ref} for 45m. Want me to stop it?`,
+        "I haven't heard from the worker on this for 45m. Want me to stop it?",
       );
 
       clock = minutes(150);
@@ -735,7 +739,7 @@ describe.skipIf(!hasDatabase)("job steps in Slack", () => {
 
       expect(s.worker.interrupts).toHaveLength(1);
       expect(texts(s.slack.posts().slice(before))).toEqual([
-        `Stopped ${s.ref}. I haven't checked or reverted its changes.`,
+        "Stopped it. I haven't checked or reverted its changes.",
       ]);
     });
 

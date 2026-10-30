@@ -149,7 +149,8 @@ describe("scheduled runs", () => {
     expect(posts).toHaveLength(1);
     const text = posts[0] ? messageText(posts[0]) : "";
     expect(text).toContain("The error rate doubled");
-    expect(text).toContain(`Done with ${ref}:`);
+    expect(text).toContain(SAMPLE_CONTRACT.summary);
+    expect(text).not.toContain(ref);
   });
 
   // The model cannot widen a schedule. The dispatcher always sends the stored brief, so these

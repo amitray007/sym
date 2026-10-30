@@ -1,6 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
+import { jobReply } from "../../lib/jobs/names.ts";
 import { steerJob } from "../../lib/jobs/steer.ts";
 import { withJobDeps } from "../../lib/runtime.ts";
 
@@ -19,11 +20,19 @@ export default defineTool({
     answers: z.record(z.string(), z.string()).optional(),
     text: z.string().min(1).describe("What the worker should do differently."),
   }),
-  label: { start: ({ job }) => `Steer ${job}` },
+  label: { start: () => "Pass on your direction" },
   async execute({ job, text, requestId, answers }, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
-    return withJobDeps((deps) =>
-      steerJob(deps, job, text, "steer", `${ctx.session.id}:${ctx.callId}`, { requestId, answers }),
+    return withJobDeps(async (deps) =>
+      jobReply(
+        deps.sql,
+        job,
+        ctx.session.id,
+        await steerJob(deps, job, text, "steer", `${ctx.session.id}:${ctx.callId}`, {
+          requestId,
+          answers,
+        }),
+      ),
     );
   },
 });

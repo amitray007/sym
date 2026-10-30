@@ -5,7 +5,7 @@ import type { WriterOutput } from "../jobs/writer.ts";
 // A scripted `writer` subagent for local end-to-end runs (SYM_MODEL=fixture), next to the
 // scripted verifier. It calls no model provider. It is a test fixture, not a product behavior.
 //
-// Script: "Written: <ref> - <summary>", read from the message's job and worker result.
+// Script: "Written: <summary>", read from the message's job and worker result.
 export function fixtureWriter(): LanguageModel {
   return mockModel({ modelId: "sym-fixture-writer", provider: "sym", respond: writeAsFixture });
 }
@@ -22,7 +22,6 @@ export function writeAsFixture(request: MockModelRequest): MockModelResponse | s
 }
 
 export function fixtureText(message: string): WriterOutput {
-  const ref = /"ref": "(J-\d+)"/.exec(message)?.[1] ?? "the job";
   const summary = /"summary": "((?:[^"\\]|\\.)*)"/.exec(message)?.[1] ?? "done";
-  return { text: `Written: ${ref} - ${summary}` };
+  return { text: `Written: ${summary}` };
 }

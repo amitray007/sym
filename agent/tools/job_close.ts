@@ -1,6 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { closeJob } from "../../lib/jobs/followup.ts";
+import { jobReply } from "../../lib/jobs/names.ts";
 import { slackUserOfPrincipal } from "../../lib/owner.ts";
 import { pack, withJobDeps } from "../../lib/runtime.ts";
 import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
@@ -13,6 +14,8 @@ export default defineTool({
     const by = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
     if (!by || !isSlackUserAllowed(pack(), process.env.SYM_SLACK_USERS, by))
       return { status: "refused", reason: "This needs an allowed person in Slack." };
-    return withJobDeps((deps) => closeJob(deps, ref, by));
+    return withJobDeps(async (deps) =>
+      jobReply(deps.sql, ref, ctx.session.id, await closeJob(deps, ref, by)),
+    );
   },
 });

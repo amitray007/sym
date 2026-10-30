@@ -1,7 +1,7 @@
 import type { Sql } from "../db.ts";
 import { chooseDisplay } from "../display.ts";
-import { jobRef } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
+import { jobEvidenceNames } from "./format.ts";
 import { alreadyHandled } from "./learn.ts";
 import { type Playbook, playbookRef, propose } from "./rows.ts";
 
@@ -58,7 +58,7 @@ export function briefsText(briefs: FinishedBrief[], playbooks: Playbook[]): stri
   if (briefs.length === 0) return "No finished jobs in the last 60 days.";
   const jobs = briefs.map((brief) =>
     [
-      `${jobRef(brief.id)} [${brief.project}] ${brief.title}`,
+      `[${brief.project}] ${brief.title}`,
       `  goal: ${brief.goal}`,
       ...brief.doneWhen.slice(0, 5).map((check) => `  done when: ${check}`),
     ].join("\n"),
@@ -114,7 +114,7 @@ export async function proposeRepeated(
   const readable = new Set((await recentBriefs(sql, now)).map((brief) => brief.id));
   const unknown = ids.filter((id) => !readable.has(id));
   if (unknown.length > 0) {
-    return `These are not recent finished jobs: ${unknown.map(jobRef).join(", ")}.`;
+    return "Some of that evidence is not recent finished work. Choose recent finished work instead.";
   }
   if (await alreadyHandled(sql, input.name, now)) {
     return `"${input.name}" already has a proposal, an approval, or a recent rejection.`;
@@ -132,11 +132,15 @@ export async function proposeRepeated(
 // review is one ping however many patterns it finds.
 export async function queueRepeatNotice(sql: Sql, target: string, rows: Playbook[]): Promise<void> {
   if (rows.length === 0) return;
+  const names = await jobEvidenceNames(
+    sql,
+    rows.flatMap((row) => row.evidence),
+  );
   const text = [
     `These jobs look similar. I drafted ${rows.length === 1 ? "a playbook" : `${rows.length} playbooks`}.`,
     ...rows.map(
       (row) =>
-        `${playbookRef(row.id)} ${row.name} (from ${row.evidence.map(jobRef).join(", ")}):\n${row.body}`,
+        `${playbookRef(row.id)} ${row.name} (from ${row.evidence.map((id) => names.get(id) ?? "Earlier work").join(", ")}):\n${row.body}`,
     ),
     "Want to review this guidance? I will only use it after you approve it.",
   ].join("\n");

@@ -253,6 +253,13 @@ export class Conversation {
     );
   }
 
+  async result(ref: string): Promise<FakeSlackMessage | undefined> {
+    const [post] = await this.h.sql<
+      { slackTs: string | null }[]
+    >`select slack_ts from outbox where idempotency_key = ${`${ref}:end`} and status = 'sent'`;
+    return this.botMessages().find((message) => message.ts === post?.slackTs);
+  }
+
   botMessages(): FakeSlackMessage[] {
     return this.messages().filter((m) => m.user === BOT);
   }
@@ -589,10 +596,7 @@ export function isCard(message: FakeSlackMessage): boolean {
 }
 
 export async function resultMessage(c: Conversation, ref: string): Promise<FakeSlackMessage> {
-  const headline = new RegExp(`^Done with ${ref}:`);
-  return until(() => c.botMessages().find((m) => headline.test(m.text ?? "")), {
-    label: `${ref} result message`,
-  });
+  return until(() => c.result(ref), { label: `${ref} result message` });
 }
 
 // Waits until Slack sees no new calls for a few seconds, so late posts would show up.

@@ -133,7 +133,7 @@ export default defineWorkflowTool({
         await postBrief(job.id);
       }
       yield {
-        status: statusLine(ref, preApproved ? "Starting scheduled run" : "Waiting for Start"),
+        status: statusLine(preApproved ? "Starting scheduled run" : "Waiting for Start"),
       };
       const decision = preApproved ? "approved" : await waitForStart(job.id, stopped, startWake);
       startWake.dispose();
@@ -146,9 +146,9 @@ export default defineWorkflowTool({
       // Decision 067: a job a person started moves into its own code channel, when that is on.
       // A scheduled check stays quiet in its thread.
       const inChannel = preApproved ? false : await toCodeChannel(job.id);
-      yield { status: statusLine(ref, `Launching ${workerNoun()} thread`) };
+      yield { status: statusLine(`Launching ${workerNoun()} thread`) };
       const threadId = await launch(job.id, callback.url);
-      yield { status: statusLine(ref, `${workerLabel()} thread started`) };
+      yield { status: statusLine(`${workerLabel()} thread started`) };
 
       let calledBack = false;
       for (;;) {
@@ -169,7 +169,7 @@ export default defineWorkflowTool({
         if (woke === "callback") calledBack = true;
 
         const result = await check(job.id, timing.verify, timing.write ?? false);
-        yield { status: statusLine(ref, result.summary) };
+        yield { status: statusLine(result.summary) };
 
         // The worker finished a code job. With SYM_VERIFIER=on, the `verifier` subagent checks
         // the result (flow 4, decisions 032 and 054). Then the `writer` subagent writes the one
@@ -179,13 +179,13 @@ export default defineWorkflowTool({
           // A run that started before the writer existed replays a timing with no `verify`; it
           // held the job in `checking` only for the verifier.
           if (timing.verify ?? true) {
-            yield { status: statusLine(ref, "Checking the result") };
+            yield { status: statusLine("Checking the result") };
             verdict = await runVerifier(ctx, job.id, stopped, timing.verifierMs);
           }
           const modelCheck = verdict === "stopped" ? undefined : verdict;
           let written: WriterOutput | undefined | "stopped";
           if (timing.write && timing.writerMs > 0 && verdict !== "stopped") {
-            yield { status: statusLine(ref, "Writing the result") };
+            yield { status: statusLine("Writing the result") };
             written = await runWriter(ctx, job.id, modelCheck, stopped, timing.writerMs);
           }
           // Stopped while checking or writing: the work is done, so it ends as done with what

@@ -102,7 +102,7 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
 
   it("refuses unknown, unlaunched, and finished jobs", async () => {
     const s = setup();
-    expect(await steerJob(s.deps, "J-999999", "go")).toContain("no job");
+    expect(await steerJob(s.deps, "J-999999", "go")).toContain("couldn't find that work");
 
     const unlaunched = await newJob("steer-unlaunched");
     expect(await steerJob(s.deps, `J-${unlaunched.id}`, "go")).toContain("not started");
@@ -127,7 +127,7 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
       lastMessage: '```json\n{"summary":"Finished work","tests":"passed"}\n```',
     });
     expect(await stopJob(s.deps, `J-${job.id}`)).toBe(
-      `J-${job.id} finished before I could stop it. I kept its result.`,
+      "This finished before I could stop it. I kept its result.",
     );
     expect((await getJob(ledger.sql(), job.id))?.status).toBe("done");
     expect(s.worker.interrupts).toEqual([]);
@@ -158,7 +158,7 @@ describe.skipIf(!hasDatabase)("steer and stop", () => {
     const answer = await stopJob(s.deps, `J-${job.id}`);
     const again = await stopJob(s.deps, `J-${job.id}`);
 
-    expect(answer).toBe(`Stopped J-${job.id}.`);
+    expect(answer).toBe("Stopped it.");
     expect(again).toContain("already finished");
     expect(s.worker.interrupts).toHaveLength(1);
     expect(s.posts().length - before).toBe(1);

@@ -23,10 +23,10 @@ const row: Schedule = {
 describe("schedule text", () => {
   it("writes one line per schedule", () => {
     expect(scheduleLine(row)).toBe(
-      "S-3: 0 9 * * 1-5 UTC - On-call check - active - next 2026-10-21T09:00:00.000Z",
+      "On-call check: 0 9 * * 1-5 UTC - active - next 2026-10-21T09:00:00.000Z",
     );
     expect(scheduleLine({ ...row, status: "paused", nextFireAt: null })).toBe(
-      "S-3: 0 9 * * 1-5 UTC - On-call check - paused",
+      "On-call check: 0 9 * * 1-5 UTC - paused",
     );
     expect(scheduleList([])).toBe("There are no schedules.");
     expect(scheduleList([row, { ...row, id: 4 }]).split("\n")).toHaveLength(2);

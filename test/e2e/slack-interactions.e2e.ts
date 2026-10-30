@@ -150,7 +150,7 @@ describe("job conversation", () => {
     await c.click(approval, "Start");
     const thread = await until(() => threadsOf(h, ref)[0], { label: "the worker" });
     await c.say(`fixture-stop ${ref}`);
-    const gate = await c.waitForControls(new RegExp(`Stop ${ref}\\?`));
+    const gate = await c.waitForControls(/Stop ".+"\? I.ll stop/);
     await c.click(gate, "Approve", OUTSIDER);
     await settle(h, 250);
     expect(thread.interrupts).toHaveLength(0);

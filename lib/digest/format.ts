@@ -1,5 +1,5 @@
+import { jobName, type NamedJob } from "../jobs/names.ts";
 import type { Job } from "../ledger/jobs.ts";
-import { jobRef } from "../ledger/jobs.ts";
 import type { RunOutcome } from "../schedules/rows.ts";
 
 // The daily digest text (docs/architecture.md, "Proactive updates"). The digest carries what the
@@ -12,7 +12,7 @@ export interface DigestRun {
 
 export interface DigestInput {
   day: string;
-  jobs: Pick<Job, "id" | "title" | "status">[];
+  jobs: (Pick<Job, "id" | "status"> & NamedJob)[];
   runs: DigestRun[];
 }
 
@@ -35,8 +35,7 @@ export function digestMessage(input: DigestInput): string | undefined {
   );
 
   const lines: string[] = [];
-  const describe = (list: typeof jobs) =>
-    list.map((job) => `${jobRef(job.id)} ${job.title}`).join(", ");
+  const describe = (list: typeof jobs) => list.map((job) => jobName(job)).join(", ");
   if (waiting.length)
     lines.push(`${describe(waiting)} ${waiting.length === 1 ? "needs" : "need"} you.`);
   if (failed.length) lines.push(`${describe(failed)} failed.`);

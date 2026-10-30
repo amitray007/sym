@@ -38,7 +38,7 @@ describe("escapeMrkdwn", () => {
 describe("resultMessage", () => {
   it("shows a short result, every concern and decision, and full facts", () => {
     const text = resultMessage(job, contract, ["No test covers <the> limit."]);
-    expect(text).toContain("Done with J-142: Added retry with backoff.");
+    expect(text).toContain("Added retry with backoff.");
     expect(text).toContain("No test covers &lt;the&gt; limit.");
     expect(text).toContain("Cap at 5 tries?");
     expect(text).toContain("tests passed (12 passed).");
@@ -90,13 +90,13 @@ describe("tldr", () => {
 describe("other messages", () => {
   it("keeps failures and blockers plain", () => {
     expect(failureMessage(job, "Build <broke>")).toContain(
-      "J-142 didn't finish. Build &lt;broke&gt;",
+      "This didn't finish. Build &lt;broke&gt;",
     );
-    expect(permissionBlockMessage("J-142")).toBe(
-      "J-142 is waiting on a permission in Worker. I can't approve that from Slack.",
+    expect(permissionBlockMessage("Billing sync retry")).toBe(
+      "Billing sync retry is waiting on a permission in Worker. I can't approve that from Slack.",
     );
     expect(failureMessage({ ref: "J-12", title: "Retry" })).toBe(
-      "J-12 didn't finish. The worker stopped without saying why; its thread has the log.",
+      "This didn't finish. The worker stopped without saying why; its thread has the log.",
     );
     expect(quietNotice(job, 45 * 60_000)).toContain(
       "for 45m. Want me to stop it? If not, I'll keep watching.",
@@ -149,8 +149,8 @@ describe("briefPrompt", () => {
     expect(text.match(/read-only/g)).toHaveLength(1);
   });
   it("gives full details on request", () => {
-    const text = fullBrief(brief, "J-142");
-    expect(text).toContain("J-142: add retries");
+    const text = fullBrief(brief);
+    expect(text).toContain("add retries");
     expect(text).toContain("I'll check: Tests pass");
     expect(text).not.toContain("☐");
   });

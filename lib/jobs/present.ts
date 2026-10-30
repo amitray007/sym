@@ -22,6 +22,7 @@ import {
   permissionBlockMessage,
   quietNotice,
 } from "./messages.ts";
+import { jobName, sentenceTitle } from "./names.ts";
 import type { ProgressEvent } from "./progress.ts";
 import {
   checkResult,
@@ -134,7 +135,7 @@ export async function presentStart(
     method: "chat.postMessage",
     payload: {
       ...target(withDisplay),
-      text: `I'm on ${jobRef(job.id)}: ${escapeMrkdwn(job.title)}.${modelNote ? `\n${modelNote}` : ""}`,
+      text: `On it: ${escapeMrkdwn(sentenceTitle(job.title))}.${modelNote ? `\n${modelNote}` : ""}`,
     },
     display,
   });
@@ -172,8 +173,8 @@ export async function presentProgress(
             { ...job, owner },
             `${ref}:permission:${step}`,
             owner
-              ? permissionBlockMessage(ref)
-              : `I need an owner configured before I can route ${ref}'s permission request privately.`,
+              ? permissionBlockMessage(jobName(job))
+              : "I need an owner configured before I can route this permission request privately.",
             true,
             quiet,
           );
@@ -273,7 +274,7 @@ async function presentEndOnce(
         ? resultPost(facts(job, now), contract, concerns, verdictLine(check, concerns))
         : job.status === "failed"
           ? failurePost(facts(job, now), job.lastSummary)
-          : { text: `Stopped ${ref}. I haven't checked or reverted its changes.`, blocks: [] };
+          : { text: "Stopped it. I haven't checked or reverted its changes.", blocks: [] };
   if (
     job.status === "done" &&
     written &&

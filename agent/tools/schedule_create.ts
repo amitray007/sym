@@ -8,7 +8,7 @@ import { allowedFromEnv, ledger, pack } from "../../lib/runtime.ts";
 import { nextFire } from "../../lib/schedules/cron.ts";
 import { scheduleLine } from "../../lib/schedules/format.ts";
 import { ScheduleInput } from "../../lib/schedules/input.ts";
-import { approveSchedule, createSchedule } from "../../lib/schedules/rows.ts";
+import { approveSchedule, createSchedule, scheduleRef } from "../../lib/schedules/rows.ts";
 
 // Creates a recurring job (docs/architecture.md, flow 2). The owner's approval of this call is
 // the approval for every fire, so the prompt shows the cron in UTC and the whole brief. The row
@@ -55,6 +55,9 @@ export default defineTool({
       owner: thread.userId,
     });
     const active = await approveSchedule(sql, created.id, thread.userId, new Date());
-    return active ? `Created ${scheduleLine(active)}` : "The schedule was not approved.";
+    return {
+      schedule: scheduleRef(created.id),
+      answer: active ? `Created ${scheduleLine(active)}` : "The schedule was not approved.",
+    };
   },
 });

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { briefsText, recentBriefs } from "../../lib/learning/repeat.ts";
 import { listPlaybooks } from "../../lib/learning/rows.ts";
+import { jobRef } from "../../lib/ledger/jobs.ts";
 import { mayDecideAsOwner, OWNER_ONLY, slackUserOfPrincipal } from "../../lib/owner.ts";
 import { ledger, pack } from "../../lib/runtime.ts";
 
@@ -33,6 +34,9 @@ export default defineTool({
       listPlaybooks(sql, "proposed"),
       listPlaybooks(sql, "approved"),
     ]);
-    return briefsText(briefs, [...approved, ...proposed]);
+    return {
+      answer: briefsText(briefs, [...approved, ...proposed]),
+      jobs: briefs.map((brief) => ({ ...brief, ref: jobRef(brief.id) })),
+    };
   },
 });

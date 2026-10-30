@@ -9,6 +9,7 @@ import type { WorkerAdapter } from "../workers/types.ts";
 import { callbackFor } from "./callback.ts";
 import { parseOutputContract } from "./contract.ts";
 import { retryClosures } from "./followup.ts";
+import { jobName } from "./names.ts";
 import {
   checkPrWakes,
   ensurePrWatched,
@@ -113,13 +114,14 @@ async function recoverAcceptedStarts(deps: JobDeps): Promise<void> {
     } catch (error) {
       if (!(error instanceof JobSetupError)) continue;
       await closeUnlaunched(deps, Number(row.id), error.message);
+      const job = await getJob(deps.sql, Number(row.id));
       await enqueuePost(deps.sql, {
         idempotencyKey: `${jobRef(Number(row.id))}:start-refused`,
         jobId: Number(row.id),
         method: "chat.postMessage",
         payload: {
           channel: row.decidedBy,
-          text: `I couldn't start ${jobRef(Number(row.id))}: ${error.message}`,
+          text: `I couldn't start ${job ? jobName(job) : "that work"}: ${error.message}`,
         },
         display: chooseDisplay({
           kind: "conversation",
@@ -268,7 +270,7 @@ async function markBack(deps: JobDeps, job: Job) {
     payload: {
       channel: job.slackChannel,
       ts: outage.slackTs,
-      text: `The ${workerNoun()} is back. I checked ${ref}: ${state}.`,
+      text: `The ${workerNoun()} is back. I checked this: ${state}.`,
     },
     display: outage.display,
   });

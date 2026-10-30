@@ -25,7 +25,7 @@ describe("working note", () => {
     expect(post.text).toContain(
       "Found the retry loop. Adding backoff. I'm leaving the webhook path alone.",
     );
-    expect(post.text).toContain("J-142 · 9m · Builder · PR #812");
+    expect(post.text).toContain("9m · Builder · PR #812");
     expect(post.blocks.map((b) => b.type)).toEqual(["section", "context"]);
     expect(JSON.stringify(post.blocks)).not.toMatch(/plan|actions|Stop|Steer/);
   });

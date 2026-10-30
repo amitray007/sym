@@ -21,6 +21,7 @@ import {
   startFollowUp,
 } from "../jobs/followup.ts";
 import { fullBrief } from "../jobs/messages.ts";
+import { jobName } from "../jobs/names.ts";
 import { refOfPrompt } from "../jobs/prompts.ts";
 import type { JobDeps } from "../jobs/run.ts";
 import { deliverNow } from "../jobs/run.ts";
@@ -82,7 +83,7 @@ export async function handleJobAction(
     const text = action.value?.trim() ?? "";
     if (!ref || !text || !action.messageTs) return undefined;
     const job = await getJobByRef(deps.sql, ref);
-    if (!job) return say(`There is no job ${ref}.`);
+    if (!job) return say("I couldn't find that work.");
     // The box's own message ts keys the request, so a repeated Enter sends once.
     const outcome =
       kind === "steer"
@@ -100,10 +101,10 @@ export async function handleJobAction(
       // The brief answers only in the channel where its button was posted: the job's own, or the
       // thread a job moved out of into a code channel (decision 067).
       if (!job || (job.slackChannel !== channel && job.originChannel !== channel)) {
-        return say(`There is no job ${ref}.`);
+        return say("I couldn't find that work.");
       }
       // fullBrief escapes the brief's text itself, so it skips `say`.
-      const text = fullBrief(Brief.parse(job.brief), ref);
+      const text = fullBrief(Brief.parse(job.brief));
       await reply(text);
       return text;
     }
@@ -121,7 +122,7 @@ export async function handleJobAction(
       return say(await closeJob(deps, ref, by));
     case LOOKS_GOOD_ACTION_ID: {
       const job = await getJobByRef(deps.sql, ref);
-      if (!job) return say(`There is no job ${ref}.`);
+      if (!job) return say("I couldn't find that work.");
       // One person's Looks good on one result counts once (the feedback table's unique index).
       await recordFeedback(deps.sql, {
         jobId: job.id,
@@ -131,7 +132,7 @@ export async function handleJobAction(
         channel,
         messageTs: action.messageTs ?? null,
       });
-      return say(`Thanks, I recorded your feedback on ${ref}.`);
+      return say("Thanks, I recorded your feedback.");
     }
     default:
       return undefined;
@@ -304,13 +305,14 @@ async function finishFollowupProposal(
     const queued = { ...rest, sql };
     await editProposal(queued, proposal, `<@${proposal.decidedBy}> chose: Start. ${reason}`);
     if (refused && notify && proposal.decidedBy) {
+      const job = await getJobByRef(sql, `J-${proposal.jobId}`);
       await enqueuePost(sql, {
         idempotencyKey: `proposal:${proposal.id}:refused`,
         jobId: proposal.jobId,
         method: "chat.postMessage",
         payload: {
           channel: proposal.decidedBy,
-          text: `I couldn't start the follow-up on J-${proposal.jobId}: ${reason}`,
+          text: `I couldn't start the follow-up on ${job ? jobName(job) : "that work"}: ${reason}`,
         },
         display: {
           ...chooseDisplay({

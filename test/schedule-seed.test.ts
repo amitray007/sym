@@ -62,7 +62,7 @@ describe.skipIf(!hasDatabase)("seedPackSchedules", () => {
     expect(posts).toHaveLength(1);
     const payload = posts[0]?.payload as { channel: string; text: string };
     expect(payload.channel).toBe("U0OWNER01");
-    expect(payload.text).toContain(`S-${row?.id}: Weekday check - 0 9 * * 1-5 UTC`);
+    expect(payload.text).toContain("Weekday check - 0 9 * * 1-5 UTC");
     expect(payload.text).toContain("approve");
     expect(posts[0]?.display).toMatchObject({ target: "dm" });
   });

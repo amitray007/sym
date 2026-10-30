@@ -4,6 +4,7 @@ import { createJob, getJob, updateJob } from "../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import {
   archiveCodeChannel,
+  codeChannelName,
   codeChannelsOn,
   jobOfCodeChannel,
   moveToCodeChannel,
@@ -20,6 +21,11 @@ describe("codeChannelsOn", () => {
     expect(codeChannelsOn({ SYM_CODE_CHANNELS: "on" })).toBe(true);
     expect(codeChannelsOn({ SYM_CODE_CHANNELS: " TRUE " })).toBe(true);
   });
+});
+
+it("names work without a ref, within the existing channel name limit", () => {
+  expect(codeChannelName({ id: 142, title: "Billing sync retry" })).toBe("Billing sync retry");
+  expect(codeChannelName({ id: 142, title: "x".repeat(100) })).toHaveLength(80);
 });
 
 // The real SlackApi against the fake Slack server, so each call crosses HTTP as in production.
@@ -41,7 +47,7 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
     vi.unstubAllEnvs();
   });
 
-  const newJob = async (channel = "C1") => {
+  const newJob = async (channel = "C1", title = "Add retries") => {
     counter += 1;
     const sessionId = `session-${counter}`;
     const sql = ledger.sql();
@@ -59,7 +65,7 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
       requestKey: `code-channel-${counter}`,
       sessionId,
       kind: "code-change",
-      title: "Add retries",
+      title,
       brief: { project: "example-app" },
       worker: "fake",
       slackChannel: channel,
@@ -82,6 +88,7 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
     const moved = await moveToCodeChannel({ sql, slack: api }, job);
 
     const channel = slack.codeChannels.at(-1);
+    expect(channel?.name).toBe("Add retries");
     expect(channel?.originChannel).toBe("C1");
     expect(channel?.originTs).toBe("1700000000.000200");
     expect(moved).toMatchObject({
@@ -89,13 +96,66 @@ describe.skipIf(!hasDatabase)("job code channels", () => {
       slackThreadTs: null,
       codeChannel: true,
     });
-    expect(channel?.contextBar).toEqual([
-      { key: "job", label: `J-${job.id}`, icon: "code" },
-      { key: "project", label: "example-app", icon: "folder" },
-    ]);
+    expect(channel?.contextBar).toEqual([{ key: "project", label: "example-app", icon: "folder" }]);
     expect(channel?.statuses).toEqual(["processing"]);
     expect(moved).toMatchObject({ originChannel: "C1", originThreadTs: "1700000000.000100" });
     expect((await jobOfCodeChannel(sql, channel?.id ?? ""))?.id).toBe(job.id);
+  });
+
+  it("retries a taken title once with a numeric suffix and preserves privacy and replay", async () => {
+    vi.stubEnv("SYM_CODE_CHANNELS", "on");
+    const sql = ledger.sql();
+    const job = await newJob("CPRIV", "x".repeat(80));
+    const before = slack.callsTo("agents.conversations.create").length;
+    slack.failNext("agents.conversations.create", "name_taken");
+    const moved = await moveToCodeChannel({ sql, slack: api }, job);
+    const creates = slack.callsTo("agents.conversations.create").slice(before);
+    expect(creates).toHaveLength(2);
+    expect(creates[0]?.body.name).toBe("x".repeat(80));
+    const suffix = ` #${job.id}`;
+    expect(creates[1]?.body).toEqual({
+      ...creates[0]?.body,
+      name: `${"x".repeat(80 - suffix.length)}${suffix}`,
+    });
+    expect(moved.codeChannel).toBe(true);
+    expect(slack.codeChannels.at(-1)?.isPrivate).toBe(true);
+    const replay = await moveToCodeChannel({ sql, slack: api }, job);
+    expect(replay.slackChannel).toBe(moved.slackChannel);
+  });
+
+  it("keeps the thread after a second collision, with no third create", async () => {
+    vi.stubEnv("SYM_CODE_CHANNELS", "on");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const job = await newJob();
+      const before = slack.callsTo("agents.conversations.create").length;
+      slack.failNext("agents.conversations.create", "name_taken");
+      slack.failNext("agents.conversations.create", "name_taken");
+      expect((await moveToCodeChannel({ sql: ledger.sql(), slack: api }, job)).codeChannel).toBe(
+        false,
+      );
+      expect(slack.callsTo("agents.conversations.create").slice(before)).toHaveLength(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not retry a permission or generic creation failure as a name collision", async () => {
+    vi.stubEnv("SYM_CODE_CHANNELS", "on");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (const code of ["restricted_action", "channel_creation_failed"]) {
+        const job = await newJob();
+        const before = slack.callsTo("agents.conversations.create").length;
+        slack.failNext("agents.conversations.create", code);
+        expect((await moveToCodeChannel({ sql: ledger.sql(), slack: api }, job)).codeChannel).toBe(
+          false,
+        );
+        expect(slack.callsTo("agents.conversations.create").slice(before)).toHaveLength(1);
+      }
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("reaches the same channel when a step replays with the job as it was", async () => {

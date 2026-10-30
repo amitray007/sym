@@ -297,7 +297,7 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
     expect(message).toContain(PR_NOT_ALLOWED);
     expect(message).toContain('<worker_result untrusted="true">');
 
-    const written = `hey, ${s.ref} is done: retry is in.`;
+    const written = "hey, retry is in.";
     await finishJob(s.deps, s.job.id, undefined, written);
 
     const post = s.added().find((c) => c.method === "chat.postMessage");
@@ -317,7 +317,8 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
 
     const posts = s.posts();
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain(`Done with ${s.ref}:`);
+    expect(posts[0]).toContain("Added retry with backoff.");
+    expect(posts[0]).not.toContain(s.ref);
   });
 
   it("posts the result with the rule checks when the model check was unavailable", async () => {
@@ -354,7 +355,8 @@ describe.skipIf(!hasDatabase)("checking a result", () => {
     expect(s.worker.interrupts).toEqual([]);
     const posts = s.posts();
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain(`Done with ${s.ref}:`);
+    expect(posts[0]).toContain("Added retry with backoff.");
+    expect(posts[0]).not.toContain(s.ref);
     expect(posts[0]).not.toContain("verifier");
   });
 

@@ -38,13 +38,13 @@ describe("wakeText", () => {
 
   it("links the PR and says the worker acts on a failure", () => {
     expect(wakeText(job, { number: 12, summary: "checks failed" })).toBe(
-      `J-7: <${PR}|PR #12>: checks failed.`,
+      `<${PR}|PR #12>: checks failed.`,
     );
   });
 
   it("reports passing checks without a promise of work", () => {
     expect(wakeText(job, { number: 12, summary: "checks passed" })).toBe(
-      `J-7: <${PR}|PR #12>: checks passed.`,
+      `<${PR}|PR #12>: checks passed.`,
     );
   });
 

@@ -422,7 +422,6 @@ export async function writerRequest(
   const brief = Brief.parse(job.brief);
   const started = job.startedAt ?? job.createdAt;
   return writerMessage({
-    ref: jobRef(job.id),
     title: job.title,
     project: brief.project,
     goal: brief.goal,
@@ -616,8 +615,8 @@ export async function endWithoutWorker(
   return toCheck(ended, []);
 }
 
-export function statusLine(ref: string, summary: string): string {
-  const line = `${ref}: ${summary.trim()}`;
+export function statusLine(summary: string): string {
+  const line = summary.trim();
   return line.length <= STATUS_LINE_MAX ? line : `${line.slice(0, STATUS_LINE_MAX - 1)}…`;
 }
 

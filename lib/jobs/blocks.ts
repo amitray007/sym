@@ -54,12 +54,9 @@ function textBlocks(text: string): Block[] {
   return blocks;
 }
 
-function meta(job: JobFacts): Block {
+function meta(job: JobFacts): Block[] {
   const time = duration(job);
-  return {
-    type: "context",
-    elements: [{ type: "mrkdwn", text: `${job.ref}${time ? ` · ${time}` : ""}` }],
-  };
+  return time ? [{ type: "context", elements: [{ type: "mrkdwn", text: time }] }] : [];
 }
 
 function resultActions(prUrl: string | null, ciUrl?: string): Block[] {
@@ -92,7 +89,7 @@ export function resultPost(
     text,
     blocks: [
       ...textBlocks(text),
-      meta(job),
+      ...meta(job),
       ...resultActions(contract?.prUrl ?? null, contract?.ciUrl),
       ...feedbackBlocks(),
     ],
@@ -109,7 +106,8 @@ export function writtenPost(
 ): BlockPost {
   const output = typeof written === "string" ? { text: written } : written;
   const body = defuse(output.text.slice(0, WRITTEN_MAX));
-  if (hasOutcomeClaim(body)) return resultPost(job, { ...contract, prUrl }, concerns, limitation);
+  if (/\b[JS]-\d+\b/i.test(body) || hasOutcomeClaim(body))
+    return resultPost(job, { ...contract, prUrl }, concerns, limitation);
   const tokens = resultTokens(contract, concerns, prUrl);
   const used = new Set<string>();
   const expanded = body.replace(/\{\{([a-z]+\d*)\}\}/g, (token, id: string) => {
@@ -148,7 +146,7 @@ export function writtenPost(
     text,
     blocks: [
       ...textBlocks(text),
-      meta(job),
+      ...meta(job),
       ...resultActions(prUrl, contract.ciUrl),
       ...feedbackBlocks(),
     ],
@@ -165,5 +163,5 @@ export function defuse(text: string): string {
 
 export function failurePost(job: JobFacts, reason?: string | null): BlockPost {
   const text = failureMessage(job, reason);
-  return { text, blocks: [...textBlocks(text), meta(job), ...feedbackBlocks()] };
+  return { text, blocks: [...textBlocks(text), ...meta(job), ...feedbackBlocks()] };
 }

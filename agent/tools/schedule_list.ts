@@ -2,7 +2,7 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { ledger } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
-import { listSchedules } from "../../lib/schedules/rows.ts";
+import { listSchedules, scheduleRef } from "../../lib/schedules/rows.ts";
 
 export default defineTool({
   description:
@@ -13,7 +13,7 @@ export default defineTool({
     const rows = await listSchedules(ledger());
     return {
       summary: scheduleList(rows),
-      schedules: rows,
+      schedules: rows.map((row) => ({ ...row, ref: scheduleRef(row.id) })),
       note: "Use these facts to answer naturally. Do not paste this return verbatim. Pending schedules need owner approval of the exact saved brief and frequency.",
     };
   },

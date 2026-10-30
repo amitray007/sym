@@ -4,7 +4,7 @@ import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { deliver } from "../../lib/delivery/deliver.ts";
 import { digestChannel } from "../../lib/digest/post.ts";
-import { playbookDetail } from "../../lib/learning/format.ts";
+import { jobEvidenceNames, playbookDetail } from "../../lib/learning/format.ts";
 import { proposeRepeated, queueRepeatNotice } from "../../lib/learning/repeat.ts";
 import {
   MAX_BODY_CHARS,
@@ -68,7 +68,7 @@ export default defineTool({
       }
       saved.push(row);
       lines.push(
-        `Proposed ${playbookRef(row.id)}. It loads only after the owner approves it.\n${playbookDetail(row)}`,
+        `Proposed ${playbookRef(row.id)}. It loads only after the owner approves it.\n${playbookDetail(row, await jobEvidenceNames(sql, row.evidence))}`,
       );
     }
     const target = digestChannel(pack()) ?? ownerUserId(pack());
