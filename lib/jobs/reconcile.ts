@@ -90,11 +90,18 @@ export async function reconcileJobs(deps: JobDeps): Promise<ReconcileReport> {
 async function recoverAcceptedStarts(deps: JobDeps): Promise<void> {
   await deps.sql`update job_proposals set status = 'expired'
     where status = 'pending' and expires_at <= now()`;
-  await deps.sql`update jobs set status = 'cancelled', finished_at = coalesce(finished_at, now())
+  const declined = await deps.sql<{ id: number }[]>`
+    update jobs set status = 'cancelled', finished_at = coalesce(finished_at, now())
     where status = 'launching' and worker_thread_id is null and (
       select p.status from job_proposals p where p.job_id = jobs.id and p.kind = 'start'
       order by p.id desc limit 1
-    ) in ('dismissed', 'expired')`;
+    ) in ('dismissed', 'expired')
+    returning id`;
+  // A job declined after its task ended leaves its code channel idle, not waiting (decision 077).
+  for (const row of declined) {
+    const job = await getJob(deps.sql, Number(row.id));
+    if (job?.codeChannel) await setChannelStatus(deps, job, "active");
+  }
   const rows = await deps.sql<{ id: number; decidedBy: string; callbackUrl: string }[]>`
     select j.id, p.decided_by, c.callback_url from jobs j
     join job_proposals p on p.job_id = j.id and p.kind = 'start' and p.status = 'approved'

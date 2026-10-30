@@ -238,6 +238,8 @@ export async function archiveCodeChannel(
 export function jobSessionStatus(job: Job): SessionStatus | undefined {
   if (!job.codeChannel) return undefined;
   if (job.archiveState === "archived") return "closed";
+  // A job proposed in its channel waits for Start there (decision 077).
+  if (job.status === "launching" && !job.workerThreadId) return "suspended";
   if (job.status === "waiting_input" || job.status === "waiting_permission") return "suspended";
   if (job.status === "done" || job.status === "failed" || job.status === "cancelled") {
     return "active";
