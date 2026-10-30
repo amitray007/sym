@@ -50,15 +50,12 @@ describe("code channel conversations", () => {
     expect(channel.archived).toBe(false);
     await clickCodeChannelClose(h, channel.id);
     await until(() => channel.archived || undefined, { label: "conversation archive" });
-    await until(
-      () =>
-        h.slack.messages.find(
-          (m) =>
-            m.channel === channel.id &&
-            messageText(m).includes("Closed this and archived its channel."),
-        ),
-      { label: "outbox close confirmation" },
-    );
+    // Slack refuses posts in an archived channel; the archive itself is the confirmation.
+    expect(
+      h.slack.messages.filter(
+        (m) => m.channel === channel.id && messageText(m).includes("archived its channel"),
+      ),
+    ).toHaveLength(0);
     expect(await h.sql`select id from jobs where slack_channel = ${channel.id}`).toHaveLength(0);
     expect(
       h.slack
