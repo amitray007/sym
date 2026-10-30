@@ -5,7 +5,7 @@ import { launchOrAdopt, startJob } from "../lib/jobs/run.ts";
 import { readJobThread } from "../lib/jobs/worker-calls.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { isSlackFileUrl, slackApiFromEnv } from "../lib/slack/eve-api.ts";
-import { sourceOf } from "../lib/slack/source-thread.ts";
+import { sourceOf, threadText } from "../lib/slack/source-thread.ts";
 import { t3Adapter } from "../lib/workers/t3/adapter.ts";
 import { connectT3, type T3Connection } from "../lib/workers/t3/client.ts";
 import { type FakeSlack, startFakeSlack } from "./fakes/slack-server.ts";
@@ -39,7 +39,7 @@ describe("the worker message", () => {
     });
     expect(message).toContain("Request details:\n- Store: example-store.example.com\n");
     expect(message).toContain("This job came from a Slack thread: https://example.slack.com/");
-    expect(message).toContain("Sym attached 2 images from that thread");
+    expect(message).toContain("Images people posted in that thread are attached");
     expect(message).toContain('call the sym_read_thread worker tool with job "J-7"');
   });
 
@@ -64,6 +64,12 @@ describe("Slack file downloads", () => {
     expect(isSlackFileUrl("http://127.0.0.1:9/files-pri/F1/a", "http://127.0.0.1:9/api/")).toBe(
       true,
     );
+  });
+
+  it("keeps a long message whole, so a detail at its end survives", () => {
+    const text = `${"log line\n".repeat(600)}error id ERR-12345`;
+    const out = threadText([{ ts: "1.1", author: "U1", bot: false, text, files: [] }]);
+    expect(out).toContain("error id ERR-12345");
   });
 
   it("prefers the origin thread of a job moved into a code channel", () => {
@@ -148,7 +154,7 @@ describe.skipIf(!hasDatabase)("the request thread over the wire", () => {
     const message = String(thread?.launch.message);
     expect(message).toContain("- Store: example-store.example.com");
     expect(message).toContain(`This job came from a Slack thread: http://127.0.0.1/archives/C1/p`);
-    expect(message).toContain("Sym attached the image from that thread");
+    expect(message).toContain("Images people posted in that thread are attached");
     // Only the person's image goes: not the PDF, not the bot's image.
     expect(thread?.launch.attachments).toEqual([
       { type: "image", id: "pending-1", name: "catalog.png", mimeType: "image/png", sizeBytes: 8 },

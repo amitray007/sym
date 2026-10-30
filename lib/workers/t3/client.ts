@@ -49,6 +49,7 @@ export async function connectT3(options: T3ConnectOptions): Promise<T3Connection
         method: "POST",
         headers: { "content-type": mimeType },
         body: bytes,
+        signal: AbortSignal.timeout(30_000),
       });
       if (!response.ok)
         throw new Error(`The ${workerNoun()} refused an upload: ${response.status}`);

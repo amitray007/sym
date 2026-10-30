@@ -32,6 +32,8 @@ export function slackApiFromEnv(env: NodeJS.ProcessEnv = process.env): SlackApi 
       const response = await fetch(url, {
         headers: { authorization: `Bearer ${botToken}` },
         redirect: "error",
+        // Launch waits on this under its lock, so a stalled download gives up.
+        signal: AbortSignal.timeout(30_000),
       });
       if (!response.ok) throw new Error(`Slack file download failed: ${response.status}`);
       // Slack answers a bad token with a sign-in page, not an error status.

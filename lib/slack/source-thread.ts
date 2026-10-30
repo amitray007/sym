@@ -10,9 +10,8 @@ import type { SlackApi } from "./api.ts";
 export const MAX_IMAGES = 8;
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
-// The thread text the worker can read in one call.
+// The thread messages the worker can read in one call.
 const MAX_MESSAGES = 100;
-const MAX_TEXT = 4000;
 
 export interface SourceThread {
   channel: string;
@@ -103,7 +102,7 @@ export function threadText(messages: ThreadMessage[]): string {
     .map((message) => {
       const who = `${message.bot ? "bot" : "user"} ${message.author}`;
       const files = message.files.map((file) => `[file: ${file.name}, ${file.mimeType}]`);
-      return [`[${message.ts}] ${who}:`, cut(message.text), ...files].filter(Boolean).join("\n");
+      return [`[${message.ts}] ${who}:`, message.text, ...files].filter(Boolean).join("\n");
     })
     .join("\n\n");
 }
@@ -128,8 +127,4 @@ function toMessage(raw: Record<string, unknown>): ThreadMessage {
       ];
     }),
   };
-}
-
-function cut(text: string): string {
-  return text.length <= MAX_TEXT ? text : `${text.slice(0, MAX_TEXT - 1)}…`;
 }
