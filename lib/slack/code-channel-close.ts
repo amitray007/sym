@@ -6,7 +6,7 @@ import { isSlackUserAllowed } from "./guard.ts";
 
 type Deps = LedgerDeps & {
   usersEnv?: string;
-  closeJob: (ref: string, by: string) => Promise<string>;
+  closeJob: (ref: string, by: string, options?: { summary?: string }) => Promise<string>;
 };
 
 // Conversation channels have no job to reconcile. Serialize their info/archive pair across
@@ -15,11 +15,12 @@ export async function closeCodeChannel(
   deps: Deps,
   channelId: string,
   by: string | undefined,
+  options: { summary?: string } = {},
 ): Promise<string> {
   if (!by || !isSlackUserAllowed(deps.pack, deps.usersEnv ?? process.env.SYM_SLACK_USERS, by))
     return "You are not on Sym's Slack allow-list.";
   const job = await jobOfCodeChannel(deps.sql, channelId);
-  if (job) return deps.closeJob(jobRef(job.id), by);
+  if (job) return deps.closeJob(jobRef(job.id), by, options);
   const slack = deps.slack;
   if (!slack) return "Slack is not configured.";
   const lock = await deps.sql.reserve();
@@ -33,7 +34,10 @@ export async function closeCodeChannel(
       return "This is not a code channel.";
     if (channel.is_archived) return "Already closed.";
     await slack.call("agents.conversations.archive", { channel_id: channelId });
-    return "Closed this and archived its channel.";
+    // A conversation channel stores no original thread, so a summary has nowhere to go.
+    return options.summary
+      ? "Closed this and archived its channel. I couldn't share the summary: Sym doesn't know the original thread of this channel."
+      : "Closed this and archived its channel.";
   } catch (error) {
     const code = error instanceof SlackApiError ? error.code : "unknown_error";
     if (code === "already_archived") return "Already closed.";

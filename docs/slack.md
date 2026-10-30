@@ -193,7 +193,7 @@ even when it mentions Sym. The channel uses the work's title alone. An explicit
 The card, result, and buttons post top-level in the channel.
 Worker questions post in the current job conversation, including code channels. The context bar
 shows its project, pull request, and a final Close channel action (decision 076). The channel's status follows the job. Everything said in the channel reaches Sym with no tag and is about that job.
-`job_close` requests settlement and archive, with the result shared in the original thread. A scheduled check, a job
+`job_close` requests settlement and archive. Slack labels the archived channel with the result, but posts nothing in the original thread. When the person asks for a summary there, `job_close` takes one and Sym posts it in the original thread before archiving (decision 078). A scheduled check, a job
 in a DM, and any job Slack refuses stay in their thread.
 
 A person can also ask Sym to move a conversation into a code channel. The brain's `code_channel`
