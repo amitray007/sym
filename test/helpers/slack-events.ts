@@ -81,6 +81,7 @@ export function appMentionRequest(
     text: string;
     ts: string;
     threadTs?: string;
+    blocks?: unknown[];
   },
 ): SlackRequestParts {
   const event: Record<string, unknown> = {
@@ -92,6 +93,7 @@ export function appMentionRequest(
     event_ts: input.ts,
   };
   if (input.threadTs) event.thread_ts = input.threadTs;
+  if (input.blocks) event.blocks = input.blocks;
   return jsonRequest(envelope(input, event), input.signingSecret, input.timestamp);
 }
 

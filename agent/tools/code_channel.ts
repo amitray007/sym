@@ -14,7 +14,7 @@ export default defineDynamic((ctx) => {
   return defineTool({
     description: [
       "Move this Slack conversation into a new code channel. Use it only when the person explicitly asks for a code channel.",
-      "Never use it on your own, not even for long or multi-step work. Coding work goes through worker_job: clicking Start moves the job into its own channel.",
+      "Never use it on your own, not even for long or multi-step work. Coding work goes through worker_job: it opens the job's own channel and asks for Start there.",
       "Call it once per request. Slack links the new channel here, so afterward reply in one short sentence at most.",
       "If it returns unavailable or refused, say why in the thread; do not retry.",
     ].join(" "),

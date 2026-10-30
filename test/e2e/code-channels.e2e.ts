@@ -4,17 +4,19 @@ import {
   briefMention,
   clickButton,
   clickCodeChannelClose,
+  clickControl,
   contractMessage,
   finishedSteps,
   type Harness,
   hitlControls,
   messageText,
   newConversation,
+  originQuoteInChannel,
+  proposeInCodeChannel,
   SAMPLE_CONTRACT,
   sayInChannel,
   settle,
   startHarness,
-  startJob,
   threadsOf,
   until,
   waitForJobStatus,
@@ -65,12 +67,11 @@ describe("code channel conversations", () => {
   });
   async function running(title: string) {
     const c = newConversation(h);
-    const { approval, job, ref } = await startJob(h, c, title);
-    await c.click(approval, "Start");
-    const channel = await until(
-      () => h.slack.codeChannels.find((cc) => cc.sessionId === `sym-${ref}`),
-      { label: "the code channel" },
-    );
+    const { approval, job, ref, channel } = await proposeInCodeChannel(h, c, title);
+    // The thread where the person asked keeps no brief and no Start (decision 077).
+    expect(c.botMessages().filter((m) => /Want me to start/.test(messageText(m)))).toEqual([]);
+    expect(channel.statuses).toContain("suspended");
+    await clickControl(h, approval, "Start");
     const thread = await until(() => threadsOf(h, ref)[0], { label: "the worker" });
     return { c, job, ref, channel, thread };
   }
@@ -95,6 +96,30 @@ describe("code channel conversations", () => {
         ),
       { label: "follow-up Start" },
     );
+
+  it("asks for Start in the code channel and leaves the channel idle after Not now", async () => {
+    const c = newConversation(h);
+    const { approval, job, channel } = await proposeInCodeChannel(h, c, "Declined job");
+    expect(c.botMessages().filter((m) => /Want me to start/.test(messageText(m)))).toEqual([]);
+    await clickControl(h, approval, "Not now");
+    await waitForJobStatus(h.sql, job.id, "cancelled");
+    await until(() => channel.statuses.at(-1) === "active" || undefined, {
+      label: "the channel to go idle",
+    });
+    expect(threadsOf(h, `J-${job.id}`)).toEqual([]);
+  });
+
+  it("does not propose the job again from Slack's quote of the origin message", async () => {
+    const { channel } = await running("Quoted job");
+    await originQuoteInChannel(h, channel.id, briefMention("Quoted job"));
+    // The fixture brain answers a brief mention within a second or two; give it ten.
+    const jobs = async () => h.sql`select id from jobs where title = 'Quoted job'`;
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline && (await jobs()).length === 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    expect(await jobs()).toHaveLength(1);
+  });
 
   it("keeps progress and results in the channel and confirms archive before reporting it", async () => {
     const { c, job, ref, channel, thread } = await running("Channel job");

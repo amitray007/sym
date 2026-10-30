@@ -53,6 +53,7 @@ import { SlackApiError } from "../../lib/slack/api.ts";
 import {
   codeChannelsOn,
   ensureConversationBar,
+  isOriginQuote,
   jobOfCodeChannel,
   jobSessionStatus,
   setChannelStatus,
@@ -558,6 +559,7 @@ export default slackChannel({
   // post, because the session already holds the rest (docs/eve.md, decision 050).
   threadContext: { since: isLastPostBoundary },
   async onAppMention(ctx, message) {
+    if (ctx.slack.codeChannel && isOriginQuote(message.raw)) return null;
     if (!fromAllowedHuman(message)) {
       await replyToStranger(ctx, message, "tag");
       return null;
@@ -594,6 +596,7 @@ export default slackChannel({
   // Replies in a thread that already has a session continue it without a new mention, when they
   // are meant for Sym. Side talk between people starts no turn (decision 050).
   async onMessage(ctx, message) {
+    if (ctx.slack.codeChannel && isOriginQuote(message.raw)) return null;
     if (!fromAllowedHuman(message)) {
       await replyToStranger(ctx, message, "thread");
       return null;

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { jobIdOfThread } from "../lib/feedback/feedback.ts";
-import { createJob, getJob, updateJob } from "../lib/ledger/jobs.ts";
+import { createJob, getJob, type Job, updateJob } from "../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import {
   archiveCodeChannel,
@@ -8,6 +8,7 @@ import {
   codeChannelsOn,
   ensureConversationBar,
   jobOfCodeChannel,
+  jobSessionStatus,
   moveToCodeChannel,
   setChannelStatus,
   setContextBar,
@@ -31,6 +32,18 @@ it("names work without a ref, within the existing channel name limit", () => {
 });
 
 // The real SlackApi against the fake Slack server, so each call crosses HTTP as in production.
+describe("jobSessionStatus", () => {
+  const base = { codeChannel: true, archiveState: null, workerThreadId: null } as const;
+  it("waits as suspended until Start, then follows the job", () => {
+    const status = (job: Record<string, unknown>) =>
+      jobSessionStatus({ ...base, ...job } as unknown as Job);
+    expect(status({ status: "launching" })).toBe("suspended");
+    expect(status({ status: "launching", workerThreadId: "t-1" })).toBe("processing");
+    expect(status({ status: "running", workerThreadId: "t-1" })).toBe("processing");
+    expect(status({ status: "cancelled" })).toBe("active");
+  });
+});
+
 describe.skipIf(!hasDatabase)("job code channels", () => {
   const ledger = useLedger();
   let slack: FakeSlack;

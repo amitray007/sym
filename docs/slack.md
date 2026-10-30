@@ -183,9 +183,12 @@ launches need approval.
 
 ## Code channels
 
-With `SYM_CODE_CHANNELS` on, a job a person starts moves from its thread into its own Slack code
-channel (decision 067, [slack-code.md](slack-code.md)). The brief and Start stay in the thread;
-Slack links the new channel there. The channel uses the work's title alone. An explicit
+With `SYM_CODE_CHANNELS` on, a job a person must start opens its own Slack code channel before
+its brief posts (decisions 067 and 077, [slack-code.md](slack-code.md)). The brief and Start post
+in the channel, and the channel waits as `suspended` until Start. The thread where the person
+asked shows only Slack's link to the channel. After Not now the channel stays open and idle.
+Slack's quote of the origin message in the new channel is context, not a request: Sym ignores it,
+even when it mentions Sym. The channel uses the work's title alone. An explicit
 `name_taken` response retries once with a numeric suffix such as `Billing sync retry #142`.
 The card, result, and buttons post top-level in the channel.
 Worker questions post in the current job conversation, including code channels. The context bar
