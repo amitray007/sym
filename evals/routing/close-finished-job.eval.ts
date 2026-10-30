@@ -7,7 +7,7 @@ export default defineEval({
   tags: ["routing"],
   async test(t) {
     const session = await t.session({ stubs: [...writeToolStubs] });
-    await session.send(afterFinishedJob("we're done here, close J-12"));
+    await session.send(afterFinishedJob("we're done here, close it"));
     t.succeeded();
     t.calledTool("job_close", { input: { ref: /^J-12$/i }, count: 1 });
     t.notCalledTool("worker_job");

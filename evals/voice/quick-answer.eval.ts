@@ -8,9 +8,11 @@ export default defineEval({
   tags: ["voice"],
   async test(t) {
     const session = await t.session({ stubs: [...writeToolStubs, statusStub] });
-    const turn = await session.send("Is J-12 still running? Just a quick answer.");
+    const turn = await session.send(
+      "Is the billing sync retry still running? Just a quick answer.",
+    );
     t.succeeded();
-    t.calledTool("jobs_status", { input: { job: /^J-12$/i }, count: 1 });
+    t.calledTool("jobs_status", { count: 1 });
     t.notCalledTool("worker_job");
     t.notCalledTool("offer_choices");
     t.check(turn.reply, satisfies(isQuickReply, "plain answer without a report or checklist"));

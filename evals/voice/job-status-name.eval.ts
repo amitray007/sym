@@ -23,7 +23,7 @@ export default defineEval({
         },
       ],
     });
-    const turn = await session.send("What's the update on J-142, the billing sync retry?");
+    const turn = await session.send("What's the update on the billing sync retry?");
     t.succeeded();
     t.calledTool("jobs_status");
     t.notCalledTool("worker_job");

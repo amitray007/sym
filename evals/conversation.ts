@@ -1,12 +1,15 @@
-// Replay the context Eve supplies on the first turn in an existing Slack thread. These are
-// test-owned snapshots, not instructions for the brain to repeat or facts about a live job.
+// Replay the context Eve supplies on the first turn in an existing Slack thread, plus the job
+// note the Slack channel adds there (agent/channels/slack.ts). These are test-owned snapshots,
+// not instructions for the brain to repeat or facts about a live job.
 export function afterFinishedJob(message: string): string {
   return `<slack_thread_context>
 <@UOWNER1>: In example-app, add retries and open a draft PR.
-<@UBOT>: J-12 is done. Draft PR #42: https://example.com/example-app/pull/42.
+<@UBOT>: Done. Draft PR #42: https://example.com/example-app/pull/42.
 Tests passed, including 4 new tests. Production is unchanged.
 One concern: retry waits can add 6 minutes to a full sync. The wait is not capped.
 </slack_thread_context>
+
+This conversation is about J-12 ("Add retries to example-app"), now done. Job and schedule references are handles for tools; never write them to people. Name the work in a few words, or say "this" here.
 
 ${message}`;
 }

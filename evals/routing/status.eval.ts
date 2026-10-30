@@ -3,7 +3,8 @@ import { includes } from "eve/evals/expect";
 import { statusStub, writeToolStubs } from "../stubs.ts";
 
 export default defineEval({
-  description: "A status question calls jobs_status with the job reference, not worker_job.",
+  description:
+    "A status question with a typed job reference calls jobs_status with it, not worker_job.",
   tags: ["routing"],
   async test(t) {
     const session = await t.session({ stubs: [...writeToolStubs, statusStub] });
@@ -11,6 +12,6 @@ export default defineEval({
     t.succeeded();
     t.calledTool("jobs_status", { input: { job: /^J-12$/i }, count: 1 });
     t.notCalledTool("worker_job");
-    t.check(turn.reply ?? "", includes(/J-12|running|step 3/i));
+    t.check(turn.reply ?? "", includes(/running|step 3/i));
   },
 });
