@@ -392,6 +392,33 @@ export async function sayInChannel(
   return message;
 }
 
+// The quote of the origin message Slack posts when it opens a code channel. It keeps the
+// origin's text, so a quoted mention arrives as an app_mention from the origin's author.
+export async function originQuoteInChannel(
+  h: Harness,
+  channel: string,
+  text: string,
+  user = OWNER,
+): Promise<FakeSlackMessage> {
+  const blocks = [
+    { type: "context", block_id: "agent_channel_origin_context", elements: [] },
+    { type: "section", text: { type: "mrkdwn", text } },
+  ];
+  const message = h.slack.addMessage({ channel, user, text, blocks });
+  await postSlack(
+    h,
+    appMentionRequest({
+      signingSecret: SIGNING_SECRET,
+      channel,
+      user,
+      text,
+      ts: message.ts,
+      blocks,
+    }),
+  );
+  return message;
+}
+
 // Clicks one of Sym's own buttons on a message anywhere, such as a result in a code channel,
 // which has no thread.
 export async function clickButton(

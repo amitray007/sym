@@ -257,3 +257,16 @@ function slackCode(error: unknown): string {
   if (error instanceof SlackApiError) return error.code;
   return error instanceof Error ? error.name : "unknown_error";
 }
+
+// When Slack opens a code channel it posts a quote of the origin message, with the origin's author
+// and text. A quoted mention of Sym then arrives as a new app_mention, and Eve 0.88 checks for
+// the quote only on plain channel messages. The quote is context, not a request.
+export function isOriginQuote(raw: Record<string, unknown>): boolean {
+  const blocks = raw.blocks;
+  return (
+    Array.isArray(blocks) &&
+    blocks.some((block) => (block as { block_id?: unknown })?.block_id === ORIGIN_QUOTE_BLOCK)
+  );
+}
+
+const ORIGIN_QUOTE_BLOCK = "agent_channel_origin_context";

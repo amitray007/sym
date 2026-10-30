@@ -10,6 +10,7 @@ import {
   hitlControls,
   messageText,
   newConversation,
+  originQuoteInChannel,
   SAMPLE_CONTRACT,
   sayInChannel,
   settle,
@@ -95,6 +96,18 @@ describe("code channel conversations", () => {
         ),
       { label: "follow-up Start" },
     );
+
+  it("does not propose the job again from Slack's quote of the origin message", async () => {
+    const { channel } = await running("Quoted job");
+    await originQuoteInChannel(h, channel.id, briefMention("Quoted job"));
+    // The fixture brain answers a brief mention within a second or two; give it ten.
+    const jobs = async () => h.sql`select id from jobs where title = 'Quoted job'`;
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline && (await jobs()).length === 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    expect(await jobs()).toHaveLength(1);
+  });
 
   it("keeps progress and results in the channel and confirms archive before reporting it", async () => {
     const { c, job, ref, channel, thread } = await running("Channel job");
