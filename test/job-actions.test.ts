@@ -575,12 +575,10 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       archiveError: null,
     });
     const archives = calls.filter((c) => c.method === "agents.conversations.archive");
-    const [end] = await sql<
-      { slackTs: string }[]
-    >`select slack_ts from outbox where idempotency_key = ${`${ref}:end`}`;
+    // Decision 079: no summary, so Slack labels nothing in the main thread.
     expect(archives.map((c) => c.body)).toEqual([
-      { channel_id: "C-code", summary_message_ts: end?.slackTs },
-      { channel_id: "C-code", summary_message_ts: end?.slackTs },
+      { channel_id: "C-code" },
+      { channel_id: "C-code" },
     ]);
     const [repaired] = await outbox(sql, `${ref}:archive-recovered`);
     expect(repaired?.payload).toMatchObject({ text: "I've archived this channel." });
