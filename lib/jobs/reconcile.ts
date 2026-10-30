@@ -108,7 +108,9 @@ async function recoverAcceptedStarts(deps: JobDeps): Promise<void> {
     try {
       const job = await getJob(deps.sql, Number(row.id));
       if (!job) continue;
-      await moveToCodeChannel(deps, job);
+      // A job proposed in its code channel is there already; it waited as suspended (decision 077).
+      if (job.codeChannel) await setChannelStatus(deps, job, "processing");
+      else await moveToCodeChannel(deps, job);
       await launchOrAdopt(deps, job.id, callbackFor(row.callbackUrl, process.env.SYM_CALLBACK_URL));
       await deps.sql`update jobs set watch_until = now() + interval '2 minutes' where id = ${job.id}`;
     } catch (error) {

@@ -37,14 +37,20 @@ async function originOf(sql: Sql, job: Job): Promise<string | null> {
   return job.slackThreadTs;
 }
 
-// Moves a started job into a new code channel. A job started inside a code channel, such as one
-// the `code_channel` tool opened, takes that channel instead of opening another (decision 068).
+// Moves a job into a new code channel before its brief posts, so the brief, Start, and the work
+// stay out of the thread it was asked in (decision 077). `status` is the channel's first status:
+// `suspended` while the job waits for Start. A job proposed inside a code channel, such as one the
+// `code_channel` tool opened, takes that channel instead of opening another (decision 068).
 // Returns the updated job, or the job unchanged when the feature is off, Slack is not configured,
 // the job is already moved, or the thread is a direct message or a Slack Connect channel. Any
 // Slack refusal also keeps the job in its thread. A private thread gets a private channel; one Slack opens as public anyway is
 // archived, as Eve does. A failed ledger write throws, so the step retries, and the retry reaches
 // the same channel through session_id.
-export async function moveToCodeChannel(deps: Deps, job: Job): Promise<Job> {
+export async function moveToCodeChannel(
+  deps: Deps,
+  job: Job,
+  status: SessionStatus = "processing",
+): Promise<Job> {
   if (!codeChannelsOn() || !deps.slack || job.codeChannel) return job;
   const slack = deps.slack;
   const channel = job.slackChannel;
@@ -56,7 +62,7 @@ export async function moveToCodeChannel(deps: Deps, job: Job): Promise<Job> {
     console.warn(`Sym kept ${jobRef(job.id)} in its thread.`, slackCode(error));
     return job;
   }
-  if (isCodeChannel(from)) return adoptCodeChannel(deps, job);
+  if (isCodeChannel(from)) return adoptCodeChannel(deps, job, status);
   const origin = await originOf(deps.sql, job);
   if (!origin) return job;
   let channelId: string;
@@ -100,16 +106,16 @@ export async function moveToCodeChannel(deps: Deps, job: Job): Promise<Job> {
     originThreadTs: job.slackThreadTs ?? origin,
   });
   await setContextBar(deps, moved);
-  await setChannelStatus(deps, moved, "processing");
+  await setChannelStatus(deps, moved, status);
   return moved;
 }
 
 // The job already lives in a code channel: it posts top-level there and keeps the channel's status
 // and context bar, with no origin thread of its own.
-async function adoptCodeChannel(deps: Deps, job: Job): Promise<Job> {
+async function adoptCodeChannel(deps: Deps, job: Job, status: SessionStatus): Promise<Job> {
   const adopted = await updateJob(deps.sql, job.id, { slackThreadTs: null, codeChannel: true });
   await setContextBar(deps, adopted);
-  await setChannelStatus(deps, adopted, "processing");
+  await setChannelStatus(deps, adopted, status);
   return adopted;
 }
 

@@ -125,6 +125,9 @@ export default defineWorkflowTool({
         ctx.session.id,
         job.id,
       );
+      // Decision 077: a job a person must start moves into its own code channel first, when that
+      // is on, so the brief and Start post there. A scheduled check stays quiet in its thread.
+      const inChannel = preApproved ? false : await toCodeChannel(job.id);
       if (preApproved) {
         // A scheduled check speaks only when something needs attention (decision 031).
         await markScheduled(job.id);
@@ -141,12 +144,10 @@ export default defineWorkflowTool({
       if (decision === "pending") return { job: ref, status: "awaiting_start", ...POSTED };
       if (decision !== "approved") {
         await closeBeforeStart(job.id, "Not started");
+        if (inChannel) await channelStatus(job.id, "active");
         return { job: ref, status: "cancelled" };
       }
-
-      // Decision 067: a job a person started moves into its own code channel, when that is on.
-      // A scheduled check stays quiet in its thread.
-      const inChannel = preApproved ? false : await toCodeChannel(job.id);
+      if (inChannel) await channelStatus(job.id, "processing");
       yield { status: statusLine(`Launching ${workerNoun()} thread`) };
       const threadId = await launch(job.id, callback.url);
       yield { status: statusLine(`${workerLabel()} thread started`) };
@@ -447,7 +448,7 @@ async function toCodeChannel(jobId: number): Promise<boolean> {
   "use step";
   const deps = ledgerDeps();
   const job = await getJob(deps.sql, jobId);
-  return job ? (await moveToCodeChannel(deps, job)).codeChannel : false;
+  return job ? (await moveToCodeChannel(deps, job, "suspended")).codeChannel : false;
 }
 
 // The code channel's status follows the job; at the end the context bar gains the pull request.

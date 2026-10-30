@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import postgres from "postgres";
 import { connect, type Sql } from "../../lib/db.ts";
-import { type Job, jobRef } from "../../lib/ledger/jobs.ts";
+import { getJob, type Job, jobRef } from "../../lib/ledger/jobs.ts";
 import { migrate } from "../../lib/ledger/migrate.ts";
 import { conversationBrain, conversationFixturePath } from "../fakes/conversation-brain.ts";
 import { type FakeSlack, type FakeSlackMessage, startFakeSlack } from "../fakes/slack-server.ts";
@@ -610,6 +610,59 @@ export async function startJob(h: Harness, c: Conversation, title: string) {
   const approval = await c.waitForControls(/Want me to start\?/);
   const job = await jobInThread(h.sql, c.channel, c.rootTs);
   return { approval, job, ref: jobRef(job.id) };
+}
+
+// With code channels on, a brief opens the job's code channel and asks for Start there
+// (decision 077). Returns the channel, its Start prompt, and the job.
+export async function proposeInCodeChannel(h: Harness, c: Conversation, title: string) {
+  await c.mention(briefMention(title));
+  const channel = await until(
+    () =>
+      h.slack.codeChannels.find((cc) => cc.originChannel === c.channel && cc.originTs === c.rootTs),
+    { label: "the code channel" },
+  );
+  const approval = await until(
+    (): HitlMessage | undefined => {
+      for (const message of h.slack.messages) {
+        if (message.channel !== channel.id) continue;
+        const controls = hitlControls(message.blocks ?? []);
+        if (controls.length > 0 && /Want me to start\?/.test(messageText(message))) {
+          return { message, controls };
+        }
+      }
+      return undefined;
+    },
+    { label: "Start in the code channel" },
+  );
+  const [row] = await h.sql<{ id: number }[]>`
+    select id from jobs where slack_channel = ${channel.id} order by id desc limit 1
+  `;
+  if (!row) throw new Error("no job in the code channel");
+  const job = await until(() => getJob(h.sql, Number(row.id)), { label: "the job" });
+  return { channel, approval, job, ref: jobRef(job.id) };
+}
+
+// Clicks a control on any of Sym's messages, such as Start in a code channel.
+export async function clickControl(h: Harness, hitl: HitlMessage, choice: string): Promise<void> {
+  const control = hitl.controls.find((c) => c.label === choice || c.value === choice);
+  if (!control) throw new Error(`no control ${choice}`);
+  await postSlack(
+    h,
+    blockActionsRequest({
+      signingSecret: SIGNING_SECRET,
+      channel: hitl.message.channel,
+      user: OWNER,
+      messageTs: hitl.message.ts,
+      ...(hitl.message.thread_ts ? { threadTs: hitl.message.thread_ts } : {}),
+      actionId: control.actionId,
+      actionType: control.type,
+      ...(control.value === undefined
+        ? {}
+        : control.selected
+          ? { selectedOptionValue: control.value }
+          : { value: control.value }),
+    }),
+  );
 }
 
 export function launchesOf(h: Harness, ref: string) {
