@@ -15,7 +15,9 @@ needs a new Slack scope, and a canvas holds text that people edit together.
    one; removal needs `bookmarks:read` to find the bookmark.
 3. `slack_canvas` writes Markdown to a channel's canvas. When the channel has no canvas, it
    creates one (`conversations.canvases.create`). Otherwise it adds to the end of the canvas
-   (`canvases.edit` with `insert_at_end`). It never replaces or deletes canvas content.
+   (`canvases.edit` with `insert_at_end`). It never replaces or deletes canvas content. When
+   someone creates the canvas first, Sym adds to theirs. A replayed call writes nothing, and one
+   write holds at most 2,800 characters, so the approval prompt shows all of it.
 4. All three follow the decision 081 checks. Bookmarks and canvases carry words into a channel,
    so they follow the decision 082 approval rules, and a canvas write counts toward the hourly
    post cap. After a `slack_read` in the same turn, they wait for approval too (decision 083).

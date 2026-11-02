@@ -18,7 +18,8 @@ export async function pinMessage(
 ): Promise<string> {
   const target = parseSlackTarget(link);
   if (!target?.messageTs) return "Give me a link to the message.";
-  if (!(await reachConversation(deps, requester, target.channel))) return UNREACHABLE;
+  const reached = await reachConversation(deps, requester, target.channel);
+  if (!reached || reached.isDirect) return UNREACHABLE;
   const code = await call(deps.slack as SlackApi, pin ? "pins.add" : "pins.remove", {
     channel: target.channel,
     timestamp: target.messageTs,

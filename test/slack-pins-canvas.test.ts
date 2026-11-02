@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { type SlackApi, SlackApiError } from "../lib/slack/api.ts";
 import { writeChannelCanvas } from "../lib/slack/canvas.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
 import { addBookmark, pinMessage } from "../lib/slack/pins.ts";
@@ -11,8 +12,12 @@ describe("pins and bookmarks", () => {
   let slack: FakeSlack;
   beforeAll(async () => {
     slack = await startFakeSlack({
-      channels: { C0OPS: { name: "ops" }, C0SECRET: { name: "secret" } },
-      members: { C0OPS: ["UASKER"], C0SECRET: [] },
+      channels: {
+        C0OPS: { name: "ops" },
+        C0SECRET: { name: "secret" },
+        G0GROUP: { is_private: true, is_mpim: true },
+      },
+      members: { C0OPS: ["UASKER"], C0SECRET: [], G0GROUP: ["UASKER"] },
     });
   });
   afterAll(async () => slack.close());
@@ -36,6 +41,8 @@ describe("pins and bookmarks", () => {
     expect(await pin(false)).toBe("It isn't pinned.");
     const secret = slack.addMessage({ channel: "C0SECRET", user: "UOTHER", text: "x" });
     expect(await pinMessage(deps(), "UASKER", link("C0SECRET", secret.ts), true)).toBe(UNREACHABLE);
+    const group = slack.addMessage({ channel: "G0GROUP", user: "UASKER", text: "y" });
+    expect(await pinMessage(deps(), "UASKER", link("G0GROUP", group.ts), true)).toBe(UNREACHABLE);
     vi.restoreAllMocks();
   });
 
@@ -95,6 +102,52 @@ describe.skipIf(!hasDatabase)("channel canvases", () => {
       | { operation: string }[]
       | undefined;
     expect(changes?.[0]?.operation).toBe("insert_at_end");
+  });
+
+  it("runs a replayed call once", async () => {
+    const edits = slack.callsTo("canvases.edit").length;
+    expect(await write("c-2")).toBe("That canvas write already ran.");
+    expect(slack.callsTo("canvases.edit").length).toBe(edits);
+  });
+
+  it("adds to a canvas someone else created first", async () => {
+    let infoCalls = 0;
+    const edits: unknown[] = [];
+    const racing: SlackApi = {
+      async call(method, body) {
+        if (method === "conversations.info") {
+          infoCalls += 1;
+          const canvas = infoCalls >= 3 ? { canvas: { file_id: "FTHEIRS" } } : {};
+          return { channel: { is_member: true, is_private: false, properties: canvas } };
+        }
+        if (method === "conversations.members") return { members: ["UASKER"] };
+        if (method === "conversations.canvases.create") {
+          throw new SlackApiError(method, "channel_canvas_already_exists");
+        }
+        if (method === "canvases.edit") edits.push(body);
+        return {};
+      },
+    };
+    expect(
+      await writeChannelCanvas(
+        { sql: ledger.sql(), slack: racing, usersEnv: "UASKER" },
+        {
+          sessionId: "s-1",
+          callId: "c-race",
+          requester: "UASKER",
+          target: "C0RACE",
+          markdown: "x",
+        },
+      ),
+    ).toBe("Added to the channel canvas.");
+    expect(edits).toEqual([
+      {
+        canvas_id: "FTHEIRS",
+        changes: [
+          { operation: "insert_at_end", document_content: { type: "markdown", markdown: "x" } },
+        ],
+      },
+    ]);
   });
 
   it("refuses a channel the requester is not in", async () => {

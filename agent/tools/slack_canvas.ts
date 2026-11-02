@@ -21,11 +21,15 @@ export default defineTool({
   }),
   approval: {
     request: ({ session, toolInput }) =>
-      postNeedsConfirmation(ledgerDeps(), session.id, toolInput?.target, toolInput?.markdown).then(
-        (ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable"),
-      ),
+      postNeedsConfirmation(
+        ledgerDeps(),
+        session.id,
+        toolInput?.target,
+        `${toolInput?.title ?? ""}\n${toolInput?.markdown ?? ""}`,
+      ).then((ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable")),
     response: requesterResponse("Only the person who asked can approve this canvas."),
-    prompt: ({ input }) => `Add this to the ${input.target} canvas?\n\n${input.markdown}`,
+    prompt: ({ input }) =>
+      `Add this to the ${input.target} canvas${input.title ? ` ("${input.title}")` : ""}?\n\n${input.markdown}`,
   },
   label: { start: () => "Write a canvas" },
   async execute({ target, markdown, title }, ctx) {

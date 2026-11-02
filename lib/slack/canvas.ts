@@ -1,13 +1,14 @@
 import type { Sql } from "../db.ts";
 import { type SlackApi, SlackApiError } from "./api.ts";
-import { OVER_CAP, reservePost } from "./own-posts.ts";
+import { isReserved, OVER_CAP, reservePost } from "./own-posts.ts";
 import { type ReachDeps, reachConversation, resolveTarget, UNREACHABLE } from "./reach.ts";
 
 // Writes to a channel's canvas on request (decision 084). Sym creates the canvas when the channel
 // has none, and otherwise adds to its end. It never replaces what people wrote there. Each write
 // counts toward the requester's hourly post cap.
 
-export const CANVAS_MAX = 20_000;
+// What an approval prompt can show in full.
+export const CANVAS_MAX = 2800;
 
 export interface CanvasInput {
   sessionId: string;
@@ -29,29 +30,18 @@ export async function writeChannelCanvas(
   if (!target) return UNREACHABLE;
   const reached = await reachConversation(deps, input.requester, target.channel);
   if (!reached || reached.isDirect) return UNREACHABLE;
-  const reserved = await reservePost(deps.sql, {
-    key: `slack-canvas:${input.sessionId}:${input.callId}`,
+  const key = `slack-canvas:${input.sessionId}:${input.callId}`;
+  // A canvas write has no outbox row, so a replayed call must not append again.
+  if (await isReserved(deps.sql, key)) return "That canvas write already ran.";
+  const reservation = {
+    key,
     channelId: target.channel,
     requester: input.requester,
     sessionId: input.sessionId,
-  });
-  if (!reserved) return OVER_CAP;
-  const content = { type: "markdown", markdown };
+  };
+  if (!(await reservePost(deps.sql, reservation))) return OVER_CAP;
   try {
-    const existing = await channelCanvasId(deps.slack, target.channel);
-    if (existing) {
-      await deps.slack.call("canvases.edit", {
-        canvas_id: existing,
-        changes: [{ operation: "insert_at_end", document_content: content }],
-      });
-      return "Added to the channel canvas.";
-    }
-    await deps.slack.call("conversations.canvases.create", {
-      channel_id: target.channel,
-      ...(input.title ? { title: input.title } : {}),
-      document_content: content,
-    });
-    return "Created the channel canvas.";
+    return await appendOrCreate(deps.slack, target.channel, markdown, input.title);
   } catch (error) {
     const code = error instanceof SlackApiError ? error.code : "unknown_error";
     console.warn(`Sym could not write a canvas: ${code}.`);
@@ -59,6 +49,43 @@ export async function writeChannelCanvas(
       return "This Slack plan doesn't allow channel canvases.";
     }
     return "Slack refused the canvas. Do not retry.";
+  }
+}
+
+// Adds to the channel's canvas, or creates it. When someone else creates it first, Sym adds to
+// theirs instead.
+async function appendOrCreate(
+  slack: SlackApi,
+  channel: string,
+  markdown: string,
+  title: string | undefined,
+): Promise<string> {
+  const content = { type: "markdown", markdown };
+  const append = (canvasId: string) =>
+    slack.call("canvases.edit", {
+      canvas_id: canvasId,
+      changes: [{ operation: "insert_at_end", document_content: content }],
+    });
+  const existing = await channelCanvasId(slack, channel);
+  if (existing) {
+    await append(existing);
+    return "Added to the channel canvas.";
+  }
+  try {
+    await slack.call("conversations.canvases.create", {
+      channel_id: channel,
+      ...(title ? { title } : {}),
+      document_content: content,
+    });
+    return "Created the channel canvas.";
+  } catch (error) {
+    if (!(error instanceof SlackApiError) || error.code !== "channel_canvas_already_exists") {
+      throw error;
+    }
+    const created = await channelCanvasId(slack, channel);
+    if (!created) throw error;
+    await append(created);
+    return "Added to the channel canvas.";
   }
 }
 
