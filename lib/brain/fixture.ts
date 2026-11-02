@@ -11,8 +11,8 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 //   schedule reference. A scheduled run that says "fixture-say" posts one line; any other run
 //   without a brief ends the turn with no_reply.
 // - A trigger run message reads only its instruction: a ```brief block calls worker_job with the
-//   trigger reference, "fixture-say" echoes the event's text, "fixture-post <target>" calls
-//   slack_post, "fixture-schedule" tries
+//   trigger reference, "fixture-say" echoes the event's text (a webhook's body), "fixture-post
+//   <target>" calls slack_post, "fixture-schedule" tries
 //   schedule_create, and anything else ends the turn with no_reply.
 // - A message that asks for an update or status calls jobs_status and repeats its answer.
 // - A message that says "sign in to the worker" calls worker_sign_in.
@@ -96,7 +96,7 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   // brief or "fixture-say" written in the event message drives nothing (decision 088).
   const trigger = /^Trigger run of (T-\d+):/m.exec(message)?.[1];
   if (trigger) {
-    const instruction = /^Instruction:\n([\s\S]*?)\n\nA Slack event started this run\./m.exec(
+    const instruction = /^Instruction:\n([\s\S]*?)\n\nA [^\n]*? started this run\./m.exec(
       message,
     )?.[1];
     const triggerBrief = briefIn(instruction ?? "");
@@ -123,7 +123,10 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
     }
     if (!/\bfixture-say\b/.test(instruction ?? "")) return quiet(request);
     const event = /^Event \(JSON data\):\n(.*)$/m.exec(message)?.[1] ?? "{}";
-    const text = (toolData(event) as { text?: string }).text ?? "";
+    const facts = toolData(event) as { text?: string; body?: unknown };
+    const text =
+      facts.text ??
+      (typeof facts.body === "string" ? facts.body : JSON.stringify(facts.body ?? ""));
     return `Fixture trigger run saw: ${text.slice(0, 200)}`;
   }
   if (brief) return { toolCalls: [{ name: "worker_job", input: brief }] };

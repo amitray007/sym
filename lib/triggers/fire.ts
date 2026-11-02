@@ -14,6 +14,7 @@ import {
   getTrigger,
   type RunTarget,
   reserveTriggerRun,
+  type SlackTriggerEvent,
   setRunTarget,
   type Trigger,
   type TriggerEvent,
@@ -90,7 +91,7 @@ export async function fireMessageTriggers(
   const triggers = (await watchingTriggers(deps.sql, input.channel, "message")).filter((t) =>
     matchesKeywords(input.text, t.keywords),
   );
-  const facts: TriggerEvent = {
+  const facts: SlackTriggerEvent = {
     kind: "message",
     channel: input.channel,
     ts: input.ts,
@@ -132,7 +133,7 @@ export async function fireReactionTriggers(
   if (!message || message.botId || (input.botUserId && message.user === input.botUserId)) {
     return [];
   }
-  const facts: TriggerEvent = {
+  const facts: SlackTriggerEvent = {
     kind: "reaction",
     channel: input.channel,
     ts: input.ts,
@@ -156,7 +157,7 @@ export async function fireReactionTriggers(
 async function fireAll(
   deps: FireDeps,
   triggers: Trigger[],
-  facts: TriggerEvent,
+  facts: SlackTriggerEvent,
   eventKey: string,
   send: SendRun,
   options: { deferElsewhere: boolean },
@@ -202,15 +203,20 @@ export async function sendDeferredRuns(
 }
 
 // The runs carry the creator's consent, and reach only what the creator reaches (decision 081):
-// the creator must still be allowed and still be a member of the watched channel. A failed
-// check, or no Slack to ask, fails closed.
-async function creatorMayRun(deps: FireDeps, trigger: Trigger): Promise<boolean> {
+// the creator must still be allowed, and still a member of the watched channel. A trigger that
+// watches no channel, such as a webhook (decision 090), checks its destination instead: the
+// creator's own DM, or a channel they are still in. A failed check, or no Slack to ask, fails
+// closed.
+export async function creatorMayRun(deps: FireDeps, trigger: Trigger): Promise<boolean> {
   const usersEnv = deps.usersEnv ?? process.env.SYM_SLACK_USERS;
   if (!isSlackUserAllowed(deps.pack, usersEnv, trigger.owner, () => {})) return false;
+  const conversation = trigger.channel ?? trigger.destination;
+  if (!conversation) return false;
+  if (!trigger.channel && conversation.startsWith("D")) return true;
   const reached = await reachConversation(
     { slack: deps.slack, pack: deps.pack, usersEnv },
     trigger.owner,
-    trigger.channel,
+    conversation,
   );
   return reached !== undefined;
 }
@@ -220,7 +226,7 @@ async function creatorMayRun(deps: FireDeps, trigger: Trigger): Promise<boolean>
 async function fire(
   deps: FireDeps,
   trigger: Trigger,
-  facts: TriggerEvent,
+  facts: SlackTriggerEvent,
   eventKey: string,
   options: { deferElsewhere: boolean; send: SendRun },
 ): Promise<string> {
@@ -263,7 +269,8 @@ async function fire(
   return sent ? "sent" : "failed";
 }
 
-async function sendRun(
+// Starts one reserved run. False when the send failed; the run then ends `failed`.
+export async function sendRun(
   deps: FireDeps,
   trigger: Trigger,
   runId: number,

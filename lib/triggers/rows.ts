@@ -2,17 +2,19 @@ import type { Sql } from "../db.ts";
 import { json } from "../ledger/jobs.ts";
 import type { BuilderMode, ScheduleRun } from "../schedules/rows.ts";
 
-// Event trigger rows (docs/architecture.md, flow 2b; decision 088). A trigger holds an
-// instruction for the brain, like a schedule, and fires on a Slack event in its watched channel.
-// The person who set it up consented to its runs, so a new row is active at once.
+// Event trigger rows (docs/architecture.md, flow 2b; decisions 088 and 090). A trigger holds an
+// instruction for the brain, like a schedule, and fires on a Slack event in its watched channel or
+// on a signed request to its webhook URL. The person who set it up consented to its runs, so a
+// new row is active at once.
 
-export type TriggerKind = "message" | "reaction";
+export type TriggerKind = "message" | "reaction" | "webhook";
 export type TriggerStatus = "active" | "paused" | "deleted";
 
 export interface Trigger {
   id: number;
   kind: TriggerKind;
-  channel: string;
+  // The watched Slack channel. Null for a webhook trigger.
+  channel: string | null;
   keywords: string[];
   emoji: string | null;
   title: string;
@@ -22,17 +24,38 @@ export interface Trigger {
   destination: string | null;
   owner: string;
   status: TriggerStatus;
+  // A webhook trigger: the unguessable ID in its URL, and the version its secret derives from.
+  hookId: string | null;
+  secretVersion: number;
   createdAt: Date;
 }
 
 export type NewTrigger = Pick<
   Trigger,
   "kind" | "channel" | "keywords" | "emoji" | "title" | "instruction" | "builder" | "destination"
-> & { owner: string };
+> & { owner: string; hookId?: string | null };
 
-// The facts of the Slack event that fired a run. They are untrusted data for the brain.
-export interface TriggerEvent {
-  kind: TriggerKind;
+// The facts of the event that fired a run. They are untrusted data for the brain.
+export type TriggerEvent = SlackTriggerEvent | WebhookTriggerEvent;
+
+// A signed request to a webhook trigger's URL (decision 090). Anyone holding the URL and the
+// secret could have sent it, so every field is data.
+export interface WebhookTriggerEvent {
+  kind: "webhook";
+  // The request's media type, without parameters.
+  contentType: string | null;
+  // The parsed JSON body, or the body as text when it is not JSON.
+  body: unknown;
+  // True when the body was cut to fit the run message.
+  truncated: boolean;
+  // The sender's delivery ID header, when it sent one.
+  delivery: string | null;
+  receivedAt: string;
+}
+
+// A Slack message or reaction in a watched channel (decision 088).
+export interface SlackTriggerEvent {
+  kind: "message" | "reaction";
   channel: string;
   // The event message and its thread root.
   ts: string;
@@ -65,10 +88,11 @@ export function parseTriggerRef(ref: string): number | undefined {
 export async function createTrigger(sql: Sql, input: NewTrigger): Promise<Trigger> {
   const [row] = await sql<Trigger[]>`
     insert into triggers (
-      kind, channel, keywords, emoji, title, instruction, builder, destination, owner
+      kind, channel, keywords, emoji, title, instruction, builder, destination, owner, hook_id
     ) values (
       ${input.kind}, ${input.channel}, ${input.keywords}, ${input.emoji}, ${input.title},
-      ${input.instruction}, ${input.builder}, ${input.destination}, ${input.owner}
+      ${input.instruction}, ${input.builder}, ${input.destination}, ${input.owner},
+      ${input.hookId ?? null}
     )
     returning *
   `;
@@ -78,6 +102,29 @@ export async function createTrigger(sql: Sql, input: NewTrigger): Promise<Trigge
 
 export async function getTrigger(sql: Sql, id: number): Promise<Trigger | undefined> {
   const [row] = await sql<Trigger[]>`select * from triggers where id = ${id}`;
+  return row ? normalize(row) : undefined;
+}
+
+// The webhook trigger behind a URL, unless it was deleted.
+export async function getWebhookTrigger(sql: Sql, hookId: string): Promise<Trigger | undefined> {
+  const [row] = await sql<Trigger[]>`
+    select * from triggers where hook_id = ${hookId} and kind = 'webhook' and status <> 'deleted'
+  `;
+  return row ? normalize(row) : undefined;
+}
+
+// Rotates a webhook trigger's secret: the next version derives a new one, and the old one stops
+// working at once. Only the creator may rotate, because the new secret goes to whoever asked.
+export async function rotateWebhookSecret(
+  sql: Sql,
+  id: number,
+  owner: string,
+): Promise<Trigger | undefined> {
+  const [row] = await sql<Trigger[]>`
+    update triggers set secret_version = secret_version + 1
+    where id = ${id} and kind = 'webhook' and owner = ${owner} and status <> 'deleted'
+    returning *
+  `;
   return row ? normalize(row) : undefined;
 }
 
@@ -276,6 +323,25 @@ export async function isTriggerRunSession(
   return false;
 }
 
+// Claims one deferred run for an immediate send, such as a webhook run right after Sym accepted
+// its request (decision 090), with the same lease the dispatcher takes. The dispatcher claims the
+// same rows, so only one of them sends it; if this send never ends, the lease runs out and the
+// dispatcher sends it with the same delivery key.
+export async function claimDeferredRun(
+  sql: Sql,
+  runId: number,
+  now: Date,
+  leaseMs = 2 * 60_000,
+): Promise<TriggerRun | undefined> {
+  const until = new Date(now.getTime() + leaseMs);
+  const [row] = await sql<TriggerRun[]>`
+    update schedule_runs set deferred_until = ${until}
+    where id = ${runId} and deferred and (deferred_until is null or deferred_until < ${now})
+    returning *
+  `;
+  return row ? normalizeRun(row) : undefined;
+}
+
 // True for a thread whose only session is a trigger run that stayed silent and that no person has
 // talked to Sym in. Replies there are people's own talk, so they start no turn; a mention still
 // does.
@@ -297,7 +363,13 @@ export async function isSilentRunThread(
 }
 
 function normalize(row: Trigger): Trigger {
-  return { ...row, id: Number(row.id), keywords: row.keywords ?? [] };
+  return {
+    ...row,
+    id: Number(row.id),
+    keywords: row.keywords ?? [],
+    hookId: row.hookId ?? null,
+    secretVersion: Number(row.secretVersion ?? 1),
+  };
 }
 
 function normalizeRun(row: TriggerRun): TriggerRun {

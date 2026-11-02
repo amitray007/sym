@@ -43,8 +43,8 @@ worker models, the project allow-list, the worker label, owner-managed MCP conne
 shared-thread manners, stranger replies, results written in the persona's voice, and opt-in Slack
 code channels for started jobs, conversational working notes and results, stored choices,
 follow-up proposals, recoverable closure, explicit consent before Builder work, event triggers on
-new messages and reactions, the "Send to Sym" message shortcut, and an opt-in sandbox for the
-brain's shell and file tools.
+new messages and reactions, the "Send to Sym" message shortcut, an opt-in sandbox for the
+brain's shell and file tools, and signed webhook triggers.
 
 ## Commands
 

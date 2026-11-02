@@ -9,6 +9,7 @@ import {
 import type { TriggerInput } from "./input.ts";
 import { normalizeEmoji } from "./match.ts";
 import { createTrigger, type Trigger } from "./rows.ts";
+import { newHookId, WEBHOOKS_OFF, webhookKey } from "./webhook.ts";
 
 // Sets up an event trigger (decision 088). Slack sends Sym events only from channels it is in,
 // so the watched channel must be one that the person and Sym both belong to, checked the way the
@@ -26,7 +27,9 @@ type SetupDeps = ReachDeps & { sql: Sql };
 export async function setUpTrigger(
   deps: SetupDeps,
   input: TriggerInput & { requester: string; current: string | undefined },
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ trigger: Trigger } | { refusal: string }> {
+  if (input.on === "webhook") return setUpWebhook(deps, input, env);
   const emoji = input.emoji ? normalizeEmoji(input.emoji) : "";
   if (input.on === "reaction" && !emoji) return { refusal: "Name the emoji to watch for." };
   const watched = await watchedChannel(deps, input.channel, input.current);
@@ -54,6 +57,37 @@ export async function setUpTrigger(
     builder: input.builder,
     destination,
     owner: input.requester,
+  });
+  return { trigger };
+}
+
+// A webhook trigger (decision 090) watches no channel. Its runs post in this conversation, a DM
+// with the person, or another channel the person and Sym share, as for schedules. Each run
+// starts a new thread there, because a request has no Slack thread of its own.
+async function setUpWebhook(
+  deps: SetupDeps,
+  input: TriggerInput & { requester: string; current: string | undefined },
+  env: NodeJS.ProcessEnv,
+): Promise<{ trigger: Trigger } | { refusal: string }> {
+  if (!webhookKey(env)) return { refusal: WEBHOOKS_OFF };
+  const wanted = input.destination?.trim();
+  const resolved = await scheduleDestination(deps, {
+    requester: input.requester,
+    current: input.current,
+    destination: wanted && wanted.toLowerCase() !== "thread" ? wanted : undefined,
+  });
+  if ("refusal" in resolved) return resolved;
+  const trigger = await createTrigger(deps.sql, {
+    kind: "webhook",
+    channel: null,
+    keywords: [],
+    emoji: null,
+    title: input.title,
+    instruction: input.instruction,
+    builder: input.builder,
+    destination: resolved.channel,
+    owner: input.requester,
+    hookId: newHookId(),
   });
   return { trigger };
 }

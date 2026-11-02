@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// The trigger_create tool input (decision 088).
+// The trigger_create tool input (decisions 088 and 090).
 export const TriggerInput = z.object({
   title: z.string().min(3).max(80).describe("Short name, for example 'Bug report triage'."),
   instruction: z
@@ -12,15 +12,19 @@ export const TriggerInput = z.object({
         "channels, people, links. Each run reads only this text and the event.",
     ),
   on: z
-    .enum(["message", "reaction"])
+    .enum(["message", "reaction", "webhook"])
     .describe(
       "'message': a new top-level message in the channel. 'reaction': someone adds the emoji " +
-        "to a message in the channel.",
+        "to a message in the channel. 'webhook': a signed HTTP request to the trigger's own " +
+        "URL; Sym DMs the person the URL and secret.",
     ),
   channel: z
     .string()
     .optional()
-    .describe("The channel to watch: an ID, mention, link, or #name. Default: this channel."),
+    .describe(
+      "For 'message' and 'reaction': the channel to watch, as an ID, mention, link, or #name. " +
+        "Default: this channel.",
+    ),
   keywords: z
     .array(z.string().min(1).max(40))
     .max(10)
@@ -46,7 +50,8 @@ export const TriggerInput = z.object({
     .optional()
     .describe(
       "Where runs post: 'thread' (default) for the event message's thread, 'dm' for a DM with " +
-        "the person who set it up, or a channel ID, mention, or link.",
+        "the person who set it up, or a channel ID, mention, or link. A webhook has no event " +
+        "thread: its default is this conversation, and each run starts a new thread.",
     ),
 });
 export type TriggerInput = z.infer<typeof TriggerInput>;

@@ -10,6 +10,7 @@
  │ Sym: Eve app (Node 24, one replica)  │ ──────────────▶ │  Claude Code / Codex      │
  │  channels/slack.ts   talk, buttons   │                 │  threads in your repos    │
  │  channels/mcp.ts     workers call in │ ◀────────────── │                           │
+ │  channels/webhook.ts signed webhooks │                 │                           │
  │  tools/worker_job.ts     one job = task  │  callback URL   └───────────────────────────┘
  │  schedules/dispatch  owner schedules │
  │  schedules/reconcile safety net      │        Postgres
@@ -28,8 +29,9 @@
 | Outbox | Durable Slack posts with an idempotency key per post |
 | Sandbox | Opt-in (`SYM_SANDBOX`). One limited Docker container per Slack thread for the brain's shell and file tools: compute, shared files, small scripts. No secrets, no repository credentials, no network by default. Repository work stays with workers (decision 089) |
 
-Only the Slack route is public. The MCP channel, the HTTP channel, and the worker stay on a
-private network such as a tailnet ([self-hosting.md](self-hosting.md)).
+Only the Slack route, the workflow webhooks, and the webhook trigger route (`/sym/hooks/`) are
+public. The MCP channel, the HTTP channel, and the worker stay on a private network such as a
+tailnet ([self-hosting.md](self-hosting.md)).
 
 ## The job ledger
 
@@ -161,6 +163,36 @@ Example: "When someone posts a bug report in #support, draft a ticket in its thr
 message, quoting it and asking what to do. The person's reply in that thread is their own
 request. Eve's shortcut handler cannot start a session, so the reply starts it (decision 088).
 
+## Flow 2c: a webhook trigger fires
+
+Example: "When our deploy tool reports a failure, summarize it in #ops."
+
+1. A person on the allow-list says it once. Sym calls `trigger_create` with `on: webhook`, the
+   instruction, and an optional destination: this conversation (the default), a channel the
+   person and Sym share, or the creator's DM. The row gets an unguessable hook ID and is active
+   at once. It stores no secret.
+2. Sym posts the URL, `<public base>/sym/hooks/<hook id>`, and the signing secret straight to the
+   creator's DM, once. The secret derives from `SYM_WEBHOOK_KEY`, the hook ID, and the secret
+   version, so Sym never stores it; the post skips the outbox, so it never lands in Postgres.
+   The tool result, `trigger_list`, logs, and channels carry the URL at most.
+3. The sender POSTs with `x-sym-timestamp` (Unix seconds) and `x-sym-signature`
+   (`sha256=` plus the hex HMAC-SHA256 of `<timestamp>.<raw body>`), and an optional
+   `x-sym-delivery` ID. The route `channels/webhook.ts` reads at most 64 KiB, checks the
+   signature in constant time and the timestamp within 5 minutes, and refuses a paused trigger
+   or a creator off the allow-list or out of the destination channel.
+4. Sym reserves one `schedule_runs` row keyed by the delivery ID, else by the signature, so a
+   retry or a replay fires nothing. The hourly cap of flow 2b applies (429 past it). The row is
+   deferred; the route answers 202, then takes the dispatcher's 2-minute lease on the row and
+   sends the run with `to()` as the app principal into a new thread at the destination. If that
+   send never ends, the next `dispatch` tick after the lease sends it with the same key. Every
+   turn of the run's session counts as having read untrusted content (flow 2b).
+5. The run message carries the instruction and the request's facts (media type, delivery ID,
+   time, and the body: JSON parsed, else text, cut at 8,000 characters) as JSON data that grants
+   nothing. Steps 4 to 5 of flow 2 apply: the run acts for the creator, and `worker_job` skips
+   Start only for an active `auto` trigger whose run this session is.
+6. `trigger_rotate_secret` bumps the secret version for the creator only, so the old secret
+   stops at once, and DMs the new one (decision 090).
+
 ## Flow 3: watching a running job
 
 ```
@@ -269,3 +301,5 @@ The digest, when it is on, carries the rest. The digest, the verifier, and PR fo
 | Prompt injection from untrusted text | Bad actions | Reading sessions get no write tools. Writes need approval. The sandbox holds no secrets and has no network by default, so injected commands there reach nothing outside it |
 | Busy watched channel | Many trigger runs, model spend | Keywords narrow the events; each trigger starts at most `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour; a Slack retry finds its run |
 | Sandbox unavailable (sandbox off, no Docker socket, daemon down) | Shell and file tools fail | Each tool returns a short error and the turn continues. Shared files reach the brain as a note with their name (decision 089) |
+| Leaked webhook secret | Anyone can start runs that act for the creator | Signatures expire after 5 minutes and each request fires once; the hourly cap bounds spend; the creator rotates the secret or pauses the trigger |
+| Webhook sender floods the URL | Load on the public route | Unsigned requests stop at the signature check before any model work; bodies over 64 KiB get 413 |

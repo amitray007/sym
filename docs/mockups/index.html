@@ -797,6 +797,52 @@ footer p + p { margin-top: 8px; }
         <p class="ctxline">The DM needs no membership in the message's channel and shows nothing there. The reply is Sam's own request.</p>
       </div>
     </div>
+
+    <div class="scene" id="webhook-triggers">
+      <div class="slack">
+        <div class="sl-top"><b># ops</b><span>Channel</span></div>
+        <div class="sl-body">
+          <div class="msg thread-root"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>11:20</time></div><div class="mt"><span class="mention">@Sym</span> when the deploy tool reports a failed deploy, post a short summary here and say if someone needs to look</div></div></div>
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>11:20</time></div>
+            <div class="mt"><p>Done. I sent you the webhook URL and its signing secret in a DM. Point the deploy tool at it, and each failed deploy gets a summary here.</p></div></div></div>
+        </div>
+      </div>
+      <div class="notes">
+        <h3>Setting up a webhook trigger</h3>
+        <p class="muted">A webhook trigger runs an instruction when another system POSTs a signed request to its own URL (decision 090). Anyone on the allow-list sets one up; there is no owner approval.</p>
+        <ul>
+          <li>The secret goes only to the creator's DM, once. The channel, the tool result, and the trigger list never show it.</li>
+          <li>Each request carries a timestamp and an HMAC signature over the timestamp and body. A stale, forged, or replayed request starts nothing.</li>
+          <li>Runs post in this conversation unless the person names a channel or a DM. Each run starts a new thread.</li>
+          <li>Only the creator can rotate the secret. The old one stops at once.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="pair">
+      <div>
+        <p class="label">The secret, once, in the creator's DM</p>
+        <div class="slack">
+          <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+          <div class="sl-body">
+            <div class="msg thread-root"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>11:20</time></div>
+              <div class="mt"><p>Webhook for <b>Failed deploys</b>. I show this secret once.</p><p>URL: <span class="sl-link">https://sym.example.com/sym/hooks/q3V9…</span><br>Secret: <code>whsec_••••••••••••</code></p><p>Sign each POST: <code>x-sym-timestamp</code> is the Unix time in seconds, and <code>x-sym-signature</code> is <code>sha256=</code> plus the hex HMAC-SHA256 of <code>&lt;timestamp&gt;.&lt;raw body&gt;</code>.</p><p>Keep the secret out of Slack threads. If it leaks, ask me to rotate it.</p></div></div></div>
+          </div>
+        </div>
+        <p class="ctxline">The post goes straight to Slack, so the secret is never stored in Sym's database.</p>
+      </div>
+      <div>
+        <p class="label">A webhook run posts a new thread in its destination</p>
+        <div class="slack">
+          <div class="sl-top"><b># ops</b><span>Channel</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>16:05</time></div>
+              <div class="mt"><p><b>The example-app deploy failed</b> at the migration step: a column already exists. Production stayed on the previous release. <span class="mention">@Sam</span>, someone should look before the next deploy.</p></div></div></div>
+          </div>
+        </div>
+        <p class="ctxline">The request body reaches the brain as data. A successful deploy fires the same trigger, and Sym posts nothing.</p>
+      </div>
+    </div>
   </section>
 
   <!-- 6. Needs you -->
