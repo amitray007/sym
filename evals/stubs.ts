@@ -49,6 +49,11 @@ export const writeToolStubs = [
     tool: "main_thread_post",
     outcome: { response: "Posted in the main thread." },
   },
+  // Decisions 081 and 082: posts, edits, deletes, and reactions in other conversations.
+  { id: "slack-post", tool: "slack_post", outcome: { response: "Posted." } },
+  { id: "slack-edit", tool: "slack_edit", outcome: { response: "Edited." } },
+  { id: "slack-delete", tool: "slack_delete", outcome: { response: "Deleted." } },
+  { id: "slack-react", tool: "slack_react", outcome: { response: "Reacted with :tada:." } },
   { id: "offer-choices", tool: "offer_choices", outcome: { response: { posted: true } } },
   { id: "worker-sign-in", tool: "worker_sign_in", outcome: { response: NOTHING_RAN } },
   { id: "playbook-propose", tool: "playbook_propose", outcome: { response: NOTHING_RAN } },

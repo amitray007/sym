@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import mainThreadPost from "../agent/tools/main_thread_post.ts";
 import slackPost from "../agent/tools/slack_post.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
@@ -18,6 +19,7 @@ describe.skipIf(!hasDatabase)("slack_post", () => {
         C0RELEASE: { name: "releases" },
         G0PRIV: { name: "secret", is_private: true },
         G0GROUP: { is_private: true, is_mpim: true },
+        C0SHARED: { name: "partner", is_ext_shared: true },
       },
       members: {
         C0RELEASE: ["UASKER"],
@@ -46,12 +48,16 @@ describe.skipIf(!hasDatabase)("slack_post", () => {
     });
   const postedIn = (channel: string) => slack.messages.filter((m) => m.channel === channel);
 
-  it("posts at the top level of a #channel, once per call, naming who asked", async () => {
+  it("posts at the top level of a #channel once per call, in Sym's voice, and records who asked", async () => {
     expect(await post("#releases", "call-1")).toBe("Posted.");
     expect(await post("#releases", "call-1")).toBe("Posted.");
-    expect(postedIn("C0RELEASE").map((m) => [m.text, m.thread_ts])).toEqual([
-      ["v2.4 is out.\n\n_Posted for <@UASKER>_", undefined],
-    ]);
+    const posted = postedIn("C0RELEASE");
+    expect(posted.map((m) => [m.text, m.thread_ts])).toEqual([["v2.4 is out.", undefined]]);
+    const rows = await ledger.sql()<{ requester: string }[]>`
+      select p.requester from requested_posts p join outbox o on o.idempotency_key = p.post_key
+      where o.slack_ts = ${posted[0]?.ts ?? ""}
+    `;
+    expect(rows.map((row) => row.requester)).toEqual(["UASKER"]);
   });
 
   it("posts in the thread of a linked message", async () => {
@@ -87,11 +93,32 @@ describe.skipIf(!hasDatabase)("slack_post", () => {
     await thread("s-public", "C0SOURCE");
     await thread("s-private", "G0PRIV");
     await thread("s-dm", "DUASKER");
-    expect(await postNeedsConfirmation(deps(), "s-public", "#releases")).toBe(false);
-    expect(await postNeedsConfirmation(deps(), "s-private", "#releases")).toBe(true);
-    expect(await postNeedsConfirmation(deps(), "s-dm", "#releases")).toBe(true);
-    expect(await postNeedsConfirmation(deps(), "s-private", "<#G0PRIV|secret>")).toBe(false);
-    expect(await postNeedsConfirmation(deps(), "s-unknown", "#releases")).toBe(true);
+    const ask = (sessionId: string, target: string, text = "v2.4 is out.") =>
+      postNeedsConfirmation(deps(), sessionId, target, text);
+    expect(await ask("s-public", "#releases")).toBe(false);
+    expect(await ask("s-private", "#releases")).toBe(true);
+    expect(await ask("s-dm", "#releases")).toBe(true);
+    expect(await ask("s-private", "<#G0PRIV|secret>")).toBe(false);
+    expect(await ask("s-unknown", "#releases")).toBe(true);
+  });
+
+  // Decision 082: a broadcast ping or a Slack Connect channel always needs approval.
+  it("asks before pinging a whole channel or posting to another organization", async () => {
+    await recordSessionThread(ledger.sql(), {
+      sessionId: "s-open",
+      teamId: "T1",
+      channelId: "C0SOURCE",
+      threadTs: null,
+      userId: "UASKER",
+    });
+    const ask = (target: string, text: string) =>
+      postNeedsConfirmation(deps(), "s-open", target, text);
+    expect(await ask("#releases", "<!here> v2.4 is out")).toBe(true);
+    expect(await ask("#releases", "@channel v2.4 is out")).toBe(true);
+    expect(await ask("#releases", "<!subteam^S123> heads up")).toBe(true);
+    expect(await ask("<#C0SOURCE|general>", "<!channel> v2.4")).toBe(true);
+    expect(await ask("C0SHARED", "v2.4 is out")).toBe(true);
+    expect(await ask("#releases", "mail me at a@here.com")).toBe(false);
   });
 });
 
@@ -109,5 +136,15 @@ describe("slack_post approval", () => {
     expect(answer("slack:T1:UASKER", "slack:T1:UASKER")).toBe("allowed");
     expect(answer("slack:T1:UASKER", "slack:T1:UOWNER")).toBe("rejected");
     expect(answer(null, "slack:T1:UASKER")).toBe("rejected");
+  });
+});
+
+// Decision 082: a main-thread post that pings a whole channel waits for the requester.
+describe("main_thread_post approval", () => {
+  const request = (mainThreadPost.approval as { request: (ctx: unknown) => unknown }).request;
+  it("asks only for a broadcast ping", () => {
+    expect(request({ toolInput: { text: "<!here> shipped" } })).toBe("user-approval");
+    expect(request({ toolInput: { text: "shipped, see (@here) notes" } })).toBe("user-approval");
+    expect(request({ toolInput: { text: "shipped" } })).toBe("not-applicable");
   });
 });

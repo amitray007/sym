@@ -14,15 +14,21 @@ export interface ConfirmedPost {
   key: string;
   channel: string;
   threadTs?: string | undefined;
+  // Edits the message with this ts instead of posting a new one.
+  editTs?: string | undefined;
   text: string;
 }
 
-export async function postAndConfirm(deps: LedgerDeps, post: ConfirmedPost): Promise<PostOutcome> {
+export async function postAndConfirm(
+  deps: LedgerDeps,
+  post: ConfirmedPost,
+): Promise<{ outcome: PostOutcome }> {
   await enqueuePost(deps.sql, {
     idempotencyKey: post.key,
-    method: "chat.postMessage",
+    method: post.editTs ? "chat.update" : "chat.postMessage",
     payload: {
       channel: post.channel,
+      ...(post.editTs ? { ts: post.editTs } : {}),
       ...(post.threadTs ? { thread_ts: post.threadTs } : {}),
       text: post.text,
     },
@@ -41,6 +47,6 @@ export async function postAndConfirm(deps: LedgerDeps, post: ConfirmedPost): Pro
   const [row] = await deps.sql<{ status: string }[]>`
     select status from outbox where idempotency_key = ${post.key}
   `;
-  if (row?.status === "sent") return "sent";
-  return row?.status === "pending" ? "pending" : "failed";
+  if (row?.status === "sent") return { outcome: "sent" };
+  return { outcome: row?.status === "pending" ? "pending" : "failed" };
 }

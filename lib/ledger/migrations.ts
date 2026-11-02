@@ -297,4 +297,19 @@ export const migrations: Migration[] = [
       created_at timestamptz not null default now()
     );`,
   },
+  {
+    // Decision 082: who asked for each post Sym made on request, so only they can edit or delete
+    // it, and the posts per person per hour stay capped. A row is written before the post is
+    // sent; its Slack ts lives on the outbox row with the same key.
+    version: "033_requested_posts",
+    sql: `create table requested_posts (
+      post_key text primary key,
+      channel_id text not null,
+      requester text not null,
+      session_id text not null,
+      created_at timestamptz not null default now(),
+      deleted_at timestamptz
+    );
+    create index requested_posts_requester on requested_posts (requester, created_at);`,
+  },
 ];
