@@ -235,7 +235,7 @@ export async function claimRunForJob(
   const rows = await sql`
     update schedule_runs set job_id = ${jobId}
     where session_id = ${sessionId} and schedule_id = ${scheduleId}
-      and (job_id is null or job_id = ${jobId})
+      and (job_id is null or job_id = ${jobId}) and outcome = 'started'
     returning id
   `;
   return rows.length > 0;

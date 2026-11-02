@@ -61,7 +61,12 @@ describe.skipIf(!hasDatabase)("worker_job Start wait", () => {
   async function run(
     key: string,
     playbook?: string,
-    schedule?: { builder: BuilderMode; byPerson?: boolean; project?: string },
+    schedule?: {
+      builder: BuilderMode;
+      byPerson?: boolean;
+      personReplies?: boolean;
+      project?: string;
+    },
   ) {
     runtime.sql = ledger.sql();
     runtime.sleeps.length = 0;
@@ -111,11 +116,14 @@ describe.skipIf(!hasDatabase)("worker_job Start wait", () => {
       );
       await recordRun(runtime.sql, { scheduleId: row.id, firedAt: new Date(), sessionId: key });
       if (!schedule.byPerson) {
-        context.session.auth.initiator = {
+        const app = {
           principalId: "eve:app",
           authenticator: "app",
           principalType: "runtime",
         } as typeof context.session.auth.initiator;
+        context.session.auth.initiator = app;
+        // A person who replies later in the run's thread is the current principal.
+        if (!schedule.personReplies) context.session.auth.current = app;
       }
       ref = `S-${row.id}`;
     }
@@ -245,6 +253,14 @@ describe.skipIf(!hasDatabase)("worker_job Start wait", () => {
     const task = await run("person-schedule", undefined, { builder: "auto", byPerson: true });
     expect((await task.next()).value?.status).toContain("Waiting for Start");
     expect(await proposals("person-schedule")).toHaveLength(1);
+    await task.return({ status: "test-ended" });
+  });
+
+  it("shows Start when a person replies in an auto-start run's thread with the reference", async () => {
+    const task = await run("reply-schedule", undefined, { builder: "auto", personReplies: true });
+    expect((await task.next()).value?.status).toContain("Waiting for Start");
+    expect(await proposals("reply-schedule")).toHaveLength(1);
+    expect(launches()).toBe(0);
     await task.return({ status: "test-ended" });
   });
 

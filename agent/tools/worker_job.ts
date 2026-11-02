@@ -120,10 +120,11 @@ export default defineWorkflowTool({
       await startWake.getConflict();
       await rememberCallback(job.id, callback.url);
       // Decision 085: only a run of an auto-start schedule skips the click. The step checks the
-      // session's initiator, the schedule row, and this session's run, so the model cannot skip it.
+      // session's initiator and current turn, the schedule row, and this session's run, so the model
+      // cannot skip it.
       const preApproved = await isPreApproved(
         schedule,
-        ctx.session.auth.initiator,
+        { initiator: ctx.session.auth.initiator, current: ctx.session.auth.current },
         ctx.session.id,
         job.id,
       );
@@ -504,13 +505,20 @@ async function markFailed(jobId: number, reason: string) {
 // project was checked before the job row existed (decision 042).
 async function isPreApproved(
   schedule: string | undefined,
-  initiator: SessionAuthContext | null | undefined,
+  auth: {
+    initiator: SessionAuthContext | null | undefined;
+    current: SessionAuthContext | null | undefined;
+  },
   sessionId: string,
   jobId: number,
 ): Promise<boolean> {
   "use step";
   const id = schedule ? parseScheduleRef(schedule) : undefined;
-  if (id === undefined || !isScheduleAuth(initiator)) return false;
+  // A person who replies in a run's thread keeps the app as the session's initiator, so the
+  // current turn must be the run's own turn too. Their request gets the Start prompt.
+  if (id === undefined || !isScheduleAuth(auth.initiator) || !isScheduleAuth(auth.current)) {
+    return false;
+  }
   const sql = ledger();
   const allowed = canSkipStart({ isSchedulePrincipal: true, schedule: await getSchedule(sql, id) });
   // The consent covers one job of this session's own run, once. Another job, or a run of

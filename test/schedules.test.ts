@@ -11,6 +11,7 @@ import {
   deleteSchedule,
   finishRun,
   finishRunForSession,
+  finishRunWithoutJob,
   getSchedule,
   listSchedules,
   parseScheduleRef,
@@ -304,6 +305,17 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
     expect(await claimRunForJob(db, "s-bind", a.id, job1)).toBe(true);
     expect(await claimRunForJob(db, "s-bind", a.id, job1)).toBe(true);
     expect(await claimRunForJob(db, "s-bind", a.id, job2)).toBe(false);
+  });
+
+  it("refuses a claim once the run has settled", async () => {
+    const db = await sql();
+    const a = await createSchedule(db, { ...input, title: "Settled" }, T0);
+    const due = new Date("2026-10-20T09:00:00Z");
+    const run = await reserveRun(db, { scheduleId: a.id, dueAt: due, firedAt: due });
+    if (!run) throw new Error("expected a run");
+    await attachSession(db, run.id, "s-settled");
+    await finishRunWithoutJob(db, "s-settled", "all_clear");
+    expect(await claimRunForJob(db, "s-settled", a.id, await newJob("settled-1"))).toBe(false);
   });
 
   it("waits for the dispatcher to attach the session, then claims", async () => {

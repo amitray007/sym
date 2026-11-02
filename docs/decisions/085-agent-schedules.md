@@ -33,8 +33,9 @@ schedule also needed the owner's approval, even when the person who asked was on
    set, and the database checks it. After its one fire, the row is `done` and leaves
    `schedule_list`.
 6. `worker_job` skips the Start click only when all of these hold in code: the session's
-   initiator is the schedule app principal, the schedule reference matches the run attached to
-   this session, the row is `active` (or `done` for the one-time row whose fire started this
+   initiator and the current turn are both the schedule app principal (a person who replies in
+   the run's thread gets Start / Not now), the schedule reference matches the run attached to
+   this session and that run has not settled, the row is `active` (or `done` for the one-time row whose fire started this
    run), its Builder mode is `auto`, and the project is on the list (decision 042). Whatever the
    mode, `worker_job` rechecks the creator at launch: when the creator left the allow-list after
    the dispatch, the run starts no Builder work and says why. The brief no
