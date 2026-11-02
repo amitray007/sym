@@ -435,6 +435,32 @@ describe.skipIf(!hasDatabase)("GitHub and Linear events", () => {
     expect(posts).toEqual([]);
   });
 
+  it("fires once for one signed body sent under two event names", async () => {
+    const trigger = await make({
+      kind: "github",
+      sourceFilter: {
+        repository: "example-org/example-app",
+        events: [],
+        actions: [],
+        label: null,
+        branch: null,
+      },
+    });
+    // An issue comment body also carries the issue, so Eve parses it under either event name.
+    const issue = { number: 7, title: "Export fails", body: "Details", labels: [], user: SENDER };
+    const payload = {
+      action: "created",
+      repository: REPO,
+      sender: SENDER,
+      installation: { id: 9 },
+      issue,
+      comment: { id: 70, body: "Same body", user: SENDER },
+    };
+    await (await route(github, githubRequest("issue_comment", "gh-c1", payload))).settle();
+    await (await route(github, githubRequest("issues", "gh-c2", payload))).settle();
+    expect(await runsOf(trigger.id)).toHaveLength(1);
+  });
+
   it("refuses a run whose creator left the destination channel", async () => {
     const trigger = await make({
       kind: "github",

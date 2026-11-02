@@ -34,8 +34,8 @@ Slack.
    actions, and an optional label for issue events. Setup refuses while the app is not set up.
 4. Each matching event reserves one deferred run per trigger, keyed by the delivery ID and by a
    SHA-256 hash of the verified content (for GitHub the repository, event, action, and event
-   object; for Linear the whole signed body), so a redelivery fires nothing even under a new,
-   unsigned delivery header. The hourly cap of decision 088 applies. Eve's hooks have no `to()`, so
+   object, plus the whole signed body; for Linear the whole signed body), so a redelivery fires
+   nothing even under a new, unsigned delivery or event header. The hourly cap of decision 088 applies. Eve's hooks have no `to()`, so
    the next `dispatch` tick sends the run as the app principal into a new thread at the
    destination, within a minute, under the dispatcher's 2-minute lease. After the reservation,
    and again before the send, the creator must be on the allow-list and, for a channel

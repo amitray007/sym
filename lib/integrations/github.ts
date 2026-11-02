@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { isGitHubRepoAllowed } from "../github-repos.ts";
 import { allowedSlackUserFor } from "../identities.ts";
@@ -67,11 +68,26 @@ function firstReply(key: string, now: number, windowMs: number): boolean {
   return true;
 }
 
+// The hash of the raw request body, set by the route before Eve verifies the signature. Hooks run
+// only after that check, so a key read inside a hook belongs to a signed body. The event header is
+// not signed: the same body sent under another event name hashes the same and fires nothing.
+const signedBodies = new AsyncLocalStorage<string>();
+
+export async function withBodyKey<T>(request: Request, run: () => Promise<T>): Promise<T> {
+  const body = await request.clone().text();
+  return signedBodies.run(createHash("sha256").update(body).digest("hex"), run);
+}
+
 // A hash of the verified event's content, so a redelivery under another delivery ID fires
 // nothing (decision 091).
 function contentKey(repository: string, event: GitHubEventName, input: GitHubEventInput): string {
   const content = JSON.stringify({ repository, event, action: input.action, item: input.item });
   return `github:content:${createHash("sha256").update(content).digest("hex")}`;
+}
+
+function bodyKeys(): string[] {
+  const hash = signedBodies.getStore();
+  return hash ? [`github:body:${hash}`] : [];
 }
 
 export async function fireGitHubEvent(
@@ -87,7 +103,7 @@ export async function fireGitHubEvent(
     { sql: deps.sql, slack: deps.slack, pack: deps.pack },
     facts,
     `github:${ctx.delivery.id}`,
-    [contentKey(repository, event, input)],
+    [contentKey(repository, event, input), ...bodyKeys()],
   );
 }
 

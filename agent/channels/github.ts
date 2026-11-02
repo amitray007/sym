@@ -1,6 +1,6 @@
 import type { RouteHandlerArgs } from "eve/channels";
 import { type GitHubChannelState, githubChannel } from "eve/channels/github";
-import { fireGitHubEvent, onGitHubComment } from "../../lib/integrations/github.ts";
+import { fireGitHubEvent, onGitHubComment, withBodyKey } from "../../lib/integrations/github.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { githubConfigured } from "../../lib/triggers/sources.ts";
 
@@ -54,7 +54,9 @@ const github: typeof channel = {
       : {
           ...route,
           handler: (request: Request, args: RouteHandlerArgs<GitHubChannelState>) =>
-            githubConfigured() ? route.handler(request, args) : Promise.resolve(notFound()),
+            githubConfigured()
+              ? withBodyKey(request, () => route.handler(request, args))
+              : Promise.resolve(notFound()),
         },
   ),
 };
