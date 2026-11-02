@@ -19,13 +19,12 @@ import {
 // an HMAC-SHA256 signature over the timestamp and the raw body. Sym stores no secret: it derives
 // each one from SYM_WEBHOOK_KEY, the hook ID, and the trigger's secret version, so a rotation
 // bumps the version. A verified request reserves a run and gets 202 at once; the run starts right
-// after, or with the next dispatcher tick if that send is lost. Nothing here logs a secret, a
+// after, or with a later dispatcher tick if that send fails. Nothing here logs a secret, a
 // signature, a header, or the body.
 
 export const WEBHOOK_PATH = "/sym/hooks";
 export const TIMESTAMP_HEADER = "x-sym-timestamp";
 export const SIGNATURE_HEADER = "x-sym-signature";
-export const DELIVERY_HEADER = "x-sym-delivery";
 // The largest body Sym reads.
 export const BODY_MAX = 64 * 1024;
 // How far a timestamp may sit from Sym's clock, either way.
@@ -34,7 +33,8 @@ export const WINDOW_SECONDS = 300;
 const FACTS_MAX = 8000;
 const KEY_MIN = 32;
 const HOOK_ID = /^[A-Za-z0-9_-]{16,64}$/;
-const DELIVERY_ID = /^[A-Za-z0-9._:-]{1,200}$/;
+// Bad signatures one hook may take per minute before Sym stops checking them.
+const BAD_SIGNATURES_PER_MINUTE = 30;
 
 export const WEBHOOKS_OFF =
   "Webhook triggers are off: the owner sets SYM_WEBHOOK_KEY (at least 32 characters) in the " +
@@ -56,13 +56,13 @@ export function webhookSecret(key: string, hookId: string, version: number): str
 }
 
 // The public base URL: SYM_SIGNIN_URL, Sym's public HTTPS address (decision 036), else
-// SYM_CALLBACK_URL (decision 028). Without either, the URL is the path alone.
+// SYM_CALLBACK_URL (decision 028). Empty without either, so URLs are paths alone.
+export function publicBase(env: NodeJS.ProcessEnv = process.env): string {
+  return (env.SYM_SIGNIN_URL?.trim() || env.SYM_CALLBACK_URL?.trim() || "").replace(/\/+$/, "");
+}
+
 export function webhookUrl(hookId: string, env: NodeJS.ProcessEnv = process.env): string {
-  const base = (env.SYM_SIGNIN_URL?.trim() || env.SYM_CALLBACK_URL?.trim() || "").replace(
-    /\/+$/,
-    "",
-  );
-  return `${base}${WEBHOOK_PATH}/${hookId}`;
+  return `${publicBase(env)}${WEBHOOK_PATH}/${hookId}`;
 }
 
 // The signature header value for a body sent at `timestamp` (Unix seconds).
@@ -121,7 +121,6 @@ export async function readBody(request: Request, max = BODY_MAX): Promise<Uint8A
 export function webhookFacts(input: {
   body: Uint8Array;
   contentType: string | null;
-  delivery: string | null;
   now: Date;
 }): WebhookTriggerEvent {
   const text = new TextDecoder().decode(input.body);
@@ -141,16 +140,38 @@ export function webhookFacts(input: {
     contentType,
     body: truncated ? `${serialized.slice(0, FACTS_MAX)}…` : body,
     truncated,
-    delivery: input.delivery,
     receivedAt: input.now.toISOString(),
   };
 }
 
-// The event key that makes a request fire once: the sender's delivery ID, so a re-signed retry
-// fires once, or else the signature itself, so a replayed request fires once.
-export function webhookEventKey(delivery: string | null, signature: string): string {
-  if (delivery) return `webhook:delivery:${delivery}`;
-  return `webhook:sig:${createHash("sha256").update(signature.trim()).digest("hex")}`;
+const sha256 = (data: Uint8Array | string) => createHash("sha256").update(data).digest("hex");
+
+// What makes a request fire once. Only signed values count, so changing an unsigned header
+// starts nothing new: the signature names the exact request, so a replay fires once, and the
+// body names its content, so a re-signed copy inside the replay window fires once too.
+export function webhookDedupe(signature: string, body: Uint8Array) {
+  return {
+    eventKey: `webhook:sig:${sha256(signature.trim())}`,
+    recent: { key: `webhook:body:${sha256(body)}`, windowMs: 2 * WINDOW_SECONDS * 1000 },
+  };
+}
+
+// Counts bad signatures per hook, so a flood of forged requests stops before the database.
+const badSignatures = new Map<string, { count: number; resetAt: number }>();
+
+function tooManyBad(hookId: string, now: number): boolean {
+  const entry = badSignatures.get(hookId);
+  return Boolean(entry && entry.resetAt > now && entry.count >= BAD_SIGNATURES_PER_MINUTE);
+}
+
+function noteBad(hookId: string, now: number): void {
+  const entry = badSignatures.get(hookId);
+  if (!entry || entry.resetAt <= now) {
+    if (badSignatures.size > 10_000) badSignatures.clear();
+    badSignatures.set(hookId, { count: 1, resetAt: now + 60_000 });
+  } else {
+    entry.count++;
+  }
 }
 
 export interface WebhookDeps {
@@ -179,21 +200,29 @@ export async function receiveWebhook(
   const env = deps.env ?? process.env;
   const key = webhookKey(env);
   if (!key || !HOOK_ID.test(hookId)) return reply(404, { ok: false, error: "not_found" });
+  const timestamp = request.headers.get(TIMESTAMP_HEADER);
+  const signature = request.headers.get(SIGNATURE_HEADER);
+  // Cheap refusals first: no signature, or a hook that keeps getting forged ones.
+  if (!timestamp || !signature) return reply(401, { ok: false, error: "signature_missing" });
+  const now = deps.now ?? new Date();
+  if (tooManyBad(hookId, now.getTime())) {
+    return reply(429, { ok: false, error: "too_many_bad_signatures" }, { "retry-after": "60" });
+  }
   const body = await readBody(request);
   if (!body) return reply(413, { ok: false, error: "too_large", limitBytes: BODY_MAX });
   const trigger = await getWebhookTrigger(deps.sql, hookId);
   if (!trigger) return reply(404, { ok: false, error: "not_found" });
-  const now = deps.now ?? new Date();
-  const signature = request.headers.get(SIGNATURE_HEADER);
   const verdict = verifyWebhook({
     secret: webhookSecret(key, hookId, trigger.secretVersion),
-    timestamp: request.headers.get(TIMESTAMP_HEADER),
+    timestamp,
     signature,
     body,
     now,
   });
-  if (verdict !== "ok" || !signature)
+  if (verdict !== "ok") {
+    noteBad(hookId, now.getTime());
     return reply(401, { ok: false, error: `signature_${verdict}` });
+  }
   if (trigger.status !== "active") return reply(409, { ok: false, error: "paused" });
   const fireDeps = { sql: deps.sql, slack: deps.slack, pack: deps.pack, usersEnv: deps.usersEnv };
   // The creator must still be allowed and still reach the destination (decision 088).
@@ -201,21 +230,14 @@ export async function receiveWebhook(
     console.warn(`Skipped ${triggerRef(trigger.id)}: its creator left the allow-list or channel.`);
     return reply(403, { ok: false, error: "creator_not_allowed" });
   }
-  const deliveryHeader = request.headers.get(DELIVERY_HEADER)?.trim() ?? "";
-  const delivery = DELIVERY_ID.test(deliveryHeader) ? deliveryHeader : null;
-  const facts = webhookFacts({
-    body,
-    contentType: request.headers.get("content-type"),
-    delivery,
-    now,
-  });
+  const facts = webhookFacts({ body, contentType: request.headers.get("content-type"), now });
   // The trigger's destination is required for a webhook, so every run starts a new thread there.
   const target: RunTarget = { channelId: trigger.destination ?? "" };
   // Deferred until the send below claims it: if this process dies after the answer, the
   // dispatcher sends the run within a minute.
   const reserved = await reserveTriggerRun(deps.sql, {
     triggerId: trigger.id,
-    eventKey: webhookEventKey(delivery, signature),
+    ...webhookDedupe(signature, body),
     facts,
     target,
     deferred: true,
@@ -232,7 +254,9 @@ export async function receiveWebhook(
   return reply(202, { ok: true, status: "accepted" });
 }
 
-// Sends the run now, unless the dispatcher claimed it first. Never throws.
+// Sends the run now, unless the dispatcher holds it. A failed send keeps the run deferred: the
+// lease runs out and a dispatcher tick retries it with the same delivery key, until the run is
+// too old (10 minutes) and fails. Never throws.
 async function startNow(
   deps: WebhookDeps,
   trigger: Trigger,
@@ -242,8 +266,10 @@ async function startNow(
 ): Promise<void> {
   try {
     if (!(await claimDeferredRun(deps.sql, runId, deps.now ?? new Date()))) return;
-    await sendRun({ sql: deps.sql }, trigger, runId, facts, target, deps.send);
-    await endDeferred(deps.sql, runId);
+    const ok = await sendRun({ sql: deps.sql }, trigger, runId, facts, target, deps.send, {
+      keepOnFailure: true,
+    });
+    if (ok) await endDeferred(deps.sql, runId);
   } catch (error) {
     console.warn(`Sym could not start a run of ${triggerRef(trigger.id)}.`, String(error));
   }

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ScheduleRun } from "../../lib/schedules/rows.ts";
 import { createTrigger, type NewTrigger, type Trigger } from "../../lib/triggers/rows.ts";
 import { newHookId, signWebhook, webhookSecret } from "../../lib/triggers/webhook.ts";
+import { createReveal } from "../../lib/triggers/webhook-reveal.ts";
 import {
   BOT,
   type Harness,
@@ -103,8 +104,15 @@ describe("webhook triggers", () => {
     const trigger = await hook({ destination: channel, instruction: "fixture-say" });
     const forged = await post(trigger, '{"alert":"x"}', "whsec_forged");
     expect(forged.status).toBe(401);
+    // No signature headers: refused before any lookup.
+    const bare = await fetch(`${h.eveUrl()}/sym/hooks/${newHookId()}`, {
+      method: "POST",
+      body: "{}",
+    });
+    expect(bare.status).toBe(401);
     const unknown = await fetch(`${h.eveUrl()}/sym/hooks/${newHookId()}`, {
       method: "POST",
+      headers: { "x-sym-timestamp": "1", "x-sym-signature": "sha256=00" },
       body: "{}",
     });
     expect(unknown.status).toBe(404);
@@ -156,5 +164,24 @@ describe("webhook triggers", () => {
       () => botPostsIn(askChannel).find((m) => /Want me to start\?/.test(messageText(m))),
       { label: "Start prompt in the destination" },
     );
+  });
+
+  it("shows the secret once on Sym's reveal page, never on a GET", async () => {
+    const trigger = await hook({ destination: newConversation(h).channel, instruction: "x" });
+    const token = await createReveal(h.sql, trigger, new Date());
+    const url = `${h.eveUrl()}/sym/reveal/${token}`;
+    const secret = webhookSecret(KEY, trigger.hookId ?? "", trigger.secretVersion);
+    const get = await fetch(url);
+    expect(get.status).toBe(200);
+    const page = await get.text();
+    expect(page).toContain("Reveal secret");
+    expect(page).not.toContain(secret);
+    const form = /name="form" value="([0-9a-f]+)"/.exec(page)?.[1] ?? "";
+    const body = new URLSearchParams({ form }).toString();
+    const headers = { "content-type": "application/x-www-form-urlencoded" };
+    const shown = await fetch(url, { method: "POST", headers, body });
+    expect(shown.status).toBe(200);
+    expect(await shown.text()).toContain(secret);
+    expect((await fetch(url, { method: "POST", headers, body })).status).toBe(410);
   });
 });

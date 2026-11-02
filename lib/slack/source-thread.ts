@@ -1,5 +1,6 @@
 import type { Job } from "../ledger/jobs.ts";
 import type { SlackApi } from "./api.ts";
+import { redactSecrets } from "./redact.ts";
 
 // The Slack thread a job came from (decision 075). The brief carries Sym's summary of the
 // request; the worker reads the thread itself when the summary leaves out a detail, and gets the
@@ -113,7 +114,7 @@ function toMessage(raw: Record<string, unknown>): ThreadMessage {
     ts: String(raw.ts ?? ""),
     author: String(raw.user ?? raw.bot_id ?? "unknown"),
     bot: typeof raw.bot_id === "string" || raw.subtype === "bot_message",
-    text: typeof raw.text === "string" ? raw.text : "",
+    text: typeof raw.text === "string" ? redactSecrets(raw.text) : "",
     files: files.flatMap((file) => {
       const url = file.url_private_download ?? file.url_private;
       if (typeof url !== "string") return [];

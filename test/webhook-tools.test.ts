@@ -124,12 +124,14 @@ describe.skipIf(!hasDatabase)("webhook trigger tools", () => {
     expect(row.hookId).toMatch(/^[A-Za-z0-9_-]{24}$/);
     const url = `https://sym.example.com/sym/hooks/${row.hookId}`;
     expect(result).toMatchObject({ url, secretSent: true });
-    // The secret is only in the DM: not in the tool result, and not in any channel.
+    // The secret is nowhere in Slack or the tool result: the DM carries a one-time link.
     const secret = secretOf(row);
     expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify(result)).not.toContain("/sym/reveal/");
     expect(posts).toHaveLength(1);
     expect(posts[0]?.channel).toBe("DUALLOWED");
-    expect(posts[0]?.text).toContain(secret);
+    expect(posts[0]?.text).not.toContain("whsec_");
+    expect(posts[0]?.text).toMatch(/https:\/\/sym\.example\.com\/sym\/reveal\/[A-Za-z0-9_-]{43}/);
     expect(posts[0]?.text).toContain(url);
     expect(posts[0]?.text).toContain("x-sym-signature");
     expect(posts.filter((p) => !p.channel.startsWith("D"))).toEqual([]);
@@ -188,8 +190,13 @@ describe.skipIf(!hasDatabase)("webhook trigger tools", () => {
     expect(rotated.secretVersion).toBe(2);
     expect(posts).toHaveLength(1);
     expect(posts[0]?.channel).toBe("DUALLOWED");
-    expect(posts[0]?.text).toContain(secretOf(rotated));
-    expect(posts[0]?.text).not.toContain(secretOf(row));
+    expect(posts[0]?.text).toContain("/sym/reveal/");
+    expect(posts[0]?.text).not.toContain("whsec_");
     expect(JSON.stringify(result)).not.toContain(secretOf(rotated));
+    // Each DM's link is new: two reveal rows, one per version.
+    const reveals = await ledger.sql()`
+      select secret_version from webhook_reveals where trigger_id = ${row.id} order by created_at
+    `;
+    expect(reveals.map((r) => r.secretVersion)).toEqual([1, 2]);
   });
 });

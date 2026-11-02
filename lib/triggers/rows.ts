@@ -48,8 +48,6 @@ export interface WebhookTriggerEvent {
   body: unknown;
   // True when the body was cut to fit the run message.
   truncated: boolean;
-  // The sender's delivery ID header, when it sent one.
-  delivery: string | null;
   receivedAt: string;
 }
 
@@ -186,8 +184,15 @@ export async function reserveTriggerRun(
     deferred: boolean;
     firedAt: Date;
     maxPerHour: number;
+    // More keys that name the same event, such as a hash of its signed content (decision 090).
+    // A run with any of them, as its event key or alias, makes this a duplicate.
+    aliases?: string[];
+    // A key that makes this a duplicate only of runs fired within `windowMs`, such as a hash of a
+    // webhook body inside its replay window.
+    recent?: { key: string; windowMs: number };
   },
 ): Promise<Reservation> {
+  const keys = [input.eventKey, ...(input.aliases ?? [])];
   return sql.begin(async (tx) => {
     const [trigger] = await tx`
       select id from triggers where id = ${input.triggerId} and status = 'active' for update
@@ -195,16 +200,32 @@ export async function reserveTriggerRun(
     if (!trigger) return { status: "inactive" as const };
     const [seen] = await tx`
       select 1 from schedule_runs
-      where trigger_id = ${input.triggerId} and event_key = ${input.eventKey}
+      where trigger_id = ${input.triggerId}
+        and (event_key = any(${keys}::text[])
+          or jsonb_exists_any(coalesce(event -> 'aliases', '[]'::jsonb), ${keys}::text[]))
     `;
     if (seen) return { status: "duplicate" as const };
+    if (input.recent) {
+      const after = new Date(input.firedAt.getTime() - input.recent.windowMs);
+      const [recent] = await tx`
+        select 1 from schedule_runs
+        where trigger_id = ${input.triggerId} and fired_at > ${after}
+          and event ->> 'recent' = ${input.recent.key}
+      `;
+      if (recent) return { status: "duplicate" as const };
+    }
     const since = new Date(input.firedAt.getTime() - 3600_000);
     const [count] = await tx<{ n: number }[]>`
       select count(*)::int as n from schedule_runs
       where trigger_id = ${input.triggerId} and fired_at > ${since}
     `;
     if ((count?.n ?? 0) >= input.maxPerHour) return { status: "limited" as const };
-    const event = { facts: input.facts, target: input.target };
+    const event = {
+      facts: input.facts,
+      target: input.target,
+      ...(input.aliases?.length ? { aliases: input.aliases } : {}),
+      ...(input.recent ? { recent: input.recent.key } : {}),
+    };
     const [row] = await tx<TriggerRun[]>`
       insert into schedule_runs (trigger_id, event_key, event, deferred, fired_at)
       values (

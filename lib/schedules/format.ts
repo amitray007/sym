@@ -104,7 +104,6 @@ function eventFacts(event: TriggerEvent): [string, Record<string, unknown>] {
       {
         event: "webhook request",
         contentType: event.contentType,
-        ...(event.delivery ? { delivery: event.delivery } : {}),
         receivedAt: event.receivedAt,
         ...(event.truncated ? { truncated: true } : {}),
         body: event.body,

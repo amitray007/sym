@@ -10,6 +10,7 @@ import {
   resolveTarget,
   UNREACHABLE,
 } from "./reach.ts";
+import { redactSecrets } from "./redact.ts";
 
 // Reads a linked message, thread, or channel when a person asks (decisions 081 and 083). Reading
 // is one-way: the content comes back only where no one outside the target can see it, which is
@@ -100,7 +101,7 @@ function toMessages(raw: unknown): ReadMessage[] {
       user: message.user,
       bot: message.bot_id ? true : undefined,
       ts: message.ts as string,
-      text: (message.text ?? "").slice(0, TEXT_LIMIT),
+      text: redactSecrets((message.text ?? "").slice(0, TEXT_LIMIT)),
     }));
 }
 

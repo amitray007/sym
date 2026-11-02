@@ -9,7 +9,7 @@ Sym runs as one Docker service with Postgres. Any Docker host works. The referen
 |---|---|---|
 | `/eve/v1/slack` | Public HTTPS | Slack sends events, interactivity, and slash commands. Eve has no Socket Mode |
 | `/.well-known/workflow/` | Public HTTPS, unrewritten | Workflow webhooks, including worker callback URLs |
-| `/sym/hooks/` | Public HTTPS, only with `SYM_WEBHOOK_KEY` set | Webhook triggers: other systems POST signed requests (decision 090) |
+| `/sym/hooks/`, `/sym/reveal/` | Public HTTPS, only with `SYM_WEBHOOK_KEY` set | Webhook triggers: other systems POST signed requests, and creators see a secret once (decision 090) |
 | `/eve/v1/mcp`, `/eve/v1/session` | Private network only | Workers and scripts call Sym |
 | Worker MCP (T3 `/mcp`) | Private network only | Sym calls the worker |
 
@@ -93,7 +93,7 @@ Postgres.
      builds `DATABASE_URL` from it, so do not set `DATABASE_URL`.
    - `TS_AUTHKEY`: a Tailscale auth key for the sidecar. `TS_HOSTNAME` is optional (`sym`).
 3. Add the public routes as Dokploy domains on the `tailscale` service, port 3000, one per path:
-   `/eve/v1/slack` and `/.well-known/workflow`, plus `/sym/hooks` when webhook triggers are on.
+   `/eve/v1/slack` and `/.well-known/workflow`, plus `/sym/hooks` and `/sym/reveal` when webhook triggers are on.
    Do not strip the path. Sym listens in the sidecar's network, so the domains point at the
    sidecar.
 4. Deploy. The start command applies ledger migrations, then runs `eve start`, which also runs
@@ -166,15 +166,17 @@ People on the allow-list can ask Sym to run an instruction when another system c
    store. Sym derives each trigger's secret from it.
 2. Set `SYM_SIGNIN_URL` to Sym's public HTTPS base, so the URLs Sym hands out are reachable.
    Without it, Sym uses `SYM_CALLBACK_URL`, which suits senders on the private network only.
-3. Expose `/sym/hooks/` publicly at the proxy, unrewritten. Leave it closed when no sender
-   lives outside the private network.
+3. Expose `/sym/hooks/` and `/sym/reveal/` publicly at the proxy, unrewritten. The reveal page
+   shows a creator their secret once, from a link Sym DMs them; it must open in their browser.
+   Leave `/sym/hooks/` closed when no sender lives outside the private network.
 
 A sender signs each POST: `x-sym-timestamp` is the Unix time in seconds, and `x-sym-signature`
-is `sha256=` plus the hex HMAC-SHA256 of `<timestamp>.<raw body>` with the secret. An optional
-`x-sym-delivery` header with a unique ID makes a re-signed retry run once. Sym answers 202 when
-it accepts a request, 200 for a duplicate, 401 for a bad or stale signature (more than 5 minutes
-off), 404 for an unknown URL, 409 for a paused trigger, 413 above 64 KiB, and 429 past the
-hourly cap. For example:
+is `sha256=` plus the hex HMAC-SHA256 of `<timestamp>.<raw body>` with the secret. Sym runs a
+request once: a replay, or a copy re-signed within 10 minutes, is a duplicate. Two real events
+with the same body inside 10 minutes need something unique in the body. Sym answers 202 when it
+accepts a request, 200 for a duplicate, 401 for a missing, bad, or stale signature (more than 5
+minutes off), 404 for an unknown URL, 409 for a paused trigger, 413 above 64 KiB, and 429 past
+the hourly cap or after 30 bad signatures in a minute. For example:
 
 ```sh
 ts=$(date +%s); body='{"alert":"disk full"}'
@@ -209,7 +211,7 @@ Only a person can do these:
 
 - Create and install the Slack app from [`slack/manifest.yaml`](../slack/manifest.yaml). After a
   manifest change (such as the Home tab), import it again and reinstall the app.
-- Choose and configure the public route, including `/sym/hooks/` for webhook triggers.
+- Choose and configure the public route, including `/sym/hooks/` and `/sym/reveal/` for webhook triggers.
 - Approve the worker sign-in and pick its access level, then re-approve every 30 days. Ask Sym
   to sign in to the worker for a new link.
 - Approve permission prompts on the worker when a thread blocks.

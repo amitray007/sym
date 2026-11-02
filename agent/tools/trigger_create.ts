@@ -7,12 +7,12 @@ import { TriggerInput } from "../../lib/triggers/input.ts";
 import { triggerRef } from "../../lib/triggers/rows.ts";
 import { setUpTrigger, TRIGGER_NOT_ALLOWED } from "../../lib/triggers/setup.ts";
 import { webhookKey, webhookUrl } from "../../lib/triggers/webhook.ts";
-import { sendWebhookSecret } from "../../lib/triggers/webhook-secret.ts";
+import { sendRevealLink } from "../../lib/triggers/webhook-reveal.ts";
 
 // Creates an event trigger (docs/architecture.md, flows 2b and 2c; decisions 088 and 090). The
 // person who sets it up consents to its runs, so the row is active at once. Each run gives the
-// brain the instruction and the event. A webhook trigger's secret goes only to the person's DM,
-// never into this tool's result.
+// brain the instruction and the event. A webhook trigger's secret shows only on a one-time page
+// linked from the person's DM, never in Slack or this tool's result.
 
 export default defineTool({
   description:
@@ -20,7 +20,8 @@ export default defineTool({
     "Set up a trigger: when a new message (optionally with keywords) or a reaction with an emoji " +
     "appears in a channel that the person and you are both in, or when a signed request reaches " +
     "a webhook URL, run an instruction with your tools. It starts right away; no approval. For a " +
-    "webhook, Sym DMs the person the URL and secret once; never ask for or repeat the secret.",
+    "webhook, Sym DMs the person the URL and a one-time link to the secret; never ask for, " +
+    "open, or repeat that link or the secret.",
   inputSchema: TriggerInput,
   label: { start: ({ title }) => `Trigger: ${title}` },
   async execute(input, ctx) {
@@ -41,16 +42,15 @@ export default defineTool({
     });
     if ("refusal" in result) return result.refusal;
     const { trigger } = result;
-    const key = webhookKey();
-    if (trigger.kind === "webhook" && trigger.hookId && key) {
-      const sent = await sendWebhookSecret(deps.slack, trigger, key);
+    if (trigger.kind === "webhook" && trigger.hookId && webhookKey()) {
+      const sent = await sendRevealLink(deps, trigger);
       return {
         trigger: triggerRef(trigger.id),
         url: webhookUrl(trigger.hookId),
         secretSent: sent,
         answer: sent
-          ? `Created ${triggerLine(trigger)}. I sent you the URL and the signing secret in a DM; the secret shows only there, once.`
-          : `Created ${triggerLine(trigger)}, but I couldn't DM you its secret. Ask me to rotate the secret to get one.`,
+          ? `Created ${triggerLine(trigger)}. I DM'd you the URL and a one-time link to the signing secret; it works once, within 15 minutes.`
+          : `Created ${triggerLine(trigger)}, but I couldn't DM you the secret's link. Ask me to rotate the secret to get one.`,
       };
     }
     return {

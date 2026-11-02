@@ -804,14 +804,14 @@ footer p + p { margin-top: 8px; }
         <div class="sl-body">
           <div class="msg thread-root"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>11:20</time></div><div class="mt"><span class="mention">@Sym</span> when the deploy tool reports a failed deploy, post a short summary here and say if someone needs to look</div></div></div>
           <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>11:20</time></div>
-            <div class="mt"><p>Done. I sent you the webhook URL and its signing secret in a DM. Point the deploy tool at it, and each failed deploy gets a summary here.</p></div></div></div>
+            <div class="mt"><p>Done. I DM'd you the webhook URL and a one-time link to its signing secret. Point the deploy tool at it, and each failed deploy gets a summary here.</p></div></div></div>
         </div>
       </div>
       <div class="notes">
         <h3>Setting up a webhook trigger</h3>
         <p class="muted">A webhook trigger runs an instruction when another system POSTs a signed request to its own URL (decision 090). Anyone on the allow-list sets one up; there is no owner approval.</p>
         <ul>
-          <li>The secret goes only to the creator's DM, once. The channel, the tool result, and the trigger list never show it.</li>
+          <li>The secret never enters Slack. The creator's DM carries a link to Sym's own page, which shows the secret once, within 15 minutes, after a button press.</li>
           <li>Each request carries a timestamp and an HMAC signature over the timestamp and body. A stale, forged, or replayed request starts nothing.</li>
           <li>Runs post in this conversation unless the person names a channel or a DM. Each run starts a new thread.</li>
           <li>Only the creator can rotate the secret. The old one stops at once.</li>
@@ -821,15 +821,15 @@ footer p + p { margin-top: 8px; }
 
     <div class="pair">
       <div>
-        <p class="label">The secret, once, in the creator's DM</p>
+        <p class="label">A one-time link to the secret, in the creator's DM</p>
         <div class="slack">
           <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
           <div class="sl-body">
             <div class="msg thread-root"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>11:20</time></div>
-              <div class="mt"><p>Webhook for <b>Failed deploys</b>. I show this secret once.</p><p>URL: <span class="sl-link">https://sym.example.com/sym/hooks/q3V9…</span><br>Secret: <code>whsec_••••••••••••</code></p><p>Sign each POST: <code>x-sym-timestamp</code> is the Unix time in seconds, and <code>x-sym-signature</code> is <code>sha256=</code> plus the hex HMAC-SHA256 of <code>&lt;timestamp&gt;.&lt;raw body&gt;</code>.</p><p>Keep the secret out of Slack threads. If it leaks, ask me to rotate it.</p></div></div></div>
+              <div class="mt"><p>Webhook for <b>Failed deploys</b>.</p><p>URL: <span class="sl-link">https://sym.example.com/sym/hooks/q3V9…</span><br>Signing secret: <span class="sl-link">open this link</span> within 15 minutes to see it. It works once.</p><p>Sign each POST: <code>x-sym-timestamp</code> is the Unix time in seconds, and <code>x-sym-signature</code> is <code>sha256=</code> plus the hex HMAC-SHA256 of <code>&lt;timestamp&gt;.&lt;raw body&gt;</code>.</p><p>Keep the secret out of Slack. If it leaks, ask me to rotate it.</p></div></div></div>
           </div>
         </div>
-        <p class="ctxline">The post goes straight to Slack, so the secret is never stored in Sym's database.</p>
+        <p class="ctxline">The link opens Sym's page with a Reveal secret button; a link preview cannot use it up. Sym stores only a hash of the link.</p>
       </div>
       <div>
         <p class="label">A webhook run posts a new thread in its destination</p>

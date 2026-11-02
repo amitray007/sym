@@ -261,10 +261,10 @@ The DM is the cleaner place: it needs no membership in the message's channel, it
 to that channel, and the conversation stays with the person who asked.
 
 A webhook trigger (`on: webhook`, decision 090) fires on a signed HTTP request instead of a Slack
-event. Sym DMs its creator the URL and the signing secret once; no channel, tool result, or list
-shows the secret. Each run starts a new thread in the destination: this conversation by default,
-a channel, or the creator's DM. Only the creator can rotate the secret
-(`trigger_rotate_secret`).
+event. Sym DMs its creator the URL and a one-time link to the signing secret on its own page;
+the secret never enters Slack. Each run starts a new thread in the destination: this
+conversation by default, a channel, or the creator's DM. Only the creator can rotate the secret
+(`trigger_rotate_secret`). Sym's Slack reads redact anything shaped like a webhook secret.
 
 ## Code channels
 

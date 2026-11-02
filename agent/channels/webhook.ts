@@ -1,13 +1,15 @@
-import { defineChannel, POST } from "eve/channels";
+import { defineChannel, GET, POST } from "eve/channels";
 import { ledger, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { APP_AUTH } from "../../lib/triggers/fire.ts";
 import { receiveWebhook } from "../../lib/triggers/webhook.ts";
+import { showReveal, useReveal } from "../../lib/triggers/webhook-reveal.ts";
 import slack from "./slack.ts";
 
 // Webhook triggers (docs/architecture.md, flow 2c; decision 090). Each trigger has its own URL,
 // `/sym/hooks/<hook id>`. The route checks the size, the signature, and the timestamp, reserves
 // one run, and answers 202 at once. The run then starts in Slack as the app principal, like a
-// scheduled run, so it acts for the trigger's creator. This channel hosts no conversation.
+// scheduled run, so it acts for the trigger's creator. `/sym/reveal/<token>` is the one-time page
+// that shows a creator their secret. This channel hosts no conversation.
 
 export default defineChannel({
   routes: [
@@ -25,6 +27,12 @@ export default defineChannel({
         request,
         params.hookId ?? "",
       ),
+    ),
+    GET("/sym/reveal/:token", async (_request, { params }) =>
+      showReveal({ sql: ledger() }, params.token ?? ""),
+    ),
+    POST("/sym/reveal/:token", async (request, { params }) =>
+      useReveal({ sql: ledger() }, request, params.token ?? ""),
     ),
   ],
 });
