@@ -30,6 +30,7 @@ import {
   triggerRunLeaseMigration,
   triggerThreadsMigration,
 } from "../triggers/migration.ts";
+import { sourceTriggersMigration } from "../triggers/source-migration.ts";
 import { webhookTriggersMigration } from "../triggers/webhook-migration.ts";
 import { credentialsMigration } from "../workers/credentials-migration.ts";
 import { workerMigration } from "../workers/migration.ts";
@@ -331,4 +332,5 @@ export const migrations: Migration[] = [
   triggerRunLeaseMigration,
   triggerThreadsMigration,
   webhookTriggersMigration,
+  sourceTriggersMigration,
 ];

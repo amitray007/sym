@@ -8,7 +8,14 @@ import {
 } from "../slack/reach.ts";
 import type { TriggerInput } from "./input.ts";
 import { normalizeEmoji } from "./match.ts";
-import { createTrigger, type Trigger } from "./rows.ts";
+import {
+  createTrigger,
+  type GitHubFilter,
+  type LinearFilter,
+  type SourceFilter,
+  type Trigger,
+} from "./rows.ts";
+import { GITHUB_OFF, githubConfigured, LINEAR_OFF, linearConfigured } from "./sources.ts";
 import { newHookId, WEBHOOKS_OFF, webhookKey } from "./webhook.ts";
 
 // Sets up an event trigger (decision 088). Slack sends Sym events only from channels it is in,
@@ -29,7 +36,9 @@ export async function setUpTrigger(
   input: TriggerInput & { requester: string; current: string | undefined },
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ trigger: Trigger } | { refusal: string }> {
-  if (input.on === "webhook") return setUpWebhook(deps, input, env);
+  if (input.on === "webhook" || input.on === "github" || input.on === "linear") {
+    return setUpOffSlack(deps, input, env);
+  }
   const emoji = input.emoji ? normalizeEmoji(input.emoji) : "";
   if (input.on === "reaction" && !emoji) return { refusal: "Name the emoji to watch for." };
   const watched = await watchedChannel(deps, input.channel, input.current);
@@ -61,15 +70,17 @@ export async function setUpTrigger(
   return { trigger };
 }
 
-// A webhook trigger (decision 090) watches no channel. Its runs post in this conversation, a DM
-// with the person, or another channel the person and Sym share, as for schedules. Each run
-// starts a new thread there, because a request has no Slack thread of its own.
-async function setUpWebhook(
+// A webhook, GitHub, or Linear trigger (decisions 090 and 091) watches no Slack channel. Its
+// runs post in this conversation, a DM with the person, or another channel the person and Sym
+// share, as for schedules. Each run starts a new thread there, because the event has no Slack
+// thread of its own.
+async function setUpOffSlack(
   deps: SetupDeps,
   input: TriggerInput & { requester: string; current: string | undefined },
   env: NodeJS.ProcessEnv,
 ): Promise<{ trigger: Trigger } | { refusal: string }> {
-  if (!webhookKey(env)) return { refusal: WEBHOOKS_OFF };
+  const source = sourceSetup(input, env);
+  if ("refusal" in source) return source;
   const wanted = input.destination?.trim();
   const resolved = await scheduleDestination(deps, {
     requester: input.requester,
@@ -78,7 +89,7 @@ async function setUpWebhook(
   });
   if ("refusal" in resolved) return resolved;
   const trigger = await createTrigger(deps.sql, {
-    kind: "webhook",
+    kind: input.on,
     channel: null,
     keywords: [],
     emoji: null,
@@ -87,9 +98,44 @@ async function setUpWebhook(
     builder: input.builder,
     destination: resolved.channel,
     owner: input.requester,
-    hookId: newHookId(),
+    ...source,
   });
   return { trigger };
+}
+
+const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+// What the kind needs beyond a destination: a webhook's hook ID, or a GitHub or Linear filter.
+// Each refuses while its service is not set up.
+function sourceSetup(
+  input: TriggerInput,
+  env: NodeJS.ProcessEnv,
+): { hookId?: string; sourceFilter?: SourceFilter } | { refusal: string } {
+  const actions = (input.actions ?? []).map((a) => a.trim().toLowerCase()).filter(Boolean);
+  const label = input.label?.trim() || null;
+  if (input.on === "webhook") {
+    return webhookKey(env) ? { hookId: newHookId() } : { refusal: WEBHOOKS_OFF };
+  }
+  if (input.on === "github") {
+    if (!githubConfigured(env)) return { refusal: GITHUB_OFF };
+    const repository = input.repository?.trim().toLowerCase() ?? "";
+    if (!REPOSITORY.test(repository)) return { refusal: "Name the repository as owner/name." };
+    const filter: GitHubFilter = {
+      repository,
+      events: [...new Set(input.events ?? [])],
+      actions,
+      label,
+      branch: input.branch?.trim() || null,
+    };
+    return { sourceFilter: filter };
+  }
+  if (!linearConfigured(env)) return { refusal: LINEAR_OFF };
+  const filter: LinearFilter = {
+    team: input.team?.trim().toUpperCase() || null,
+    actions,
+    label,
+  };
+  return { sourceFilter: filter };
 }
 
 // The named channel, or this conversation's channel. A DM cannot be watched.

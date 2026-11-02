@@ -65,6 +65,7 @@ const TRIGGER: Trigger = {
   status: "active",
   hookId: null,
   secretVersion: 1,
+  sourceFilter: null,
   createdAt: new Date(),
 };
 

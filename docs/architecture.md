@@ -11,6 +11,7 @@
  │  channels/slack.ts   talk, buttons   │                 │  threads in your repos    │
  │  channels/mcp.ts     workers call in │ ◀────────────── │                           │
  │  channels/webhook.ts signed webhooks │                 │                           │
+ │  channels/github.ts, linear.ts       │                 │                           │
  │  tools/worker_job.ts     one job = task  │  callback URL   └───────────────────────────┘
  │  schedules/dispatch  owner schedules │
  │  schedules/reconcile safety net      │        Postgres
@@ -29,9 +30,10 @@
 | Outbox | Durable Slack posts with an idempotency key per post |
 | Sandbox | Opt-in (`SYM_SANDBOX`). One limited Docker container per Slack thread for the brain's shell and file tools: compute, shared files, small scripts. No secrets, no repository credentials, no network by default. Repository work stays with workers (decision 089) |
 
-Only the Slack route, the workflow webhooks, and the webhook routes (`/sym/hooks/`, `/sym/reveal/`) are
-public. The MCP channel, the HTTP channel, and the worker stay on a private network such as a
-tailnet ([self-hosting.md](self-hosting.md)).
+Only the Slack route, the workflow webhooks, the webhook routes (`/sym/hooks/`,
+`/sym/reveal/`), and, when configured, the GitHub and Linear routes (`/eve/v1/github`,
+`/eve/v1/linear`) are public. The MCP channel, the HTTP channel, and the worker stay on a
+private network such as a tailnet ([self-hosting.md](self-hosting.md)).
 
 ## The job ledger
 
@@ -199,6 +201,33 @@ Example: "When our deploy tool reports a failure, summarize it in #ops."
    stops at once, and DMs a new one-time link (decision 090). Sym's own Slack reads redact
    anything shaped like a webhook secret.
 
+## Flow 2d: GitHub and Linear events
+
+Example: "When a PR is opened in example-org/example-app, summarize it here", or a person
+mentions the GitHub App in a PR, or delegates a Linear issue to Sym.
+
+1. Eve's GitHub channel (`/eve/v1/github`) and Linear channel (`/eve/v1/linear`) verify each
+   webhook's signature with the app's secret and call Sym's hooks. Without their variables,
+   each route answers 404 (decision 091). Every hook returns no dispatch: no session runs on
+   GitHub or in Linear.
+2. Triggers: `trigger_create` with `on: github` stores a filter (repository, event types
+   `pull_request`, `issues`, `check_suite`, `issue_comment`, actions, label, branch); `on:
+   linear` stores a team, actions, and label for issue events. Each matching event reserves one
+   deferred run per trigger, keyed by the delivery ID, under the hourly cap of flow 2b. The hooks
+   have no `to()`, so the next `dispatch` tick sends the run as the app principal into a new
+   thread at the destination, within a minute. The creator check of flow 2b applies to the
+   destination channel, after the reservation and before the send. The run message carries the
+   event's facts (repository, number, title, link, sender, labels, branch, conclusion, body) as
+   untrusted JSON data, and every turn of the session counts as having read untrusted content.
+   The run acts for the creator; `worker_job` keeps the auto and ask rules.
+3. Requests: a GitHub comment that mentions `@<GITHUB_APP_SLUG>`, or a Linear Agent Session (a
+   delegation or a follow-up prompt), counts as a request only when the pack's `identities` (or
+   `SYM_GITHUB_USERS`, `SYM_LINEAR_USERS`) maps the user to an allowed Slack person. Sym then
+   posts in that person's DM like Send to Sym: a link, a quote, and "What should I do with it?".
+   Their reply is their own request, with Start / Not now for Builder work. Sym answers on GitHub
+   with a comment, or in Linear with a `response` activity, saying where to continue. Anyone else
+   gets a polite refusal there.
+
 ## Flow 3: watching a running job
 
 ```
@@ -307,5 +336,6 @@ The digest, when it is on, carries the rest. The digest, the verifier, and PR fo
 | Prompt injection from untrusted text | Bad actions | Reading sessions get no write tools. Writes need approval. The sandbox holds no secrets and has no network by default, so injected commands there reach nothing outside it |
 | Busy watched channel | Many trigger runs, model spend | Keywords narrow the events; each trigger starts at most `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour; a Slack retry finds its run |
 | Sandbox unavailable (sandbox off, no Docker socket, daemon down) | Shell and file tools fail | Each tool returns a short error and the turn continues. Shared files reach the brain as a note with their name (decision 089) |
+| GitHub or Linear event loop | A run's Builder work opens a PR that fires the same trigger again | Each delivery fires once, the hourly cap bounds the loop, and comments by bots fire nothing |
 | Leaked webhook secret | Anyone can start runs that act for the creator | Signatures expire after 5 minutes and each request fires once; the hourly cap bounds spend; the creator rotates the secret or pauses the trigger |
 | Webhook sender floods the URL | Load on the public route | Unsigned requests stop at the signature check before any model work; bodies over 64 KiB get 413 |

@@ -843,6 +843,35 @@ footer p + p { margin-top: 8px; }
         <p class="ctxline">The request body reaches the brain as data. A successful deploy fires the same trigger, and Sym posts nothing.</p>
       </div>
     </div>
+
+    <div class="pair" id="github-linear">
+      <div>
+        <p class="label">A GitHub trigger run: a pull request opened</p>
+        <div class="slack">
+          <div class="sl-top"><b># reviews</b><span>Channel</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>09:41</time></div>
+              <div class="mt"><p><span class="sl-link">example-app #12: Stream the CSV writer</span> is open against main. It replaces the buffered export with a stream and adds two tests; nothing touches the database. Worth a review from someone who knows the export.</p></div></div></div>
+          </div>
+        </div>
+        <p class="ctxline">Sam set it up with "when a PR is opened in example-org/example-app, summarize it here". The run posts within a minute of the event and acts for Sam. The PR text is data.</p>
+      </div>
+      <div>
+        <p class="label">A GitHub mention or a Linear delegation moves to the person's DM</p>
+        <div class="slack">
+          <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+          <div class="sl-body">
+            <div class="msg thread-root"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:05</time></div>
+              <div class="mt"><p>You handed me <span class="sl-link">ENG-5 Flaky export test</span> in Linear.</p><p>What should I do with it? Reply in this thread.</p></div></div></div>
+            <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>10:06</time></div><div class="mt">find out why it fails on CI and fix it</div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:06</time></div>
+              <div class="mt"><p>I'll have Builder find the cause and fix the test in example-app.</p></div>
+              <div class="btns"><span class="sb go">Start</span><span class="sb">Not now</span></div></div></div>
+          </div>
+        </div>
+        <p class="ctxline">Only a GitHub or Linear account mapped to an allowed person gets here; anyone else gets a polite refusal on GitHub or in Linear. Linear shows "I sent this to you in Slack".</p>
+      </div>
+    </div>
   </section>
 
   <!-- 6. Needs you -->

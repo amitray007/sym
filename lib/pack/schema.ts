@@ -64,6 +64,18 @@ export const packSchema = z
     persona: relativeFile.optional(),
     playbooks: z.array(relativeFile).default([]),
     skills: z.array(relativeFile).default([]),
+    // Who a GitHub login or a Linear user is in Slack (decision 091). A mention on GitHub or a
+    // delegation in Linear counts as a person's request only through this mapping.
+    identities: z
+      .array(
+        z.strictObject({
+          slackUserId: slackUserId,
+          github: z.string().min(1).optional(),
+          // A Linear user's email or ID.
+          linear: z.string().min(1).optional(),
+        }),
+      )
+      .default([]),
   })
   .superRefine((pack, ctx) => {
     const names = new Set(pack.workers.map((w) => w.name));

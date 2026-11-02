@@ -11,7 +11,7 @@ const urlOf = (trigger: Trigger) =>
 
 export default defineTool({
   description:
-    "Use the returned facts to answer naturally. Do not paste tool returns verbatim or name internal tools. List the triggers: reference, title, what fires each (a new message with keywords, a reaction emoji, or a webhook URL) and in which channel, status, where runs post, the Builder mode, and the instruction. Webhook secrets are never listed.",
+    "Use the returned facts to answer naturally. Do not paste tool returns verbatim or name internal tools. List the triggers: reference, title, what fires each (a new message with keywords, a reaction emoji, a webhook URL, or a GitHub or Linear filter) and in which channel, status, where runs post, the Builder mode, and the instruction. Webhook secrets are never listed.",
   inputSchema: z.object({}),
   label: { start: () => "List triggers" },
   async execute() {
