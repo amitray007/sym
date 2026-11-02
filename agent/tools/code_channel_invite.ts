@@ -4,7 +4,7 @@ import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { jobIdOfThread } from "../../lib/feedback/feedback.ts";
 import { getJob, getJobByRef } from "../../lib/ledger/jobs.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
+import { requesterOf } from "../../lib/requester.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { codeChannelsOn, jobOfCodeChannel } from "../../lib/slack/code-channel.ts";
 import { inviteToCodeChannel, normalizeSlackPerson } from "../../lib/slack/code-channel-invite.ts";
@@ -42,12 +42,7 @@ export default defineDynamic((ctx) => {
           job = id ? await getJob(deps.sql, id) : undefined;
         }
       }
-      return inviteToCodeChannel(
-        deps,
-        job,
-        people,
-        slackUserOfPrincipal(toolCtx.session.auth.current?.principalId),
-      );
+      return inviteToCodeChannel(deps, job, people, await requesterOf(toolCtx.session, ledgerDeps));
     },
   });
 });

@@ -81,13 +81,18 @@ describe.skipIf(!hasDatabase)("queueDigest", () => {
 
   it("queues one post per day, DM for a user ID", async () => {
     const db = ledger.sql();
-    const schedule = await createSchedule(db, {
-      cron: "0 9 * * *",
-      title: "On-call check",
-      brief: {},
-      channel: "C1",
-      owner: "U1",
-    });
+    const schedule = await createSchedule(
+      db,
+      {
+        cron: "0 9 * * *",
+        title: "On-call check",
+        instruction: "Check the on-call dashboard.",
+        builder: "ask",
+        channel: "C1",
+        owner: "U1",
+      },
+      now,
+    );
     const run = await recordRun(db, {
       scheduleId: schedule.id,
       firedAt: new Date("2026-10-20T09:00:00Z"),

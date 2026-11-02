@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { requesterResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
+import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { editOwnPost } from "../../lib/slack/own-posts.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
@@ -19,15 +19,15 @@ export default defineTool({
     text: z.string().min(1).max(POST_MAX).describe("The full new text of the message."),
   }),
   approval: {
-    request: ({ session, toolInput }) =>
+    request: async ({ session, toolInput }) =>
       editNeedsConfirmation(
         ledgerDeps(),
         session.id,
-        slackUserOfPrincipal(session.auth.current?.principalId),
+        await requesterOf(session, ledgerDeps),
         toolInput?.message,
         toolInput?.text,
       ).then((ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable")),
-    response: requesterResponse("Only the person who asked can approve this edit."),
+    response: requesterResponse("Only the person who asked can approve this edit.", ledgerDeps),
     prompt: ({ input }) => `Change the post to this?\n\n${input.text}`,
   },
   label: { start: () => "Edit a post" },
@@ -36,7 +36,7 @@ export default defineTool({
     return editOwnPost(ledgerDeps(), {
       sessionId: ctx.session.id,
       callId: ctx.callId,
-      requester: slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+      requester: await requesterOf(ctx.session, ledgerDeps),
       message,
       text,
     });

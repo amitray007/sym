@@ -39,7 +39,7 @@ strands running sessions, so every job keeps enough state to continue in a new s
 |---|---|
 | `jobs` | ID, kind, Slack channel and thread, brief, worker, thread ID, launched model, status, cursor, last summary, job card `ts`, display choice, parent job and close (decision 056), playbook and outcome (decision 059), credential-free worker identity (decision 065) |
 | `worker_capabilities` | Private per-job worker credentials and MCP endpoints; terminal jobs cannot use them (decision 065) |
-| `schedules` | Cron (UTC), stored brief, approval state, lease |
+| `schedules` | Cron (UTC) or one-time run, instruction, Builder mode, destination channel, creator, status, lease |
 | `outbox` | Pending Slack posts with an idempotency key and the `chooseDisplay` result. Refuses level 0 and missing choices |
 | `feedback` | Buttons, reactions, "Fix" replies, brief edits, linked to a job |
 | `memory` | Facts and preferences (learning layer 1) |
@@ -55,8 +55,8 @@ Example: "@sym add retry with backoff to the billing sync in sync-service, open 
 The brain checks read-only facts with its own tools first. A problem report does not grant
 Builder consent (decision 071). A job needs an explicit Builder request or acceptance of a
 specific offer, including for repository investigations. Sym never edits repositories itself.
-Interactive chat requests show Start / Not now, even for trusted playbooks. Approved schedules
-start without a click (decision 024). The trust ladder no longer auto-starts jobs.
+Interactive chat requests show Start / Not now, even for trusted playbooks. Runs of a schedule
+set to `auto` start without a click (decision 085). The trust ladder no longer auto-starts jobs.
 
 1. `onAppMention` checks the sender against the allow-list and starts a session for the thread.
 2. The model loads the `task-brief` playbook and writes a brief: project, goal, the request's
@@ -82,22 +82,33 @@ start without a click (decision 024). The trust ladder no longer auto-starts job
 
 ## Flow 2: a schedule fires
 
-Example: "Every weekday at 09:00, run the on-call check and tell me only what needs attention."
+Example: "Every weekday at 09:00, check the open PRs and tell me only what needs attention."
 
-1. The owner says it once. Sym calls `schedule_create`, which needs approval. Sym shows the row:
-   cron in UTC, project, brief, runtime mode, read-only. That approval covers every fire.
-2. Every minute, `dispatch` claims due rows with a lease, so a row cannot fire twice.
-3. For each due row, `dispatch` starts a session in the schedule's channel with
-   `to(slack, { channelId })` and no root message, and records a `schedule_runs` row.
-4. The model calls `worker_job` with the stored brief and the schedule reference. The job skips the
-   Start click only when the session came from the dispatcher and the brief equals the approved
-   one (decision 024).
-5. The scheduled job posts nothing while it runs. When the check is clean, nothing posts at all,
-   and the evening digest, when it is on, lists "On-call check: all clear". When something needs attention, one
-   message posts and opens the thread (decision 031).
+1. A person on the allow-list says it once. Sym calls `schedule_create` with a title, the
+   instruction, and a cron in UTC or a one-time `at` time. If a run might need Builder work, the
+   brain first asks whether Builder starts on its own (`auto`) or asks each time (`ask`, the
+   default), and where to ask: this channel, another channel, or a DM. The row is active at once;
+   the person's setup is the consent for its runs (decision 085).
+2. Every minute, `dispatch` claims due rows with a lease, so a row cannot fire twice. A run whose
+   creator left the allow-list does not start.
+3. For each due row, `dispatch` starts a session in the schedule's destination channel with
+   `to(slack, { channelId })` and no root message, and records a `schedule_runs` row. The message
+   gives the instruction, the Builder mode, and the schedule reference.
+4. The brain does what the instruction asks with its tools. The run acts for the schedule's
+   creator: Slack tools use the creator's reach, and only the creator can approve a gated step in
+   the run (decision 085). When the instruction asks for Builder
+   work, it calls `worker_job` with a brief inside the instruction's scope and the schedule
+   reference. The job skips the Start click only when the session came from the dispatcher, the
+   reference matches this session's run, the row is active (or done, for a one-time row), its
+   Builder mode is `auto`, and the project is on the list. Otherwise it shows Start / Not now.
+5. An auto-started job posts nothing while it runs. When the check is clean, nothing posts at
+   all, and the evening digest, when it is on, lists "On-call check: all clear". When something
+   needs attention, one message posts and opens the thread (decision 031). A run with nothing to
+   say calls `no_reply`. A run with no job ends with its turn: all clear when silent, needs
+   attention when it posted.
+6. A one-time row ends as `done` after its fire.
 
-A pack can seed schedules from `schedules.yaml`. They start pending, and the owner approves each
-with `schedule_approve` (decision 055).
+A pack can seed schedules from `schedules.yaml`. They start active (decisions 055 and 085).
 
 Sym owns schedules instead of the worker (decision 008). Sym then knows each run before it starts,
 so it can open the thread, record the job, and pick the display level.

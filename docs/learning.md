@@ -6,7 +6,7 @@ decides what to keep.
 | Layer | What changes | Eve part | Takes effect | Who approves |
 |---|---|---|---|---|
 | 1. Memory | Facts and preferences: "draft PRs, never ready for review" | `defineMemory` with a Postgres provider. Recall before each turn, capture after it | Next turn | Nobody. Sym saves them |
-| 2. Playbooks and rules | New playbooks, instruction snippets, schedules | `defineDynamic` loads approved rows at session start | Next session, no redeploy | The owner, one click |
+| 2. Playbooks and rules | New playbooks, instruction snippets | `defineDynamic` loads approved rows at session start | Next session, no redeploy | The owner, one click |
 | 3. Code | New tools, Slack handlers, integrations | A worker thread in Sym's own repository opens a draft PR | After merge and redeploy | A person, by merging |
 
 ## The loop
@@ -44,7 +44,7 @@ decides what to keep.
    approved playbook row. An unknown name grants no authority. Sym records each finished job as
    `clean` or `unclean`; negative feedback or a follow-up makes it `unclean`. The trust ladder no
    longer auto-starts jobs or offers promotion. Every chat request shows Start / Not now.
-   Approved schedules start without a click under their own approval (decision 024).
+   Runs of a schedule set to `auto` start without a click; its creator chose that at setup (decision 085).
    Historical trust columns and rows stay stored; they grant no start permission.
 
 ## Layer 2 rows

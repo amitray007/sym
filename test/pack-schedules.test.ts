@@ -28,11 +28,7 @@ const entry = `
 - key: weekday-check
   title: Weekday check
   cron: "0 9 * * 1-5"
-  brief:
-    project: example-app
-    title: Weekday check
-    goal: Look for failing checks.
-    doneWhen: ["The report lists each failure"]
+  instruction: Look for failing checks on example-app and list each one.
 `;
 
 function packWith(schedules?: string, config = manifest): string {
@@ -44,14 +40,30 @@ function packWith(schedules?: string, config = manifest): string {
 }
 
 describe("pack schedules.yaml", () => {
-  it("loads a good file and fills the channel and the brief defaults", () => {
+  it("loads a good file and fills the channel and the builder mode", () => {
     const [schedule] = loadPack(packWith(entry)).schedules;
-    expect(schedule).toMatchObject({
+    expect(schedule).toEqual({
       key: "weekday-check",
+      title: "Weekday check",
       cron: "0 9 * * 1-5",
       channel: "C0EXAMPLE",
+      instruction: "Look for failing checks on example-app and list each one.",
+      builder: "ask",
     });
-    expect(schedule?.brief).toMatchObject({ openPullRequest: false, constraints: [] });
+  });
+
+  it("keeps an auto-start builder mode and rejects an unknown one", () => {
+    expect(loadPack(packWith(`${entry}  builder: auto\n`)).schedules[0]?.builder).toBe("auto");
+    expect(() => loadPack(packWith(`${entry}  builder: always\n`))).toThrow(/builder/);
+  });
+
+  it("rejects an entry without an instruction, such as an old brief entry", () => {
+    const old = entry.replace(
+      "  instruction: Look for failing checks on example-app and list each one.\n",
+      "  brief:\n    project: example-app\n",
+    );
+    expect(() => loadPack(packWith(old))).toThrow(/instruction/);
+    expect(() => loadPack(packWith(old))).toThrow(/brief/);
   });
 
   it("keeps a channel set on the entry", () => {
@@ -70,10 +82,6 @@ describe("pack schedules.yaml", () => {
     expect(() => loadPack(packWith(text))).toThrow(/extra/);
   });
 
-  it("rejects an unknown field inside the brief", () => {
-    expect(() => loadPack(packWith(`${entry}    mode: write\n`))).toThrow(/mode/);
-  });
-
   it("rejects a bad cron", () => {
     expect(() => loadPack(packWith(entry.replace("0 9 * * 1-5", "every day")))).toThrow(/cron/);
   });
@@ -82,11 +90,6 @@ describe("pack schedules.yaml", () => {
     expect(() => loadPack(packWith(entry.replace("weekday-check", "Weekday Check")))).toThrow(
       /key/,
     );
-  });
-
-  it("rejects a project that is not in the pack", () => {
-    const text = entry.replace("project: example-app", "project: other-app");
-    expect(() => loadPack(packWith(text))).toThrow(/brief\.project: "other-app"/);
   });
 
   it("rejects a duplicate key", () => {

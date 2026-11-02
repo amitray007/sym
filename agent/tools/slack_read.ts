@@ -1,8 +1,8 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
-import { ledger, pack, slackFromEnv } from "../../lib/runtime.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { markReadInTurn, readConversation } from "../../lib/slack/read.ts";
 
 // Reads a linked message, thread, or channel when a person asks (decision 083). Code holds the
@@ -24,7 +24,7 @@ export default defineTool({
       { sql: ledger(), slack: slackFromEnv(), pack: pack() },
       {
         sessionId: ctx.session.id,
-        requester: slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+        requester: await requesterOf(ctx.session, ledgerDeps),
         target,
       },
     );

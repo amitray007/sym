@@ -21,3 +21,10 @@ export function runOutcome(
   }
   return "needs_attention";
 }
+
+// The digest outcome of a scheduled run that started no job (decision 085): a turn that posted
+// needs attention, a silent one is all clear, and a turn that did not complete failed.
+export function turnOutcome(turn: string, posted: boolean): Exclude<RunOutcome, "started"> {
+  if (turn !== "completed") return "failed";
+  return posted ? "needs_attention" : "all_clear";
+}

@@ -7,7 +7,9 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 //
 // Script:
 // - A message with a ```brief JSON block calls worker_job with that brief.
-// - A scheduled run message calls worker_job with its brief and its schedule reference.
+// - A scheduled run message with a ```brief block calls worker_job with that brief and the
+//   schedule reference. A scheduled run that says "fixture-say" posts one line; any other run
+//   without a brief ends the turn with no_reply.
 // - A message that asks for an update or status calls jobs_status and repeats its answer.
 // - A message that says "sign in to the worker" calls worker_sign_in.
 // - A message that says "thinking out loud" calls no_reply (side talk, decision 050).
@@ -56,10 +58,13 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   // A reply in a thread carries the earlier thread messages first. Only the new message counts.
   const message = text.replace(/<slack_thread_context>[\s\S]*?<\/slack_thread_context>/g, "");
   const brief = briefIn(message);
-  // A dispatch message names the schedule. The brief goes back unchanged, with the reference.
+  // A run message names the schedule. Its instruction may carry the brief to start.
   const schedule = /^Scheduled run of (S-\d+):/m.exec(message)?.[1];
   if (brief && schedule)
     return { toolCalls: [{ name: "worker_job", input: { ...brief, schedule } }] };
+  if (schedule) {
+    return /\bfixture-say\b/.test(message) ? "Fixture run: this needs a look." : quiet(request);
+  }
   if (brief) return { toolCalls: [{ name: "worker_job", input: brief }] };
   const reaction = /\bfixture-react\s+(\S+)/.exec(message)?.[1];
   if (reaction) return { toolCalls: [{ name: "slack_react", input: { emoji: reaction } }] };

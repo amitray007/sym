@@ -7,7 +7,7 @@ uses.
 
 People see the work's title, linked to its thread or code channel when known. Inside that
 conversation, Sym says "this", "it", or just the result. Job and schedule references are internal
-tool handles. People can still type one; Sym does not repeat it (decision 073). Home schedules
+tool handles. People can still type one; Sym does not repeat it (decision 073). Schedule lists
 show their titles. Status lists, digests, learning evidence, and permission DMs use linked titles.
 
 ## The working note
@@ -74,8 +74,8 @@ Ordinary chat replies have no feedback buttons.
 Sym checks read-only facts with its own tools first. A problem report does not authorize Builder.
 `worker_job` requires an explicit request for Builder work or acceptance of a specific offer,
 including for repository investigations. The brief still needs its code-owned Start approval.
-Interactive chat always shows Start / Not now, even for trusted playbooks. Approved schedules
-start without a click (decision 024). The trust ladder no longer auto-starts jobs.
+Interactive chat always shows Start / Not now, even for trusted playbooks. Runs of a schedule
+set to `auto` start without a click (decision 085). The trust ladder no longer auto-starts jobs.
 
 - A question about a result stays chat.
 - A requested redirect of running work uses `job_steer`.
@@ -121,8 +121,8 @@ who runs Sym. `SYM_STRANGER_REPLIES=off` disables these replies.
   while handlers keep accepting old clicks.
 - Legacy controls remain routable. A legacy change submission creates a follow-up proposal
   with Start / Not now; submitting text never starts work.
-- Home shows Needs you, Running, and Finished today with job links. Start waits, schedules
-  waiting for approval, and incomplete closures go under Needs you and change the opening summary.
+- Home shows Needs you, Running, and Finished today with job links. Start waits and
+  incomplete closures go under Needs you and change the opening summary.
   Finished today labels failed and cancelled jobs as such. The owner also sees Setup,
   including worker state, persona, quiet mode, projects, and connections. It renders no Retry
   or Stop controls. Every Home open rechecks the allow-list and owner role.
@@ -174,10 +174,10 @@ on the Home tab: reinstall the app after you import this change, or Slack sends 
 the manifest has no `chat:write.public`.
 
 Allow-list: the pack's owner and `allowList`, or `SYM_SLACK_USERS` without a pack. Owner
-approvals (tool approvals such as schedules, playbooks, and Stop) count only from the owner: the
+approvals (tool approvals such as playbooks and Stop) count only from the owner: the
 pack owner, else `SYM_OWNER_SLACK_USER`. Each tool's response policy enforces this, and an allowed
 person may still cancel one. A `slack_post` approval counts only from the person who asked
-(decision 081). Start / Not now proposals and worker questions stay open to allowed
+(decision 081); in a scheduled run, that is the schedule's creator (decision 085). Start / Not now proposals and worker questions stay open to allowed
 users. Every inbound
 handler checks it and fails closed, including answers to buttons. Free-text answers go through
 Eve's "Type your answer" box, so the same check covers them; a reply typed in the thread is a new

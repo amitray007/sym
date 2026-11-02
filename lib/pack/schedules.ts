@@ -1,9 +1,8 @@
-// The pack's schedules.yaml (docs/adopting.md, decision 055). A list of schedules to seed. The
-// brief is the same shape the brain writes, so a seeded row and a chat-made row are alike.
+// The pack's schedules.yaml (docs/adopting.md, decisions 055 and 085). A list of schedules to
+// seed. Each holds the same instruction and builder mode a person sets up in chat.
 import { z } from "zod";
-import { Brief } from "../jobs/brief.ts";
-import { findAllowedProject } from "../projects/allowed.ts";
 import { isValidCron } from "../schedules/cron.ts";
+import type { BuilderMode } from "../schedules/rows.ts";
 import type { PackConfig } from "./schema.ts";
 
 export const SCHEDULES_NAME = "schedules.yaml";
@@ -23,7 +22,8 @@ const entry = z.strictObject({
     .string()
     .regex(/^[CGD][A-Z0-9]+$/, "must be a Slack channel ID")
     .optional(),
-  brief: Brief.strict(),
+  instruction: z.string().trim().min(3).max(4000),
+  builder: z.enum(["ask", "auto"]).default("ask"),
 });
 
 export interface PackSchedule {
@@ -31,7 +31,8 @@ export interface PackSchedule {
   title: string;
   cron: string;
   channel: string;
-  brief: Brief;
+  instruction: string;
+  builder: BuilderMode;
 }
 
 export class PackSchedulesError extends Error {
@@ -44,10 +45,6 @@ export function parsePackSchedules(raw: unknown, config: PackConfig, file: strin
   if (!Array.isArray(raw)) {
     throw new PackSchedulesError(`${file} is invalid: (root): must be a list of schedules`);
   }
-  const allowed = config.projects.map((p) => ({
-    name: p.name,
-    workerProject: p.workerProject ?? p.name,
-  }));
   const seen = new Set<string>();
   const out: PackSchedule[] = [];
   raw.forEach((item, index) => {
@@ -65,11 +62,6 @@ export function parsePackSchedules(raw: unknown, config: PackConfig, file: strin
       throw new PackSchedulesError(`${where}: key: "${value.key}" is used twice`);
     }
     seen.add(value.key);
-    if (!findAllowedProject(allowed, value.brief.project)) {
-      throw new PackSchedulesError(
-        `${where}: brief.project: "${value.brief.project}" is not in the pack's projects`,
-      );
-    }
     const channel = value.channel ?? config.channels?.default;
     if (!channel) {
       throw new PackSchedulesError(
@@ -81,7 +73,8 @@ export function parsePackSchedules(raw: unknown, config: PackConfig, file: strin
       title: value.title,
       cron: value.cron.trim(),
       channel,
-      brief: value.brief,
+      instruction: value.instruction,
+      builder: value.builder,
     });
   });
   return out;

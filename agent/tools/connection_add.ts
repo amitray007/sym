@@ -6,8 +6,9 @@ import { reviewOf } from "../../lib/connections/format.ts";
 import { nameProblem } from "../../lib/connections/names.ts";
 import { probeServer } from "../../lib/connections/probe.ts";
 import { getConnection, proposeConnection } from "../../lib/connections/rows.ts";
-import { mayDecideAsOwner, OWNER_ONLY, slackUserOfPrincipal } from "../../lib/owner.ts";
-import { ledger, pack } from "../../lib/runtime.ts";
+import { mayDecideAsOwner, OWNER_ONLY } from "../../lib/owner.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
 
 // The first half of adding an MCP connection (decision 045). Sym probes the server and saves a
 // proposal. Nothing loads until the owner approves it with connection_approve. The input has no
@@ -34,7 +35,7 @@ export default defineTool({
   label: { start: ({ name }) => `Check ${name}` },
   async execute(input, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
-    const caller = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    const caller = await requesterOf(ctx.session, ledgerDeps);
     if (!mayDecideAsOwner(caller, pack())) return OWNER_ONLY;
     const name = input.name.trim();
     const problem = nameProblem(name);

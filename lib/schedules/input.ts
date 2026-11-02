@@ -1,28 +1,60 @@
 import { z } from "zod";
 import { Brief } from "../jobs/brief.ts";
 import { isValidCron } from "./cron.ts";
+import type { ScheduleTiming } from "./rows.ts";
 
-// The schedule_create tool input.
+// The schedule_create tool input (decision 085). `scheduleTiming` checks that exactly one of
+// `cron` and `at` is set, so the input schema stays a plain object.
 export const ScheduleInput = z.object({
+  title: z.string().min(3).max(80).describe("Short name, for example 'Open PR check'."),
+  instruction: z
+    .string()
+    .min(3)
+    .max(4000)
+    .describe(
+      "What to do on each run, in plain words, with the exact facts: projects, channels, " +
+        "people, links. Each run reads only this text.",
+    ),
   cron: z
     .string()
     .refine(isValidCron, "Use 5 fields: minute hour day-of-month month day-of-week.")
-    .describe("Five-field cron in UTC, for example '0 9 * * 1-5' for 09:00 UTC on weekdays."),
-  title: z.string().min(3).max(80).describe("Short name, for example 'On-call check'."),
-  brief: Brief.describe(
-    "The job brief each run starts. Keep production and customer data read-only.",
-  ),
-  channel: z
+    .optional()
+    .describe("For a recurring schedule: five-field cron in UTC, such as '0 9 * * 1-5'."),
+  at: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe("For a one-time run: an ISO time in UTC, such as '2026-11-04T15:00:00Z'."),
+  builder: z
+    .enum(["ask", "auto"])
+    .default("ask")
+    .describe(
+      "If a run starts Builder work: 'auto' starts it without a click, 'ask' posts Start / " +
+        "Not now. Use the person's answer; default 'ask'.",
+    ),
+  destination: z
     .string()
     .optional()
-    .describe("Slack channel ID for the run threads. Default: the channel of this conversation."),
+    .describe(
+      "Where runs post: 'dm' for a DM with the person who set it up, or a channel ID, mention, " +
+        "or link. Default: this conversation's channel.",
+    ),
 });
+export type ScheduleInput = z.infer<typeof ScheduleInput>;
 
-// The worker_job tool input: a brief, plus the schedule reference when a scheduled run passes the
-// stored brief (decision 024).
+// Exactly one of a cron and a one-time run, as the row stores them.
+export function scheduleTiming(
+  input: Pick<ScheduleInput, "cron" | "at">,
+): ScheduleTiming | undefined {
+  if (input.cron && !input.at) return { cron: input.cron };
+  if (input.at && !input.cron) return { runAt: new Date(input.at) };
+  return undefined;
+}
+
+// The worker_job tool input: a brief, plus the schedule reference when a scheduled run starts
+// Builder work (decision 085).
 export const ScheduledBrief = Brief.extend({
   schedule: z
     .string()
     .optional()
-    .describe("Schedule reference such as S-3. Only for a scheduled run; leave the brief as is."),
+    .describe("Schedule reference such as S-3. Only for a scheduled run: the reference it names."),
 });

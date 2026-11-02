@@ -1,14 +1,14 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
 import {
   reactionTarget,
   reactToLinkedMessage,
   reactToTurn,
   unreactToTurn,
 } from "../../lib/reactions/react.ts";
-import { ledger, pack, slackFromEnv } from "../../lib/runtime.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
 
 // A reaction on the message that started this turn (decision 051). Code enforces the limits:
 // one reaction per message and three per thread per hour. The brain decides whether one fits.
@@ -39,7 +39,7 @@ export default defineTool({
       messageTs: reactionTarget(ctx.session.id, ctx.session.turn.id),
     };
     if (message) {
-      const requester = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+      const requester = await requesterOf(ctx.session, ledgerDeps);
       return reactToLinkedMessage({ ...deps, pack: pack() }, requester, message, emoji, !remove);
     }
     if (remove) return unreactToTurn(deps, ctx.session.id, emoji);

@@ -10,13 +10,9 @@ import {
   retirePlaybook,
 } from "../../lib/learning/rows.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
-import {
-  mayDecideAsOwner,
-  OWNER_ONLY,
-  ownerResponse,
-  slackUserOfPrincipal,
-} from "../../lib/owner.ts";
-import { ledger, pack } from "../../lib/runtime.ts";
+import { mayDecideAsOwner, OWNER_ONLY, ownerResponse } from "../../lib/owner.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
 
 // Retires an approved row so new sessions stop loading it. On a proposed row it rejects the
 // proposal. The row stays in the history.
@@ -34,7 +30,7 @@ export default defineTool({
   label: { start: ({ id }) => `Retire ${playbookRef(id)}` },
   async execute({ id }, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
-    const caller = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    const caller = await requesterOf(ctx.session, ledgerDeps);
     if (!mayDecideAsOwner(caller, pack())) return OWNER_ONLY;
     const sql = ledger();
     const thread = await getSessionThread(sql, ctx.session.id);

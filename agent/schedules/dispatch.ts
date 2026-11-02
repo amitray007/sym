@@ -1,6 +1,5 @@
 import { defineSchedule } from "eve/schedules";
-import { checkProject } from "../../lib/projects/allowed.ts";
-import { allowedFromEnv, ledger, pack } from "../../lib/runtime.ts";
+import { ledger, pack } from "../../lib/runtime.ts";
 import { dispatchMessage } from "../../lib/schedules/format.ts";
 import {
   attachSession,
@@ -8,8 +7,10 @@ import {
   completeClaim,
   finishRun,
   reserveRun,
+  scheduleRef,
 } from "../../lib/schedules/rows.ts";
 import { seedPackSchedules } from "../../lib/schedules/seed.ts";
+import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
 import slack from "../channels/slack.ts";
 
 // Dynamic scheduling (docs/architecture.md, flow 2; decision 008; Eve's dynamic scheduling
@@ -20,9 +21,9 @@ const LEASE_MS = 5 * 60_000;
 // Decision 055: seed the pack's schedules once per process, before the first claim. A failure
 // clears the promise, so the next tick tries again.
 let seeded: Promise<unknown> | undefined;
-async function seedOnce(): Promise<void> {
+async function seedOnce(now: Date): Promise<void> {
   try {
-    seeded ??= seedPackSchedules(ledger(), pack());
+    seeded ??= seedPackSchedules(ledger(), pack(), now);
     await seeded;
   } catch (error) {
     seeded = undefined;
@@ -36,8 +37,8 @@ export default defineSchedule({
     waitUntil(
       (async () => {
         const sql = ledger();
-        await seedOnce();
         const now = new Date();
+        await seedOnce(now);
         for (const schedule of await claimDueSchedules(sql, now, LEASE_MS)) {
           // Persist the fire identity before the send. A crash after the send leaves the row,
           // so the next dispatcher skips the send and only completes the claim.
@@ -49,10 +50,12 @@ export default defineSchedule({
               })
             : undefined;
           if (run) {
-            // Decision 042: a schedule whose project left the list does not run. worker_job checks
-            // again, so the brain cannot start it either.
-            const project = (schedule.brief as { project?: unknown } | null)?.project;
-            if (typeof project !== "string" || checkProject(allowedFromEnv(), project)) {
+            // Decision 085: the runs carry the consent of the person who set the schedule up. Once
+            // they leave the allow-list, the schedule stops running.
+            if (
+              !isSlackUserAllowed(pack(), process.env.SYM_SLACK_USERS, schedule.owner, () => {})
+            ) {
+              console.warn(`Skipped ${scheduleRef(schedule.id)}: its creator left the allow-list.`);
               await finishRun(sql, run.id, "failed");
               await completeClaim(sql, schedule, now);
               continue;

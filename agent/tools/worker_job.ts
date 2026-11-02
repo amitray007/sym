@@ -81,7 +81,7 @@ export default defineWorkflowTool({
     "Hand a coding task to a worker agent in a new worktree of a project the worker knows. " +
     "Use it for the work your instructions give to the worker, not for a quick check. " +
     "The owner sees the brief and presses Start before anything runs. A scheduled run passes " +
-    "its stored brief unchanged with its schedule reference, and starts without a click. Runs as a task: you get " +
+    "its schedule reference; code decides whether that run starts without a click. Runs as a task: you get " +
     "a receipt now and the result later. Write a complete brief, with the request's exact " +
     "facts in context.",
   inputSchema: ScheduledBrief,
@@ -116,11 +116,10 @@ export default defineWorkflowTool({
       // Register before publishing Start, so even an immediate decision can wake this task.
       await startWake.getConflict();
       await rememberCallback(job.id, callback.url);
-      // Decision 024: only an approved schedule run skips the click. The step checks the
-      // session's initiator, the schedule row, and the brief, so the model cannot widen it.
+      // Decision 085: only a run of an auto-start schedule skips the click. The step checks the
+      // session's initiator, the schedule row, and this session's run, so the model cannot skip it.
       const preApproved = await isPreApproved(
         schedule,
-        brief,
         ctx.session.auth.initiator,
         ctx.session.id,
         job.id,
@@ -481,11 +480,11 @@ async function markFailed(jobId: number, reason: string) {
   return failJob(ledgerDeps(), jobId, reason);
 }
 
-// True only for a run the owner approved ahead of time (decision 024). The initiator travels in
-// as data, and the principal check, the row lookup, and the brief comparison run in this step.
+// True only for a run of a schedule set to start Builder work on its own (decision 085). The
+// initiator travels in as data, and the principal check and the row lookup run in this step. The
+// project was checked before the job row existed (decision 042).
 async function isPreApproved(
   schedule: string | undefined,
-  brief: unknown,
   initiator: SessionAuthContext | null | undefined,
   sessionId: string,
   jobId: number,
@@ -494,12 +493,8 @@ async function isPreApproved(
   const id = schedule ? parseScheduleRef(schedule) : undefined;
   if (id === undefined || !isScheduleAuth(initiator)) return false;
   const sql = ledger();
-  const allowed = canSkipStart({
-    isSchedulePrincipal: true,
-    schedule: await getSchedule(sql, id),
-    brief,
-  });
-  // The approval covers one job of this session's own run, once. Another job, or a run of
+  const allowed = canSkipStart({ isSchedulePrincipal: true, schedule: await getSchedule(sql, id) });
+  // The consent covers one job of this session's own run, once. Another job, or a run of
   // another schedule, gets the normal Start prompt.
   return allowed && (await claimRunWhenAttached(sql, sessionId, id, jobId));
 }

@@ -46,7 +46,8 @@ import {
 } from "../../lib/reactions/react.ts";
 import { ledger, ledgerDeps, pack, slackFromEnv, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
-import { listSchedules } from "../../lib/schedules/rows.ts";
+import { turnOutcome } from "../../lib/schedules/outcome.ts";
+import { finishRunWithoutJob, listSchedules } from "../../lib/schedules/rows.ts";
 import { namesBot, threadPeople, triageThreadMessage } from "../../lib/slack/addressing.ts";
 import { SlackApiError } from "../../lib/slack/api.ts";
 import {
@@ -117,7 +118,7 @@ async function answerSymCommand(text: string, now: Date, userId: string): Promis
       return slackText(jobListAnswer(jobs, now)) + quiet;
     }
     case "schedules":
-      // Creating or changing a schedule needs an approval, so it goes through Sym in a thread.
+      // Creating or changing a schedule goes through Sym in a thread, where the brain asks the setup question.
       return slackText(scheduleList(await listSchedules(ledger())));
     case "quiet": {
       if (command.arg.kind === "off") {
@@ -311,7 +312,22 @@ type TurnBookkeeping = {
   pendingToolCallMessage?: unknown;
   threadStatus?: unknown;
   postedInThread?: boolean;
+  // Set once a turn of this session calls worker_job; a scheduled run then waits for the job.
+  startedJob?: boolean;
 };
+
+// A scheduled run that started no job ends with its turn: a reply needs attention, silence is
+// all clear (decision 085). A session that is not a run has no run row, so nothing changes.
+async function endScheduledRun(sessionId: string, outcome: string, state: TurnBookkeeping) {
+  if (state.startedJob) return;
+  await finishRunWithoutJob(
+    ledger(),
+    sessionId,
+    turnOutcome(outcome, state.postedInThread === true),
+  ).catch((error: unknown) => {
+    console.warn("Sym could not record the outcome of a scheduled run.", errorName(error));
+  });
+}
 
 const symRenderer = defineSlackRenderer({
   // Eve's default sets "Thinking..." as soon as a message arrives. The persona's list replaces it.
@@ -379,6 +395,9 @@ const symRenderer = defineSlackRenderer({
     "call.settled": stayQuiet<"call.settled">(),
     "turn.paused": stayQuiet<"turn.paused">(),
     async "call.requested"(event, ctx, next) {
+      if (event.data.capability.name === "worker_job") {
+        (ctx.channel.state as TurnBookkeeping).startedJob = true;
+      }
       const key = quietKey(ctx.channel);
       if (isQuietTurn(key)) {
         if (event.data.capability.name === "no_reply") return;
@@ -406,6 +425,11 @@ const symRenderer = defineSlackRenderer({
       endQuietTurn(quietKey(ctx.channel));
       // A failed or cancelled quiet turn still gets Eve's notice.
       if (!quiet || event.data.outcome !== "completed") await next(event);
+      await endScheduledRun(
+        ctx.session.id,
+        event.data.outcome,
+        ctx.channel.state as TurnBookkeeping,
+      );
       // Eve sets a code channel back to active when the brain's turn ends. The channel shows its
       // job, so Sym sets the job's own status again, such as suspended while a question waits.
       if (ctx.channel.state.codeChannel && ctx.channel.state.channelId) {

@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller } from "../../lib/callers.ts";
-import { requesterResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
+import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { postToMainThread } from "../../lib/slack/main-thread.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
@@ -27,7 +27,7 @@ export default defineTool({
       hasBroadcastMention(toolInput?.text ?? "") || readInTurn(session)
         ? "user-approval"
         : "not-applicable",
-    response: requesterResponse("Only the person who asked can approve this post."),
+    response: requesterResponse("Only the person who asked can approve this post.", ledgerDeps),
     prompt: ({ input }) => `Post this in the main thread?\n\n${input.text}`,
   },
   async execute({ text }, ctx) {
@@ -35,7 +35,7 @@ export default defineTool({
     return postToMainThread(ledgerDeps(), {
       sessionId: ctx.session.id,
       callId: ctx.callId,
-      requester: slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+      requester: await requesterOf(ctx.session, ledgerDeps),
       text,
     });
   },

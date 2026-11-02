@@ -1,28 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { Pack } from "../lib/pack/load.ts";
 import type { PackSchedule } from "../lib/pack/schedules.ts";
-import { sameAsStored } from "../lib/schedules/approval.ts";
-import { scheduleList } from "../lib/schedules/format.ts";
-import { approveSchedule, getSchedule, listSchedules } from "../lib/schedules/rows.ts";
+import { getSchedule, listSchedules, pauseSchedule } from "../lib/schedules/rows.ts";
 import { seedPackSchedules } from "../lib/schedules/seed.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
-
-const brief = {
-  project: "example-app",
-  title: "Weekday check",
-  goal: "Look for failing checks.",
-  constraints: [],
-  doneWhen: ["The report lists each failure"],
-  openPullRequest: false,
-  estimatedMinutes: 15,
-};
 
 const entry = (over: Partial<PackSchedule> = {}): PackSchedule => ({
   key: "weekday-check",
   title: "Weekday check",
   cron: "0 9 * * 1-5",
   channel: "C0EXAMPLE",
-  brief,
+  instruction: "Look for failing checks on example-app and list each one.",
+  builder: "ask",
   ...over,
 });
 
@@ -37,122 +26,81 @@ const packWith = (...schedules: PackSchedule[]): Pack =>
 
 describe.skipIf(!hasDatabase)("seedPackSchedules", () => {
   const ledger = useLedger();
-  const now = new Date("2026-10-21T08:00:00Z");
+  // A Tuesday.
+  const now = new Date("2026-10-20T08:00:00Z");
 
-  const notices = () =>
-    ledger.sql()`select * from outbox where idempotency_key like 'schedule-seed:%'`;
   const theRow = async () => {
-    const row = (await listSchedules(ledger.sql()))[0];
-    if (!row) throw new Error("no schedule row");
-    return row;
+    const row = (await ledger.sql()`select id from schedules where pack_key = 'weekday-check'`)[0];
+    const found = row ? await getSchedule(ledger.sql(), Number(row.id)) : undefined;
+    if (!found) throw new Error("no schedule row");
+    return found;
   };
 
-  it("inserts a new key as pending and tells the owner once", async () => {
-    const result = await seedPackSchedules(ledger.sql(), packWith(entry()));
-    expect(result.pending).toHaveLength(1);
-    const row = result.pending[0];
-    expect(row).toMatchObject({
-      status: "pending_approval",
+  it("inserts a new key as active, owned by the pack owner, and posts nothing", async () => {
+    const result = await seedPackSchedules(ledger.sql(), packWith(entry()), now);
+    expect(result.seeded).toHaveLength(1);
+    expect(result.seeded[0]).toMatchObject({
+      status: "active",
       packKey: "weekday-check",
       owner: "U0OWNER01",
       channel: "C0EXAMPLE",
+      builder: "ask",
+      instruction: entry().instruction,
     });
-
-    const posts = await notices();
-    expect(posts).toHaveLength(1);
-    const payload = posts[0]?.payload as { channel: string; text: string };
-    expect(payload.channel).toBe("U0OWNER01");
-    expect(payload.text).toContain("Weekday check - 0 9 * * 1-5 UTC");
-    expect(payload.text).toContain("approve");
-    expect(posts[0]?.display).toMatchObject({ target: "dm" });
+    expect(result.seeded[0]?.nextFireAt?.toISOString()).toBe("2026-10-20T09:00:00.000Z");
+    expect(await ledger.sql()`select * from outbox`).toHaveLength(0);
   });
 
-  it("leaves an approved, unchanged row alone and posts nothing new", async () => {
-    const sql = ledger.sql();
-    const row = await theRow();
-    await approveSchedule(sql, row.id, "U0OWNER01", now);
-
-    const again = await seedPackSchedules(sql, packWith(entry()));
-    expect(again.pending).toEqual([]);
-    expect((await getSchedule(sql, row.id))?.status).toBe("active");
-    expect(await notices()).toHaveLength(1);
+  it("leaves an unchanged row alone", async () => {
+    const again = await seedPackSchedules(ledger.sql(), packWith(entry()), now);
+    expect(again.seeded).toEqual([]);
   });
 
-  it("puts a changed brief back to pending, clears the approval, and asks once", async () => {
+  it.each([
+    { cron: "0 10 * * *" },
+    { title: "Daily check" },
+    { channel: "C0OTHER01" },
+    { instruction: "Look wider." },
+    { builder: "auto" as const },
+  ])("updates an active row when %j changes and keeps it active", async (over) => {
     const sql = ledger.sql();
     const row = await theRow();
-    const changed = entry({ brief: { ...brief, goal: "Look wider." } });
+    const result = await seedPackSchedules(sql, packWith(entry(over)), now);
+    expect(result.seeded.map((r) => r.id)).toEqual([row.id]);
+    expect(await getSchedule(sql, row.id)).toMatchObject({ status: "active", ...over });
+    await seedPackSchedules(sql, packWith(entry()), now);
+  });
 
-    const result = await seedPackSchedules(sql, packWith(changed));
-    expect(result.pending.map((r) => r.id)).toEqual([row.id]);
+  it("keeps a row someone paused paused when its entry changes", async () => {
+    const sql = ledger.sql();
+    const row = await theRow();
+    await pauseSchedule(sql, row.id);
+    await seedPackSchedules(sql, packWith(entry({ instruction: "Look wider." })), now);
     expect(await getSchedule(sql, row.id)).toMatchObject({
-      status: "pending_approval",
-      approvedBy: null,
-      approvedAt: null,
+      status: "paused",
       nextFireAt: null,
-      brief: { goal: "Look wider." },
+      instruction: "Look wider.",
     });
-    expect(await notices()).toHaveLength(2);
-
-    await seedPackSchedules(sql, packWith(changed));
-    expect(await notices()).toHaveLength(2);
+    await sql`update schedules set status = 'active', next_fire_at = ${now} where id = ${row.id}`;
   });
 
-  it.each([{ cron: "0 10 * * *" }, { title: "Daily check" }, { channel: "C0OTHER01" }])(
-    "resets an approved row when %j changes",
-    async (over) => {
-      const sql = ledger.sql();
-      const row = await theRow();
-      const base = entry({ brief: { ...brief, goal: "Look wider." } });
-      await seedPackSchedules(sql, packWith(base));
-      await approveSchedule(sql, row.id, "U0OWNER01", now);
-
-      const result = await seedPackSchedules(sql, packWith({ ...base, ...over }));
-      expect(result.pending.map((r) => r.id)).toEqual([row.id]);
-      expect((await getSchedule(sql, row.id))?.status).toBe("pending_approval");
-      // Back to the stored base, so the next case starts from it.
-      await seedPackSchedules(sql, packWith(base));
-    },
-  );
-
-  it("deletes a key that left the pack, and revives it as pending", async () => {
+  it("deletes a key that left the pack, and revives it as active", async () => {
     const sql = ledger.sql();
     const row = await theRow();
-    const kept = entry({
-      cron: row.cron,
-      title: row.title,
-      channel: row.channel,
-      brief: row.brief as PackSchedule["brief"],
-    });
 
-    const gone = await seedPackSchedules(sql, packWith());
+    const gone = await seedPackSchedules(sql, packWith(), now);
     expect(gone.removed).toEqual(["weekday-check"]);
     expect((await getSchedule(sql, row.id))?.status).toBe("deleted");
 
-    const back = await seedPackSchedules(sql, packWith(kept));
-    expect(back.pending.map((r) => r.id)).toEqual([row.id]);
-    expect((await getSchedule(sql, row.id))?.status).toBe("pending_approval");
+    const back = await seedPackSchedules(sql, packWith(entry()), now);
+    expect(back.seeded.map((r) => r.id)).toEqual([row.id]);
+    expect((await getSchedule(sql, row.id))?.status).toBe("active");
   });
 
   it("changes nothing without a pack", async () => {
     const sql = ledger.sql();
     const before = await listSchedules(sql);
-    expect(await seedPackSchedules(sql, undefined)).toEqual({ pending: [], removed: [] });
+    expect(await seedPackSchedules(sql, undefined, now)).toEqual({ seeded: [], removed: [] });
     expect(await listSchedules(sql)).toEqual(before);
-  });
-
-  it("lists a pending row with its brief, and approval needs the same text", async () => {
-    const row = await theRow();
-    expect(row.status).toBe("pending_approval");
-    const text = scheduleList([row]);
-    expect(text).not.toContain("schedule_approve");
-    expect(text).not.toContain('"goal"');
-
-    const shown = { cron: row.cron, brief: row.brief };
-    expect(sameAsStored(row, shown)).toBe(true);
-    expect(sameAsStored(row, { ...shown, brief: { ...brief, goal: "Something else." } })).toBe(
-      false,
-    );
-    expect(sameAsStored(row, { ...shown, cron: "* * * * *" })).toBe(false);
   });
 });

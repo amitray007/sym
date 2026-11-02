@@ -13,7 +13,6 @@ import {
 import { createJob, type Job, type JobStatus, updateJob } from "../lib/ledger/jobs.ts";
 import { propose } from "../lib/ledger/proposals.ts";
 import { setQuietUntil } from "../lib/quiet/quiet.ts";
-import { approveSchedule, createSchedule, pauseSchedule } from "../lib/schedules/rows.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
 import { type FakeSlack, startFakeSlack } from "./fakes/slack-server.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
@@ -82,7 +81,6 @@ function data(overrides: Partial<HomeData> = {}): HomeData {
     worker: { state: "reachable", expiresAt: new Date(NOW.getTime() + 12 * 86_400_000) },
     active: [],
     finished: { done: 0, failed: 0, cancelled: 0, latest: [] },
-    schedules: [],
     projects: ["alpha"],
     ...overrides,
   };
@@ -244,47 +242,6 @@ describe("homeView by role", () => {
     expect(text).toContain("cancelled");
     expect(text).toContain("Nothing needs you.");
   });
-
-  it("shows only schedules waiting for approval under Needs you", () => {
-    const schedule = {
-      id: 1,
-      cron: "0 9 * * *",
-      title: "Morning check",
-      brief: {},
-      channel: "C1",
-      owner: "U1",
-      status: "paused" as const,
-      approvedBy: null,
-      approvedAt: null,
-      leaseUntil: null,
-      lastFiredAt: null,
-      nextFireAt: null,
-      createdAt: NOW,
-      packKey: null,
-    };
-    const text = textOf(
-      homeView(
-        "member",
-        data({
-          schedules: [
-            schedule,
-            { ...schedule, id: 3, status: "pending_approval" },
-            {
-              ...schedule,
-              id: 2,
-              status: "active",
-              nextFireAt: new Date(NOW.getTime() + 3600_000),
-            },
-          ],
-        }),
-      ),
-    );
-    expect(text).not.toContain("S-1");
-    expect(text).not.toContain("S-2");
-    expect(text).toContain("One item needs you.");
-    expect(text).toContain("*Needs you*");
-    expect(text).toContain("Morning check · waiting for approval");
-  });
 });
 
 describe("homeView limits", () => {
@@ -298,7 +255,7 @@ describe("homeView limits", () => {
     expect(text).toContain("+15 more");
   });
 
-  it("shows at most five finished jobs and ten schedules", () => {
+  it("shows at most five finished jobs", () => {
     const latest = Array.from({ length: 8 }, (_, i) =>
       job(i + 1, { status: "done", finishedAt: minutesAgo(i + 1) }),
     );
@@ -507,23 +464,6 @@ describe.skipIf(!hasDatabase)("publishHome", () => {
     await make("home-wait", "Billing", "waiting_input");
     await make("home-done", "Docs", "done");
     await make("home-fail", "Lint", "failed");
-    const schedule = await createSchedule(ledger.sql(), {
-      cron: "0 9 * * *",
-      title: "Morning check",
-      brief: {},
-      channel: "C1",
-      owner: "UOWNER",
-    });
-    await approveSchedule(ledger.sql(), schedule.id, "UOWNER", NOW);
-    const paused = await createSchedule(ledger.sql(), {
-      cron: "0 10 * * *",
-      title: "Paused one",
-      brief: {},
-      channel: "C1",
-      owner: "UOWNER",
-    });
-    await approveSchedule(ledger.sql(), paused.id, "UOWNER", NOW);
-    await pauseSchedule(ledger.sql(), paused.id);
     const proposed = await proposeConnection(ledger.sql(), {
       name: "docs",
       url: "https://mcp.example.com",
@@ -547,8 +487,6 @@ describe.skipIf(!hasDatabase)("publishHome", () => {
     expect(member).toContain("Retry loop");
     expect(member).toContain("waiting for you");
     expect(member).toContain("Finished today");
-    expect(member).not.toContain("Morning check");
-    expect(member).not.toContain("Paused one · paused");
     expect(member).not.toContain("alpha");
     expect(member).not.toContain("expires in 3 days");
     expect(member).not.toContain("Connections");

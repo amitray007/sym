@@ -2,7 +2,6 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { migrate } from "../lib/ledger/migrate.ts";
 import type { Schedule } from "../lib/schedules/rows.ts";
 import {
-  approveSchedule,
   attachSession,
   claimDueSchedules,
   claimRunForJob,
@@ -13,7 +12,6 @@ import {
   finishRun,
   finishRunForSession,
   getSchedule,
-  isApprovedBrief,
   listSchedules,
   parseScheduleRef,
   pauseSchedule,
@@ -21,12 +19,19 @@ import {
   reserveRun,
   resumeSchedule,
   runsSince,
+  ScheduleTimingError,
 } from "../lib/schedules/rows.ts";
 import { scheduleRunsMigration } from "../lib/schedules/runs-migration.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
-const brief = { project: "p", title: "On-call check", goal: "g", doneWhen: ["d"] };
-const input = { cron: "0 9 * * *", title: "On-call check", brief, channel: "C1", owner: "U1" };
+const input = {
+  cron: "0 9 * * *",
+  title: "On-call check",
+  instruction: "Check the on-call dashboard.",
+  builder: "ask" as const,
+  channel: "C1",
+  owner: "U1",
+};
 const T0 = new Date("2026-10-20T08:00:00Z");
 
 describe.skipIf(!hasDatabase)("schedule rows", () => {
@@ -45,27 +50,28 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
     return Number(job?.id);
   };
 
-  it("creates a pending row that does not fire", async () => {
+  it("creates an active row with its first fire, no approval needed", async () => {
     const db = await sql();
-    const row = await createSchedule(db, input);
-    expect(row.status).toBe("pending_approval");
-    expect(row.nextFireAt).toBeNull();
-    expect(await claimDueSchedules(db, new Date("2030-01-01T00:00:00Z"), 1000)).toEqual([]);
+    const row = await createSchedule(db, input, T0);
+    expect(row).toMatchObject({ status: "active", builder: "ask", runAt: null });
+    expect(row.nextFireAt?.toISOString()).toBe("2026-10-20T09:00:00.000Z");
   });
 
-  it("rejects a bad cron", async () => {
-    await expect(createSchedule(await sql(), { ...input, cron: "nope" })).rejects.toThrow(/cron/i);
+  it("rejects a bad cron, a cron that never fires, and a past one-time run", async () => {
+    const db = await sql();
+    await expect(createSchedule(db, { ...input, cron: "nope" }, T0)).rejects.toThrow(/cron/i);
+    await expect(createSchedule(db, { ...input, cron: "0 0 31 2 *" }, T0)).rejects.toThrow(
+      ScheduleTimingError,
+    );
+    const { cron: _cron, ...once } = input;
+    await expect(
+      createSchedule(db, { ...once, runAt: new Date("2026-10-20T07:00:00Z") }, T0),
+    ).rejects.toThrow("That time has passed.");
   });
 
-  it("runs the lifecycle: approve, pause, resume, delete", async () => {
+  it("runs the lifecycle: pause, resume, delete", async () => {
     const db = await sql();
-    const created = await createSchedule(db, input);
-    const active = await approveSchedule(db, created.id, "U1", T0);
-    expect(active?.status).toBe("active");
-    expect(active?.approvedBy).toBe("U1");
-    expect(active?.nextFireAt?.toISOString()).toBe("2026-10-20T09:00:00.000Z");
-    // A second approval changes nothing.
-    expect(await approveSchedule(db, created.id, "U2", T0)).toBeUndefined();
+    const created = await createSchedule(db, input, T0);
 
     const paused = await pauseSchedule(db, created.id);
     expect(paused?.status).toBe("paused");
@@ -80,25 +86,58 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
     expect((await getSchedule(db, created.id))?.status).toBe("deleted");
   });
 
-  it("cannot approve a paused or deleted row", async () => {
+  it("the database refuses an active row without a next fire, and both or neither timing", async () => {
     const db = await sql();
-    const created = await createSchedule(db, input);
-    await deleteSchedule(db, created.id);
-    expect(await approveSchedule(db, created.id, "U1", T0)).toBeUndefined();
+    const created = await createSchedule(db, input, T0);
+    await expect(
+      db`update schedules set next_fire_at = null where id = ${created.id}`,
+    ).rejects.toThrow(/schedules_active_ready/);
+    await expect(db`update schedules set run_at = now() where id = ${created.id}`).rejects.toThrow(
+      /schedules_timing/,
+    );
+    await expect(db`update schedules set cron = null where id = ${created.id}`).rejects.toThrow(
+      /schedules_timing/,
+    );
   });
 
-  it("the database refuses an active row without an approver", async () => {
+  it("fires a one-time row once, then it is done", async () => {
     const db = await sql();
-    const created = await createSchedule(db, input);
-    await expect(
-      db`update schedules set status = 'active' where id = ${created.id}`,
-    ).rejects.toThrow(/schedules_active_ready/);
+    const { cron: _cron, ...once } = input;
+    const runAt = new Date("2026-10-20T15:00:00Z");
+    const created = await createSchedule(db, { ...once, title: "Reminder", runAt }, T0);
+    expect(created).toMatchObject({ cron: null, status: "active" });
+    expect(created.nextFireAt?.toISOString()).toBe(runAt.toISOString());
+
+    const mine = (rows: Schedule[]) => rows.filter((row) => row.id === created.id);
+    expect(mine(await claimDueSchedules(db, new Date("2026-10-20T14:59:00Z"), 60_000))).toEqual([]);
+    const now = new Date("2026-10-20T15:00:20Z");
+    const [claimed] = mine(await claimDueSchedules(db, now, 60_000));
+    if (!claimed) throw new Error("expected a claim");
+    expect(await completeClaim(db, claimed, now)).toBe(true);
+
+    const after = await getSchedule(db, created.id);
+    expect(after).toMatchObject({ status: "done", nextFireAt: null });
+    expect(mine(await claimDueSchedules(db, new Date("2026-10-22T00:00:00Z"), 60_000))).toEqual([]);
+    expect((await listSchedules(db)).some((row) => row.id === created.id)).toBe(false);
+  });
+
+  it("will not resume a one-time row whose time passed", async () => {
+    const db = await sql();
+    const { cron: _cron, ...once } = input;
+    const created = await createSchedule(
+      db,
+      { ...once, title: "Late", runAt: new Date("2026-10-20T10:00:00Z") },
+      T0,
+    );
+    await pauseSchedule(db, created.id);
+    await expect(resumeSchedule(db, created.id, new Date("2026-10-20T11:00:00Z"))).rejects.toThrow(
+      "That time has passed.",
+    );
   });
 
   it("claims a due row once, even with two concurrent claims", async () => {
     const db = await sql();
-    const created = await createSchedule(db, { ...input, title: "Concurrent" });
-    await approveSchedule(db, created.id, "U1", T0);
+    const created = await createSchedule(db, { ...input, title: "Concurrent" }, T0);
     const due = new Date("2026-10-20T09:00:30Z");
     const [a, b] = await Promise.all([
       claimDueSchedules(db, due, 60_000),
@@ -110,8 +149,7 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
 
   it("holds a lease, then lets the row go after it runs out", async () => {
     const db = await sql();
-    const created = await createSchedule(db, { ...input, title: "Lease" });
-    await approveSchedule(db, created.id, "U1", T0);
+    const created = await createSchedule(db, { ...input, title: "Lease" }, T0);
     const due = new Date("2026-10-20T09:00:00Z");
     const mine = (rows: Schedule[]) => rows.filter((row) => row.id === created.id);
     expect(mine(await claimDueSchedules(db, due, 60_000))).toHaveLength(1);
@@ -123,8 +161,11 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
 
   it("completeClaim records the fire, clears the lease, and skips missed windows", async () => {
     const db = await sql();
-    const created = await createSchedule(db, { ...input, title: "Complete", cron: "0 * * * *" });
-    await approveSchedule(db, created.id, "U1", T0);
+    const created = await createSchedule(
+      db,
+      { ...input, title: "Complete", cron: "0 * * * *" },
+      T0,
+    );
     // The dispatcher was down for hours: the next fire is the next hour after now, not a backlog.
     const now = new Date("2026-10-20T13:20:00Z");
     const [claimed] = (await claimDueSchedules(db, now, 60_000)).filter((r) => r.id === created.id);
@@ -138,8 +179,7 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
 
   it("completeClaim leaves a row paused during the fire paused", async () => {
     const db = await sql();
-    const created = await createSchedule(db, { ...input, title: "Pause mid-fire" });
-    await approveSchedule(db, created.id, "U1", T0);
+    const created = await createSchedule(db, { ...input, title: "Pause mid-fire" }, T0);
     const now = new Date("2026-10-20T09:00:00Z");
     const [claimed] = (await claimDueSchedules(db, now, 60_000)).filter((r) => r.id === created.id);
     if (!claimed) throw new Error("expected a claim");
@@ -152,7 +192,7 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
 
   it("records runs and their outcome", async () => {
     const db = await sql();
-    const created = await createSchedule(db, { ...input, title: "Runs" });
+    const created = await createSchedule(db, { ...input, title: "Runs" }, T0);
     const run = await recordRun(db, { scheduleId: created.id, firedAt: T0, sessionId: "s1" });
     expect(run.outcome).toBe("started");
     await finishRun(db, run.id, "all_clear");
@@ -164,7 +204,7 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
 
   it("ends a run by session once and links the job", async () => {
     const db = await sql();
-    const created = await createSchedule(db, { ...input, title: "By session" });
+    const created = await createSchedule(db, { ...input, title: "By session" }, T0);
     const run = await recordRun(db, { scheduleId: created.id, firedAt: T0, sessionId: "s-by" });
     const [job] = await db<{ id: string }[]>`
       insert into jobs (request_key, kind, title, brief, worker)
@@ -180,27 +220,9 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
     expect([after?.outcome, after?.jobId]).toEqual(["all_clear", jobId]);
   });
 
-  it("isApprovedBrief matches only the approved brief of an active row", async () => {
-    const db = await sql();
-    const created = await createSchedule(db, { ...input, title: "Approved" });
-    expect(await isApprovedBrief(db, created.id, brief)).toBe(false);
-    await approveSchedule(db, created.id, "U1", T0);
-    expect(
-      await isApprovedBrief(db, created.id, {
-        doneWhen: ["d"],
-        goal: "g",
-        title: "On-call check",
-        project: "p",
-      }),
-    ).toBe(true);
-    expect(await isApprovedBrief(db, created.id, { ...brief, goal: "write code" })).toBe(false);
-    await pauseSchedule(db, created.id);
-    expect(await isApprovedBrief(db, created.id, brief)).toBe(false);
-  });
   it("reserves one run per fire, so a repeated dispatch does not send twice", async () => {
     const db = await sql();
-    const created = await createSchedule(db, { ...input, title: "Identity" });
-    await approveSchedule(db, created.id, "U1", T0);
+    const created = await createSchedule(db, { ...input, title: "Identity" }, T0);
     const due = new Date("2026-10-20T09:00:00Z");
     const first = await reserveRun(db, { scheduleId: created.id, dueAt: due, firedAt: due });
     expect(first?.scheduleId).toBe(created.id);
@@ -221,8 +243,7 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
 
   it("recovers a crash after the send: the lease expires, the fire is skipped, the claim completes", async () => {
     const db = await sql();
-    const created = await createSchedule(db, { ...input, title: "Crash", cron: "0 * * * *" });
-    await approveSchedule(db, created.id, "U1", T0);
+    const created = await createSchedule(db, { ...input, title: "Crash", cron: "0 * * * *" }, T0);
     const t1 = new Date("2026-10-20T09:00:30Z");
     const mine = (rows: Schedule[]) => rows.filter((r) => r.id === created.id);
     const [claim1] = mine(await claimDueSchedules(db, t1, 60_000));
@@ -250,8 +271,11 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
 
   it("completeClaim does nothing for a dispatcher that lost its lease", async () => {
     const db = await sql();
-    const created = await createSchedule(db, { ...input, title: "Lost lease", cron: "0 * * * *" });
-    await approveSchedule(db, created.id, "U1", T0);
+    const created = await createSchedule(
+      db,
+      { ...input, title: "Lost lease", cron: "0 * * * *" },
+      T0,
+    );
     const mine = (rows: Schedule[]) => rows.filter((r) => r.id === created.id);
     const [old] = mine(await claimDueSchedules(db, new Date("2026-10-20T09:00:30Z"), 60_000));
     const [fresh] = mine(await claimDueSchedules(db, new Date("2026-10-20T09:05:00Z"), 60_000));
@@ -263,8 +287,8 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
 
   it("binds pre-approval to the run of this session, one job only", async () => {
     const db = await sql();
-    const a = await createSchedule(db, { ...input, title: "Bind A" });
-    const b = await createSchedule(db, { ...input, title: "Bind B" });
+    const a = await createSchedule(db, { ...input, title: "Bind A" }, T0);
+    const b = await createSchedule(db, { ...input, title: "Bind B" }, T0);
     const due = new Date("2026-10-20T09:00:00Z");
     const run = await reserveRun(db, { scheduleId: a.id, dueAt: due, firedAt: due });
     if (!run) throw new Error("expected a run");
@@ -284,7 +308,7 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
 
   it("waits for the dispatcher to attach the session, then claims", async () => {
     const db = await sql();
-    const a = await createSchedule(db, { ...input, title: "Late attach" });
+    const a = await createSchedule(db, { ...input, title: "Late attach" }, T0);
     // fired_at is now, so the run counts as recently reserved.
     const run = await reserveRun(db, {
       scheduleId: a.id,
@@ -303,7 +327,7 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
 
   it("does not wait when no run is waiting to be attached", async () => {
     const db = await sql();
-    const a = await createSchedule(db, { ...input, title: "No run" });
+    const a = await createSchedule(db, { ...input, title: "No run" }, T0);
     const job = await newJob("no-run");
     const started = Date.now();
 
@@ -315,7 +339,7 @@ describe.skipIf(!hasDatabase)("schedule rows", () => {
 
   it("lets only one of two concurrent jobs claim the run", async () => {
     const db = await sql();
-    const a = await createSchedule(db, { ...input, title: "Race" });
+    const a = await createSchedule(db, { ...input, title: "Race" }, T0);
     const due = new Date("2026-10-20T09:00:00Z");
     const run = await reserveRun(db, { scheduleId: a.id, dueAt: due, firedAt: due });
     if (!run) throw new Error("expected a run");

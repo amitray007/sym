@@ -1,8 +1,8 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
-import { pack, slackFromEnv } from "../../lib/runtime.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { lookUpPerson, UNKNOWN_PERSON } from "../../lib/slack/people.ts";
 
 // Looks up a workspace member: name, title, time zone and local time, and status (decision 083).
@@ -19,7 +19,7 @@ export default defineTool({
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
     const found = await lookUpPerson(
       { slack: slackFromEnv(), pack: pack() },
-      slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+      await requesterOf(ctx.session, ledgerDeps),
       person,
     );
     return found ?? UNKNOWN_PERSON;

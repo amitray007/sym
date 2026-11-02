@@ -1,10 +1,10 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
 import { PERSONAS } from "../../lib/persona.ts";
 import { changePersona } from "../../lib/persona-setting.ts";
-import { ledger, pack } from "../../lib/runtime.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
 
 // Lets the owner switch the brain's voice in plain words (decision 046). The tool checks the
 // caller itself, because code decides, not the model. The change applies from the next session,
@@ -26,7 +26,7 @@ export default defineTool({
     return changePersona({
       sql: ledger(),
       pack: pack(),
-      userId: slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+      userId: await requesterOf(ctx.session, ledgerDeps),
       name: input.persona,
     });
   },

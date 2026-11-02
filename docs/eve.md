@@ -24,7 +24,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Feature | API | Decision | How Sym uses it | Limits |
 |---|---|---|---|---|
 | Plain tools | `defineTool` | Use | `jobs_status`, `worker_projects`, `schedule_*`, memory tools | Not retried. Interrupted steps re-run, so use idempotency keys |
-| Approvals | `approval: never/once/always/policy` | Use | Gate launches with write intent, schedule deletes, merges | Default `never`. Check the clicker in `onAnswers` |
+| Approvals | `approval: never/once/always/policy` | Use | Gate launches with write intent, merges | Default `never`. Check the clicker in `onAnswers` |
 | Workflow task | `defineWorkflowTool({ task })` | Use | `worker_job`: one worker thread from launch to checked result | 32 working tasks per session. Result capped at 50 KB |
 | Progress | `async *task` + `yield` | Use | The thread status line | The task card row does not show yields. `serve` tasks cannot yield |
 | Questions | `ctx.ask` | Use | Worker questions become Slack buttons | `unavailable` in Markdown schedule sessions |
@@ -68,7 +68,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 |---|---|---|---|---|
 | Handler schedules | `defineSchedule({ cron, run })` | Use | `dispatch` (1 min), `reconcile` (3 min), `digest`, `learn` | Cron in UTC. `eve start` runs the scheduler. One replica |
 | Markdown schedules | `.md` with `cron` | Skip | | Output discarded. Approvals fail the session |
-| Dynamic scheduling | dispatcher + rows + CRUD tools | Use | Owner schedules as rows | At-least-once. Lease each row |
+| Dynamic scheduling | dispatcher + rows + CRUD tools | Use | Schedules as rows, each an instruction for the brain (decision 085) | At-least-once. Lease each row |
 | Durable notifications | outbox + schedule + `callSlackApi` | Use | Posts that retry | At-least-once. Idempotency key per post |
 | Memory | `defineMemory`, `defineMemoryProvider` | Use | Learning layer 1 | `fileMemory` needs Vercel Blob off Vercel, so Sym uses its own Postgres provider (`lib/memory/provider.ts`) in the `owner` slot. `byPrincipal` scopes it per person and gives schedule turns no memory |
 | Session state | `defineState` | Use lightly | Per-thread scratch | Lost with the session |
@@ -83,7 +83,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Feature | API | Decision | How Sym uses it | Limits |
 |---|---|---|---|---|
 | Self-modification | `eve/self-modification/remote` | Skip | Code changes go through a worker thread instead (decision 007) | Needs microsandbox when self-hosted |
-| Evals | `evals/**/*.eval.ts`, `eve eval`, tool stubs | Use | Six routing cases and three voice cases check the brain with a real model (voice: silence after a posted result, and two persona floors run by `pnpm eval:plain` and `pnpm eval:spicy`; decision 062 removed the shape cases). The routing cases: a code change calls `worker_job`, a quick pull request check starts no job (decision 063), a status question calls `jobs_status`, a recurring request calls `schedule_create`, a production write stays read-only, and injected text calls no write tool (decision 039). Stubs replace the write tools. `pnpm test:e2e` still covers the flows with the fixture brain | Run by the owner, not CI: it spends model tokens. Setup moves the run to its own database (`SYM_EVAL_DATABASE_URL`, default `sym_eval`), migrates it, and stops when it has an active connection, so no eval reaches a live server (decision 064). The `worker_job` stub returns the real end result, `posted: true`. Stubs need the dev-only grant in `agent/channels/eve.ts`. No judge is used, so no judge model is set |
+| Evals | `evals/**/*.eval.ts`, `eve eval`, tool stubs | Use | Six routing cases and three voice cases check the brain with a real model (voice: silence after a posted result, and two persona floors run by `pnpm eval:plain` and `pnpm eval:spicy`; decision 062 removed the shape cases). The routing cases: a code change calls `worker_job`, a quick pull request check starts no job (decision 063), a status question calls `jobs_status`, a recurring request calls `schedule_create`, a schedule that needs Builder work asks about auto-start first, a production write stays read-only, and injected text calls no write tool (decision 039). Stubs replace the write tools. `pnpm test:e2e` still covers the flows with the fixture brain | Run by the owner, not CI: it spends model tokens. Setup moves the run to its own database (`SYM_EVAL_DATABASE_URL`, default `sym_eval`), migrates it, and stops when it has an active connection, so no eval reaches a live server (decision 064). The `worker_job` stub returns the real end result, `posted: true`. Stubs need the dev-only grant in `agent/channels/eve.ts`. No judge is used, so no judge model is set |
 | OpenTelemetry | `agent/instrumentation/*` | Later | Traces to a collector | |
 | Route auth | custom bearer `AuthFn`, `localDev()` | Use | Slack by signature. MCP by job capabilities or the status-read `SYM_MCP_TOKEN`, sessions by `SYM_API_TOKEN` (decisions 019, 027, 065). An IP allow-list is later; keep both routes on the private network | `placeholderAuth` blocks production |
 | Self-hosting | `eve build`, `eve start` | Use | Docker service with a volume at `.eve/.workflow-data` | The proxy must pass `/eve/` and `/.well-known/workflow/` unrewritten |
@@ -114,5 +114,5 @@ conversation, including code channels. Completed brain replies use the outbox an
 Decision 071 adds evals for vague problems, a vague report matching a trusted playbook, explicit
 Builder requests, acceptance of an offer,
 finished-job discussion, follow-ups, closure, short answers, lists, and persona recaps. Fixture
-checks prove wiring only. The owner runs real-model evals. Interactive Builder requests show Start / Not now even for trusted playbooks. Approved schedules
-start without a click (decision 024). The trust ladder no longer auto-starts jobs.
+checks prove wiring only. The owner runs real-model evals. Interactive Builder requests show Start / Not now even for trusted playbooks. Schedules set to
+`auto` start without a click (decision 085). The trust ladder no longer auto-starts jobs.

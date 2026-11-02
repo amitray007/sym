@@ -1,6 +1,6 @@
 # 055. A pack seeds schedules that the owner still approves
 
-Status: accepted
+Status: superseded in part by [085](085-agent-schedules.md). Seeding remains; entries hold an instruction, rows start active, and `schedule_approve` is removed.
 Date: 2026-10-21
 
 ## Context

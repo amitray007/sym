@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { requesterResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
+import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { dmNeedsConfirmation, sendDirectMessage } from "../../lib/slack/dm.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
@@ -19,14 +19,14 @@ export default defineTool({
     text: z.string().min(1).max(POST_MAX).describe("The message to send. A few short lines."),
   }),
   approval: {
-    request: ({ session, toolInput }) =>
+    request: async ({ session, toolInput }) =>
       dmNeedsConfirmation(
         ledgerDeps(),
         session.id,
-        slackUserOfPrincipal(session.auth.current?.principalId),
+        await requesterOf(session, ledgerDeps),
         toolInput?.person,
       ).then((ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable")),
-    response: requesterResponse("Only the person who asked can approve this DM."),
+    response: requesterResponse("Only the person who asked can approve this DM.", ledgerDeps),
     prompt: ({ input }) => `Send this to ${input.person}?\n\n${input.text}`,
   },
   label: { start: () => "Send a DM" },
@@ -35,7 +35,7 @@ export default defineTool({
     return sendDirectMessage(ledgerDeps(), {
       sessionId: ctx.session.id,
       callId: ctx.callId,
-      requester: slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+      requester: await requesterOf(ctx.session, ledgerDeps),
       person,
       text,
     });

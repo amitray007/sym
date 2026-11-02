@@ -6,7 +6,7 @@ import { listSchedules, scheduleRef } from "../../lib/schedules/rows.ts";
 
 export default defineTool({
   description:
-    "Use the returned facts to answer naturally. Do not paste tool returns verbatim or name internal tools. List the schedules: reference, cron in UTC, title, status, and next run.",
+    "Use the returned facts to answer naturally. Do not paste tool returns verbatim or name internal tools. List the schedules: reference, title, cron in UTC or one-time run, status, next run, where runs post, the Builder mode, and the instruction.",
   inputSchema: z.object({}),
   label: { start: () => "List schedules" },
   async execute() {
@@ -14,7 +14,7 @@ export default defineTool({
     return {
       summary: scheduleList(rows),
       schedules: rows.map((row) => ({ ...row, ref: scheduleRef(row.id) })),
-      note: "Use these facts to answer naturally. Do not paste this return verbatim. Pending schedules need owner approval of the exact saved brief and frequency.",
+      note: "Use these facts to answer naturally. Do not paste this return verbatim.",
     };
   },
 });

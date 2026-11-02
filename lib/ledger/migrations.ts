@@ -17,7 +17,11 @@ import {
 import { memoryMigration } from "../memory/migration.ts";
 import { quietMigration } from "../quiet/migration.ts";
 import { reactionsMigration } from "../reactions/migration.ts";
-import { schedulePackKeyMigration, schedulesMigration } from "../schedules/migration.ts";
+import {
+  agentSchedulesMigration,
+  schedulePackKeyMigration,
+  schedulesMigration,
+} from "../schedules/migration.ts";
 import { scheduleRunsMigration } from "../schedules/runs-migration.ts";
 import { credentialsMigration } from "../workers/credentials-migration.ts";
 import { workerMigration } from "../workers/migration.ts";
@@ -312,4 +316,5 @@ export const migrations: Migration[] = [
     );
     create index requested_posts_requester on requested_posts (requester, created_at);`,
   },
+  agentSchedulesMigration,
 ];

@@ -124,18 +124,21 @@ describe.skipIf(!hasDatabase)("slack_post", () => {
 
 describe("slack_post approval", () => {
   const approval = slackPost.approval as {
-    response: (ctx: unknown) => { status: string };
+    response: (ctx: unknown) => Promise<{ status: string }>;
   };
-  const answer = (requester: string | null, responder: string) =>
-    approval.response({
-      request: { principal: requester ? { principalId: requester } : null },
-      response: { decision: "approve", principal: { principalId: responder } },
-    }).status;
+  const answer = async (requester: string | null, responder: string) =>
+    (
+      await approval.response({
+        request: { principal: requester ? { principalId: requester } : null },
+        response: { decision: "approve", principal: { principalId: responder } },
+        session: { id: "s-chat" },
+      })
+    ).status;
 
-  it("lets only the person who asked approve the post", () => {
-    expect(answer("slack:T1:UASKER", "slack:T1:UASKER")).toBe("allowed");
-    expect(answer("slack:T1:UASKER", "slack:T1:UOWNER")).toBe("rejected");
-    expect(answer(null, "slack:T1:UASKER")).toBe("rejected");
+  it("lets only the person who asked approve the post", async () => {
+    expect(await answer("slack:T1:UASKER", "slack:T1:UASKER")).toBe("allowed");
+    expect(await answer("slack:T1:UASKER", "slack:T1:UOWNER")).toBe("rejected");
+    expect(await answer(null, "slack:T1:UASKER")).toBe("rejected");
   });
 });
 

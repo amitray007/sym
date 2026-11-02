@@ -13,13 +13,9 @@ import {
   setToolMode,
 } from "../../lib/connections/rows.ts";
 import type { ToolMode } from "../../lib/connections/tools.ts";
-import {
-  mayDecideAsOwner,
-  OWNER_ONLY,
-  ownerResponse,
-  slackUserOfPrincipal,
-} from "../../lib/owner.ts";
-import { ledger, pack } from "../../lib/runtime.ts";
+import { mayDecideAsOwner, OWNER_ONLY, ownerResponse } from "../../lib/owner.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
 
 // The owner changes how a connection's tools run (decisions 045 and 049): auto, ask, or hidden,
 // for one tool or, without a tool, for the connection default.
@@ -46,7 +42,7 @@ export default defineTool({
   label: { start: ({ name, tool }) => `Set ${name}${tool ? ` ${tool}` : ""}` },
   async execute(input, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
-    const caller = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    const caller = await requesterOf(ctx.session, ledgerDeps);
     if (!mayDecideAsOwner(caller, pack())) return OWNER_ONLY;
     const sql = ledger();
     let row = await getConnection(sql, input.name);
