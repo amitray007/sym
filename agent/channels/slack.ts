@@ -44,6 +44,7 @@ import {
   recordThreadMessage,
   recordTurnMessage,
 } from "../../lib/reactions/react.ts";
+import { isAppSession, type RequesterSession, threadUserOf } from "../../lib/requester.ts";
 import { ledger, ledgerDeps, pack, slackFromEnv, withJobDeps } from "../../lib/runtime.ts";
 import { scheduleList } from "../../lib/schedules/format.ts";
 import { turnOutcome } from "../../lib/schedules/outcome.ts";
@@ -317,12 +318,12 @@ type TurnBookkeeping = {
 };
 
 // A scheduled run that started no job ends with its turn: a reply needs attention, silence is
-// all clear (decision 085). A session that is not a run has no run row, so nothing changes.
-async function endScheduledRun(sessionId: string, outcome: string, state: TurnBookkeeping) {
-  if (state.startedJob) return;
+// all clear (decision 085). Only app sessions can be runs.
+async function endScheduledRun(session: RequesterSession, outcome: string, state: TurnBookkeeping) {
+  if (state.startedJob || !isAppSession(session)) return;
   await finishRunWithoutJob(
     ledger(),
-    sessionId,
+    session.id,
     turnOutcome(outcome, state.postedInThread === true),
   ).catch((error: unknown) => {
     console.warn("Sym could not record the outcome of a scheduled run.", errorName(error));
@@ -361,7 +362,9 @@ const symRenderer = defineSlackRenderer({
           channelId,
           threadTs: threadTs ?? null,
           // A quiet turn does not make its sender the person Sym serves.
-          userId: quiet ? null : (triggeringUserId ?? null),
+          userId: quiet
+            ? null
+            : await threadUserOf(ctx.session, triggeringUserId, ledgerDeps).catch(() => null),
         })
           // The first message of the session, for slack_react (decision 051).
           .then(() =>
@@ -425,11 +428,7 @@ const symRenderer = defineSlackRenderer({
       endQuietTurn(quietKey(ctx.channel));
       // A failed or cancelled quiet turn still gets Eve's notice.
       if (!quiet || event.data.outcome !== "completed") await next(event);
-      await endScheduledRun(
-        ctx.session.id,
-        event.data.outcome,
-        ctx.channel.state as TurnBookkeeping,
-      );
+      await endScheduledRun(ctx.session, event.data.outcome, ctx.channel.state as TurnBookkeeping);
       // Eve sets a code channel back to active when the brain's turn ends. The channel shows its
       // job, so Sym sets the job's own status again, such as suspended while a question waits.
       if (ctx.channel.state.codeChannel && ctx.channel.state.channelId) {

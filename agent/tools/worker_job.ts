@@ -47,6 +47,7 @@ import {
   setChannelStatus,
   setContextBar,
 } from "../../lib/slack/code-channel.ts";
+import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
 import { workerLabel, workerNoun } from "../../lib/worker-label.ts";
 
 // One worker job from brief to result (docs/architecture.md, flows 1 and 3, decision 017). It
@@ -94,7 +95,9 @@ export default defineWorkflowTool({
     const { schedule, ...brief } = input;
     // Decision 042: a project outside Sym's list never gets a job row or a brief post. The
     // reason names only the allowed projects, whether or not the asked-for project exists.
-    const refusal = await projectRefusal(brief.project);
+    const refusal =
+      (await projectRefusal(brief.project)) ??
+      (await creatorRefusal(schedule, ctx.session.auth.initiator));
     if (refusal) {
       await endRefusedRun(ctx.session.id);
       return { status: "not_started", reason: refusal };
@@ -365,6 +368,22 @@ async function rememberCallback(jobId: number, webhookUrl: string) {
 async function projectRefusal(project: string): Promise<string | undefined> {
   "use step";
   return checkProject(allowedFromEnv(), project);
+}
+
+// Decision 085: a run carries its creator's consent. When the creator left the allow-list after
+// the dispatcher sent the run, the run starts no Builder work at all.
+async function creatorRefusal(
+  schedule: string | undefined,
+  initiator: SessionAuthContext | null | undefined,
+): Promise<string | undefined> {
+  "use step";
+  const id = schedule ? parseScheduleRef(schedule) : undefined;
+  if (id === undefined || !isScheduleAuth(initiator)) return undefined;
+  const row = await getSchedule(ledger(), id);
+  if (!row || isSlackUserAllowed(pack(), process.env.SYM_SLACK_USERS, row.owner, () => {})) {
+    return undefined;
+  }
+  return "The person who set up this schedule is no longer on Sym's allow-list, so its runs cannot start Builder work.";
 }
 
 // A scheduled run that is refused has no job. The digest shows it as failed.

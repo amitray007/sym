@@ -35,7 +35,9 @@ schedule also needed the owner's approval, even when the person who asked was on
 6. `worker_job` skips the Start click only when all of these hold in code: the session's
    initiator is the schedule app principal, the schedule reference matches the run attached to
    this session, the row is `active` (or `done` for the one-time row whose fire started this
-   run), its Builder mode is `auto`, and the project is on the list (decision 042). The brief no
+   run), its Builder mode is `auto`, and the project is on the list (decision 042). Whatever the
+   mode, `worker_job` rechecks the creator at launch: when the creator left the allow-list after
+   the dispatch, the run starts no Builder work and says why. The brief no
    longer has to equal a stored brief: the brain writes it within the instruction's scope. Any
    other case shows Start / Not now. An auto-started run stays a quiet `scheduled-check`
    (decision 031).
@@ -49,6 +51,8 @@ schedule also needed the owner's approval, even when the person who asked was on
    gets the instruction "Start the builder with this brief." and its brief in a `brief` block. A
    row that was approved gets `builder = 'auto'`, so it keeps its click-free start. A row that
    waited for approval was never approved, so it becomes `paused`; anyone allowed can resume it.
+   The migration has no rollback, and it drops the approval metadata (who approved each row and
+   when) for good.
 9. A scheduled run acts for the schedule's creator. The dispatcher still sends with the app
    principal, the code proof that the session is a run, and `worker_job` relies on it.
    `requesterOf` in `lib/requester.ts` is the one requester lookup for every tool: a person's
@@ -56,13 +60,21 @@ schedule also needed the owner's approval, even when the person who asked was on
    creator while the creator is on the allow-list; any other app or worker session acts for
    nobody. So `slack_read`, `slack_post`, `slack_react`, `slack_dm`, and the other tools work in
    a run with the creator's reach, and owner-only tools work only when the creator is the owner.
-   Schedule management stays closed to runs, so a run cannot create or change schedules.
+   Schedule management stays closed to runs, so a run cannot create or change schedules. The
+   turn records the creator as the person its Slack thread serves, so a run in the creator's DM
+   can share what the creator may read (decision 083).
 10. An approval inside a run (`requesterResponse`) accepts only the creator, because the request
     principal there is the app. Every other approval rule stays the same.
 11. A run that starts no Builder job ends with its turn: `needs_attention` when the turn posted,
     `all_clear` when it stayed silent (`no_reply`), and `failed` when the turn did not complete.
-    A turn that called `worker_job` leaves the outcome to the job's end, as before.
-12. `runMessage` in `lib/schedules/format.ts` builds a run message from the reference, title,
+    A turn that called `worker_job` leaves the outcome to the job's end, as before. Migration
+    `035_schedule_run_settlements` keeps the first settlement by session, so a turn that ends
+    before the dispatcher attaches its session still sets the outcome on attach.
+12. Each run is delivered with the idempotency key `sym-schedule-run:<run id>`, so a retry
+    reaches the same Slack session. A one-time run that a dispatcher reserved but never
+    delivered is sent again, for up to an hour, before its row is `done`. A recurring fire left
+    undelivered is skipped, and its run ends `failed`.
+13. `runMessage` in `lib/schedules/format.ts` builds a run message from the reference, title,
    instruction, Builder mode, and creator. It is the seam a later event trigger can use: a
    message in a watched channel is also an instruction, a Builder mode, and a destination.
 

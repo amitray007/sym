@@ -19,6 +19,7 @@ import { quietMigration } from "../quiet/migration.ts";
 import { reactionsMigration } from "../reactions/migration.ts";
 import {
   agentSchedulesMigration,
+  runSettlementsMigration,
   schedulePackKeyMigration,
   schedulesMigration,
 } from "../schedules/migration.ts";
@@ -317,4 +318,5 @@ export const migrations: Migration[] = [
     create index requested_posts_requester on requested_posts (requester, created_at);`,
   },
   agentSchedulesMigration,
+  runSettlementsMigration,
 ];

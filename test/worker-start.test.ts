@@ -69,6 +69,7 @@ describe.skipIf(!hasDatabase)("worker_job Start wait", () => {
     runtime.wakes.clear();
     runtime.deps = { sql: runtime.sql, worker: new FakeWorker(), allowedProjects: TEST_PROJECTS };
     vi.stubEnv("SYM_CODE_CHANNELS", "off");
+    vi.stubEnv("SYM_SLACK_USERS", "U1");
     const brief = Brief.parse({
       project: schedule?.project ?? "test-repo",
       title: key,
@@ -261,6 +262,23 @@ describe.skipIf(!hasDatabase)("worker_job Start wait", () => {
     ).toHaveLength(0);
     const [runRow] =
       await ledger.sql()`select outcome from schedule_runs where session_id = 'outside-schedule'`;
+    expect(runRow?.outcome).toBe("failed");
+    expect(launches()).toBe(0);
+  });
+
+  it("refuses Builder work when the creator left the allow-list after the dispatch", async () => {
+    const task = await run("revoked-schedule", undefined, { builder: "auto" });
+    // The dispatcher sent the run while U1 was allowed. Then the owner removed U1.
+    vi.stubEnv("SYM_SLACK_USERS", "UOTHER");
+    await expect(task.next()).resolves.toMatchObject({
+      done: true,
+      value: { status: "not_started", reason: expect.stringContaining("allow-list") },
+    });
+    expect(
+      await ledger.sql()`select id from jobs where request_key = 'revoked-schedule:revoked-schedule'`,
+    ).toHaveLength(0);
+    const [runRow] =
+      await ledger.sql()`select outcome from schedule_runs where session_id = 'revoked-schedule'`;
     expect(runRow?.outcome).toBe("failed");
     expect(launches()).toBe(0);
   });

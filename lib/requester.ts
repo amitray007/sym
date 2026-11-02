@@ -21,17 +21,32 @@ export interface RequesterSession {
   auth: { current?: Caller };
 }
 
+// True for a session the app principal started, such as a scheduled run.
+export function isAppSession(session: RequesterSession): boolean {
+  return isScheduleAuth(session.auth.current as Parameters<typeof isScheduleAuth>[0]);
+}
+
 // `deps` is a getter, so a person's turn reads no ledger.
 export async function requesterOf(
   session: RequesterSession,
   deps: () => RequesterDeps,
   usersEnv: string | undefined = process.env.SYM_SLACK_USERS,
 ): Promise<string | undefined> {
-  const current = session.auth.current;
-  if (!isScheduleAuth(current as Parameters<typeof isScheduleAuth>[0])) {
-    return slackUserOfPrincipal(current?.principalId);
-  }
+  if (!isAppSession(session)) return slackUserOfPrincipal(session.auth.current?.principalId);
   return allowedCreator(session.id, deps(), usersEnv);
+}
+
+// The person a session's Slack thread serves: the sender of the turn, or, for a scheduled run,
+// the creator it acts for. A run's thread then counts as the creator's own, so a run in their DM
+// can share what they may read there (decision 083). The session keeps the app principal.
+export async function threadUserOf(
+  session: RequesterSession,
+  triggeringUserId: string | null | undefined,
+  deps: () => RequesterDeps,
+): Promise<string | null> {
+  if (triggeringUserId) return triggeringUserId;
+  if (!isAppSession(session)) return null;
+  return (await requesterOf(session, deps)) ?? null;
 }
 
 async function allowedCreator(

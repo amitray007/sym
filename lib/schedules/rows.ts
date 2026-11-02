@@ -208,6 +208,21 @@ export async function reserveRun(
   return row ? normalizeRun(row) : undefined;
 }
 
+// The run of this fire that a dispatcher reserved and never delivered, such as one that crashed
+// before its send.
+export async function unsentRun(
+  sql: Sql,
+  scheduleId: number,
+  dueAt: Date,
+): Promise<ScheduleRun | undefined> {
+  const [row] = await sql<ScheduleRun[]>`
+    select * from schedule_runs
+    where schedule_id = ${scheduleId} and due_at = ${dueAt} and session_id is null
+      and outcome = 'started'
+  `;
+  return row ? normalizeRun(row) : undefined;
+}
+
 // Binds a pre-approved job to the run of this session. The run must belong to the named
 // schedule and have no job yet. The same job may claim it again (a replayed step).
 export async function claimRunForJob(
@@ -262,38 +277,66 @@ export async function runCreatorOf(
 ): Promise<string | undefined> {
   const attempts = options.attempts ?? 20;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    const [row] = await sql<{ owner: string }[]>`
-      select s.owner from schedule_runs r join schedules s on s.id = r.schedule_id
-      where r.session_id = ${sessionId}
-    `;
-    if (row) return row.owner;
+    const owner = await creatorOfSession(sql, sessionId);
+    if (owner) return owner;
     const [pending] = await sql`
       select 1 from schedule_runs
-      where session_id is null and fired_at >= now() - interval '2 minutes' limit 1
+      where session_id is null and outcome = 'started'
+        and fired_at >= now() - interval '2 minutes'
+      limit 1
     `;
-    if (!pending) return undefined;
+    // The attach can land between the two reads. Read once more before giving up.
+    if (!pending) return creatorOfSession(sql, sessionId);
     await new Promise((resolve) => setTimeout(resolve, options.delayMs ?? 500));
   }
   return undefined;
 }
 
-// Ends a run whose turn started no job, from what the turn posted (decision 085). A run that
-// has a job keeps waiting: the job's end sets its outcome.
+async function creatorOfSession(sql: Sql, sessionId: string): Promise<string | undefined> {
+  const [row] = await sql<{ owner: string }[]>`
+    select s.owner from schedule_runs r join schedules s on s.id = r.schedule_id
+    where r.session_id = ${sessionId}
+  `;
+  return row?.owner;
+}
+
+// Ends a run whose turn started no job, from what the turn posted (decision 085). The first
+// settlement of a session wins. A turn can settle before the dispatcher attaches its session, so
+// the settlement is kept by session and attachSession applies it. A run that has a job keeps
+// waiting: the job's end sets its outcome.
 export async function finishRunWithoutJob(
   sql: Sql,
   sessionId: string,
-  outcome: RunOutcome,
+  outcome: Exclude<RunOutcome, "started">,
 ): Promise<void> {
   await sql`
-    update schedule_runs set outcome = ${outcome}
-    where session_id = ${sessionId} and outcome = 'started' and job_id is null
+    insert into schedule_run_settlements (session_id, outcome) values (${sessionId}, ${outcome})
+    on conflict (session_id) do nothing
+  `;
+  await sql`
+    update schedule_runs r set outcome = st.outcome
+    from schedule_run_settlements st
+    where r.session_id = ${sessionId} and st.session_id = r.session_id
+      and r.outcome = 'started' and r.job_id is null
       and not exists (select 1 from jobs where session_id = ${sessionId})
   `;
 }
 
-// Sets the session of a reserved run, after the send.
+// Sets the session of a reserved run, after the send, and applies a turn that already settled.
 export async function attachSession(sql: Sql, runId: number, sessionId: string): Promise<void> {
-  await sql`update schedule_runs set session_id = ${sessionId} where id = ${runId}`;
+  await sql`
+    update schedule_runs r set session_id = ${sessionId},
+      outcome = case
+        when r.outcome = 'started' and r.job_id is null
+          and not exists (select 1 from jobs where session_id = ${sessionId})
+        then coalesce(
+          (select outcome from schedule_run_settlements where session_id = ${sessionId}),
+          r.outcome
+        )
+        else r.outcome
+      end
+    where r.id = ${runId}
+  `;
 }
 
 export async function recordRun(

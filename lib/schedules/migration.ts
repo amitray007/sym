@@ -98,3 +98,16 @@ export const agentSchedulesMigration: Migration = {
     alter table schedules drop column brief, drop column approved_by, drop column approved_at;
   `,
 };
+
+// Decision 085: how a scheduled run's turn ended, kept by session. A fast turn can settle before
+// the dispatcher attaches its session to the run; the attach then applies it.
+export const runSettlementsMigration: Migration = {
+  version: "035_schedule_run_settlements",
+  sql: `
+    create table schedule_run_settlements (
+      session_id text primary key,
+      outcome text not null check (outcome in ('all_clear', 'needs_attention', 'failed')),
+      settled_at timestamptz not null default now()
+    );
+  `,
+};
