@@ -47,8 +47,11 @@ export const SANDBOX_ENV: Readonly<Record<string, string>> = { ...SANDBOX_AGENT_
 // Timeouts for docker calls, in milliseconds.
 const CALL_TIMEOUT = 60_000;
 const PULL_TIMEOUT = 15 * 60_000;
-// How long start() waits for another caller to finish setting up a container.
-const READY_WAIT = 30_000;
+// The most a new container's setup may take. Callers that find a container mid-setup wait this
+// long from its creation before they replace it.
+const SETUP_BUDGET = 2 * 60_000;
+// How long one call inside the container may run before the container kills it.
+const EXEC_SECONDS = 55;
 
 export interface DockerResult {
   exitCode: number;
@@ -100,15 +103,16 @@ interface Artifact {
   resources: string | null;
 }
 
+// `container` is the container's ID, so a replaced container is never mistaken for this one.
 interface State {
   [key: string]: number | string;
-  version: 1;
+  version: 2;
   container: string;
 }
 
 export const SymDockerSandbox = defineSandboxProvider({
   name: "sym-docker",
-  stateProtocolVersion: 2,
+  stateProtocolVersion: 3,
   environment: (options: SymDockerOptions) => dockerLifecycle(options),
 });
 
@@ -129,8 +133,9 @@ export function containerName(sessionId: string): string {
   return `sym-sbx-${hash.slice(0, 32)}`;
 }
 
-// The main process: it keeps the container up until Sym has not touched the activity file for
-// the idle limit. Then it exits and Docker removes the container (`--rm`).
+// The main process. Sym enforces the idle limit itself (`reapIdleSandboxes`, every minute), since
+// a command could stop this process with SIGSTOP. This loop is a backstop for when Sym is down:
+// it exits after the idle limit, and Docker removes the container (`--rm`).
 export function keepaliveScript(idleSeconds: number = SANDBOX_LIMITS.idleSeconds): string {
   return [
     'mkdir -p "$HOME"',
@@ -141,6 +146,12 @@ export function keepaliveScript(idleSeconds: number = SANDBOX_LIMITS.idleSeconds
     "  sleep 15",
     "done",
   ].join("\n");
+}
+
+// A command that the container itself kills after `seconds`, with its whole process group, so a
+// call Sym gives up on (a write blocked on a FIFO) leaves no process behind.
+export function bounded(seconds: number, command: string[]): string[] {
+  return ["timeout", "-s", "KILL", String(seconds), ...command];
 }
 
 // `docker run` arguments for a new session container.
@@ -161,6 +172,10 @@ export function runArgs(
     `${LABEL}=1`,
     "--label",
     `${LABEL}.session=${sessionId}`,
+    // No container log. Sym reads output through `docker exec`, and a command writing to the
+    // main process's stdout would otherwise fill Docker's log file on the host's disk.
+    "--log-driver",
+    "none",
     // Reaps the zombies that background commands leave.
     "--init",
     "--memory",
@@ -196,20 +211,90 @@ export function runArgs(
   return args;
 }
 
-// `readyWaitMs` is how long start() waits for another process's setup; tests shorten it.
+interface Found {
+  id: string;
+  running: boolean;
+  // When Docker created it, in milliseconds since the epoch.
+  created: number;
+}
+
+async function inspect(cli: DockerCli, ref: string): Promise<Found | undefined> {
+  const result = await cli.run(
+    ["container", "inspect", "--format", "{{.Id}} {{.State.Running}} {{.Created}}", ref],
+    { timeoutMs: CALL_TIMEOUT },
+  );
+  if (result.exitCode !== 0) {
+    if (/no such (container|object)/i.test(result.stderr)) return undefined;
+    throw dockerError(result, `inspect sandbox container ${ref}`);
+  }
+  const [id = ref, running, created] = result.stdout.trim().split(/\s+/);
+  const time = Date.parse(created ?? "");
+  return { id, running: running === "true", created: Number.isNaN(time) ? 0 : time };
+}
+
+// Removes a container by its ID, so a newer container with the same name is never hit.
+async function removeContainer(cli: DockerCli, id: string, signal?: AbortSignal) {
+  const removed = await cli.run(["rm", "--force", id], {
+    timeoutMs: CALL_TIMEOUT,
+    ...(signal ? { signal } : {}),
+  });
+  if (removed.exitCode !== 0 && !/no such container/i.test(removed.stderr)) {
+    throw dockerError(removed, `remove sandbox container ${id}`);
+  }
+}
+
+// Removes every sandbox container no call has touched within `idleSeconds`. A command still
+// running in it is killed. The `sandbox` schedule runs it every minute, in whichever Sym process
+// runs schedules; it keeps no state, so a restart or a second process changes nothing.
+export async function reapIdleSandboxes(
+  cli: DockerCli,
+  idleSeconds: number = SANDBOX_LIMITS.idleSeconds,
+  now: number = Date.now(),
+): Promise<string[]> {
+  const listed = await cli.run(["ps", "--quiet", "--no-trunc", "--filter", `label=${LABEL}=1`], {
+    timeoutMs: CALL_TIMEOUT,
+  });
+  if (listed.exitCode !== 0) return [];
+  const removed: string[] = [];
+  for (const id of listed.stdout.split("\n").map((line) => line.trim())) {
+    if (!id) continue;
+    // Root-owned, so only Sym's own touches move it.
+    const stat = await cli.run(
+      ["exec", "--user", "root", id, ...bounded(10, ["stat", "-c", "%Y", ACTIVE_FILE])],
+      { timeoutMs: CALL_TIMEOUT },
+    );
+    const touched = Number(stat.stdout.trim()) * 1000;
+    const last =
+      stat.exitCode === 0 && touched > 0 ? touched : ((await inspect(cli, id))?.created ?? 0);
+    if (now - last < idleSeconds * 1000) continue;
+    await removeContainer(cli, id).catch(() => undefined);
+    removed.push(id);
+  }
+  return removed;
+}
+
+export interface LifecycleTiming {
+  // The most a new container's setup may take, ready marker included. Default 2 minutes.
+  setupMs?: number;
+  // How long a call inside the container may run before the container kills it. Default 55 s.
+  execSeconds?: number;
+}
+
 export function dockerLifecycle(
   options: SymDockerOptions,
   cli: DockerCli = createDockerCli(),
-  { readyWaitMs = READY_WAIT }: { readyWaitMs?: number } = {},
+  { setupMs = SETUP_BUDGET, execSeconds = EXEC_SECONDS }: LifecycleTiming = {},
 ) {
   const image = options.image ?? DEFAULT_SANDBOX_IMAGE;
   const network = options.network ?? false;
   const memoryBytes = options.memoryBytes ?? SANDBOX_LIMITS.memoryBytes;
   const idleSeconds = options.idleSeconds ?? SANDBOX_LIMITS.idleSeconds;
   const fileBytes = sandboxDisk(memoryBytes).fileBytes;
+  const limits = { fileBytes, execSeconds };
+  const execTimeout = execSeconds * 1000 + 5000;
   let daemon: Promise<void> | undefined;
   // One setup at a time per container in this process. Concurrent callers wait for it.
-  const pending = new Map<string, Promise<void>>();
+  const pending = new Map<string, Promise<string>>();
 
   function ensureDaemon(): Promise<void> {
     daemon ??= checkDaemon(cli).catch((error: unknown) => {
@@ -219,44 +304,34 @@ export function dockerLifecycle(
     return daemon;
   }
 
-  async function status(name: string): Promise<"running" | "stopped" | "missing"> {
-    const result = await cli.run(["container", "inspect", "--format", "{{.State.Running}}", name], {
-      timeoutMs: CALL_TIMEOUT,
+  const asRoot = (id: string, ...command: string[]) =>
+    cli.run(["exec", "--user", "root", id, ...bounded(execSeconds, command)], {
+      timeoutMs: execTimeout,
     });
-    if (result.exitCode === 0) return result.stdout.trim() === "true" ? "running" : "stopped";
-    if (/no such (container|object)/i.test(result.stderr)) return "missing";
-    throw dockerError(result, `inspect sandbox container ${name}`);
+
+  async function isReady(id: string): Promise<boolean> {
+    return (await asRoot(id, "test", "-e", READY_FILE)).exitCode === 0;
   }
 
-  const asRoot = (name: string, ...command: string[]) =>
-    cli.run(["exec", "--user", "root", name, ...command], { timeoutMs: CALL_TIMEOUT });
-
-  async function isReady(name: string): Promise<boolean> {
-    return (await asRoot(name, "test", "-e", READY_FILE)).exitCode === 0;
-  }
-
-  async function remove(name: string, signal?: AbortSignal) {
-    const removed = await cli.run(["rm", "--force", name], {
-      timeoutMs: CALL_TIMEOUT,
-      ...(signal ? { signal } : {}),
-    });
-    if (removed.exitCode !== 0 && !/no such container/i.test(removed.stderr)) {
-      throw dockerError(removed, `remove sandbox container ${name}`);
+  // Waits for the setup another caller (in this process or another) is running on `found`. Its
+  // setup has `setupMs` from the container's creation, so this waits until then, plus a margin.
+  // A creation time ahead of Sym's clock counts as now. True when it became ready.
+  async function waitReady(found: Found): Promise<boolean> {
+    const deadline = Math.min(found.created, Date.now()) + setupMs + Math.min(5000, setupMs);
+    for (;;) {
+      const current = await inspect(cli, found.id);
+      if (!current?.running) return false;
+      if (await isReady(found.id)) return true;
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(500, setupMs)));
     }
   }
 
-  // Waits for another process to finish setting up `name`. False when it does not in time.
-  async function waitReady(name: string): Promise<boolean> {
-    const deadline = Date.now() + readyWaitMs;
-    do {
-      if ((await status(name)) !== "running") return false;
-      if (await isReady(name)) return true;
-      await new Promise((resolve) => setTimeout(resolve, Math.min(500, readyWaitMs)));
-    } while (Date.now() < deadline);
-    return false;
-  }
-
-  async function create(ctx: SandboxSessionContext, name: string, artifact: Artifact) {
+  async function create(
+    ctx: SandboxSessionContext,
+    name: string,
+    artifact: Artifact,
+  ): Promise<string> {
     const present = await cli.run(["image", "inspect", "--format", "{{.Id}}", image], {
       timeoutMs: CALL_TIMEOUT,
     });
@@ -269,41 +344,65 @@ export function dockerLifecycle(
       { timeoutMs: CALL_TIMEOUT },
     );
     if (started.exitCode !== 0) {
-      // Another process created it first: wait for its setup, or replace a broken one.
-      if (/is already in use/i.test(started.stderr)) {
-        if (await waitReady(name)) return;
-        await remove(name);
-        return create(ctx, name, artifact);
-      }
+      // Another caller created it first: wait for its setup, or replace a broken one.
+      if (/is already in use/i.test(started.stderr)) return setUp(ctx, name, artifact);
       throw dockerError(started, `start sandbox container ${name}`);
     }
+    const id = started.stdout.trim();
+    let timer: NodeJS.Timeout | undefined;
     try {
-      await initialize(ctx, name, artifact);
+      await Promise.race([
+        initialize(ctx, id, artifact),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("Sandbox setup took too long.")), setupMs);
+        }),
+      ]);
     } catch (error) {
-      // A half-set-up container would look usable to the next start(). Remove it.
-      await remove(name).catch(() => undefined);
+      // A half-set-up container would look usable to the next start(). Remove this one, by ID.
+      await removeContainer(cli, id).catch(() => undefined);
       throw error;
+    } finally {
+      clearTimeout(timer);
     }
+    return id;
   }
 
-  // Sets up a new container, then writes the ready marker. Only a ready container is used.
-  async function initialize(ctx: SandboxSessionContext, name: string, artifact: Artifact) {
-    await asRoot(name, "touch", ACTIVE_FILE);
+  // Sets up a new container by its ID, then writes the ready marker. Only a ready container is
+  // used.
+  async function initialize(ctx: SandboxSessionContext, id: string, artifact: Artifact) {
+    await asRoot(id, "touch", ACTIVE_FILE);
+    const user = await cli.run(["exec", id, ...bounded(execSeconds, ["id", "-u"])], {
+      timeoutMs: execTimeout,
+    });
+    // A root user could rewrite the root-owned activity and ready files.
+    if (user.exitCode !== 0 || user.stdout.trim() === "0") {
+      throw new Error(
+        `The sandbox image ${image} runs commands as root (UID 0) or has no \`id\`. Use an image whose default user is not root.`,
+      );
+    }
     const check = await cli.run(
-      ["exec", name, "bash", "-c", `mkdir -p "$HOME" && test -w ${WORKSPACE} && test -w "$HOME"`],
-      { timeoutMs: CALL_TIMEOUT },
+      [
+        "exec",
+        id,
+        ...bounded(execSeconds, [
+          "bash",
+          "-c",
+          `mkdir -p "$HOME" && test -w ${WORKSPACE} && test -w "$HOME"`,
+        ]),
+      ],
+      { timeoutMs: execTimeout },
     );
     if (check.exitCode !== 0) {
-      throw new Error(`The sandbox image ${image} must provide bash for its default user.`);
+      throw new Error(`The sandbox image ${image} must provide bash and coreutils.`);
     }
-    if (artifact.resources !== null) await copyResources(ctx, name, artifact.resources);
-    const ready = await asRoot(name, "touch", READY_FILE);
+    if (artifact.resources !== null) await copyResources(ctx, id, artifact.resources);
+    const ready = await asRoot(id, "touch", READY_FILE);
     if (ready.exitCode !== 0) throw dockerError(ready, "mark the sandbox ready");
   }
 
   // Copies the agent's skill and workspace files, recorded by `eve build`, into a new container.
   // They travel through `docker exec`, so this works when Docker runs on another host.
-  async function copyResources(ctx: SandboxSessionContext, name: string, resources: string) {
+  async function copyResources(ctx: SandboxSessionContext, id: string, resources: string) {
     const source = isAbsolute(resources) ? resources : join(ctx.storagePath, resources);
     const files: { path: string; content: Uint8Array }[] = [];
     for (const [part, target] of [
@@ -318,18 +417,21 @@ export function dockerLifecycle(
         files.push({ path: `${target}/${relative(root, full)}`, content: await readFile(full) });
       }
     }
-    await dockerConnection(cli, name, { fileBytes }).writeFiles({ files });
+    await dockerConnection(cli, id, limits).writeFiles({ files });
   }
 
-  async function setUp(ctx: SandboxSessionContext, name: string, artifact: Artifact) {
-    const current = await status(name);
-    if (current === "running") {
-      if (await isReady(name)) return;
-      if (await waitReady(name)) return;
-    }
-    // Stopped, half set up, or missing: a fresh container.
-    if (current !== "missing") await remove(name);
-    await create(ctx, name, artifact);
+  // The ID of the session's ready container, set up now if needed.
+  async function setUp(
+    ctx: SandboxSessionContext,
+    name: string,
+    artifact: Artifact,
+  ): Promise<string> {
+    const found = await inspect(cli, name);
+    if (found?.running && (await isReady(found.id))) return found.id;
+    if (found?.running && (await waitReady(found))) return found.id;
+    // Stopped, half set up past its setup time, or missing: a fresh container.
+    if (found) await removeContainer(cli, found.id);
+    return create(ctx, name, artifact);
   }
 
   return {
@@ -349,41 +451,39 @@ export function dockerLifecycle(
         setup = setUp(ctx, name, artifact).finally(() => pending.delete(name));
         pending.set(name, setup);
       }
-      await setup;
-      await asRoot(name, "touch", ACTIVE_FILE);
-      const state: State = { version: 1, container: name };
-      return { connection: dockerConnection(cli, name, { fileBytes }), state };
+      const id = await setup;
+      await asRoot(id, "touch", ACTIVE_FILE);
+      const state: State = { version: 2, container: id };
+      return { connection: dockerConnection(cli, id, limits), state };
     },
     async resume(
-      _ctx: SandboxSessionContext,
+      ctx: SandboxSessionContext,
       _artifact: Readonly<Artifact>,
       state: Readonly<State>,
     ) {
-      if (state.version !== 1 || typeof state.container !== "string") {
+      if (state.version !== 2 || typeof state.container !== "string") {
         throw new SandboxSessionGoneError("The sandbox state is not one Sym recognizes.");
       }
       await ensureDaemon();
-      await pending.get(state.container)?.catch(() => undefined);
-      const current = await status(state.container);
+      await pending.get(containerName(ctx.session.id))?.catch(() => undefined);
+      const found = await inspect(cli, state.container);
       // Its files lived in memory, so a stopped container has nothing left to resume.
-      if (current !== "running" || !(await isReady(state.container))) {
-        if (current !== "missing") await remove(state.container);
-        throw new SandboxSessionGoneError(
-          `Sandbox container ${state.container} is gone, with its files.`,
-        );
+      if (!found?.running || !(await isReady(found.id))) {
+        if (found) await removeContainer(cli, found.id);
+        throw new SandboxSessionGoneError("The sandbox is gone, with its files.");
       }
-      await asRoot(state.container, "touch", ACTIVE_FILE);
-      return dockerConnection(cli, state.container, { fileBytes });
+      await asRoot(found.id, "touch", ACTIVE_FILE);
+      return dockerConnection(cli, found.id, limits);
     },
     async onSessionEnd(
       ctx: SandboxSessionContext,
       state: Readonly<State> | null,
       { signal }: SandboxSessionEndOptions,
     ) {
-      const name = state?.container ?? containerName(ctx.session.id);
+      const ref = state?.container ?? containerName(ctx.session.id);
       const end = async () => {
         await ensureDaemon();
-        await remove(name, signal);
+        await removeContainer(cli, ref, signal);
       };
       // A session that never recorded a sandbox almost never has one. Without Docker, as with
       // the sandbox off, its cleanup is a quiet no-op instead of a retried failure.
@@ -434,15 +534,24 @@ const READ_SCRIPT = [
 export function dockerConnection(
   cli: DockerCli,
   name: string,
-  limits: { fileBytes?: number; readBytes?: number; outputBytes?: number } = {},
+  limits: {
+    fileBytes?: number;
+    readBytes?: number;
+    outputBytes?: number;
+    execSeconds?: number;
+  } = {},
 ): SandboxConnection<object> {
   const fileBytes = limits.fileBytes ?? sandboxDisk().fileBytes;
   const readBytes = limits.readBytes ?? SANDBOX_LIMITS.readBytes;
   const outputBytes = limits.outputBytes ?? SANDBOX_LIMITS.outputBytes;
+  const execSeconds = limits.execSeconds ?? EXEC_SECONDS;
+  // Sym's own timeout comes after the container's, so the container kills the call first.
+  const timeoutMs = execSeconds * 1000 + 5000;
+  const within = (command: string[]) => bounded(execSeconds, command);
   // Sym keeps the idle clock: the sandbox's user cannot touch this file.
   const touch = () =>
     cli
-      .run(["exec", "--user", "root", name, "touch", ACTIVE_FILE], { timeoutMs: CALL_TIMEOUT })
+      .run(["exec", "--user", "root", name, ...within(["touch", ACTIVE_FILE])], { timeoutMs })
       .catch(() => undefined);
   return {
     workspaceRoot: WORKSPACE,
@@ -456,8 +565,8 @@ export function dockerConnection(
       args.push(name, "bash", "-c", script, "sym-sandbox", pidFile, command);
       const killTree = () =>
         cli
-          .run(["exec", name, "bash", "-c", KILL_TREE, "sym-kill", pidFile], {
-            timeoutMs: CALL_TIMEOUT,
+          .run(["exec", name, ...within(["bash", "-c", KILL_TREE, "sym-kill", pidFile])], {
+            timeoutMs,
           })
           .then(() => undefined)
           .catch(() => undefined);
@@ -487,8 +596,8 @@ export function dockerConnection(
     async readFile({ path, signal }) {
       await touch();
       const result = await cli.run(
-        ["exec", name, "bash", "-c", READ_SCRIPT, "sym-read", path, String(readBytes)],
-        { maxBytes: readBytes, timeoutMs: CALL_TIMEOUT, ...(signal ? { signal } : {}) },
+        ["exec", name, ...within(["bash", "-c", READ_SCRIPT, "sym-read", path, String(readBytes)])],
+        { maxBytes: readBytes, timeoutMs, ...(signal ? { signal } : {}) },
       );
       if (result.exitCode === 43 && !result.killed) return null;
       if (result.killed === "overflow") {
@@ -509,13 +618,17 @@ export function dockerConnection(
             "exec",
             "--interactive",
             name,
-            "bash",
-            "-c",
-            'mkdir -p -- "$(dirname -- "$1")" && cat > "$1"',
-            "sym-write",
-            file.path,
+            ...within([
+              "bash",
+              "-c",
+              // `exec`: no forked child, so the container's timeout kills the very process that
+              // blocks, such as one opening a FIFO.
+              'mkdir -p -- "$(dirname -- "$1")" && exec cat > "$1"',
+              "sym-write",
+              file.path,
+            ]),
           ],
-          { stdin: file.content, timeoutMs: CALL_TIMEOUT, ...(signal ? { signal } : {}) },
+          { stdin: file.content, timeoutMs, ...(signal ? { signal } : {}) },
         );
         if (result.exitCode !== 0 || result.killed) {
           throw dockerError(result, `write ${file.path} in the sandbox`);
@@ -525,8 +638,8 @@ export function dockerConnection(
     async removePath({ path, force, recursive, signal }) {
       const flags = `${recursive ? "r" : ""}${force ? "f" : ""}`;
       const result = await cli.run(
-        ["exec", name, "rm", ...(flags ? [`-${flags}`] : []), "--", path],
-        { timeoutMs: CALL_TIMEOUT, ...(signal ? { signal } : {}) },
+        ["exec", name, ...within(["rm", ...(flags ? [`-${flags}`] : []), "--", path])],
+        { timeoutMs, ...(signal ? { signal } : {}) },
       );
       if (result.exitCode !== 0 || result.killed) {
         throw dockerError(result, `remove ${path} in the sandbox`);

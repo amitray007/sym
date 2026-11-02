@@ -18,6 +18,7 @@ const ctx: SandboxSessionContext = {
 };
 
 const lifecycle = dockerLifecycle({}, createDockerCli());
+const plain = { version: 1 as const, resources: null };
 const cli = createDockerCli();
 
 async function run(
@@ -47,7 +48,7 @@ describe.skipIf(!enabled)("Sym's Docker sandbox on a real daemon", () => {
   });
 
   it("runs bash, keeps files, and holds no secrets, network, or root", async () => {
-    const { connection } = await lifecycle.start(ctx, undefined, { version: 1, resources: null });
+    const { connection } = await lifecycle.start(ctx, undefined, plain);
 
     const echo = await run(connection, "echo hello from the sandbox");
     expect(echo).toEqual({ stdout: "hello from the sandbox\n", stderr: "", exitCode: 0 });
@@ -79,8 +80,17 @@ describe.skipIf(!enabled)("Sym's Docker sandbox on a real daemon", () => {
     expect((await run(connection, "touch -d 2099-01-01 /run/sym/active")).exitCode).not.toBe(0);
   }, 300_000);
 
-  it("bounds disk, reads, and output", async () => {
-    const { connection } = await lifecycle.start(ctx, undefined, { version: 1, resources: null });
+  it("bounds disk, logs, reads, and output", async () => {
+    const { connection, state } = await lifecycle.start(ctx, undefined, plain);
+    // No container log, so writing to the main process's stdout fills nothing on the host.
+    const log = await cli.run([
+      "container",
+      "inspect",
+      "--format",
+      "{{.HostConfig.LogConfig.Type}}",
+      state.container,
+    ]);
+    expect(log.stdout.trim()).toBe("none");
     const workspaceMb = sandboxDisk().fileBytes / 1024 ** 2;
     // A file larger than the workspace fails inside the sandbox; the host disk is never touched.
     const big = await run(
@@ -101,6 +111,39 @@ describe.skipIf(!enabled)("Sym's Docker sandbox on a real daemon", () => {
     expect(flood.stdout.length).toBeLessThan(9 * 1024 ** 2);
     // The sandbox still works after the flood was stopped.
     expect((await run(connection, "echo still here")).stdout).toBe("still here\n");
+  }, 300_000);
+
+  it("kills a write blocked on a FIFO inside the container, leaving no process", async () => {
+    const fifoCtx = { ...ctx, session: { ...ctx.session, id: `${ctx.session.id}-fifo` } };
+    const quick = dockerLifecycle({}, cli, { execSeconds: 2 });
+    try {
+      const { connection } = await quick.start(fifoCtx, undefined, plain);
+      expect((await run(connection, "mkfifo /workspace/pipe")).exitCode).toBe(0);
+      const started = Date.now();
+      await expect(
+        connection.writeFiles({
+          files: [{ path: "/workspace/pipe", content: new TextEncoder().encode("x") }],
+        }),
+      ).rejects.toThrow(/write/);
+      expect(Date.now() - started).toBeLessThan(10_000);
+      const left = await run(connection, "ps -eo args | grep -c '[s]ym-write' || true");
+      expect(left.stdout.trim()).toBe("0");
+    } finally {
+      await quick.onSessionEnd(fifoCtx, null, { reason: "completed" });
+    }
+  }, 120_000);
+
+  it("refuses an image whose user is root", async () => {
+    const rootCtx = { ...ctx, session: { ...ctx.session, id: `${ctx.session.id}-root` } };
+    const rooted = dockerLifecycle({ image: "postgres:18-alpine" }, cli);
+    await expect(rooted.start(rootCtx, undefined, plain)).rejects.toThrow(/runs commands as root/);
+    const left = await cli.run([
+      "ps",
+      "-q",
+      "--filter",
+      `label=sym.sandbox.session=${rootCtx.session.id}`,
+    ]);
+    expect(left.stdout.trim()).toBe("");
   }, 300_000);
 
   it("removes an idle container, and resume then reports it gone", async () => {

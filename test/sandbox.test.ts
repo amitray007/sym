@@ -229,6 +229,9 @@ describe("Sym's Docker provider arguments", () => {
     const args = runArgs("sym-sbx-x", "session-1", { image: "img", network: false });
     expect(args).toContain("--read-only");
     expect(args).toContain("--rm");
+    // No container log on the host's disk: a command writing to the main process's stdout
+    // would otherwise grow Docker's log file without bound.
+    expect(args[args.indexOf("--log-driver") + 1]).toBe("none");
     const tmpfs = args.flatMap((arg, i) => (args[i - 1] === "--tmpfs" ? [arg] : []));
     expect(tmpfs).toEqual([
       "/workspace:rw,exec,nosuid,nodev,size=512m,mode=1777",
@@ -308,7 +311,7 @@ describe("Sym's Docker provider arguments", () => {
     await expect(
       lifecycle.onSessionEnd(sessionContext(), null, { reason: "completed" }),
     ).resolves.toBeUndefined();
-    const state = { version: 1 as const, container: "sym-sbx-a" };
+    const state = { version: 2 as const, container: "sym-sbx-a" };
     await expect(
       lifecycle.onSessionEnd(sessionContext(), state, { reason: "completed" }),
     ).rejects.toThrow(/Docker is not reachable/);
@@ -320,8 +323,12 @@ describe("Sym's Docker provider arguments", () => {
     const path = "/workspace/a'; rm -rf / #.txt";
     expect(await connection.readFile({ path })).toBeNull();
     expect(calls.at(-1)?.at(-2)).toBe(path);
+    // The container kills a call Sym gives up on, so a read or write blocked on a FIFO leaves
+    // no process behind.
+    expect(calls.at(-1)).toEqual(expect.arrayContaining(["timeout", "-s", "KILL", "55"]));
     await connection.writeFiles({ files: [{ path, content: new Uint8Array([1]) }] });
     expect(calls.at(-1)?.at(-1)).toBe(path);
+    expect(calls.at(-1)).toEqual(expect.arrayContaining(["timeout", "-s", "KILL", "55"]));
     await connection.spawn({
       command: "echo $HOME",
       env: { AI_AGENT: "eve" },

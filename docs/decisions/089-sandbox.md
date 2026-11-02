@@ -31,8 +31,10 @@ provider also sets no memory, CPU, or process limits.
    network isolation, so production never uses it. `just-bash` is a dev dependency.
 4. The image is Eve's sandbox image (`ghcr.io/vercel/eve`, Ubuntu with Node.js 24, Python 3, git,
    ripgrep, jq, curl), pinned to the tag Eve 0.88 uses. `SYM_SANDBOX_IMAGE` replaces it. The
-   image must run with a read-only root filesystem and give its default user bash. `$HOME` is
-   `/tmp/home`.
+   image must run with a read-only root filesystem and give its default user bash and coreutils
+   (`timeout`, `stat`, `id`). `$HOME` is `/tmp/home`. Its default user must not be root: setup
+   checks `id -u` and refuses UID 0, because root in the container could rewrite the
+   root-owned activity and ready files.
 5. Each container runs with 1 GB of memory and no extra swap (`SYM_SANDBOX_MEMORY` changes it),
    1 CPU, 256 processes, `--init`, every Linux capability dropped, and `no-new-privileges`, so
    `sudo` in the image does nothing.
@@ -41,26 +43,36 @@ provider also sets no memory, CPU, or process limits.
    The kernel charges tmpfs pages to the container's memory limit, so a sandbox cannot fill the
    host's disk, and nothing is bind-mounted from the host. `--ulimit fsize` and `ulimit -f` in
    each command cap one file at the workspace size. `--storage-opt` is not used: with a
-   read-only root nothing writes to the container layer.
-7. Files last while the sandbox is active. Because they live in memory, a stopped container keeps
-   nothing, so the container runs with `--rm`: after 30 minutes with no sandbox call its main
-   process exits and Docker removes it with its files. The next call starts an empty sandbox
-   (Eve reruns the selector), and a file staged earlier reads as missing. A background command
-   still running then stops, so 30 minutes past the last call is the time limit. A single `bash`
-   call waits 30 seconds and then keeps running in the background, as Eve's tool does. Session
-   end removes the container. Sym keeps the idle clock: it touches `/run/sym/active` as root on
-   each call, in a root-owned tmpfs the sandbox's user can read but not change, so a command
-   cannot push the cutoff into the future.
+   read-only root nothing writes to the container layer. The container has no log
+   (`--log-driver none`): Sym reads output through `docker exec`, and a command writing to the
+   main process's stdout would otherwise grow Docker's log file on the host's disk.
+7. Files last while the sandbox is active. Sym keeps the idle clock: it touches
+   `/run/sym/active` as root on each call, in a root-owned tmpfs the sandbox's user can read but
+   not change. The `sandbox` schedule runs every minute and removes (`docker rm -f`, by
+   container ID) every sandbox container not touched for 30 minutes, with its files. A command
+   still running in it is killed, so 30 minutes past the last call is the time limit. The
+   enforcement runs in Sym, outside the sandbox, so a command cannot stop it; the container's
+   own idle loop, which a command could pause with SIGSTOP, is only a backstop for when Sym is
+   down. The container runs with `--rm`, so one that stops is gone too; its files lived in
+   memory anyway. The next call starts an empty sandbox (Eve reruns the selector), and a file
+   staged earlier reads as missing. A single `bash` call waits 30 seconds and then keeps running
+   in the background, as Eve's tool does. Session end removes the container.
 8. What Sym reads back is bounded. `read_file` and Eve's reads accept only a regular file of at
    most 32 MiB (just over Slack's 25 MiB upload limit), checked inside the container, read with
    `head -c`, and capped again in Sym. A command's stdout and stderr each pass at most 8 MiB to
    Sym; past that Sym stops the command. Every docker call Sym buffers has a byte cap and a
    timeout, an early docker exit that breaks stdin settles as a failed call, and a cancel stops
-   the process.
+   the process. Each read, write, remove, and setup call also runs under the container's own
+   `timeout -s KILL` (55 seconds, before Sym's 60), so a call Sym gives up on, such as a write
+   blocked on a FIFO, leaves no process behind to use up the process limit.
 9. Setup is all or nothing. A new container gets a root-owned ready marker only after its setup
-   (workspace check, skill files) succeeds. A failed setup removes the container. A start that
-   finds a container without the marker waits up to 30 seconds for another caller's setup, then
-   replaces it. Concurrent starts in one process share one setup.
+   (user check, workspace check, skill files) succeeds, and the setup has 2 minutes from the
+   container's creation. A failed or late setup removes its own container by ID, never by name,
+   so it cannot delete a newer container another caller made. A start that finds a container
+   without the marker waits until that container's 2 minutes (by its Docker creation time) have
+   passed, then replaces it. Concurrent starts in one process share one setup. Nothing here
+   assumes one Sym process: the marker, the creation time, and the IDs live in Docker. The
+   session's state records the container ID, so a replaced container reads as gone.
 10. Network: none by default (`--network none`). A command cannot send a shared file anywhere,
     reach the Docker host's private network or tailnet, or read a cloud metadata endpoint, and it
     cannot install packages. `SYM_SANDBOX_NETWORK=on` gives the container Docker's default
@@ -109,13 +121,14 @@ provider also sets no memory, CPU, or process limits.
 - The first sandbox call on a host pulls about 550 MB. Pre-pull the image to avoid the wait.
 - A thread that goes quiet for 30 minutes loses its sandbox files, shared files included. The
   brain says so and asks for a file again. No stopped container is left on the host.
-- Sandbox files count against the memory limit, so a full workspace leaves less memory for
-  commands. Raise `SYM_SANDBOX_MEMORY` for larger files; Docker's own `/dev/shm` (64 MB) counts
-  too.
+- The tmpfs files, Docker's `/dev/shm` (64 MB), and the commands' own memory share one 1 GiB
+  memory cgroup. A sandbox that fills its workspace and then runs a large command can be killed
+  by the kernel's out-of-memory killer. That ends the sandbox, not Sym, which runs in its own
+  container. Raise `SYM_SANDBOX_MEMORY` for larger files.
 - The secret check matches exact values of Sym's secret variables. It stops an accidental paste;
   it does not stop a value the brain was never given, and Sym gives the brain none.
 - With the sandbox on, files people share in a thread live in that thread's container while it
   is active.
-- Containers from before this layer's fixes (state protocol 1) start fresh.
+- Containers from before these fixes (state protocols 1 and 2) start fresh.
 - Changing `SANDBOX_LIMITS` or the image takes effect for new containers. Upgrading Eve may change
   its image tag; keep `DEFAULT_SANDBOX_IMAGE` in step.

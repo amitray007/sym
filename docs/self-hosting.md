@@ -53,7 +53,7 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_SANDBOX` | Optional. `off` (default) or `on`. On gives the brain a sandbox with `bash`, `read_file`, `write_file`, `glob`, and `grep`, one container per Slack thread, and lets it open files people share. Needs the Docker socket, see [Sandbox](#sandbox) (decision 089) |
 | `SYM_SANDBOX_MEMORY` | Optional. Each sandbox's memory, such as `768m` or `2g`, at least `256m`. Default `1g`. Its files count against it: `/workspace` gets half and `/tmp` a quarter |
 | `SYM_SANDBOX_NETWORK` | Optional. `off` (default) or `on`. On lets sandbox commands reach the network through Docker's default bridge. Off gives the container no network at all |
-| `SYM_SANDBOX_IMAGE` | Optional. The sandbox image. Default: Eve's sandbox image (Ubuntu with Node.js, Python 3, git, ripgrep, jq, curl). It must run with a read-only root filesystem and give its default user bash |
+| `SYM_SANDBOX_IMAGE` | Optional. The sandbox image. Default: Eve's sandbox image (Ubuntu with Node.js, Python 3, git, ripgrep, jq, curl). It must run with a read-only root filesystem, give its default user bash and coreutils, and not run as root: Sym refuses an image whose default user is UID 0 |
 | `DOCKER_GID` | compose.yaml only, with the sandbox. The group ID that owns `/var/run/docker.sock` on the host |
 | `DOCKER_HOST` | Optional, with the sandbox. A Docker host for sandbox containers other than the mounted socket, such as `tcp://sandbox-host:2376` with `DOCKER_TLS_VERIFY=1` and `DOCKER_CERT_PATH` |
 | `SYM_SLACK_USERS` | Slack user IDs allowed to use Sym, comma-separated |
@@ -126,8 +126,10 @@ What each container gets:
   also cannot install packages.
 - The environment variable `AI_AGENT=eve` and nothing else: no Sym variable, no secret, no
   repository or git credentials.
-- Removal, with its files, after 30 minutes with no sandbox call. The next call starts an empty
-  sandbox. A command still running then stops.
+- Removal, with its files, after 30 minutes with no sandbox call. Sym's `sandbox` schedule
+  removes it every minute it finds one, so a command still running then is killed. The next
+  call starts an empty sandbox.
+- No container log, so nothing a command prints reaches Docker's log files on the host.
 
 To turn it on with `compose.yaml`:
 
