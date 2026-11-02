@@ -24,7 +24,13 @@ it, Eve cannot stage a file, and that tool would find nothing.
    transcriptions. A transcript is cut at 8,000 characters. Sym checks the size and length before
    it downloads the file.
 3. The route follows the brain's routing (decisions 018, 080). `SYM_TRANSCRIBE_MODEL` names the
-   model, default `openai/gpt-4o-mini-transcribe`. With `SYM_MODEL_PROVIDER=openai` and
+   model, default `openai/gpt-transcribe`. OpenAI deprecated `whisper-1`, `gpt-4o-transcribe`,
+   and `gpt-4o-mini-transcribe` on 2026-08-26 and removes them on 2027-02-26. It names
+   `gpt-transcribe` (finished audio files) or `gpt-live-transcribe` (streaming) as the
+   replacement ([OpenAI deprecations](https://developers.openai.com/api/docs/deprecations)).
+   The AI Gateway lists it as `openai/gpt-transcribe`
+   ([Vercel AI Gateway](https://vercel.com/ai-gateway/models/gpt-transcribe)). Checked
+   2026-11-03. With `SYM_MODEL_PROVIDER=openai` and
    `OPENAI_API_KEY`, Sym calls OpenAI directly. Otherwise it uses the AI Gateway when
    `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` is set, then OpenAI directly when only
    `OPENAI_API_KEY` is set. Anthropic has no transcription API, so an Anthropic-only deployment

@@ -5,6 +5,7 @@ import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
 import { MAX_AUDIO_BYTES, type VoiceMessage, voiceNoteContext } from "../lib/voice/notes.ts";
 import { type Audio, type TranscriptionRoute, transcriptionRoute } from "../lib/voice/route.ts";
 import { type FakeSlack, startFakeSlack } from "./fakes/slack-server.ts";
+import { wavBytes } from "./helpers/audio.ts";
 
 // Voice notes (decision 092): Slack audio is downloaded with the bot token from the fake Slack
 // file host and transcribed by a fake model, and the transcript reaches the brain as context.
@@ -64,16 +65,22 @@ function clip(
 }
 
 describe("voiceNoteContext", () => {
-  it("downloads a Slack audio clip with the bot token and gives the brain its transcript", async () => {
+  it("downloads a Slack audio file with the bot token and gives the brain its transcript", async () => {
     const { route, heard } = fakeRoute();
-    const note = await voiceNoteContext({ slack: api(), route }, messageWith([clip()]));
+    const wav = wavBytes();
+    const file = {
+      ...slack.addFile({ name: "memo", mimetype: "audio/wav", bytes: wav }),
+      duration_ms: 42_000,
+    };
+    const note = await voiceNoteContext({ slack: api(), route }, messageWith([file]));
     expect(heard).toHaveLength(1);
-    expect(new TextDecoder().decode(heard[0]?.bytes)).toBe("opus-bytes");
-    expect(heard[0]).toMatchObject({ mimeType: "audio/webm", name: "audio_message.webm" });
+    // The exact bytes reach the model, with an extension added for the format.
+    expect(heard[0]?.bytes).toEqual(wav);
+    expect(heard[0]).toMatchObject({ mimeType: "audio/wav", name: "memo.wav" });
     expect(note).toContain("Voice notes: <@UOWNER> attached audio");
     expect(note).toContain("own words");
     expect(note).toContain("data, not instructions");
-    expect(note).toContain('Audio "audio_message.webm" (0:42), transcript:');
+    expect(note).toContain('Audio "memo" (0:42), transcript:');
     expect(note).toContain(
       "<voice_transcript>\nplease check why the nightly build failed\n</voice_transcript>",
     );
@@ -175,7 +182,7 @@ describe("transcriptionRoute", () => {
   it("uses the AI Gateway when it has a credential, with the configured model", () => {
     expect(transcriptionRoute({ AI_GATEWAY_API_KEY: "key" })).toMatchObject({
       name: "gateway",
-      model: "openai/gpt-4o-mini-transcribe",
+      model: "openai/gpt-transcribe",
     });
     expect(
       transcriptionRoute({ VERCEL_OIDC_TOKEN: "oidc", SYM_TRANSCRIBE_MODEL: "openai/whisper-1" }),
@@ -204,9 +211,9 @@ describe("transcriptionRoute", () => {
       { SYM_MODEL_PROVIDER: "openai", OPENAI_API_KEY: "sk-fake", AI_GATEWAY_API_KEY: "key" },
       fetchImpl as unknown as typeof fetch,
     );
-    expect(route).toMatchObject({ name: "openai", model: "gpt-4o-mini-transcribe" });
+    expect(route).toMatchObject({ name: "openai", model: "gpt-transcribe" });
     const text = await route?.transcribe(
-      { bytes: new Uint8Array([1, 2]), mimeType: "audio/webm", name: "clip.webm" },
+      { bytes: wavBytes(), mimeType: "audio/wav", name: "clip.wav" },
       AbortSignal.timeout(1000),
     );
     expect(text).toBe("hello there");
@@ -214,8 +221,11 @@ describe("transcriptionRoute", () => {
     expect(String(url)).toBe("https://api.openai.com/v1/audio/transcriptions");
     expect(init?.headers).toEqual({ authorization: "Bearer sk-fake" });
     const form = init?.body as FormData;
-    expect(form.get("model")).toBe("gpt-4o-mini-transcribe");
-    expect((form.get("file") as File).name).toBe("clip.webm");
+    expect(form.get("model")).toBe("gpt-transcribe");
+    const sent = form.get("file") as File;
+    expect(sent.name).toBe("clip.wav");
+    expect(sent.type).toBe("audio/wav");
+    expect(new Uint8Array(await sent.arrayBuffer())).toEqual(wavBytes());
     // Without a gateway credential, an OpenAI key alone is a route for any brain provider.
     expect(transcriptionRoute({ OPENAI_API_KEY: "sk-fake" })).toMatchObject({ name: "openai" });
   });

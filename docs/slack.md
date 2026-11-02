@@ -102,8 +102,9 @@ Slack channel downloads it with the bot token and transcribes it before the turn
 reads the person's words as text. Sym answers what they said and does not mention the
 transcription. Only messages that pass the allow-list check and the shared-thread triage are
 transcribed. A transcript counts as that person's own words, with the same rules as typed text; a
-spoken "yes" does not click Start. Files over 25 MB or 10 minutes, unknown audio formats, and
-deployments without a transcription route get a one-line "please type it" reply. Slack shows no
+spoken "yes" does not click Start. Files over 25 MB, clips over 10 minutes when Slack supplies
+the duration, unknown audio formats, and deployments without a transcription route get a
+one-line "please type it" reply. Slack shows no
 transcript note; the reply is the only visible change.
 
 ## People off the allow-list

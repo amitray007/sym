@@ -4,7 +4,7 @@ import { transcribe } from "ai";
 // routing (decisions 018, 080): the AI Gateway when it has a credential, or OpenAI directly with
 // OPENAI_API_KEY. Anthropic has no transcription API, so an Anthropic-only deployment has no
 // route and Sym tells the person it cannot hear audio. SYM_TRANSCRIBE_MODEL=off turns it off.
-export const DEFAULT_TRANSCRIBE_MODEL = "openai/gpt-4o-mini-transcribe";
+export const DEFAULT_TRANSCRIBE_MODEL = "openai/gpt-transcribe";
 
 const OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions";
 
