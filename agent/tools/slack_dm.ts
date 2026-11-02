@@ -5,6 +5,7 @@ import { requesterResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { dmNeedsConfirmation, sendDirectMessage } from "../../lib/slack/dm.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
+import { readInTurn } from "../../lib/slack/read.ts";
 
 // Sends a person a DM when someone asks (decision 083). From a DM or private channel, the
 // requester approves it first.
@@ -24,7 +25,7 @@ export default defineTool({
         session.id,
         slackUserOfPrincipal(session.auth.current?.principalId),
         toolInput?.person,
-      ).then((ask) => (ask ? "user-approval" : "not-applicable")),
+      ).then((ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable")),
     response: requesterResponse("Only the person who asked can approve this DM."),
     prompt: ({ input }) => `Send this to ${input.person}?\n\n${input.text}`,
   },

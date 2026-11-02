@@ -4,6 +4,7 @@ import { type SlackApi, SlackApiError } from "./api.ts";
 import {
   type Conversation,
   isDirectMessage,
+  isExternalConversation,
   type ReachDeps,
   reachConversation,
   resolveTarget,
@@ -45,7 +46,9 @@ export async function readConversation(
   if (!target) return UNREACHABLE;
   const reached = await reachConversation(deps, input.requester, target.channel);
   if (!reached) return UNREACHABLE;
-  if (!(await mayShareHere(deps, input.sessionId, reached))) return READ_ELSEWHERE;
+  if (!(await mayShareHere(deps, input.sessionId, input.requester as string, reached))) {
+    return READ_ELSEWHERE;
+  }
   const root = target.threadTs ?? target.messageTs;
   try {
     const page = root
@@ -71,16 +74,22 @@ export async function readConversation(
   }
 }
 
+// The reply lands in the session's conversation. It may carry the content when that is the target
+// itself; otherwise never into a Slack Connect channel, where another organization reads; a
+// public channel anywhere else; and private content only into the requester's own DM with Sym.
 async function mayShareHere(
   deps: ReadDeps,
   sessionId: string,
+  requester: string,
   target: Conversation,
 ): Promise<boolean> {
-  if (!target.isPrivate && !target.isDirect) return true;
   const source = await getSessionThread(deps.sql, sessionId);
   if (!source) return false;
   if (source.channelId === target.id) return true;
-  return isDirectMessage(deps.slack as SlackApi, source.channelId);
+  const slack = deps.slack as SlackApi;
+  if (await isExternalConversation(slack, source.channelId)) return false;
+  if (!target.isPrivate && !target.isDirect) return true;
+  return source.userId === requester && (await isDirectMessage(slack, source.channelId));
 }
 
 function toMessages(raw: unknown): ReadMessage[] {
@@ -93,4 +102,17 @@ function toMessages(raw: unknown): ReadMessage[] {
       ts: message.ts as string,
       text: (message.text ?? "").slice(0, TEXT_LIMIT),
     }));
+}
+
+// Turns that read Slack content (decision 083). That content may carry instructions, so any
+// write the brain makes later in the same turn waits for the requester's approval.
+const readTurns = new Set<string>();
+
+export function markReadInTurn(sessionId: string, turnId: string): void {
+  readTurns.add(`${sessionId}:${turnId}`);
+  if (readTurns.size > 2000) readTurns.delete(readTurns.values().next().value as string);
+}
+
+export function readInTurn(session: { id: string; turn?: { id: string } } | undefined): boolean {
+  return session?.turn !== undefined && readTurns.has(`${session.id}:${session.turn.id}`);
 }

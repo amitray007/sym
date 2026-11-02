@@ -4,6 +4,7 @@ import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { requesterResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
+import { readInTurn } from "../../lib/slack/read.ts";
 import { postNeedsConfirmation, postToConversation } from "../../lib/slack/slack-post.ts";
 
 // Posts in another Slack channel or thread when a person asks (decision 081). Code checks the
@@ -25,7 +26,7 @@ export default defineTool({
   approval: {
     request: ({ session, toolInput }) =>
       postNeedsConfirmation(ledgerDeps(), session.id, toolInput?.target, toolInput?.text).then(
-        (ask) => (ask ? "user-approval" : "not-applicable"),
+        (ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable"),
       ),
     response: requesterResponse("Only the person who asked can approve this post."),
     prompt: ({ input }) => `Post this in ${input.target}?\n\n${input.text}`,

@@ -5,7 +5,13 @@ import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
 import { deleteOwnPost, editOwnPost } from "../lib/slack/own-posts.ts";
 import { lookUpPerson, UNKNOWN_PERSON } from "../lib/slack/people.ts";
 import { UNREACHABLE } from "../lib/slack/reach.ts";
-import { READ_ELSEWHERE, type ReadResult, readConversation } from "../lib/slack/read.ts";
+import {
+  markReadInTurn,
+  READ_ELSEWHERE,
+  type ReadResult,
+  readConversation,
+  readInTurn,
+} from "../lib/slack/read.ts";
 import { type FakeSlack, startFakeSlack } from "./fakes/slack-server.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
@@ -21,6 +27,8 @@ describe.skipIf(!hasDatabase)("reading, DMs, and people", () => {
         G0PRIV: { name: "secret", is_private: true },
         C0OTHER: { name: "general" },
         DUASKER: { is_im: true },
+        DUOTHER: { is_im: true },
+        C0CONNECT: { name: "partner", is_ext_shared: true },
       },
       members: { C0PUBLIC: ["UASKER"], G0PRIV: ["UASKER"], C0OTHER: ["UASKER"] },
       users: {
@@ -32,6 +40,8 @@ describe.skipIf(!hasDatabase)("reading, DMs, and people", () => {
         UBOTTY: { is_bot: true },
         UGONE: { deleted: true },
         UGUEST: { is_stranger: true },
+        UFOREIGN: { team_id: "T0OTHER" },
+        UAPP: { is_app_user: true },
       },
     });
   });
@@ -80,6 +90,40 @@ describe.skipIf(!hasDatabase)("reading, DMs, and people", () => {
         "salary bands",
       ]);
       expect(((await read("s-priv")) as ReadResult).messages).toHaveLength(1);
+    });
+
+    it("never shares into another person's DM or a Slack Connect channel", async () => {
+      await recordSessionThread(ledger.sql(), {
+        sessionId: "s-their-dm",
+        teamId: "T1",
+        channelId: "DUOTHER",
+        threadTs: null,
+        userId: "UOTHER",
+      });
+      await session("s-connect", "C0CONNECT");
+      expect(
+        await readConversation(deps(), {
+          sessionId: "s-their-dm",
+          requester: "UASKER",
+          target: "#secret",
+        }),
+      ).toBe(READ_ELSEWHERE);
+      expect(
+        await readConversation(deps(), {
+          sessionId: "s-connect",
+          requester: "UASKER",
+          target: "#releases",
+        }),
+      ).toBe(READ_ELSEWHERE);
+    });
+
+    it("makes later writes in the same turn wait for approval", async () => {
+      const session = { id: "s-read-turn", turn: { id: "t-1" } };
+      expect(readInTurn(session)).toBe(false);
+      markReadInTurn("s-read-turn", "t-1");
+      expect(readInTurn(session)).toBe(true);
+      expect(readInTurn({ id: "s-read-turn", turn: { id: "t-2" } })).toBe(false);
+      expect(readInTurn(undefined)).toBe(false);
     });
 
     it("refuses a non-member like every other unreachable target", async () => {
@@ -154,7 +198,7 @@ describe.skipIf(!hasDatabase)("reading, DMs, and people", () => {
     });
 
     it("never DMs a bot, a deactivated person, or someone from another organization", async () => {
-      for (const person of ["UBOTTY", "UGONE", "UGUEST"]) {
+      for (const person of ["UBOTTY", "UGONE", "UGUEST", "UFOREIGN", "UAPP"]) {
         expect(await dm(person, `dm-${person}`)).toBe(
           "I only send DMs to current people in this workspace.",
         );
