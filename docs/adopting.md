@@ -10,7 +10,7 @@ a private folder or repository that Sym loads at build time and at session start
 | Job ledger, watch loop, reconcile, outbox | Your Slack user IDs, channels, and allow-list |
 | Worker adapters | Worker endpoints and which projects each worker may use |
 | Display rule and its defaults | Quiet hours, time zone, per-class display preferences |
-| Generic playbooks: `task-brief`, `progress`, `verify-result` | Your playbooks: on-call check, release steps, incident triage |
+| Skill loading and the shared safety rules | Your playbooks: on-call check, release steps, incident triage |
 | Schedule engine | Your schedules |
 | Eval harness and generic evals | Evals for your playbooks |
 
@@ -24,7 +24,8 @@ my-pack/
   sym.config.yaml     owner, allow-list, channels, time zone, quiet hours, workers, projects
   instructions/       extra instruction files (tone, house rules)
   personas/           optional persona file for the brain's voice
-  playbooks/          Eve skills, one Markdown file each
+  playbooks/          legacy Eve skills, one Markdown file each
+  skills/             on-demand procedures, one Markdown file each
   schedules.yaml      schedules to seed at start (optional)
   evals/              eval cases for your playbooks
 ```
@@ -63,7 +64,8 @@ projects:
     model: claudeAgent/claude-opus-5-5   # optional; always this model for this project
 instructions: [instructions/tone.md]
 persona: personas/house.md        # optional; wins over SYM_PERSONA
-playbooks: [playbooks/release-steps.md]
+playbooks: [playbooks/release-steps.md]  # existing packs keep working
+skills: [skills/investigate.md]
 ```
 
 Rules (decision 026):
@@ -81,7 +83,11 @@ Rules (decision 026):
   project is refused in code, and the brain sees only these names. An empty list allows nothing.
   Without a pack, `SYM_PROJECTS` plays this role.
 - The owner is always allowed; `allowList` adds people.
-- Instruction and playbook files are listed by path and stay inside the pack folder.
+- Instruction, playbook, and skill files are listed by path and stay inside the pack folder,
+  including their resolved symlink targets. Skill names must be valid Eve names and cannot use
+  the reserved `eve` namespace. Names must be unique across `playbooks` and `skills`. Empty bodies,
+  malformed YAML frontmatter, and invalid description or metadata types fail before the overlay
+  writes files (decision 087).
 - `persona` is one Markdown file inside the pack folder, with the same rules as `instructions`
   (decision 044). It replaces the built-in persona that `SYM_PERSONA` would pick. Sym reads it at
   start from `SYM_PACK_DIR`, so it needs no overlay. It sets the brain's tone only. The shared
@@ -111,11 +117,11 @@ active again. An entry with the old `brief` field fails the pack check (decision
 ## How Sym loads a pack
 
 - **Build time:** `node scripts/pack-overlay.ts <pack-dir> <app-dir>` validates the pack, then
-  copies each instruction file to `agent/instructions/<name>.md` and each playbook to
+  copies each instruction file to `agent/instructions/<name>.md` and each playbook or skill to
   `agent/skills/<name>.md` before `eve build`, so Eve compiles them like built-in files.
   Instructions are added after `agent/instructions.md`, in alphabetical order; the overlay never
   overwrites an instruction file. A playbook with the same name as a built-in skill replaces it.
-  A playbook without `description` frontmatter gets one from its first line, but write your own
+  A skill without `description` frontmatter gets one from its first line, but write your own
   so the model can route on intent. File names use ASCII letters, digits, `_`, and `-`.
   In Docker, pass the pack as a build context: `docker build --build-context pack=./my-pack -t sym .`.
   Without it, the image builds with no pack. Mount the pack at `SYM_PACK_DIR` at runtime too,
@@ -127,6 +133,19 @@ active again. An entry with the old `brief` field fails the pack check (decision
 
 Milestone 1 checked this split: Eve 0.81.0 compiles pack instructions and playbooks from the
 overlay, in `eve build` and in `docker build`.
+
+## Loading skills
+
+A repo procedure lives at `agent/skills/<name>.md`. A pack procedure is listed under `skills`
+or the legacy `playbooks` field. Both use Eve's skill catalog: the brain sees the description and
+calls `eve__skill({ name })` to load the full text only when it needs that procedure. Prefer a
+description that says when to use it. Flat Markdown text works without a sandbox. Supporting
+files, references, and scripts are not available until a sandbox layer is added.
+
+Skills add instructions, not tools or permission. They cannot bypass Builder consent, the Projects
+list, or production read-only rules. Worker MCP callers cannot load or read them. Approved learned
+playbooks still load from Layer 2 rows under their existing approval rules; they do not become
+skills (decisions 033, 058, and 087).
 
 ## Secrets
 

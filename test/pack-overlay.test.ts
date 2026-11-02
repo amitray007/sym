@@ -78,3 +78,29 @@ describe("skillMarkdown", () => {
     );
   });
 });
+
+it("overlays explicit pack skills and rejects bad skills before writing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sym-skills-"));
+  try {
+    writeFileSync(
+      join(dir, "sym.config.yaml"),
+      JSON.stringify({
+        owner: { slackUserId: "UOWNER" },
+        skills: ["investigate.md"],
+      }),
+    );
+    writeFileSync(join(dir, "investigate.md"), "Compare sources.\nRead two sources.\n");
+    const result = applyPackOverlay(dir, app);
+    expect(result.skills).toEqual(["agent/skills/investigate.md"]);
+    expect(readFileSync(join(app, "agent/skills/investigate.md"), "utf8")).toContain(
+      'description: "Compare sources."',
+    );
+    writeFileSync(join(dir, "investigate.md"), "---\ndescription: []\n---\nBody");
+    expect(() => applyPackOverlay(dir, app)).toThrow(/invalid skill frontmatter/);
+    expect(readFileSync(join(app, "agent/skills/investigate.md"), "utf8")).toContain(
+      "Read two sources.",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -31,6 +31,12 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
     (message) => message.role === "user" && message.text === text,
   );
   const since = request.messages.slice(authoredAt + 1);
+  const researchResult =
+    /<task_result\b[^>]*>[\s\S]*?Research fixture checked the saved ledger\.[\s\S]*?<\/task_result>/.exec(
+      [text, ...since.map((message) => message.text)].join("\n"),
+    );
+  if (researchResult)
+    return "Research fixture checked the saved ledger. No live worker state was checked.";
   // A task result, or any result with `posted: true`, means Sym already posted (decision 044).
   const posted = (m: { text: string }) => /"posted"\s*:\s*true/.test(m.text);
   if (
@@ -41,6 +47,7 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   }
   if (since.some((message) => message.role === "tool")) {
     const result = request.toolResults.at(-1);
+    if (result?.name === "eve__skill") return String(result.output);
     if (result?.name === "jobs_status") {
       const output = toolData(result.output) as { answer?: string };
       return output.answer ?? String(result.output);
@@ -57,6 +64,12 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
 
   // A reply in a thread carries the earlier thread messages first. Only the new message counts.
   const message = text.replace(/<slack_thread_context>[\s\S]*?<\/slack_thread_context>/g, "");
+  if (/\bfixture-skill\b/.test(message)) {
+    return { toolCalls: [{ name: "eve__skill", input: { name: "fixture-check" } }] };
+  }
+  if (/\bfixture-research\b/.test(message)) {
+    return { toolCalls: [{ name: "research", input: { message: "Check saved job status." } }] };
+  }
   const brief = briefIn(message);
   // A run message names the schedule. Its instruction may carry the brief to start.
   const schedule = /^Scheduled run of (S-\d+):/m.exec(message)?.[1];

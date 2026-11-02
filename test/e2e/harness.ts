@@ -2,6 +2,7 @@ import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
   appendFileSync,
   cpSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
@@ -754,6 +755,11 @@ function copyApp(): string {
   for (const entry of ["agent", "lib", "package.json", "tsconfig.json"]) {
     cpSync(join(REPO, entry), join(dir, entry), { recursive: true });
   }
+  mkdirSync(join(dir, "agent/skills"), { recursive: true });
+  cpSync(
+    join(REPO, "test/fixtures/skills/fixture-check.md"),
+    join(dir, "agent/skills/fixture-check.md"),
+  );
   const original = join(dir, "lib/brain/fixture.ts");
   cpSync(original, join(dir, "lib/brain/fixture-base.ts"));
   writeFileSync(

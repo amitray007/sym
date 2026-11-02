@@ -180,3 +180,48 @@ describe("pack policy", () => {
     expect(isAllowedSlackUser(ownerOnly, "U0SAM0001")).toBe(false);
   });
 });
+
+describe("pack skills", () => {
+  it("loads a flat skill beside existing playbooks", () => {
+    const dir = packWith(
+      { ...base, skills: ["investigate.md"] },
+      { "investigate.md": "---\ndescription: Compare sources.\n---\nRead two sources.\n" },
+    );
+    expect(loadPack(dir).skills).toEqual([
+      { path: "investigate.md", content: expect.stringContaining("Read two sources.") },
+    ]);
+    expect(loadPack(packWith(base)).skills).toEqual([]);
+  });
+
+  it.each([
+    ["bad name.md", "Read sources.", /invalid.*skill name/],
+    ["eve__skill.md", "Read sources.", /reserved skill name/],
+    ["empty.md", "   ", /body is empty/],
+    ["bad.md", "---\ndescription: [wrong]\n---\nRead sources.", /invalid skill frontmatter/],
+    [
+      "bad.md",
+      "---\ndescription: Fine\ndeferred: yes\n---\nRead sources.",
+      /invalid skill frontmatter/,
+    ],
+    ["bad.md", "---\ndescription: Fine\nRead sources.", /unclosed frontmatter/],
+  ])("refuses invalid skill %s", (name, content, error) => {
+    const dir = packWith({ ...base, skills: [name] }, { [name]: content });
+    expect(() => loadPack(dir)).toThrow(error);
+  });
+
+  it("refuses skills outside the pack, including symlinks", () => {
+    const outside = packWith(base, { "source.md": "Read sources." });
+    const dir = packWith({ ...base, skills: ["linked.md"] });
+    symlinkSync(join(outside, "source.md"), join(dir, "linked.md"));
+    expect(() => loadPack(dir)).toThrow(/outside the pack folder/);
+    expect(() => loadPack(packWith({ ...base, skills: ["../outside.md"] }))).toThrow(/outside/);
+  });
+
+  it("refuses names repeated across skills and legacy playbooks", () => {
+    const dir = packWith(
+      { ...base, skills: ["shared.md"], playbooks: ["shared.md"] },
+      { "shared.md": "Read sources." },
+    );
+    expect(() => loadPack(dir)).toThrow(/Two pack skills/);
+  });
+});

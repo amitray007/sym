@@ -5,8 +5,6 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { loadPack, PackError, type PackFile } from "./load.ts";
 
-// Eve accepts ASCII letters, digits, underscores, and dashes, starting with a letter or digit.
-const SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---(\r?\n|$)/;
 const DESCRIPTION = /^description\s*:\s*\S/m;
 
@@ -64,14 +62,8 @@ export function applyPackOverlay(packDir: string, appDir: string): OverlayResult
   }
 
   const skills = new Map<string, string>();
-  for (const file of pack.playbooks) {
-    const name = fileName(file, "playbooks").slice(0, -".md".length);
-    if (!SKILL_NAME.test(name)) {
-      throw new PackError(
-        `playbooks "${file.path}": the skill name "${name}" must use ASCII letters, digits, underscores, and dashes, and at most 64 characters`,
-      );
-    }
-    if (skills.has(name)) throw new PackError(`Two pack playbooks are named "${name}"`);
+  for (const file of [...pack.playbooks, ...pack.skills]) {
+    const name = fileName(file, "skills").slice(0, -".md".length);
     skills.set(name, skillMarkdown(name, file.content));
   }
 

@@ -18,4 +18,5 @@ export default mcpChannel({
   // Eve has no allow-list: `tools: true` publishes every plain tool. See the note in docs/eve.md.
   tools: true,
   agent: false,
+  skills: false,
 });

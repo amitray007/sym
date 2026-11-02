@@ -9,6 +9,8 @@ import { stepModel } from "../lib/brain/model.ts";
 export default defineAgent({
   // Workers do repository work, so Sym needs no shell or file tools (docs/eve.md).
   defaultTools: false,
+  // Root copies would inherit worker_job and Slack write tools.
+  tool: false,
   // The brain plans and summarizes; workers spend the real compute. A session that passes this
   // model cost pauses and asks a person to continue or stop (docs/eve.md, spend limits).
   // The window restarts when the person approves Continue. A direct provider reports no cost, so

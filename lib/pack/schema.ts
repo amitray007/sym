@@ -63,6 +63,7 @@ export const packSchema = z
     // The brain's persona, such as personas/dry.md. It wins over SYM_PERSONA (decision 044).
     persona: relativeFile.optional(),
     playbooks: z.array(relativeFile).default([]),
+    skills: z.array(relativeFile).default([]),
   })
   .superRefine((pack, ctx) => {
     const names = new Set(pack.workers.map((w) => w.name));

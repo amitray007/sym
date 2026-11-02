@@ -39,6 +39,17 @@ it("refuses web fetch and hides provider-managed search for workers", async () =
     expect(names).toContain("jobs_status");
     expect(names).toContain("web_fetch");
     expect(names).not.toContain("web_search");
+    expect(names).not.toContain("researcher");
+    expect(names).not.toContain("research");
+    expect(names).not.toContain("agent");
+    expect(names).not.toContain("eve__skill");
+    await expect(
+      client.callTool({ name: "research", arguments: { message: "Investigate" } }),
+    ).rejects.toThrow();
+    await expect(
+      client.callTool({ name: "eve__skill", arguments: { name: "fixture-check" } }),
+    ).rejects.toThrow();
+    await expect(client.readResource({ uri: "skill://fixture-check/SKILL.md" })).rejects.toThrow();
     const refusal = await client.callTool({
       name: "web_fetch",
       arguments: { url: "https://127.0.0.1/" },
@@ -141,4 +152,18 @@ it("provisions scoped callbacks on launch and Fix and enforces scope through the
   } finally {
     await worker.close();
   }
+});
+
+it("lets the brain call the read-only researcher without starting a worker", async () => {
+  const c = newConversation(h);
+  const launches = h.t3.calls.filter((call) => call.name === "t3_thread_launch").length;
+  await c.mention("fixture-research");
+  await c.waitForPrompt(/Research fixture checked the saved ledger/);
+  expect(h.t3.calls.filter((call) => call.name === "t3_thread_launch")).toHaveLength(launches);
+});
+
+it("loads a repo skill on demand without a sandbox", async () => {
+  const c = newConversation(h);
+  await c.mention("fixture-skill");
+  await c.waitForPrompt(/Fixture skill loaded/);
 });
