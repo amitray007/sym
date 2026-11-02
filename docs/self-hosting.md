@@ -51,8 +51,9 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_RESULT_WRITER` | Optional. `on` (default) or `off`. On runs the `writer` subagent, a model call, on each finished code job, so the result reads in the persona's voice. Off keeps the template result (decision 062) |
 | `SYM_PR_FOLLOW` | Optional. `off` (default) or `on`. On asks the worker to watch each job's PR for 7 days and posts CI and review wakes in the job thread (decision 054) |
 | `SYM_SANDBOX` | Optional. `off` (default) or `on`. On gives the brain a sandbox with `bash`, `read_file`, `write_file`, `glob`, and `grep`, one container per Slack thread, and lets it open files people share. Needs the Docker socket, see [Sandbox](#sandbox) (decision 089) |
+| `SYM_SANDBOX_MEMORY` | Optional. Each sandbox's memory, such as `768m` or `2g`, at least `256m`. Default `1g`. Its files count against it: `/workspace` gets half and `/tmp` a quarter |
 | `SYM_SANDBOX_NETWORK` | Optional. `off` (default) or `on`. On lets sandbox commands reach the network through Docker's default bridge. Off gives the container no network at all |
-| `SYM_SANDBOX_IMAGE` | Optional. The sandbox image. Default: Eve's sandbox image (Ubuntu with Node.js, Python 3, git, ripgrep, jq, curl). It must give its default user bash and a writable `/workspace` |
+| `SYM_SANDBOX_IMAGE` | Optional. The sandbox image. Default: Eve's sandbox image (Ubuntu with Node.js, Python 3, git, ripgrep, jq, curl). It must run with a read-only root filesystem and give its default user bash |
 | `DOCKER_GID` | compose.yaml only, with the sandbox. The group ID that owns `/var/run/docker.sock` on the host |
 | `DOCKER_HOST` | Optional, with the sandbox. A Docker host for sandbox containers other than the mounted socket, such as `tcp://sandbox-host:2376` with `DOCKER_TLS_VERIFY=1` and `DOCKER_CERT_PATH` |
 | `SYM_SLACK_USERS` | Slack user IDs allowed to use Sym, comma-separated |
@@ -117,14 +118,16 @@ What each container gets:
 
 - Eve's sandbox image, or `SYM_SANDBOX_IMAGE`, started as its default user with every Linux
   capability dropped and `no-new-privileges`, so `sudo` does nothing.
-- 1 GB of memory and no extra swap, 1 CPU, and 256 processes.
+- 1 GB of memory and no extra swap (`SYM_SANDBOX_MEMORY`), 1 CPU, and 256 processes.
+- A read-only root filesystem. `/workspace` (half the memory) and `/tmp` (a quarter) live in
+  memory and count against the memory limit, so a sandbox cannot fill the host's disk.
 - No network, unless `SYM_SANDBOX_NETWORK=on`. With no network a command cannot send a shared file
   anywhere, reach the host's private network or the tailnet, or read a cloud metadata endpoint. It
   also cannot install packages.
 - The environment variable `AI_AGENT=eve` and nothing else: no Sym variable, no secret, no
   repository or git credentials.
-- A 30-minute idle stop. The files stay, and the next call starts the container again. A command
-  still running then stops.
+- Removal, with its files, after 30 minutes with no sandbox call. The next call starts an empty
+  sandbox. A command still running then stops.
 
 To turn it on with `compose.yaml`:
 
@@ -141,9 +144,8 @@ socket, and Sym runs only the fixed docker commands in `lib/sandbox/docker.ts`. 
 or a compromised dependency would reach it. To keep that risk off the Sym host, leave the socket
 out and set `DOCKER_HOST` to a separate Docker host that runs only sandboxes.
 
-Sandbox containers carry the label `sym.sandbox`. Each is removed when its session ends. Stopped
-containers of long-lived threads stay on the host; remove old ones with
-`docker container prune --filter label=sym.sandbox --filter until=168h`.
+Sandbox containers carry the label `sym.sandbox`. Each is removed when it goes idle or its
+session ends, so none stay on the host.
 
 Without the socket, keep `SYM_SANDBOX` off. With it on and no Docker, each sandbox tool says the
 sandbox is unavailable and the turn continues; shared files reach the brain as a note.

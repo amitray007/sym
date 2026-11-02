@@ -11,8 +11,10 @@ import { capabilityInstructions } from "../lib/capabilities.ts";
 import {
   carriesSecret,
   DEFAULT_SANDBOX_IMAGE,
+  sandboxDisk,
   sandboxEnabled,
   sandboxImage,
+  sandboxMemoryBytes,
   sandboxNetwork,
   sandboxProvider,
 } from "../lib/sandbox/config.ts";
@@ -23,6 +25,7 @@ import {
   dockerCliEnv,
   dockerConnection,
   dockerLifecycle,
+  keepaliveScript,
   runArgs,
   SANDBOX_ENV,
 } from "../lib/sandbox/docker.ts";
@@ -191,7 +194,7 @@ describe("sandbox settings", () => {
   });
 });
 
-describe("Sym's Docker provider", () => {
+describe("Sym's Docker provider arguments", () => {
   it("passes no secret to the container or the docker CLI", () => {
     const args = runArgs("sym-sbx-x", "session-1", { image: "img", network: false });
     const text = args.join(" ");
@@ -199,7 +202,7 @@ describe("Sym's Docker provider", () => {
     // Every --env is NAME=value, so nothing is copied from the CLI's environment.
     const envs = args.flatMap((arg, i) => (args[i - 1] === "--env" ? [arg] : []));
     expect(envs).toEqual(Object.entries(SANDBOX_ENV).map(([k, v]) => `${k}=${v}`));
-    expect(SANDBOX_ENV).toEqual({ AI_AGENT: "eve" });
+    expect(SANDBOX_ENV).toEqual({ AI_AGENT: "eve", HOME: "/tmp/home" });
 
     const cliEnv = dockerCliEnv({ ...SECRETS, PATH: "/bin", HOME: "/home/node", DOCKER_HOST: "x" });
     expect(cliEnv).toEqual({ PATH: "/bin", HOME: "/home/node", DOCKER_HOST: "x" });
@@ -209,8 +212,8 @@ describe("Sym's Docker provider", () => {
     const args = runArgs("sym-sbx-x", "session-1", { image: "img", network: false });
     const flag = (name: string) => args[args.indexOf(name) + 1];
     expect(flag("--network")).toBe("none");
-    expect(flag("--memory")).toBe("1g");
-    expect(flag("--memory-swap")).toBe("1g");
+    expect(flag("--memory")).toBe("1024m");
+    expect(flag("--memory-swap")).toBe("1024m");
     expect(flag("--cpus")).toBe("1");
     expect(flag("--pids-limit")).toBe("256");
     expect(flag("--cap-drop")).toBe("ALL");
@@ -220,6 +223,44 @@ describe("Sym's Docker provider", () => {
     expect(args.some((arg) => arg.includes("docker.sock"))).toBe(false);
     const networked = runArgs("n", "s", { image: "img", network: true });
     expect(networked[networked.indexOf("--network") + 1]).toBe("bridge");
+  });
+
+  it("bounds the disk: read-only root, memory-backed writable paths, and a file size limit", () => {
+    const args = runArgs("sym-sbx-x", "session-1", { image: "img", network: false });
+    expect(args).toContain("--read-only");
+    expect(args).toContain("--rm");
+    const tmpfs = args.flatMap((arg, i) => (args[i - 1] === "--tmpfs" ? [arg] : []));
+    expect(tmpfs).toEqual([
+      "/workspace:rw,exec,nosuid,nodev,size=512m,mode=1777",
+      "/tmp:rw,exec,nosuid,nodev,size=256m,mode=1777",
+      "/run/sym:rw,noexec,nosuid,nodev,size=1m,mode=0755",
+    ]);
+    expect(args[args.indexOf("--ulimit") + 1]).toBe(`fsize=${512 * 1024 ** 2}:${512 * 1024 ** 2}`);
+    // No bind mount of any host path, so nothing the sandbox writes lands on the host's disk.
+    expect(args).not.toContain("--volume");
+    expect(args).not.toContain("--mount");
+
+    const big = runArgs("n", "s", { image: "img", network: false, memoryBytes: 2 * 1024 ** 3 });
+    expect(big[big.indexOf("--memory") + 1]).toBe("2048m");
+    expect(big.find((arg) => arg.startsWith("/workspace:"))).toContain("size=1024m");
+  });
+
+  it("reads SYM_SANDBOX_MEMORY, and warns on a value it cannot use", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(sandboxMemoryBytes({})).toBe(1024 ** 3);
+    expect(sandboxMemoryBytes({ SYM_SANDBOX_MEMORY: "2g" })).toBe(2 * 1024 ** 3);
+    expect(sandboxMemoryBytes({ SYM_SANDBOX_MEMORY: "768M" })).toBe(768 * 1024 ** 2);
+    expect(sandboxMemoryBytes({ SYM_SANDBOX_MEMORY: "64m" })).toBe(1024 ** 3);
+    expect(sandboxMemoryBytes({ SYM_SANDBOX_MEMORY: "lots" })).toBe(1024 ** 3);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(sandboxDisk(768 * 1024 ** 2)).toMatchObject({ workspace: "384m", tmp: "192m" });
+    warn.mockRestore();
+  });
+
+  it("keeps the idle clock in a file only root can touch", () => {
+    const script = keepaliveScript(60);
+    expect(script).toContain("/run/sym/active");
+    expect(script).toContain("-lt 60");
   });
 
   it("names a container from its session alone", () => {
@@ -237,66 +278,6 @@ describe("Sym's Docker provider", () => {
     } as never);
     expect(artifact).toEqual({ version: 1, resources: null });
     expect(calls).toEqual([]);
-  });
-
-  it("pulls the image, starts a limited container, and checks the workspace on first use", async () => {
-    const { cli, calls } = fakeCli((args) => {
-      if (args[0] === "container") return failed("Error: No such container: x");
-      if (args[0] === "image") return failed("Error: No such image");
-      return ok("29.0.0");
-    });
-    const lifecycle = dockerLifecycle({ image: "example/sandbox:1" }, cli);
-    const { state } = await lifecycle.start(sessionContext(), undefined, {
-      version: 1,
-      resources: null,
-    });
-    expect(state).toEqual({ version: 1, container: containerName("session-1") });
-    expect(calls.map((args) => args[0])).toEqual([
-      "version",
-      "container",
-      "image",
-      "pull",
-      "run",
-      "exec",
-    ]);
-    expect(calls[3]).toEqual(["pull", "example/sandbox:1"]);
-    expect(calls[4]).toContain("example/sandbox:1");
-  });
-
-  it("copies recorded skill files into a new container", async () => {
-    const { cli, calls } = fakeCli((args) =>
-      args[0] === "container" ? failed("No such container") : ok(),
-    );
-    await dockerLifecycle({}, cli).start(sessionContext(), undefined, {
-      version: 1,
-      resources: "sym-docker/resources/abc",
-    });
-    const cp = calls.find((args) => args[0] === "cp");
-    expect(cp?.[1]).toBe("/app/.eve/sandbox-cache/sym-docker/resources/abc/.");
-  });
-
-  it("restarts a stopped container and reports a removed one as gone", async () => {
-    let running = "false";
-    const { cli, calls } = fakeCli((args) => (args[0] === "container" ? ok(running) : ok()));
-    const lifecycle = dockerLifecycle({}, cli);
-    const state = { version: 1 as const, container: "sym-sbx-a" };
-    await lifecycle.resume(sessionContext(), { version: 1, resources: null }, state);
-    expect(calls).toContainEqual(["start", "sym-sbx-a"]);
-
-    running = "true";
-    calls.length = 0;
-    await lifecycle.resume(sessionContext(), { version: 1, resources: null }, state);
-    expect(calls.some((args) => args[0] === "start")).toBe(false);
-    // A running container's idle clock restarts, so it cannot stop before the turn's command.
-    expect(calls).toContainEqual(["exec", "sym-sbx-a", "touch", "/tmp/.sym-sandbox-active"]);
-
-    const gone = dockerLifecycle(
-      {},
-      fakeCli((args) => (args[0] === "container" ? failed("No such container") : ok())).cli,
-    );
-    await expect(
-      gone.resume(sessionContext(), { version: 1, resources: null }, state),
-    ).rejects.toThrow(/no longer exists/);
   });
 
   it("fails with a clear reason when Docker is missing, and tries again next time", async () => {
@@ -327,14 +308,9 @@ describe("Sym's Docker provider", () => {
     await expect(
       lifecycle.onSessionEnd(sessionContext(), null, { reason: "completed" }),
     ).resolves.toBeUndefined();
+    const state = { version: 1 as const, container: "sym-sbx-a" };
     await expect(
-      lifecycle.onSessionEnd(
-        sessionContext(),
-        { version: 1, container: "sym-sbx-a" },
-        {
-          reason: "completed",
-        },
-      ),
+      lifecycle.onSessionEnd(sessionContext(), state, { reason: "completed" }),
     ).rejects.toThrow(/Docker is not reachable/);
   });
 
@@ -343,7 +319,7 @@ describe("Sym's Docker provider", () => {
     const connection = dockerConnection(cli, "sym-sbx-a");
     const path = "/workspace/a'; rm -rf / #.txt";
     expect(await connection.readFile({ path })).toBeNull();
-    expect(calls.at(-1)?.at(-1)).toBe(path);
+    expect(calls.at(-1)?.at(-2)).toBe(path);
     await connection.writeFiles({ files: [{ path, content: new Uint8Array([1]) }] });
     expect(calls.at(-1)?.at(-1)).toBe(path);
     await connection.spawn({
@@ -354,5 +330,6 @@ describe("Sym's Docker provider", () => {
     const spawned = calls.at(-1) ?? [];
     expect(spawned.at(-1)).toBe("echo $HOME");
     expect(spawned).toContain("AI_AGENT=eve");
+    expect(spawned.find((arg) => arg.includes("ulimit -f"))).toContain(`ulimit -f ${512 * 1024}`);
   });
 });

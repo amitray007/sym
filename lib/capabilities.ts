@@ -51,6 +51,7 @@ function sandboxLines(env: Record<string, string | undefined>): string[] {
     sandboxNetwork(env)
       ? "- Sandbox commands can reach the network. Fetch only what the request needs."
       : "- The sandbox has no network. Do not try to install packages or call outside services from it.",
+    "- Sandbox files last only while the sandbox is active. After 30 minutes with no sandbox call it is removed with its files, and the next call starts an empty one; a file shared before then may be gone, so ask for it again. Space is small (a few hundred MB) and lives in memory: keep files small.",
     "- The sandbox holds no secrets and no repository credentials. Never clone a repository to change it, and never push from it: code changes and repository checkouts go to the worker as a job. Production and customer data stay read-only there too.",
     "- If a sandbox tool says the sandbox is unavailable, say so briefly and answer without it.",
   ];
