@@ -1,4 +1,5 @@
 import { defineAgent, defineDynamic } from "eve";
+import { overSessionBudget } from "../lib/brain/budget.ts";
 import { fixtureBrain } from "../lib/brain/fixture.ts";
 import { stepModel } from "../lib/brain/model.ts";
 
@@ -10,8 +11,9 @@ export default defineAgent({
   defaultTools: false,
   // The brain plans and summarizes; workers spend the real compute. A session that passes this
   // model cost pauses and asks a person to continue or stop (docs/eve.md, spend limits).
-  // The window restarts when the person approves Continue.
-  limits: { sessionUsage: ({ window }) => (window.costUsd ?? 0) >= 2 },
+  // The window restarts when the person approves Continue. A direct provider reports no cost, so
+  // its tokens are priced at reference rates (lib/brain/budget.ts, decision 080).
+  limits: { sessionUsage: ({ window }) => overSessionBudget(window) },
   // Resolved per step because the fixture and direct providers are live model objects, which
   // only step selections may return. The model ID stays the same each step, so the prompt cache
   // stays valid.

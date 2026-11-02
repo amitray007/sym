@@ -34,7 +34,7 @@ describe("stepModel", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const env = { SYM_REASONING: "maximum" };
     expect(stepModel(fixture, "low", env).reasoning).toBe("low");
-    expect(stepModel(fixture, "low", env).reasoning).toBe("low");
+    expect(stepModel(fixture, "medium", env).reasoning).toBe("medium");
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });

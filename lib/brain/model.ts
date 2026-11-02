@@ -61,7 +61,7 @@ function selectReasoning(fallback: "low" | "medium", env: Record<string, string 
   const override = env.SYM_REASONING?.trim().toLowerCase();
   if (!override) return fallback;
   if (isReasoning(override)) return override;
-  warnOnce(`unknown SYM_REASONING "${override}". Using "${fallback}".`);
+  warnOnce(`unknown SYM_REASONING "${override}". Using the default level.`);
   return fallback;
 }
 

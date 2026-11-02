@@ -18,9 +18,14 @@ model, and `SYM_MODEL` takes the provider's native model ID, such as `claude-son
 `SYM_MODEL` uses the helper's default model. An unknown provider warns once and uses the gateway.
 `SYM_REASONING` applies to every route.
 
+Only AI Gateway reports a step's cost, and the $2 session spend limit reads that cost. Without a
+reported cost, `lib/brain/budget.ts` prices the window's tokens at Sonnet-class list rates: $2
+per million new input tokens, $0.20 per million cache reads, and $10 per million output tokens.
+
 ## Consequences
 
 An owner needs one provider key and no gateway account. A direct route has no gateway fallback
 across providers and no gateway session logs. Eve reads the model's context window from the
-gateway catalog, so a direct model that the catalog does not list fails at selection. The
-gateway stays the default, so existing deployments do not change.
+gateway catalog, so a direct model that the catalog does not list fails at selection. The spend
+limit on a direct route is an estimate, so a cheaper model stops early and a dearer one stops
+late. The gateway stays the default, so existing deployments do not change.
