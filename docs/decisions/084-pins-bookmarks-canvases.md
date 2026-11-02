@@ -18,7 +18,8 @@ needs a new Slack scope, and a canvas holds text that people edit together.
    (`canvases.edit` with `insert_at_end`). It never replaces or deletes canvas content.
 4. All three follow the decision 081 checks. Bookmarks and canvases carry words into a channel,
    so they follow the decision 082 approval rules, and a canvas write counts toward the hourly
-   post cap. None of them work in a DM.
+   post cap. After a `slack_read` in the same turn, they wait for approval too (decision 083).
+   None of them work in a DM.
 5. The manifest adds `pins:write`, `bookmarks:write`, and `canvases:write`. The owner reinstalls
    the app to grant them.
 

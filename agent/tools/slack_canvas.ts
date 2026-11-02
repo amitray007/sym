@@ -4,6 +4,7 @@ import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { requesterResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
 import { ledger, ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { CANVAS_MAX, writeChannelCanvas } from "../../lib/slack/canvas.ts";
+import { readInTurn } from "../../lib/slack/read.ts";
 import { postNeedsConfirmation } from "../../lib/slack/slack-post.ts";
 
 // Writes to a channel's canvas when a person asks (decision 084). Sym adds to the end of an
@@ -21,7 +22,7 @@ export default defineTool({
   approval: {
     request: ({ session, toolInput }) =>
       postNeedsConfirmation(ledgerDeps(), session.id, toolInput?.target, toolInput?.markdown).then(
-        (ask) => (ask ? "user-approval" : "not-applicable"),
+        (ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable"),
       ),
     response: requesterResponse("Only the person who asked can approve this canvas."),
     prompt: ({ input }) => `Add this to the ${input.target} canvas?\n\n${input.markdown}`,
