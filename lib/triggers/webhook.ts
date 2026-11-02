@@ -156,8 +156,21 @@ export function webhookDedupe(signature: string, body: Uint8Array) {
   };
 }
 
-// Counts bad signatures per hook, so a flood of forged requests stops before the database.
+// Counts bad signatures per hook. Past the limit, the hook's row comes from a short cache, so a
+// flood of forged requests stops before the database while a correctly signed request still runs.
 const badSignatures = new Map<string, { count: number; resetAt: number }>();
+const floodedRows = new Map<string, { trigger: Trigger | undefined; until: number }>();
+const FLOODED_ROW_MS = 30_000;
+
+async function webhookTriggerFor(sql: Sql, hookId: string, now: number) {
+  if (!tooManyBad(hookId, now)) return getWebhookTrigger(sql, hookId);
+  const cached = floodedRows.get(hookId);
+  if (cached && cached.until > now) return cached.trigger;
+  const trigger = await getWebhookTrigger(sql, hookId);
+  if (floodedRows.size > 10_000) floodedRows.clear();
+  floodedRows.set(hookId, { trigger, until: now + FLOODED_ROW_MS });
+  return trigger;
+}
 
 function tooManyBad(hookId: string, now: number): boolean {
   const entry = badSignatures.get(hookId);
@@ -202,15 +215,12 @@ export async function receiveWebhook(
   if (!key || !HOOK_ID.test(hookId)) return reply(404, { ok: false, error: "not_found" });
   const timestamp = request.headers.get(TIMESTAMP_HEADER);
   const signature = request.headers.get(SIGNATURE_HEADER);
-  // Cheap refusals first: no signature, or a hook that keeps getting forged ones.
+  // Cheap refusal first: no signature reaches no database.
   if (!timestamp || !signature) return reply(401, { ok: false, error: "signature_missing" });
   const now = deps.now ?? new Date();
-  if (tooManyBad(hookId, now.getTime())) {
-    return reply(429, { ok: false, error: "too_many_bad_signatures" }, { "retry-after": "60" });
-  }
   const body = await readBody(request);
   if (!body) return reply(413, { ok: false, error: "too_large", limitBytes: BODY_MAX });
-  const trigger = await getWebhookTrigger(deps.sql, hookId);
+  const trigger = await webhookTriggerFor(deps.sql, hookId, now.getTime());
   if (!trigger) return reply(404, { ok: false, error: "not_found" });
   const verdict = verifyWebhook({
     secret: webhookSecret(key, hookId, trigger.secretVersion),
@@ -220,8 +230,11 @@ export async function receiveWebhook(
     now,
   });
   if (verdict !== "ok") {
+    const flooded = tooManyBad(hookId, now.getTime());
     noteBad(hookId, now.getTime());
-    return reply(401, { ok: false, error: `signature_${verdict}` });
+    return flooded
+      ? reply(429, { ok: false, error: "too_many_bad_signatures" }, { "retry-after": "60" })
+      : reply(401, { ok: false, error: `signature_${verdict}` });
   }
   if (trigger.status !== "active") return reply(409, { ok: false, error: "paused" });
   const fireDeps = { sql: deps.sql, slack: deps.slack, pack: deps.pack, usersEnv: deps.usersEnv };

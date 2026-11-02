@@ -28,8 +28,10 @@ send an HTTP request but cannot post in Slack. Eve's custom channels give Sym an
    HMAC of `<timestamp>.<raw body>` with the trigger's secret. Sym compares in constant time and
    refuses a timestamp more than 5 minutes off. Sym accepts no static bearer token: a leaked
    header would work until someone noticed, while a signature expires and covers the body. A
-   request without both headers gets 401 before any database read, and a hook that gets 30 bad
-   signatures in a minute gets 429 for the rest of that minute.
+   request without both headers gets 401 before any database read. After 30 bad signatures in a
+   minute, a hook's row comes from a 30-second cache and each further bad signature gets 429, so a
+   flood stops before the database while a correctly signed request still runs. The counter is
+   per process; a shared limit belongs at the proxy.
 4. Sym stores no secret. Each secret is `whsec_` plus the base64url HMAC-SHA256 of
    `sym-webhook:<hook id>:<version>` keyed with `SYM_WEBHOOK_KEY`, a deployment secret of at
    least 32 characters. A database copy alone reveals nothing, and there is no ciphertext or

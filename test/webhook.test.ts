@@ -427,7 +427,7 @@ describe.skipIf(!hasDatabase)("receiving webhooks", () => {
     expect((await runsOf(stuck.id))[0]).toMatchObject({ deferred: false, outcome: "failed" });
   });
 
-  it("stops checking a hook's forged signatures after a burst", async () => {
+  it("answers 429 to a burst of forged signatures without locking out signed requests", async () => {
     const trigger = await make();
     const { deps } = harness();
     const id = trigger.hookId ?? "";
@@ -438,6 +438,8 @@ describe.skipIf(!hasDatabase)("receiving webhooks", () => {
       );
     }
     expect(statuses).toEqual(new Set([401, 429]));
+    // A correctly signed request still runs during the flood: forgers cannot lock out the sender.
+    expect((await receiveWebhook(deps, post(trigger, '{"during":"flood"}'), id)).status).toBe(202);
     const later = { ...deps, now: new Date(NOW.getTime() + 61_000) };
     const fresh = seconds(later.now);
     expect(

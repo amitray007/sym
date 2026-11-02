@@ -176,7 +176,7 @@ request once: a replay, or a copy re-signed within 10 minutes, is a duplicate. T
 with the same body inside 10 minutes need something unique in the body. Sym answers 202 when it
 accepts a request, 200 for a duplicate, 401 for a missing, bad, or stale signature (more than 5
 minutes off), 404 for an unknown URL, 409 for a paused trigger, 413 above 64 KiB, and 429 past
-the hourly cap or after 30 bad signatures in a minute. For example:
+the hourly cap or for a bad signature after 30 in a minute. For example:
 
 ```sh
 ts=$(date +%s); body='{"alert":"disk full"}'
