@@ -1,15 +1,11 @@
 import type { Sql } from "../db.ts";
-import { chooseDisplay } from "../display.ts";
-import { deliverNow, type LedgerDeps } from "../jobs/run.ts";
-import { enqueuePost } from "../ledger/outbox.ts";
+import type { LedgerDeps } from "../jobs/run.ts";
 import { getSessionThread } from "../ledger/threads.ts";
 import { jobOfCodeChannel } from "./code-channel.ts";
+import { POST_MAX, postAndConfirm } from "./post.ts";
 
 // The thread a code channel came from, and Sym's posts there on request (decision 079). A code
 // channel is the same agent as its thread: it can still speak in the thread when a person asks.
-
-// The longest message Sym posts in the main thread.
-export const MAIN_THREAD_POST_MAX = 3000;
 
 export interface MainThread {
   channel: string;
@@ -51,32 +47,18 @@ export async function postToMainThread(
   deps: LedgerDeps,
   input: { sessionId: string; callId: string; text: string },
 ): Promise<string> {
-  const text = input.text.trim().slice(0, MAIN_THREAD_POST_MAX);
+  const text = input.text.trim().slice(0, POST_MAX);
   if (!text) return "The message is empty.";
   const main = await mainThreadOf(deps.sql, input.sessionId);
   if (!main) return "This conversation has no main thread to post in. Reply here instead.";
-  const key = `main-thread:${input.sessionId}:${input.callId}`;
-  await enqueuePost(deps.sql, {
-    idempotencyKey: key,
-    method: "chat.postMessage",
-    payload: { channel: main.channel, thread_ts: main.threadTs, text },
-    display: chooseDisplay({
-      kind: "conversation",
-      needsAction: false,
-      isNew: true,
-      estMinutes: 0,
-      steps: 0,
-      lines: text.split("\n").length,
-      surface: /^D/.test(main.channel) ? "dm" : "channel",
-      quiet: false,
-    }),
+  const outcome = await postAndConfirm(deps, {
+    key: `main-thread:${input.sessionId}:${input.callId}`,
+    channel: main.channel,
+    threadTs: main.threadTs,
+    text,
   });
-  await deliverNow(deps);
-  const [post] = await deps.sql<{ status: string }[]>`
-    select status from outbox where idempotency_key = ${key}
-  `;
-  if (post?.status === "sent") return "Posted in the main thread.";
-  if (post?.status === "pending")
+  if (outcome === "sent") return "Posted in the main thread.";
+  if (outcome === "pending")
     return "The post will appear in the main thread once Slack accepts it.";
   return "I couldn't post in the main thread: Slack refused it, or the thread is gone.";
 }

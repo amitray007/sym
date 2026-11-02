@@ -1,7 +1,6 @@
 import {
   defaultSlackAuth,
   defineSlackRenderer,
-  type SlackAnswerSubmission,
   type SlackContext,
   type SlackEventContext,
   type SlackInboundMessageContext,
@@ -31,7 +30,7 @@ import { getListenMode } from "../../lib/ledger/listen.ts";
 import { sentPostTimestamps } from "../../lib/ledger/outbox.ts";
 import { DISMISS_ACTION_ID, START_ACTION_ID } from "../../lib/ledger/proposals.ts";
 import { lastTurnUser, recordSessionThread } from "../../lib/ledger/threads.ts";
-import { isApprovalAction, mayDecideAsOwner, ownerUserId } from "../../lib/owner.ts";
+import { mayDecideAsOwner, ownerUserId } from "../../lib/owner.ts";
 import {
   changePersona,
   describePersona,
@@ -157,14 +156,6 @@ async function showLoadingMessages(channel: SlackContext): Promise<boolean> {
     console.warn("Sym could not set the loading messages.", String(error));
     return false;
   }
-}
-
-// A modal answer (`view_submission`) is always a question.
-function isApprovalSubmission(submission: SlackAnswerSubmission): boolean {
-  return (
-    submission.type === "block_actions" &&
-    submission.actions.some((action) => isApprovalAction(action.actionId))
-  );
 }
 
 const fromAllowedHuman = (message: SlackMessage) =>
@@ -839,13 +830,11 @@ export default slackChannel({
       console.warn("Sym could not record a reaction.", String(error));
     }
   },
-  // Answers count from allowed people. A tool approval is an owner decision, so it counts only
-  // from the owner (lib/owner.ts). Without a configured owner, the allow-list decides.
+  // Answers count from allowed people. Who may settle a tool approval is the tool's own response
+  // policy: owner decisions use ownerResponse (lib/owner.ts), and slack_post accepts only the
+  // person who asked (decision 081).
   onAnswers(ctx, submission) {
     if (!isAllowed(submission.user.id)) return null;
-    if (isApprovalSubmission(submission) && !mayDecideAsOwner(submission.user.id, pack())) {
-      return null;
-    }
     return { auth: ctx.defaultAuth };
   },
 });

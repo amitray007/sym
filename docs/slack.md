@@ -32,6 +32,7 @@ After 45 minutes Sym asks once whether to stop.
 | "Type your answer" modal | Free-text answers | Eve, inside `ctx.ask` | Milestone 1 |
 | Feedback buttons | 👍/👎 on job results only | Sym: renderer posts the reply with a `context_actions` block | Built |
 | Reactions | A rare emoji on a person's message: 😂 funny, 💡 good idea, 🙌 good news, 🫡 ack. Never 👀, never on every message (decision 051) | Brain: `slack_react` and `slack_emoji`, limits in code | Built |
+| Posts elsewhere | A post in another channel or thread on request, ending "Posted for @name". From a DM or private channel, Sym asks first (decision 081) | Brain: `slack_post`, checks in `lib/slack/reach.ts` | Built |
 | Ephemeral replies | `/sym status`, private sign-in prompts, stranger lines | Eve, Sym | Production |
 | Long output | Long completed replies as a Markdown file | Eve | Production |
 | Modals | "New schedule" form | Sym: `views.open` with the `trigger_id` | Team phase |
@@ -162,7 +163,7 @@ with the public host before you import it.
 | `users:read` | Resolve the approver for DM routing, and display names in a shared thread |
 | `code_channels:manage` | Create, archive, and label a job's code channel (decision 067) |
 | `channels:write.invites`, `groups:write.invites` | Invite mentioned people into code channels on request (decision 074); reinstall the app to grant these scopes |
-| `channels:read`, `groups:read`, `mpim:read` | Tell a code channel apart (`conversations.info`) |
+| `channels:read`, `groups:read`, `mpim:read` | Tell a code channel apart (`conversations.info`); check membership and find a `#name` for posts elsewhere (decision 081) |
 
 Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reaction_added`, `app_home_opened`,
 `agent_session_stopped`. The manifest also turns on `features.code_channels`.
@@ -171,15 +172,26 @@ on the Home tab: reinstall the app after you import this change, or Slack sends 
 `app_home_opened`. To post the digest in a channel, invite Sym to it first;
 the manifest has no `chat:write.public`.
 
-Allow-list: the pack's owner and `allowList`, or `SYM_SLACK_USERS` without a pack. Approvals
-(tool approvals such as schedules, playbooks, and Stop) count only from the owner: the pack owner,
-else `SYM_OWNER_SLACK_USER`. Start / Not now proposals and worker questions stay open to allowed
+Allow-list: the pack's owner and `allowList`, or `SYM_SLACK_USERS` without a pack. Owner
+approvals (tool approvals such as schedules, playbooks, and Stop) count only from the owner: the
+pack owner, else `SYM_OWNER_SLACK_USER`. Each tool's response policy enforces this, and an allowed
+person may still cancel one. A `slack_post` approval counts only from the person who asked
+(decision 081). Start / Not now proposals and worker questions stay open to allowed
 users. Every inbound
 handler checks it and fails closed, including answers to buttons. Free-text answers go through
 Eve's "Type your answer" box, so the same check covers them; a reply typed in the thread is a new
 message, not an answer (decision 066). Thread context still includes
 messages from other people in the thread. The instructions treat that text as data, and job
 launches need approval.
+
+## Reaching other conversations
+
+A person can ask Sym to act in another conversation: "post this in #releases", or "tell them in
+this thread" with a link (decision 081). `lib/slack/reach.ts` decides. The requester must be on
+the allow-list, and both Sym and the requester must be members of the target. Every refusal says
+"I can't reach that conversation", so a non-member learns nothing about the target. A post ends
+"Posted for @name". When the request comes from a DM or private channel, Sym asks the requester
+to approve the post first. Decision 081 lists the tools that follow `slack_post`.
 
 ## Code channels
 

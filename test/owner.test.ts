@@ -3,7 +3,6 @@ import playbookPropose from "../agent/tools/playbook_propose.ts";
 import playbookRetire from "../agent/tools/playbook_retire.ts";
 import playbookReview from "../agent/tools/playbook_review.ts";
 import {
-  isApprovalAction,
   mayDecideAsOwner,
   OWNER_ONLY,
   ownerResponse,
@@ -29,16 +28,6 @@ describe("owner helper", () => {
     expect(mayDecideAsOwner("U2", undefined, env)).toBe(false);
     expect(mayDecideAsOwner(undefined, undefined, env)).toBe(false);
     expect(mayDecideAsOwner("U2", undefined, {})).toBe(true);
-  });
-
-  it("tells approval buttons from question buttons", () => {
-    expect(isApprovalAction("eve_input:tool-approval:req1:button:0")).toBe(true);
-    expect(isApprovalAction("eve_input:route:C1:1700.1:tool-approval:req1:button:1")).toBe(true);
-    expect(isApprovalAction("eve_input:code:C1:tool-approval:req1:button:0")).toBe(true);
-    expect(isApprovalAction("eve_input:code:C1:req1:button:0")).toBe(false);
-    expect(isApprovalAction("eve_input:req1:button:0")).toBe(false);
-    expect(isApprovalAction("eve_input_freeform:req1")).toBe(false);
-    expect(isApprovalAction("sym_stop")).toBe(false);
   });
 });
 

@@ -2,7 +2,8 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller } from "../../lib/callers.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
-import { MAIN_THREAD_POST_MAX, postToMainThread } from "../../lib/slack/main-thread.ts";
+import { postToMainThread } from "../../lib/slack/main-thread.ts";
+import { POST_MAX } from "../../lib/slack/post.ts";
 
 // Posts in the thread a code channel came from, when a person asks (decision 079). A code channel
 // is the same agent as its thread, so it can still speak there.
@@ -13,7 +14,7 @@ export default defineTool({
     text: z
       .string()
       .min(1)
-      .max(MAIN_THREAD_POST_MAX)
+      .max(POST_MAX)
       .describe("The message to post in the main thread. A few short lines."),
   }),
   async execute({ text }, ctx) {
