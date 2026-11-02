@@ -171,28 +171,71 @@ export async function reserveTriggerRun(
   });
 }
 
-// Claims the deferred runs the dispatcher should send now. A deferred run older than
-// `maxAgeMs` is stale: it fails instead of firing late.
+// Claims the deferred runs the dispatcher should send now, each for `leaseMs`. The run stays
+// deferred until its session is attached (`endDeferred`), so a dispatcher that crashes after the
+// claim leaves it for the next tick once the lease runs out; the delivery key makes that resend
+// reach the same session. A deferred run older than `maxAgeMs` is stale: it fails instead of
+// firing late.
 export async function claimDeferredRuns(
   sql: Sql,
   now: Date,
-  maxAgeMs: number,
-  limit = 25,
+  options: { maxAgeMs: number; leaseMs: number; limit?: number },
 ): Promise<TriggerRun[]> {
-  const oldest = new Date(now.getTime() - maxAgeMs);
+  const oldest = new Date(now.getTime() - options.maxAgeMs);
   await sql`
-    update schedule_runs set deferred = false, outcome = 'failed'
-    where deferred and fired_at < ${oldest}
+    update schedule_runs set deferred = false, deferred_until = null, outcome = 'failed'
+    where deferred and fired_at < ${oldest} and session_id is null
   `;
+  const until = new Date(now.getTime() + options.leaseMs);
   const rows = await sql<TriggerRun[]>`
-    update schedule_runs set deferred = false
+    update schedule_runs set deferred_until = ${until}
     where id in (
-      select id from schedule_runs where deferred order by id limit ${limit}
+      select id from schedule_runs
+      where deferred and (deferred_until is null or deferred_until < ${now})
+      order by id limit ${options.limit ?? 25}
       for update skip locked
     )
     returning *
   `;
   return rows.map(normalizeRun).sort((a, b) => a.id - b.id);
+}
+
+// Ends a deferred run's wait, after its session is attached or its send failed for good.
+export async function endDeferred(sql: Sql, runId: number): Promise<void> {
+  await sql`
+    update schedule_runs set deferred = false, deferred_until = null where id = ${runId}
+  `;
+}
+
+// Remembers that a person's turn ran in this session's thread (decision 088).
+export async function markPersonTurn(sql: Sql, sessionId: string): Promise<void> {
+  await sql`update session_threads set person_turn = true where session_id = ${sessionId}`;
+}
+
+// True for a session that is a trigger run (decision 088). Its turns read event text from
+// whoever wrote the message. Like runCreatorOf, it waits briefly while a recent delivery may
+// not be attached yet.
+export async function isTriggerRunSession(
+  sql: Sql,
+  sessionId: string,
+  options: { attempts?: number; delayMs?: number } = {},
+): Promise<boolean> {
+  const attempts = options.attempts ?? 20;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const [row] = await sql<{ trigger: boolean }[]>`
+      select trigger_id is not null as trigger from schedule_runs where session_id = ${sessionId}
+    `;
+    if (row) return row.trigger;
+    const [pending] = await sql`
+      select 1 from schedule_runs
+      where session_id is null and outcome = 'started' and (not deferred or sent_at is not null)
+        and coalesce(sent_at, fired_at) >= now() - interval '2 minutes'
+      limit 1
+    `;
+    if (!pending) return false;
+    await new Promise((resolve) => setTimeout(resolve, options.delayMs ?? 500));
+  }
+  return false;
 }
 
 // True for a thread whose only session is a trigger run that stayed silent and that no person has
@@ -203,16 +246,13 @@ export async function isSilentRunThread(
   channel: string,
   threadTs: string,
 ): Promise<boolean> {
-  // A run's turn records its creator as the thread's person (threadUserOf), so the creator counts
-  // as no person here.
+  // A person's turn there, the creator's mention included, sets `person_turn` and ends the rule.
   const [row] = await sql<{ silent: boolean }[]>`
     select bool_and(
-      r.trigger_id is not null and r.outcome = 'all_clear'
-        and (t.user_id is null or t.user_id = g.owner)
+      r.trigger_id is not null and r.outcome = 'all_clear' and not t.person_turn
     ) as silent
     from session_threads t
     left join schedule_runs r on r.session_id = t.session_id
-    left join triggers g on g.id = r.trigger_id
     where t.channel_id = ${channel} and t.thread_ts = ${threadTs}
   `;
   return row?.silent === true;

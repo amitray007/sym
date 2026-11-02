@@ -233,9 +233,13 @@ does a reaction on Sym's message (that is feedback). Each Slack event fires a tr
 each trigger starts at most `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour (default 20).
 
 A run acts for the trigger's creator. The message's author is not the requester; the event's
-text reaches the brain as JSON data that grants nothing. A run shows no status line, because it
-sits in someone else's thread and most runs end in silence. After a silent run, people's replies
-in that thread start no turn; a mention does.
+text reaches the brain as JSON data that grants nothing, and a post, DM, edit, bookmark, or
+canvas write the run makes outside its own reply waits for the creator's approval. The creator
+must stay allowed and a member of the watched channel, or runs fail closed. When two triggers
+match one message, each run gets its own session: one in the message's thread, the others in
+their creators' DMs. A run shows no status line, because it sits in someone else's thread and
+most runs end in silence. After a silent run, people's replies in that thread start no turn
+until someone talks to Sym there; a mention always does.
 
 "Send to Sym" on a message's menu posts a DM to the person who picked it: a link, a quote, and
 "What should I do with it?". Their reply in that DM thread is their own request, and the brain

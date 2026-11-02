@@ -1,5 +1,5 @@
 import { defineSchedule } from "eve/schedules";
-import { ledger, pack } from "../../lib/runtime.ts";
+import { ledger, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { dispatchDue } from "../../lib/schedules/dispatch.ts";
 import { seedPackSchedules } from "../../lib/schedules/seed.ts";
 import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
@@ -53,7 +53,7 @@ export default defineSchedule({
         // because the message handler can start a session only in that thread. It uses the same
         // idempotent send, send mark, and locked attach as a scheduled run.
         await sendDeferredRuns(
-          { sql: ledger(), pack: pack(), now },
+          { sql: ledger(), slack: slackFromEnv(), pack: pack(), now },
           async ({ message, target, key, title }) =>
             (await to(slack, target).send(message, { auth: appAuth, idempotencyKey: key, title }))
               .sessionId,

@@ -270,10 +270,12 @@ export async function claimRunWhenAttached(
   const attempts = options.attempts ?? 30;
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (await claimRunForJob(sql, sessionId, source, jobId)) return true;
-    // A deferred trigger run waits for the dispatcher, not for an attach (decision 088).
+    // A deferred trigger run waits for the dispatcher, not for an attach, until its send starts
+    // (decision 088).
     const [pending] = await sql`
       select 1 from schedule_runs
-      where ${sql(column)} = ${id} and session_id is null and job_id is null and not deferred
+      where ${sql(column)} = ${id} and session_id is null and job_id is null
+        and (not deferred or sent_at is not null)
         and coalesce(sent_at, fired_at) >= now() - interval '2 minutes'
       limit 1
     `;
@@ -296,10 +298,11 @@ export async function runCreatorOf(
   for (let attempt = 0; attempt < attempts; attempt++) {
     const owner = await creatorOfSession(sql, sessionId);
     if (owner) return owner;
-    // A delivery in the last 2 minutes, a retried one included, may not be attached yet.
+    // A delivery in the last 2 minutes, a retried one included, may not be attached yet. A
+    // deferred trigger run counts once its send starts (decision 088).
     const [pending] = await sql`
       select 1 from schedule_runs
-      where session_id is null and outcome = 'started' and not deferred
+      where session_id is null and outcome = 'started' and (not deferred or sent_at is not null)
         and coalesce(sent_at, fired_at) >= now() - interval '2 minutes'
       limit 1
     `;

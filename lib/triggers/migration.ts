@@ -47,3 +47,14 @@ export const channelTriggersMigration: Migration = {
     create index schedule_runs_deferred on schedule_runs (fired_at) where deferred;
   `,
 };
+
+// Decision 088, hardening. A deferred run's claim expires, so a dispatcher that crashes between
+// the claim and the send leaves the run for the next tick, which sends it with the same delivery
+// key. A thread remembers that a person talked to Sym there, so a silent run's rule ends.
+export const triggerRunLeaseMigration: Migration = {
+  version: "038_trigger_run_lease",
+  sql: `
+    alter table schedule_runs add column deferred_until timestamptz;
+    alter table session_threads add column person_turn boolean not null default false;
+  `,
+};

@@ -5,8 +5,8 @@ import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { editOwnPost } from "../../lib/slack/own-posts.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
-import { readInTurn } from "../../lib/slack/read.ts";
 import { editNeedsConfirmation } from "../../lib/slack/slack-post.ts";
+import { readUntrustedInTurn } from "../../lib/triggers/untrusted.ts";
 
 // Edits a post Sym made because this person asked (decision 082). Only they can edit it.
 export default defineTool({
@@ -26,7 +26,11 @@ export default defineTool({
         await requesterOf(session, ledgerDeps),
         toolInput?.message,
         toolInput?.text,
-      ).then((ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable")),
+      ).then(async (ask) =>
+        ask || (await readUntrustedInTurn(session, () => ledgerDeps().sql))
+          ? "user-approval"
+          : "not-applicable",
+      ),
     response: requesterResponse("Only the person who asked can approve this edit.", ledgerDeps),
     prompt: ({ input }) => `Change the post to this?\n\n${input.text}`,
   },

@@ -39,6 +39,12 @@ function slackRequests(messages: Record<string, unknown>[] = []) {
   const request = vi.fn(async (method: string, body: Record<string, unknown>) => {
     calls.push({ method, body });
     if (method === "conversations.open") return { ok: true, channel: { id: `D${body.users}` } };
+    if (method === "conversations.info") {
+      return { ok: true, channel: { id: body.channel, is_private: false, is_member: true } };
+    }
+    if (method === "conversations.members") {
+      return { ok: true, members: ["UCREATOR", "UCREATOR2", "UFRIEND"] };
+    }
     if (method === "users.info") return { ok: true, user: { id: body.user, is_bot: false } };
     if (method === "conversations.history") return { ok: true, messages };
     if (method === "conversations.replies") return { ok: true, messages: [] };
@@ -115,6 +121,23 @@ describe.skipIf(!hasDatabase)("event triggers in the Slack channel", () => {
     const [run] =
       await ledger.sql()`select session_id from schedule_runs where event_key = ${`message:${where}:30.1`}`;
     expect(run?.sessionId).toBe(`run-${where}-1`);
+  });
+
+  it("sends one session per creator when two triggers match one message", async () => {
+    vi.stubEnv("SYM_SLACK_USERS", "UCREATOR,UCREATOR2");
+    const where = fresh("CTWO");
+    const first = await watch({ channel: where });
+    const second = await watch({ channel: where, owner: "UCREATOR2" });
+    const { ctx, sends } = messageCtx(where);
+    await channel.onMessage(ctx, topLevel(where, "30.5", "release?"));
+    // Only the first run uses the message's thread; the second waits for the dispatcher's DM.
+    expect(sends).toHaveLength(1);
+    expect(String(sends[0]?.text)).toContain(`Trigger run of T-${first.id}`);
+    const [deferred] = await ledger.sql()<{ deferred: boolean; event: { target: unknown } }[]>`
+      select deferred, event from schedule_runs where trigger_id = ${second.id}
+    `;
+    expect(deferred?.deferred).toBe(true);
+    expect(deferred?.event.target).toEqual({ channelId: "DUCREATOR2" });
   });
 
   it("ignores bots, Sym's own posts, and edits, so a run never fires itself", async () => {

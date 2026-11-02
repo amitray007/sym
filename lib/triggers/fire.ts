@@ -4,10 +4,12 @@ import { deliveryKey } from "../schedules/dispatch.ts";
 import { attachSession, finishRun, markSending } from "../schedules/rows.ts";
 import type { SlackApi } from "../slack/api.ts";
 import { isSlackUserAllowed } from "../slack/guard.ts";
+import { reachConversation } from "../slack/reach.ts";
 import { triggerRunMessage } from "./format.ts";
 import { matchesKeywords, normalizeEmoji } from "./match.ts";
 import {
   claimDeferredRuns,
+  endDeferred,
   getTrigger,
   type RunTarget,
   reserveTriggerRun,
@@ -75,8 +77,8 @@ export interface MessageEventInput {
 }
 
 // A new top-level message in a channel. The caller drops bots, Sym's own posts, edits, and
-// thread replies first. `send` reaches only the message's own thread here, so a trigger that
-// posts elsewhere defers its run to the dispatcher.
+// thread replies first. `send` reaches only the message's own thread here, so a run that posts
+// elsewhere waits for the dispatcher.
 export async function fireMessageTriggers(
   deps: FireDeps,
   input: MessageEventInput,
@@ -95,17 +97,11 @@ export async function fireMessageTriggers(
     text: clip(input.text),
     link: messageLink(input.channel, input.ts),
   };
-  const results: FireResult[] = [];
-  for (const trigger of triggers) {
-    const target = targetOf(trigger, facts);
-    const status = await fire(deps, trigger, facts, `message:${input.channel}:${input.ts}`, {
-      target,
-      deferred: Boolean(trigger.destination),
-      send,
-    });
-    results.push({ trigger: triggerRef(trigger.id), status });
-  }
-  return results;
+  return fireAll(deps, triggers, facts, `message:${input.channel}:${input.ts}`, send, {
+    // The message's own thread is new, so no session holds it yet.
+    threadBusy: false,
+    deferElsewhere: true,
+  });
 }
 
 export interface ReactionEventInput {
@@ -147,17 +143,44 @@ export async function fireReactionTriggers(
     emoji,
     reactor: input.reactor,
   };
+  return fireAll(deps, triggers, facts, `reaction:${input.channel}:${input.ts}`, send, {
+    // A thread that already talks with Sym keeps its own session.
+    threadBusy: await threadHasSession(deps.sql, input.channel, facts.threadTs),
+    deferElsewhere: false,
+  });
+}
+
+// One run per matching trigger, each in its own session, so each acts for its own creator. Eve
+// gives a Slack thread one session, so at most one run can live in the event's thread: the
+// oldest trigger that posts there, and none when a session already holds the thread. Every other
+// trigger that posts in the thread runs in its creator's DM instead (decision 088).
+async function fireAll(
+  deps: FireDeps,
+  triggers: Trigger[],
+  facts: TriggerEvent,
+  eventKey: string,
+  send: SendRun,
+  options: { threadBusy: boolean; deferElsewhere: boolean },
+): Promise<FireResult[]> {
+  let threadTaken = options.threadBusy;
   const results: FireResult[] = [];
   for (const trigger of triggers) {
-    const target = targetOf(trigger, facts);
-    // A thread that already talks with Sym keeps its own session; a run there would share it.
-    if (!trigger.destination && (await threadHasSession(deps.sql, target))) {
-      results.push({ trigger: triggerRef(trigger.id), status: "busy_thread" });
+    let target: RunTarget | undefined;
+    if (trigger.destination) target = { channelId: trigger.destination };
+    else if (!threadTaken) {
+      target = { channelId: facts.channel, threadTs: facts.threadTs };
+      threadTaken = true;
+    } else {
+      const dm = await openDm(deps.slack, trigger.owner);
+      target = dm ? { channelId: dm } : undefined;
+    }
+    if (!target) {
+      results.push({ trigger: triggerRef(trigger.id), status: "no_destination" });
       continue;
     }
-    const status = await fire(deps, trigger, facts, `reaction:${input.channel}:${input.ts}`, {
+    const status = await fire(deps, trigger, facts, eventKey, {
       target,
-      deferred: false,
+      deferred: options.deferElsewhere && target.threadTs === undefined,
       send,
     });
     results.push({ trigger: triggerRef(trigger.id), status });
@@ -165,39 +188,51 @@ export async function fireReactionTriggers(
   return results;
 }
 
+async function openDm(slack: SlackApi | undefined, user: string): Promise<string | undefined> {
+  const opened = await slack?.call("conversations.open", { users: user }).catch(() => undefined);
+  const channel = (opened?.channel as { id?: unknown } | undefined)?.id;
+  return typeof channel === "string" ? channel : undefined;
+}
+
 // Sends the deferred runs: message triggers that post outside the message's thread, which the
 // message handler cannot reach. Called each minute by the dispatcher, which can send anywhere.
 export async function sendDeferredRuns(
   deps: FireDeps,
   send: SendRun,
-  maxAgeMs = 10 * 60_000,
+  options: { maxAgeMs?: number; leaseMs?: number } = {},
 ): Promise<number> {
   const now = deps.now ?? new Date();
   let sent = 0;
-  for (const run of await claimDeferredRuns(deps.sql, now, maxAgeMs)) {
+  const claimed = await claimDeferredRuns(deps.sql, now, {
+    maxAgeMs: options.maxAgeMs ?? 10 * 60_000,
+    leaseMs: options.leaseMs ?? 2 * 60_000,
+  });
+  for (const run of claimed) {
     const trigger = run.triggerId === null ? undefined : await getTrigger(deps.sql, run.triggerId);
-    if (trigger?.status !== "active" || !run.event || !creatorAllowed(deps, trigger)) {
+    if (trigger?.status !== "active" || !run.event || !(await creatorMayRun(deps, trigger))) {
       await finishRun(deps.sql, run.id, "failed");
+      await endDeferred(deps.sql, run.id);
       continue;
     }
     if (await sendRun(deps, trigger, run.id, run.event.facts, run.event.target, send)) sent++;
+    await endDeferred(deps.sql, run.id);
   }
   return sent;
 }
 
-function targetOf(trigger: Trigger, facts: TriggerEvent): RunTarget {
-  return trigger.destination
-    ? { channelId: trigger.destination }
-    : { channelId: facts.channel, threadTs: facts.threadTs };
-}
-
-const creatorAllowed = (deps: FireDeps, trigger: Trigger) =>
-  isSlackUserAllowed(
-    deps.pack,
-    deps.usersEnv ?? process.env.SYM_SLACK_USERS,
+// The runs carry the creator's consent, and reach only what the creator reaches (decision 081):
+// the creator must still be allowed and still be a member of the watched channel. A failed
+// check, or no Slack to ask, fails closed.
+async function creatorMayRun(deps: FireDeps, trigger: Trigger): Promise<boolean> {
+  const usersEnv = deps.usersEnv ?? process.env.SYM_SLACK_USERS;
+  if (!isSlackUserAllowed(deps.pack, usersEnv, trigger.owner, () => {})) return false;
+  const reached = await reachConversation(
+    { slack: deps.slack, pack: deps.pack, usersEnv },
     trigger.owner,
-    () => {},
+    trigger.channel,
   );
+  return reached !== undefined;
+}
 
 async function fire(
   deps: FireDeps,
@@ -206,11 +241,6 @@ async function fire(
   eventKey: string,
   options: { target: RunTarget; deferred: boolean; send: SendRun },
 ): Promise<string> {
-  // The runs carry the creator's consent. Once they leave the allow-list, the trigger stops.
-  if (!creatorAllowed(deps, trigger)) {
-    console.warn(`Skipped ${triggerRef(trigger.id)}: its creator left the allow-list.`);
-    return "creator_not_allowed";
-  }
   const reserved = await reserveTriggerRun(deps.sql, {
     triggerId: trigger.id,
     eventKey,
@@ -224,6 +254,13 @@ async function fire(
     console.warn(`Skipped ${triggerRef(trigger.id)}: it reached its hourly run limit.`);
   }
   if (reserved.status !== "reserved") return reserved.status;
+  // Checked after the reservation, so a retried event finds the failed run and fires nothing.
+  if (!(await creatorMayRun(deps, trigger))) {
+    console.warn(`Skipped ${triggerRef(trigger.id)}: its creator left the allow-list or channel.`);
+    await finishRun(deps.sql, reserved.run.id, "failed");
+    if (options.deferred) await endDeferred(deps.sql, reserved.run.id);
+    return "creator_not_allowed";
+  }
   if (options.deferred) return "deferred";
   const sent = await sendRun(deps, trigger, reserved.run.id, facts, options.target, options.send);
   return sent ? "sent" : "failed";
@@ -242,7 +279,7 @@ async function sendRun(
     // for the attach; send with the run's own key; attach under the session lock.
     await markSending(deps.sql, runId);
     const sessionId = await send({
-      message: triggerRunMessage(trigger, facts),
+      message: triggerRunMessage(trigger, facts, target),
       target,
       key: deliveryKey(runId),
       title: `Trigger: ${trigger.title}`,
@@ -257,11 +294,10 @@ async function sendRun(
   }
 }
 
-async function threadHasSession(sql: Sql, target: RunTarget): Promise<boolean> {
-  if (!target.threadTs) return false;
+async function threadHasSession(sql: Sql, channel: string, threadTs: string): Promise<boolean> {
   const [row] = await sql`
     select 1 from session_threads
-    where channel_id = ${target.channelId} and thread_ts = ${target.threadTs} limit 1
+    where channel_id = ${channel} and thread_ts = ${threadTs} limit 1
   `;
   return Boolean(row);
 }

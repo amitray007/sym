@@ -1,5 +1,5 @@
 import { runMessage } from "../schedules/format.ts";
-import { type Trigger, type TriggerEvent, triggerRef } from "./rows.ts";
+import { type RunTarget, type Trigger, type TriggerEvent, triggerRef } from "./rows.ts";
 
 const INSTRUCTION_PREVIEW = 300;
 
@@ -45,10 +45,21 @@ function details(trigger: Trigger): string {
 
 // The message that starts a trigger run (decision 088): the schedule run message with the
 // event's facts as untrusted data and where the run posts.
-export function triggerRunMessage(trigger: Trigger, event: TriggerEvent): string {
-  const where = trigger.destination
-    ? `This run's replies post in ${postsIn(trigger)}.`
-    : "This run's replies post in the event message's thread.";
+// `target` is where the session starts. A run moved out of a shared event thread says so.
+export function triggerRunMessage(
+  trigger: Trigger,
+  event: TriggerEvent,
+  target?: RunTarget,
+): string {
+  const channel = target?.channelId ?? trigger.destination;
+  const where = target?.threadTs
+    ? "This run's replies post in the event message's thread."
+    : !channel
+      ? "This run's replies post in the event message's thread."
+      : channel === trigger.destination
+        ? `This run's replies post in ${postsIn(trigger)}.`
+        : `This run's replies post in a DM with <@${trigger.owner}>, because another run uses ` +
+          "the event message's thread.";
   return runMessage({
     ref: triggerRef(trigger.id),
     title: trigger.title,

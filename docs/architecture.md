@@ -136,17 +136,24 @@ Example: "When someone posts a bug report in #support, draft a ticket in its thr
    cannot fire itself. Anyone's message can fire a trigger; its author is not the requester.
 3. For each matching trigger, Sym reserves a `schedule_runs` row keyed by the trigger and the
    event (one run per message), so a Slack retry fires nothing. Each trigger starts at most
-   `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour (default 20).
+   `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour (default 20). The creator must still be allowed and
+   a member of the watched channel, or the run fails closed. Each run gets its own session: the
+   oldest trigger that posts in the event's thread takes it, and any other runs in its creator's
+   DM.
 4. Sym sends the run message as the app principal, the same proof of a run a schedule uses:
    `ctx.send` in the event message's thread, or `ctx.send` with a target from `onEvent`. A
    message handler can start a session only in its own thread, so a message trigger that posts
-   elsewhere leaves its run deferred, and the next `dispatch` tick sends it with `to()`.
+   elsewhere leaves its run deferred, and the next `dispatch` tick claims it with a lease and
+   sends it with `to()`, rechecking the creator first. Every send uses the scheduled run's send
+   mark, delivery key, and locked attach.
 5. The run message carries the instruction and the event's facts (channel, link, author, text)
    as JSON data that grants nothing. The brain decides from the instruction; most events need
    nothing, so it calls `no_reply`. Steps 4 to 5 of flow 2 apply: the run acts for the creator,
-   and `worker_job` skips Start only for an active `auto` trigger whose run this session is.
+   and `worker_job` skips Start only for an active `auto` trigger whose run this session is, in
+   the run's own turn. Each run turn counts as one that read untrusted content, so a post or DM
+   elsewhere waits for the creator's approval (decision 082).
 6. A run that stays silent leaves its thread to the people there: their replies start no turn.
-   A mention still does.
+   A mention still does, and once any person talks to Sym there the rule ends.
 
 "Send to Sym" on a message's menu is not a trigger. Sym posts a DM to the person who picked the
 message, quoting it and asking what to do. The person's reply in that thread is their own

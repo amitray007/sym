@@ -11,7 +11,8 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 //   schedule reference. A scheduled run that says "fixture-say" posts one line; any other run
 //   without a brief ends the turn with no_reply.
 // - A trigger run message reads only its instruction: a ```brief block calls worker_job with the
-//   trigger reference, "fixture-say" echoes the event's text, "fixture-schedule" tries
+//   trigger reference, "fixture-say" echoes the event's text, "fixture-post <target>" calls
+//   slack_post, "fixture-schedule" tries
 //   schedule_create, and anything else ends the turn with no_reply.
 // - A message that asks for an update or status calls jobs_status and repeats its answer.
 // - A message that says "sign in to the worker" calls worker_sign_in.
@@ -101,6 +102,14 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
             name: "schedule_create",
             input: { title: "Run-made", instruction: "Say hello.", cron: "0 9 * * *" },
           },
+        ],
+      };
+    }
+    const postTarget = /\bfixture-post\s+(\S+)/.exec(instruction ?? "")?.[1];
+    if (postTarget) {
+      return {
+        toolCalls: [
+          { name: "slack_post", input: { target: postTarget, text: "Fixture run post." } },
         ],
       };
     }

@@ -103,7 +103,7 @@ import {
   fireReactionTriggers,
   type SendRun,
 } from "../../lib/triggers/fire.ts";
-import { isSilentRunThread } from "../../lib/triggers/rows.ts";
+import { isSilentRunThread, markPersonTurn } from "../../lib/triggers/rows.ts";
 
 // The Slack channel (docs/slack.md). It reads SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET from the
 // environment. A valid signature proves Slack sent the event, not that the sender may use Sym,
@@ -398,6 +398,8 @@ const symRenderer = defineSlackRenderer({
               ? recordTurnMessage(ledger(), ctx.session.id, channel.state.triggeringMessageTs)
               : undefined,
           )
+          // A person talking to Sym ends a silent trigger run's hold on the thread (decision 088).
+          .then(() => (run || quietTurn ? undefined : markPersonTurn(ledger(), ctx.session.id)))
           .catch((error: unknown) => {
             console.warn("Sym could not record the Slack thread of a session.", String(error));
           });
@@ -601,7 +603,7 @@ async function fireTriggersOnMessage(ctx: SlackInboundMessageContext, message: S
   };
   try {
     await fireMessageTriggers(
-      { sql: ledger(), pack: pack() },
+      { sql: ledger(), slack: slackOf(ctx), pack: pack() },
       {
         channel: message.channelId,
         ts: message.ts,

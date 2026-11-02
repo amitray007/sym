@@ -17,13 +17,16 @@ import {
 import { triggerRunMessage } from "../lib/triggers/format.ts";
 import { matchesKeywords, normalizeEmoji } from "../lib/triggers/match.ts";
 import {
+  claimDeferredRuns,
   createTrigger,
   isSilentRunThread,
+  markPersonTurn,
   type NewTrigger,
   setTriggerStatus,
   type Trigger,
   type TriggerRun,
 } from "../lib/triggers/rows.ts";
+import { readUntrustedInTurn } from "../lib/triggers/untrusted.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
 // Decision 088: event triggers fire a run like a schedule's, from a Slack message or reaction.
@@ -102,7 +105,11 @@ describe("the trigger run message", () => {
   });
 });
 
-// A Slack fake for the reaction lookups: messages by channel, and the bots it knows.
+// People who left a channel, as "user:channel". Everyone else is in every channel.
+const leftChannel = new Set<string>();
+
+// A Slack fake for the reaction lookups, the membership checks, and DMs: messages by channel,
+// and the bots it knows.
 function fakeSlack(
   messages: {
     channel: string;
@@ -116,6 +123,16 @@ function fakeSlack(
 ): SlackApi {
   return {
     async call(method, body) {
+      if (method === "conversations.info") {
+        return { channel: { id: body.channel, is_private: true, is_member: true } };
+      }
+      if (method === "conversations.members") {
+        const members = ["UCREATOR", "UOTHER"].filter(
+          (user) => !leftChannel.has(`${user}:${String(body.channel)}`),
+        );
+        return { members };
+      }
+      if (method === "conversations.open") return { channel: { id: `D${String(body.users)}` } };
       if (method === "users.info")
         return { user: { id: body.user, is_bot: bots.includes(String(body.user)) } };
       if (method === "conversations.history") {
@@ -140,6 +157,12 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
 
   beforeEach(() => vi.stubEnv("SYM_SLACK_USERS", "UCREATOR,UOTHER"));
   afterEach(() => vi.unstubAllEnvs());
+
+  const base = (extra: Record<string, unknown> = {}) => ({
+    sql: ledger.sql(),
+    slack: fakeSlack([]),
+    ...extra,
+  });
 
   const make = (input: Partial<NewTrigger> & { channel: string }) =>
     createTrigger(ledger.sql(), {
@@ -181,7 +204,7 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     const where = channel();
     const trigger = await make({ channel: where });
     const { sent, send } = sender();
-    const deps = { sql: ledger.sql() };
+    const deps = base();
     expect(await fireMessageTriggers(deps, message(where, "10.1"), send)).toEqual([
       { trigger: `T-${trigger.id}`, status: "sent" },
     ]);
@@ -201,7 +224,7 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     const where = channel();
     const trigger = await make({ channel: where, keywords: ["outage"] });
     const { sent, send } = sender();
-    const deps = { sql: ledger.sql() };
+    const deps = base();
     await fireMessageTriggers(
       deps,
       { ...message(where, "11.2", "outage!"), threadTs: "11.1" },
@@ -220,7 +243,7 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     const where = channel();
     const trigger = await make({ channel: where });
     const { sent, send } = sender();
-    const deps = { sql: ledger.sql(), maxPerHour: 2 };
+    const deps = base({ maxPerHour: 2 });
     const statuses = [];
     for (const ts of ["12.1", "12.2", "12.3"]) {
       statuses.push(...(await fireMessageTriggers(deps, message(where, ts), send)));
@@ -234,20 +257,95 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     const where = channel();
     await make({ channel: where, owner: "UGONE" });
     const { sent, send } = sender();
-    const result = await fireMessageTriggers({ sql: ledger.sql() }, message(where, "13.1"), send);
+    const result = await fireMessageTriggers(base(), message(where, "13.1"), send);
     expect(result.map((r) => r.status)).toEqual(["creator_not_allowed"]);
     expect(sent).toEqual([]);
+  });
+
+  it("fails closed once the creator left a private watched channel", async () => {
+    const where = channel();
+    const trigger = await make({ channel: where });
+    leftChannel.add(`UCREATOR:${where}`);
+    const { sent, send } = sender();
+    const result = await fireMessageTriggers(base(), message(where, "13.5"), send);
+    expect(result.map((r) => r.status)).toEqual(["creator_not_allowed"]);
+    expect(sent).toEqual([]);
+    const [run] = await runsOf(trigger.id);
+    expect(run?.outcome).toBe("failed");
+    // Without Slack to ask, the check fails closed too.
+    leftChannel.delete(`UCREATOR:${where}`);
+    const offline = await fireMessageTriggers({ sql: ledger.sql() }, message(where, "13.6"), send);
+    expect(offline.map((r) => r.status)).toEqual(["creator_not_allowed"]);
+  });
+
+  it("rechecks membership before a deferred delivery", async () => {
+    const where = channel();
+    const trigger = await make({ channel: where, destination: "DUCREATOR" });
+    const { sent, send } = sender();
+    await fireMessageTriggers(base(), message(where, "13.7"), send);
+    leftChannel.add(`UCREATOR:${where}`);
+    expect(await sendDeferredRuns(base(), send)).toBe(0);
+    leftChannel.delete(`UCREATOR:${where}`);
+    expect(sent).toEqual([]);
+    const [run] = await runsOf(trigger.id);
+    expect(run).toMatchObject({ outcome: "failed", deferred: false });
+  });
+
+  it("gives two creators' triggers on one message their own sessions", async () => {
+    const where = channel();
+    const first = await make({ channel: where });
+    const second = await make({ channel: where, owner: "UOTHER" });
+    const inHandler = sender();
+    const result = await fireMessageTriggers(base(), message(where, "13.8"), inHandler.send);
+    // The oldest trigger takes the message's thread; the other runs in its creator's DM.
+    expect(result.map((r) => r.status)).toEqual(["sent", "deferred"]);
+    expect(inHandler.sent).toHaveLength(1);
+    expect(inHandler.sent[0]?.target).toEqual({ channelId: where, threadTs: "13.8" });
+    const dispatcher = sender();
+    expect(await sendDeferredRuns(base(), dispatcher.send)).toBe(1);
+    expect(dispatcher.sent[0]?.target).toEqual({ channelId: "DUOTHER" });
+    expect(dispatcher.sent[0]?.message).toContain("because another run uses the event message's");
+    const [a] = await runsOf(first.id);
+    const [b] = await runsOf(second.id);
+    expect(a?.sessionId).toBeTruthy();
+    expect(b?.sessionId).toBeTruthy();
+    expect(a?.sessionId).not.toBe(b?.sessionId);
+    const creator = (sessionId: string | null) =>
+      requesterOf({ id: sessionId ?? "", auth: { current: APP_AUTH } }, () => ({
+        sql: ledger.sql(),
+      }));
+    expect(await creator(a?.sessionId ?? null)).toBe("UCREATOR");
+    expect(await creator(b?.sessionId ?? null)).toBe("UOTHER");
+  });
+
+  it("resends a deferred run claimed by a dispatcher that crashed", async () => {
+    const where = channel();
+    const trigger = await make({ channel: where, destination: "DUCREATOR" });
+    await fireMessageTriggers(base(), message(where, "13.9"), sender().send);
+    const t0 = new Date();
+    // A dispatcher claims the run and dies before its send.
+    const [claimed] = await claimDeferredRuns(ledger.sql(), t0, {
+      maxAgeMs: 600_000,
+      leaseMs: 60_000,
+    });
+    expect(claimed?.triggerId).toBe(trigger.id);
+    const early = sender();
+    expect(await sendDeferredRuns(base({ now: t0 }), early.send)).toBe(0);
+    // Once the lease runs out, the next tick sends it with the same delivery key.
+    const later = sender();
+    const t1 = new Date(t0.getTime() + 61_000);
+    expect(await sendDeferredRuns(base({ now: t1 }), later.send, { maxAgeMs: 600_000 })).toBe(1);
+    expect(later.sent[0]?.key).toBe(`sym-schedule-run:${claimed?.id}`);
+    const [run] = await runsOf(trigger.id);
+    expect(run).toMatchObject({ deferred: false });
+    expect(run?.sessionId).toBe(`session-sym-schedule-run:${claimed?.id}`);
   });
 
   it("defers a run that posts elsewhere to the dispatcher", async () => {
     const where = channel();
     const trigger = await make({ channel: where, destination: "DUCREATOR" });
     const inHandler = sender();
-    const result = await fireMessageTriggers(
-      { sql: ledger.sql() },
-      message(where, "14.1"),
-      inHandler.send,
-    );
+    const result = await fireMessageTriggers(base(), message(where, "14.1"), inHandler.send);
     expect(result.map((r) => r.status)).toEqual(["deferred"]);
     expect(inHandler.sent).toEqual([]);
     const [pending] = await runsOf(trigger.id);
@@ -260,7 +358,7 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     ).toBeUndefined();
 
     const dispatcher = sender();
-    expect(await sendDeferredRuns({ sql: ledger.sql() }, dispatcher.send)).toBe(1);
+    expect(await sendDeferredRuns(base(), dispatcher.send)).toBe(1);
     expect(dispatcher.sent[0]?.target).toEqual({ channelId: "DUCREATOR" });
     expect(dispatcher.sent[0]?.message).toContain(
       "This run's replies post in a DM with <@UCREATOR>.",
@@ -268,14 +366,14 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     const [run] = await runsOf(trigger.id);
     expect(run?.deferred).toBe(false);
     expect(run?.sessionId).toBeTruthy();
-    expect(await sendDeferredRuns({ sql: ledger.sql() }, dispatcher.send)).toBe(0);
+    expect(await sendDeferredRuns(base(), dispatcher.send)).toBe(0);
   });
 
   it("acts for the creator, not the message's author", async () => {
     const where = channel();
     const trigger = await make({ channel: where, builder: "auto" });
     const { sent, send } = sender();
-    await fireMessageTriggers({ sql: ledger.sql() }, message(where, "15.1"), send);
+    await fireMessageTriggers(base(), message(where, "15.1"), send);
     const sessionId = sent[0] ? `session-${sent[0].key}` : "";
     const session = { id: sessionId, auth: { current: APP_AUTH } };
     expect(await requesterOf(session, () => ({ sql: ledger.sql() }))).toBe("UCREATOR");
@@ -305,6 +403,28 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     ).toBe(false);
   });
 
+  it("counts a trigger run's turn as read, so gated writes wait for approval", async () => {
+    const where = channel();
+    await make({ channel: where });
+    const { sent, send } = sender();
+    await fireMessageTriggers(base(), message(where, "17.1"), send);
+    const sessionId = sent[0] ? `session-${sent[0].key}` : "";
+    const sql = () => ledger.sql();
+    const turn = { id: "turn-1" };
+    expect(
+      await readUntrustedInTurn({ id: sessionId, turn, auth: { current: APP_AUTH } }, sql),
+    ).toBe(true);
+    // A person's own turn in that thread reads nothing untrusted by itself.
+    const person = { principalId: "slack:T1:UOTHER" };
+    expect(await readUntrustedInTurn({ id: sessionId, turn, auth: { current: person } }, sql)).toBe(
+      false,
+    );
+    // A scheduled run is the creator's own instruction.
+    expect(
+      await readUntrustedInTurn({ id: "no-run", turn, auth: { current: APP_AUTH } }, sql),
+    ).toBe(false);
+  });
+
   it("starts Builder without a click only for an active auto trigger", () => {
     const auto = { ...TRIGGER, builder: "auto" as const };
     expect(canSkipStart({ isSchedulePrincipal: true, schedule: auto })).toBe(true);
@@ -319,7 +439,7 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     const where = channel();
     await make({ channel: where });
     const { sent, send } = sender();
-    await fireMessageTriggers({ sql: ledger.sql() }, message(where, "16.1"), send);
+    await fireMessageTriggers(base(), message(where, "16.1"), send);
     const sessionId = sent[0] ? `session-${sent[0].key}` : "";
     await recordSessionThread(ledger.sql(), {
       sessionId,
@@ -331,14 +451,17 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     expect(await isSilentRunThread(ledger.sql(), where, "16.1")).toBe(false);
     await finishRunWithoutJob(ledger.sql(), sessionId, "all_clear");
     expect(await isSilentRunThread(ledger.sql(), where, "16.1")).toBe(true);
-    // Once a person talks to Sym there, it is an ordinary conversation.
+    // A run records its creator as the thread's person; that does not end the rule.
     await recordSessionThread(ledger.sql(), {
       sessionId,
       teamId: "T1",
       channelId: where,
       threadTs: "16.1",
-      userId: "UOTHER",
+      userId: "UCREATOR",
     });
+    expect(await isSilentRunThread(ledger.sql(), where, "16.1")).toBe(true);
+    // Once a person, the creator included, talks to Sym there, it is an ordinary conversation.
+    await markPersonTurn(ledger.sql(), sessionId);
     expect(await isSilentRunThread(ledger.sql(), where, "16.1")).toBe(false);
     expect(await isSilentRunThread(ledger.sql(), where, "99.9")).toBe(false);
   });
@@ -401,7 +524,7 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
       expect(sent[0]?.target).toEqual({ channelId: where, threadTs: "21.1" });
     });
 
-    it("ignores Sym, other bots, Sym's own messages, and busy threads", async () => {
+    it("ignores Sym, other bots, and Sym's own messages; a busy thread's run goes to a DM", async () => {
       const where = channel();
       await make({ channel: where, kind: "reaction", emoji: "eyes" });
       const slack = fakeSlack(
@@ -432,8 +555,9 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
         (await fireReactionTriggers(deps, reaction(where, "22.3", "eyes"), send)).map(
           (r) => r.status,
         ),
-      ).toEqual(["busy_thread"]);
-      expect(sent).toEqual([]);
+      ).toEqual(["sent"]);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.target).toEqual({ channelId: "DUCREATOR" });
     });
   });
 });
