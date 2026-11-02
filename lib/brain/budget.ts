@@ -6,8 +6,8 @@ const SESSION_BUDGET_USD = 2;
 // Reference rates in USD per million tokens: Sonnet-class list prices.
 const REFERENCE_RATES = { input: 2, cacheRead: 0.2, output: 10 };
 
-export function overSessionBudget(window: TokenUsage): boolean {
-  return (window.costUsd ?? estimatedCostUsd(window)) >= SESSION_BUDGET_USD;
+export function overSessionBudget(window: TokenUsage, usd = SESSION_BUDGET_USD): boolean {
+  return (window.costUsd ?? estimatedCostUsd(window)) >= usd;
 }
 
 function estimatedCostUsd(usage: TokenUsage): number {
@@ -18,4 +18,9 @@ function estimatedCostUsd(usage: TokenUsage): number {
       usage.outputTokens * REFERENCE_RATES.output) /
     1_000_000
   );
+}
+
+export function researchBudgetUsd(env: Record<string, string | undefined> = process.env): number {
+  const value = Number(env.SYM_RESEARCH_BUDGET_USD);
+  return Number.isFinite(value) && value > 0 ? value : 0.5;
 }

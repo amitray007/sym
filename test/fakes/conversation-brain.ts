@@ -10,6 +10,28 @@ export function conversationBrain(): LanguageModel {
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const text = request.lastUserMessage ?? "";
+  const researchPost = /fixture-research-post\s+(C[A-Z0-9]+)/.exec(request.userMessages.join("\n"));
+  if (
+    researchPost &&
+    request.messages.some(
+      (message) =>
+        message.text.includes("<task_result") &&
+        message.text.includes("Research fixture checked the saved ledger"),
+    )
+  ) {
+    if (request.toolResults.some((result) => result.name === "slack_post")) return { text: "" };
+    return {
+      toolCalls: [
+        {
+          name: "slack_post",
+          input: {
+            target: `<#${researchPost[1]}>`,
+            text: "Research findings to share.",
+          },
+        },
+      ],
+    };
+  }
   const authoredAt = request.messages.findLastIndex(
     (message) => message.role === "user" && message.text === text,
   );

@@ -210,12 +210,3 @@ describe("respondAsFixture scheduled runs", () => {
     );
   });
 });
-
-it("routes the research fixture to the researcher and reads its result", () => {
-  expect(respondAsFixture(request("fixture-research"))).toEqual({
-    toolCalls: [{ name: "research", input: { message: "Check saved job status." } }],
-  });
-  const reply =
-    '<task_result id="researcher-1">Research fixture checked the saved ledger.</task_result>';
-  expect(respondAsFixture(request(reply))).toContain("Research fixture checked the saved ledger.");
-});

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { overSessionBudget } from "../lib/brain/budget.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import researcher from "../agent/subagents/researcher/agent.ts";
+import { overSessionBudget, researchBudgetUsd } from "../lib/brain/budget.ts";
 
 const usage = (tokens: Partial<Record<string, number>>, costUsd?: number) => ({
   inputTokens: 0,
@@ -31,3 +32,27 @@ describe("overSessionBudget", () => {
     expect(overSessionBudget(usage({ inputTokens: 1_000_000 }))).toBe(true);
   });
 });
+
+afterEach(() => vi.unstubAllEnvs());
+
+it("gives research its own smaller window for reported cost and direct-provider tokens", () => {
+  const limit = researcher.limits.sessionUsage;
+  vi.stubEnv("SYM_RESEARCH_BUDGET_USD", "0.5");
+  const below = usage({}, 0.49);
+  const at = usage({}, 0.5);
+  const check = (window: typeof at) => limit({ window, total: window });
+  expect(check(below)).toBe(false);
+  expect(check(at)).toBe(true);
+  expect(check(usage({ outputTokens: 49_000 }))).toBe(false);
+  expect(check(usage({ outputTokens: 50_000 }))).toBe(true);
+  expect(overSessionBudget(at)).toBe(false);
+  vi.stubEnv("SYM_RESEARCH_BUDGET_USD", "0.25");
+  expect(check(usage({}, 0.25))).toBe(true);
+});
+
+it.each([undefined, "", "0", "-1", "not-a-number", "Infinity"])(
+  "defaults an invalid research budget (%s) to $0.50",
+  (value) => {
+    expect(researchBudgetUsd({ SYM_RESEARCH_BUDGET_USD: value })).toBe(0.5);
+  },
+);

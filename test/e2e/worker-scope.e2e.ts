@@ -3,12 +3,15 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { startFollowUp } from "../../lib/jobs/followup.ts";
 import { createJob, getJob, updateJob } from "../../lib/ledger/jobs.ts";
 import { pendingPosts } from "../../lib/ledger/outbox.ts";
+import { slackApiFromEnv } from "../../lib/slack/eve-api.ts";
+import { postNeedsConfirmation } from "../../lib/slack/slack-post.ts";
 import { workerIdentity } from "../../lib/workers/resolve.ts";
 import { t3Adapter } from "../../lib/workers/t3/adapter.ts";
 import { connectT3 } from "../../lib/workers/t3/client.ts";
 import {
   type Harness,
   newConversation,
+  OWNER,
   startHarness,
   startJob,
   threadsOf,
@@ -24,6 +27,7 @@ beforeAll(async () => {
   await h.startEve();
 });
 afterAll(async () => {
+  h?.writeReport();
   await h?.close();
 });
 
@@ -166,4 +170,33 @@ it("loads a repo skill on demand without a sandbox", async () => {
   const c = newConversation(h);
   await c.mention("fixture-skill");
   await c.waitForPrompt(/Fixture skill loaded/);
+});
+
+it("requires approval before posting research findings in the same parent turn", async () => {
+  const c = newConversation(h);
+  h.slack.members[c.channel] = [OWNER];
+  await c.mention(`fixture-research-post ${c.channel}`);
+  const prompt = await c.waitForControls(/Post this in/);
+  const [session] = await h.sql<{ sessionId: string }[]>`
+    select session_id from session_threads where channel_id = ${c.channel}
+  `;
+  if (!session) throw new Error("No parent session was recorded");
+  expect(
+    await postNeedsConfirmation(
+      {
+        sql: h.sql,
+        slack: slackApiFromEnv({
+          SLACK_BOT_TOKEN: "xoxb-e2e-fake",
+          SLACK_API_BASE_URL: h.slack.apiBaseUrl,
+        }),
+      },
+      session.sessionId,
+      `<#${c.channel}>`,
+      "Research findings to share.",
+    ),
+  ).toBe(false);
+  expect(h.slack.messages.some((message) => message.text === "Research findings to share.")).toBe(
+    false,
+  );
+  await c.click(prompt, "Deny");
 });

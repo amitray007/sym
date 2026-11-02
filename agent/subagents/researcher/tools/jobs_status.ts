@@ -1,8 +1,8 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../../../lib/callers.ts";
-import { jobListAnswer } from "../../../../lib/jobs/status.ts";
-import { getJobByRef, jobRef, recentJobs } from "../../../../lib/ledger/jobs.ts";
+import { jobStatusList } from "../../../../lib/jobs/status.ts";
+import { getJobByRef, recentJobs } from "../../../../lib/ledger/jobs.ts";
 import { ledger } from "../../../../lib/runtime.ts";
 
 export default defineTool({
@@ -18,13 +18,8 @@ export default defineTool({
     const jobs = job ? (found ? [found] : []) : await recentJobs(sql, today);
     return {
       source: "ledger",
-      answer: job && !found ? "Job not found." : jobListAnswer(jobs, now),
-      jobs: jobs.map((row) => ({
-        job: jobRef(row.id),
-        title: row.title,
-        status: row.status,
-        updatedAt: row.updatedAt.toISOString(),
-      })),
+      ...jobStatusList(jobs, now),
+      ...(job && !found ? { answer: "Job not found." } : {}),
     };
   },
 });

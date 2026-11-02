@@ -125,7 +125,7 @@ export function loadPack(dir: string): Pack {
   const persona = config.persona ? readReferenced(root, [config.persona], "persona")[0] : undefined;
   const playbooks = readReferenced(root, config.playbooks, "playbooks");
   const skills = readReferenced(root, config.skills, "skills");
-  validatePackSkills([...playbooks, ...skills]);
+  validatePackSkills(playbooks, skills);
   return {
     dir: root,
     config,

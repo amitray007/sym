@@ -85,9 +85,11 @@ Rules (decision 026):
 - The owner is always allowed; `allowList` adds people.
 - Instruction, playbook, and skill files are listed by path and stay inside the pack folder,
   including their resolved symlink targets. Skill names must be valid Eve names and cannot use
-  the reserved `eve` namespace. Names must be unique across `playbooks` and `skills`. Empty bodies,
+  the reserved `eve` namespace. Names must be unique, ignoring case, across `playbooks` and
+  `skills`. Each skill file is limited to 64 KiB of UTF-8 text. Empty bodies,
   malformed YAML frontmatter, and invalid description or metadata types fail before the overlay
-  writes files (decision 087).
+  writes files (decision 087). Legacy playbooks may begin with a Markdown horizontal rule or
+  empty frontmatter; the overlay keeps their first-line description fallback.
 - `persona` is one Markdown file inside the pack folder, with the same rules as `instructions`
   (decision 044). It replaces the built-in persona that `SYM_PERSONA` would pick. Sym reads it at
   start from `SYM_PACK_DIR`, so it needs no overlay. It sets the brain's tone only. The shared
