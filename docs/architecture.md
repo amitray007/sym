@@ -67,6 +67,7 @@ Interactive chat requests show Start / Not now, even for trusted playbooks. Runs
 set to `auto` start without a click (decision 085). The trust ladder no longer auto-starts jobs.
 
 1. `onAppMention` checks the sender against the allow-list and starts a session for the thread.
+   Audio on the message is transcribed first and joins the turn as a context note (decision 092).
 2. The model loads the `task-brief` playbook and writes a brief: project, goal, the request's
    exact facts (decision 075), constraints, a done-when list, and an output contract. The
    contract is a final JSON block with `summary`, `pr_url`, `tests`, `files_changed`, and

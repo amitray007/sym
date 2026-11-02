@@ -27,6 +27,7 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A repeated-work review calls repeated_work, proposes one playbook for any title seen 3 or more
 //   times, then ends the turn with no_reply.
 // - A task result, or a tool result with `posted: true`, ends the turn with no_reply.
+// - A voice note (decision 092) gets a one-line echo of its transcript, or of why it has none.
 // - Anything else gets a one-line echo.
 export function fixtureBrain(): LanguageModel {
   return mockModel({ modelId: "sym-fixture", provider: "sym", respond: respondAsFixture });
@@ -162,7 +163,27 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
     const job = /\bJ-\d+\b/.exec(message)?.[0];
     return { toolCalls: [{ name: "jobs_status", input: job ? { job } : {} }] };
   }
+  const voice = voiceNote(request);
+  if (voice) return `Fixture brain heard a voice note: ${voice.slice(0, 200)}`;
   return `Fixture brain heard: ${message.slice(0, 200)}`;
+}
+
+// The turn's voice note context (lib/voice/notes.ts): the transcripts, or the note itself when
+// none was made. It arrives as a context message just before the turn's message.
+function voiceNote(request: MockModelRequest): string | undefined {
+  const turn = request.messages.slice(
+    request.messages.findLastIndex((message) => message.role === "assistant") + 1,
+  );
+  const note = turn.find(
+    (message) => message.role === "user" && /^Voice notes:/m.test(message.text),
+  );
+  if (!note) return undefined;
+  const transcripts = [
+    ...note.text.matchAll(/<voice_transcript>\n([\s\S]*?)\n<\/voice_transcript>/g),
+  ];
+  return transcripts.length > 0
+    ? transcripts.map((match) => match[1]).join(" / ")
+    : note.text.split("\n").slice(1).join(" ") || note.text;
 }
 
 function quiet(request: MockModelRequest): MockModelResponse {

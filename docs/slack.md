@@ -95,6 +95,17 @@ no longer auto-starts jobs.
 A tool result with `posted: true` suppresses its duplicate reply only. Later questions still get
 answers. Saved preferences never grant consent for Builder work.
 
+## Voice notes
+
+A person can send Sym a Slack audio clip or an audio file instead of typing (decision 092). The
+Slack channel downloads it with the bot token and transcribes it before the turn, so the brain
+reads the person's words as text. Sym answers what they said and does not mention the
+transcription. Only messages that pass the allow-list check and the shared-thread triage are
+transcribed. A transcript counts as that person's own words, with the same rules as typed text; a
+spoken "yes" does not click Start. Files over 25 MB or 10 minutes, unknown audio formats, and
+deployments without a transcription route get a one-line "please type it" reply. Slack shows no
+transcript note; the reply is the only visible change.
+
 ## People off the allow-list
 
 Sym never sends a stranger's message to the brain. A tag, DM, or named reply in a known thread
@@ -158,7 +169,7 @@ with the public host before you import it.
 | `chat:write` | Replies, job cards, card edits |
 | `im:history`, `im:read`, `im:write` | DMs and approval DMs |
 | `channels:history`, `groups:history` | Replies in job threads without a mention, the people in a thread, new messages and reacted messages for event triggers (decision 088) |
-| `files:read`, `files:write` | Logs and screenshots in; long reports out |
+| `files:read`, `files:write` | Logs, screenshots, and voice notes in; long reports out |
 | `assistant:write` | The thread status line (`assistant.threads.setStatus`) |
 | `reactions:read`, `reactions:write` | Feedback reactions in; Sym's own reactions out |
 | `emoji:read` | The workspace's custom emoji (`emoji.list`), so Sym can pick a fitting one |

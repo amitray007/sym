@@ -31,7 +31,8 @@ Tailscale Funnel limited to the Slack path also works.
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway, for the brain model. Not needed with a direct provider |
 | `SYM_MODEL_PROVIDER` | Optional. `gateway` (default), `anthropic`, or `openai`. A direct provider calls the provider with its own key and skips the gateway (decision 080). An unknown value warns and uses `gateway` |
 | `ANTHROPIC_API_KEY` | Anthropic API key, for `SYM_MODEL_PROVIDER=anthropic` |
-| `OPENAI_API_KEY` | OpenAI API key, for `SYM_MODEL_PROVIDER=openai` |
+| `OPENAI_API_KEY` | OpenAI API key, for `SYM_MODEL_PROVIDER=openai`. Without a gateway key, it also transcribes voice notes (decision 092) |
+| `SYM_TRANSCRIBE_MODEL` | Optional. The model for voice notes, default `openai/gpt-4o-mini-transcribe`. It uses the AI Gateway, or OpenAI directly as above; `off` turns transcription off (decision 092) |
 | `SYM_MODEL` | Optional. A gateway model ID, for example `anthropic/claude-sonnet-5.5`. With a direct provider, the provider's model ID, for example `claude-sonnet-5-5`; unset uses Eve's default for that provider |
 | `SYM_REASONING` | Optional. Replaces the reasoning level of the brain and its subagents: `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. Set `provider-default` for a model without reasoning, because some providers reject any level for it (decision 064). An unknown value warns and is ignored |
 | `SYM_WORKER_MODEL` | Optional. Overrides the default worker model, as `<provider>/<model>`, for example `codex/gpt-6-luna`. It joins the model list when missing (decision 041) |
