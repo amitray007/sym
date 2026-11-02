@@ -294,6 +294,13 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
         .map((m) => (m.ts === root.ts ? { ...m, thread_ts: root.ts } : m));
       return { messages: kept, has_more: false };
     },
+    "conversations.history": (b) => {
+      const limit = b.limit === undefined ? 100 : Number(b.limit);
+      const top = messages
+        .filter((m) => m.channel === b.channel && (!m.thread_ts || m.thread_ts === m.ts))
+        .reverse();
+      return { messages: top.slice(0, limit), has_more: top.length > limit };
+    },
     // Slack Code (decision 067). A repeated session_id returns the same channel.
     "agents.conversations.create": (b) => {
       const sessionId = b.session_id === undefined ? undefined : String(b.session_id);

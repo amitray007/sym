@@ -32,7 +32,7 @@ After 45 minutes Sym asks once whether to stop.
 | "Type your answer" modal | Free-text answers | Eve, inside `ctx.ask` | Milestone 1 |
 | Feedback buttons | 👍/👎 on job results only | Sym: renderer posts the reply with a `context_actions` block | Built |
 | Reactions | A rare emoji on a person's message: 😂 funny, 💡 good idea, 🙌 good news, 🫡 ack. Never 👀, never on every message (decision 051) | Brain: `slack_react` and `slack_emoji`, limits in code | Built |
-| Posts elsewhere | A post in another channel or thread on request, in Sym's voice. Sym can edit or delete it, or add and remove a reaction on a linked message, when the same person asks. Some posts need the requester's approval first (decisions 081, 082) | Brain: `slack_post`, `slack_edit`, `slack_delete`, `slack_react`; checks in `lib/slack/reach.ts` | Built |
+| Posts elsewhere | A post in another channel or thread on request, in Sym's voice. Sym can edit or delete it, or add and remove a reaction on a linked message, when the same person asks. Some posts need the requester's approval first (decisions 081, 082) | Brain: `slack_post`, `slack_edit`, `slack_delete`, `slack_react`, `slack_dm`, `slack_read`, `slack_user`; checks in `lib/slack/reach.ts` | Built |
 | Ephemeral replies | `/sym status`, private sign-in prompts, stranger lines | Eve, Sym | Production |
 | Long output | Long completed replies as a Markdown file | Eve | Production |
 | Modals | "New schedule" form | Sym: `views.open` with the `trigger_id` | Team phase |
@@ -196,8 +196,14 @@ asked for each post (`requested_posts`), and only that person can have Sym edit 
 Each person gets 10 posts an hour. The requester approves a post first when it pings a whole
 channel or user group, goes to a Slack Connect channel, or carries words out of a DM or private
 channel into another conversation (decision 082). On request, `slack_react` adds or removes
-Sym's reaction on a linked message under the same membership rule. Decision 081 lists the tools
-still to come.
+Sym's reaction on a linked message under the same membership rule.
+
+`slack_read` reads a linked message, thread, or channel for a member. It returns private content
+only in that conversation or in the requester's DM with Sym, so a channel never sees what its
+members cannot. `slack_dm` sends a current, human member of the workspace a DM under the same
+cap, with approval when the request comes from a DM or private channel. `slack_user` gives a
+person's name, title, time zone and local time, and status (decision 083). Decision 081 lists the
+tools still to come.
 
 ## Code channels
 

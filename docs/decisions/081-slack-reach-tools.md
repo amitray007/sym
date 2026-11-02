@@ -42,12 +42,12 @@ The tools land in this order, each with its own PR:
 |---|---|---|
 | `slack_post` | Post in a channel, or in the thread of a linked message | Built |
 | `slack_react` with a link | Add or remove a reaction on a linked message | Built (082) |
-| `slack_read` | Read a linked message or thread | Planned |
+| `slack_read` | Read a linked message or thread | Built (083) |
 | `slack_edit`, `slack_delete` | Change or remove Sym's own posts | Built (082) |
-| `slack_dm` | Send a person a DM | Planned |
+| `slack_dm` | Send a person a DM | Built (083) |
 | `slack_pin` | Pin a message or add a channel bookmark (`pins:write`, `bookmarks:write`) | Planned |
 | `slack_canvas` | Write a canvas (`canvases:write`) | Planned |
-| `slack_user` | Look up a person's name, time zone, and status | Planned |
+| `slack_user` | Look up a person's name, time zone, and status | Built (083) |
 
 ## Consequences
 
