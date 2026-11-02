@@ -145,6 +145,7 @@ footer p + p { margin-top: 8px; }
 .thread-root { border-bottom: 1px solid var(--sl-border); padding-bottom: 8px; margin-bottom: 4px; }
 .replies { padding: 2px 16px 6px 60px; color: var(--sl-link); font-size: 13px; font-weight: 700; }
 .compose { margin: 4px 16px 0; padding: 8px 12px; border: 1px solid var(--sl-border); border-radius: 8px; color: #ffffff59; font-size: 14px; }
+.quote { margin-top: 4px; padding-left: 10px; border-left: 4px solid var(--sl-border); color: var(--sl-text); }
 .empty-ch { padding: 28px 16px; color: var(--sl-muted); font-size: 13px; text-align: center; }
 
 /* Slack plan / task card rendering (approximate) */
@@ -202,7 +203,7 @@ footer p + p { margin-top: 8px; }
       <a href="#rule">2. The display rule</a>
       <a href="#job">3. A code job end to end</a>
       <a href="#asks">4. Quick asks and updates</a>
-      <a href="#sched">5. Scheduled work</a>
+      <a href="#sched">5. Scheduled work and triggers</a>
       <a href="#needs">6. When it needs you</a>
       <a href="#learn">7. Learning</a>
       <a href="#home">8. Home tab</a>
@@ -595,7 +596,7 @@ footer p + p { margin-top: 8px; }
 
   <!-- 5. Scheduled -->
   <section class="section" id="sched" aria-labelledby="sched-h">
-    <h2 id="sched-h">5. Scheduled work</h2>
+    <h2 id="sched-h">5. Scheduled work and triggers</h2>
     <p class="prose muted">Eve's dispatcher claims due rows every minute and starts a session aimed at the schedule's channel, here #sym. The session gets the schedule's instruction and decides what to do. The Slack thread exists only once Sym has something to post, so a clean run leaves no trace in the channel.</p>
     <div class="figure">
       <svg viewBox="0 0 1000 400" role="img" aria-labelledby="sch-title sch-desc">
@@ -718,6 +719,56 @@ footer p + p { margin-top: 8px; }
           <li>Quiet-mode items also wait for it.</li>
           <li>A day with nothing to report still gets one line: "Quiet day. 0 jobs."</li>
         </ul>
+      </div>
+    </div>
+
+    <div class="scene" id="triggers">
+      <div class="slack">
+        <div class="sl-top"><b># support</b><span>Channel</span></div>
+        <div class="sl-body">
+          <div class="msg thread-root"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>10:02</time></div><div class="mt"><span class="mention">@Sym</span> when someone posts a bug report here, draft a ticket for example-app in the thread</div></div></div>
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>10:02</time></div>
+            <div class="mt"><p>Will do. I'm in #support, so I'll see new posts here. Each one that reads like a bug report gets a draft ticket in its thread; the rest I leave alone.</p></div></div></div>
+        </div>
+      </div>
+      <div class="notes">
+        <h3>Setting up a trigger</h3>
+        <p class="muted">A trigger is a schedule fired by a Slack event: a new message in a channel, or a reaction with one emoji (decision 088). Anyone on the allow-list sets one up; there is no owner approval.</p>
+        <ul>
+          <li>Sym watches only a channel it and the person both belong to. Slack sends it nothing from other channels.</li>
+          <li>Keywords narrow which messages reach Sym. Sym still decides from the instruction.</li>
+          <li>The one Builder question is the same as for schedules, and only when a run might need Builder.</li>
+          <li>Runs post in the event message's thread unless the person names a channel or a DM.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="pair">
+      <div>
+        <p class="label">A trigger run answers in the message's thread</p>
+        <div class="slack">
+          <div class="sl-top"><b># support</b><span>Thread</span></div>
+          <div class="sl-body">
+            <div class="msg thread-root"><div class="av user">R</div><div><div class="mh"><b>Riley</b><time>14:17</time></div><div class="mt">Export to CSV hangs at 99% for big workspaces since this morning</div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>14:18</time></div>
+              <div class="mt"><p>Drafted a ticket for this: <span class="sl-link">Export hangs at 99% on large workspaces</span>. It has the time it started and the size you mentioned.</p></div></div></div>
+          </div>
+        </div>
+        <p class="ctxline">"Thanks all, lunch at 1?" in the same channel fires the same trigger, and Sym posts nothing. People's replies in a silent thread start no turn.</p>
+      </div>
+      <div>
+        <p class="label">"Send to Sym" on a message's menu opens a DM</p>
+        <div class="slack">
+          <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+          <div class="sl-body">
+            <div class="msg thread-root"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>15:40</time></div>
+              <div class="mt"><p>You sent me <span class="sl-link">a message</span> from <span class="mention">@Riley</span> in <span class="sl-link">#support</span>:</p><p class="quote">Export to CSV hangs at 99% for big workspaces since this morning</p><p>What should I do with it? Reply in this thread.</p></div></div></div>
+            <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>15:41</time></div><div class="mt">is there an open PR that touches the export?</div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>15:41</time></div>
+              <div class="mt"><p>One: <span class="sl-link">Stream the CSV writer</span>, opened yesterday, still in review.</p></div></div></div>
+          </div>
+        </div>
+        <p class="ctxline">The DM needs no membership in the message's channel and shows nothing there. The reply is Sam's own request.</p>
       </div>
     </div>
   </section>

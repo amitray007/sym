@@ -48,6 +48,7 @@ import {
   setContextBar,
 } from "../../lib/slack/code-channel.ts";
 import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
+import { getTrigger, parseTriggerRef } from "../../lib/triggers/rows.ts";
 import { workerLabel, workerNoun } from "../../lib/worker-label.ts";
 
 // One worker job from brief to result (docs/architecture.md, flows 1 and 3, decision 017). It
@@ -82,7 +83,8 @@ export default defineWorkflowTool({
     "Hand a coding task to a worker agent in a new worktree of a project the worker knows. " +
     "Use it for the work your instructions give to the worker, not for a quick check. " +
     "The owner sees the brief and presses Start before anything runs. A scheduled run passes " +
-    "its schedule reference; code decides whether that run starts without a click. Runs as a task: you get " +
+    "its schedule reference, and a trigger run its trigger reference; code decides whether " +
+    "that run starts without a click. Runs as a task: you get " +
     "a receipt now and the result later. Write a complete brief, with the request's exact " +
     "facts in context.",
   inputSchema: ScheduledBrief,
@@ -92,12 +94,12 @@ export default defineWorkflowTool({
   },
   async *task(input, ctx) {
     "use workflow";
-    const { schedule, ...brief } = input;
+    const { schedule, trigger, ...brief } = input;
     // Decision 042: a project outside Sym's list never gets a job row or a brief post. The
     // reason names only the allowed projects, whether or not the asked-for project exists.
     const refusal =
       (await projectRefusal(brief.project)) ??
-      (await creatorRefusal(schedule, ctx.session.auth.initiator));
+      (await creatorRefusal(schedule, ctx.session.auth.initiator, trigger));
     if (refusal) {
       await endRefusedRun(ctx.session.id);
       return { status: "not_started", reason: refusal };
@@ -119,14 +121,16 @@ export default defineWorkflowTool({
       // Register before publishing Start, so even an immediate decision can wake this task.
       await startWake.getConflict();
       await rememberCallback(job.id, callback.url);
-      // Decision 085: only a run of an auto-start schedule skips the click. The step checks the
-      // session's initiator and current turn, the schedule row, and this session's run, so the model
+      // Decisions 085 and 088: only a run of an auto-start schedule or trigger skips the click.
+      // The step checks the session's initiator and current turn, the row, and this session's
+      // run, so the model
       // cannot skip it.
       const preApproved = await isPreApproved(
         schedule,
         { initiator: ctx.session.auth.initiator, current: ctx.session.auth.current },
         ctx.session.id,
         job.id,
+        trigger,
       );
       // Decision 077: a job a person must start moves into its own code channel first, when that
       // is on, so the brief and Start post there. A scheduled check stays quiet in its thread.
@@ -371,20 +375,29 @@ async function projectRefusal(project: string): Promise<string | undefined> {
   return checkProject(allowedFromEnv(), project);
 }
 
-// Decision 085: a run carries its creator's consent. When the creator left the allow-list after
-// the dispatcher sent the run, the run starts no Builder work at all.
+// Decisions 085 and 088: a run carries its creator's consent. When the creator left the
+// allow-list after the run was sent, the run starts no Builder work at all. `trigger` comes last,
+// so a replay of a run that started before triggers keeps its arguments.
 async function creatorRefusal(
   schedule: string | undefined,
   initiator: SessionAuthContext | null | undefined,
+  trigger?: string,
 ): Promise<string | undefined> {
   "use step";
-  const id = schedule ? parseScheduleRef(schedule) : undefined;
-  if (id === undefined || !isScheduleAuth(initiator)) return undefined;
-  const row = await getSchedule(ledger(), id);
+  if (!isScheduleAuth(initiator)) return undefined;
+  const triggerId = trigger ? parseTriggerRef(trigger) : undefined;
+  const scheduleId = !trigger && schedule ? parseScheduleRef(schedule) : undefined;
+  const row =
+    triggerId !== undefined
+      ? await getTrigger(ledger(), triggerId)
+      : scheduleId !== undefined
+        ? await getSchedule(ledger(), scheduleId)
+        : undefined;
   if (!row || isSlackUserAllowed(pack(), process.env.SYM_SLACK_USERS, row.owner, () => {})) {
     return undefined;
   }
-  return "The person who set up this schedule is no longer on Sym's allow-list, so its runs cannot start Builder work.";
+  const what = triggerId !== undefined ? "trigger" : "schedule";
+  return `The person who set up this ${what} is no longer on Sym's allow-list, so its runs cannot start Builder work.`;
 }
 
 // A scheduled run that is refused has no job. The digest shows it as failed.
@@ -500,9 +513,10 @@ async function markFailed(jobId: number, reason: string) {
   return failJob(ledgerDeps(), jobId, reason);
 }
 
-// True only for a run of a schedule set to start Builder work on its own (decision 085). The
-// initiator travels in as data, and the principal check and the row lookup run in this step. The
-// project was checked before the job row existed (decision 042).
+// True only for a run of a schedule or trigger set to start Builder work on its own (decisions
+// 085 and 088). The initiator travels in as data, and the principal check and the row lookup run
+// in this step. The project was checked before the job row existed (decision 042). `trigger`
+// comes last, so a replay of a run that started before triggers keeps its arguments.
 async function isPreApproved(
   schedule: string | undefined,
   auth: {
@@ -511,15 +525,25 @@ async function isPreApproved(
   },
   sessionId: string,
   jobId: number,
+  trigger?: string,
 ): Promise<boolean> {
   "use step";
-  const id = schedule ? parseScheduleRef(schedule) : undefined;
   // A person who replies in a run's thread keeps the app as the session's initiator, so the
   // current turn must be the run's own turn too. Their request gets the Start prompt.
-  if (id === undefined || !isScheduleAuth(auth.initiator) || !isScheduleAuth(auth.current)) {
-    return false;
-  }
+  if (!isScheduleAuth(auth.initiator) || !isScheduleAuth(auth.current)) return false;
   const sql = ledger();
+  const triggerId = trigger ? parseTriggerRef(trigger) : undefined;
+  if (trigger) {
+    if (triggerId === undefined) return false;
+    const row = await getTrigger(sql, triggerId);
+    // The consent covers one job of this session's own run, once.
+    return (
+      canSkipStart({ isSchedulePrincipal: true, schedule: row }) &&
+      (await claimRunWhenAttached(sql, sessionId, { trigger: triggerId }, jobId))
+    );
+  }
+  const id = schedule ? parseScheduleRef(schedule) : undefined;
+  if (id === undefined) return false;
   const allowed = canSkipStart({ isSchedulePrincipal: true, schedule: await getSchedule(sql, id) });
   // The consent covers one job of this session's own run, once. Another job, or a run of
   // another schedule, gets the normal Start prompt.
