@@ -2,6 +2,7 @@ import type { Sql } from "../db.ts";
 import type { LedgerDeps } from "../jobs/run.ts";
 import { getSessionThread } from "../ledger/threads.ts";
 import { jobOfCodeChannel } from "./code-channel.ts";
+import { recordRequestedPost } from "./own-posts.ts";
 import { POST_MAX, postAndConfirm } from "./post.ts";
 
 // The thread a code channel came from, and Sym's posts there on request (decision 079). A code
@@ -45,18 +46,26 @@ export async function mainThreadOf(sql: Sql, sessionId: string): Promise<MainThr
 // Slack confirms it.
 export async function postToMainThread(
   deps: LedgerDeps,
-  input: { sessionId: string; callId: string; text: string },
+  input: { sessionId: string; callId: string; requester?: string | undefined; text: string },
 ): Promise<string> {
   const text = input.text.trim().slice(0, POST_MAX);
   if (!text) return "The message is empty.";
   const main = await mainThreadOf(deps.sql, input.sessionId);
   if (!main) return "This conversation has no main thread to post in. Reply here instead.";
-  const outcome = await postAndConfirm(deps, {
+  const { outcome, ts } = await postAndConfirm(deps, {
     key: `main-thread:${input.sessionId}:${input.callId}`,
     channel: main.channel,
     threadTs: main.threadTs,
     text,
   });
+  if (ts && input.requester) {
+    await recordRequestedPost(deps.sql, {
+      channelId: main.channel,
+      messageTs: ts,
+      requester: input.requester,
+      sessionId: input.sessionId,
+    });
+  }
   if (outcome === "sent") return "Posted in the main thread.";
   if (outcome === "pending")
     return "The post will appear in the main thread once Slack accepts it.";

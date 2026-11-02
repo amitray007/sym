@@ -128,9 +128,19 @@ export async function isPrivateConversation(slack: SlackApi, channel: string): P
   }
 }
 
+// True for a Slack Connect channel, shared with another organization. Unknown counts as shared.
+export async function isExternalConversation(slack: SlackApi, channel: string): Promise<boolean> {
+  try {
+    return (await conversationInfo(slack, channel))?.isExternal ?? true;
+  } catch {
+    return true;
+  }
+}
+
 interface ConversationInfo {
   isPrivate: boolean;
   isDirect: boolean;
+  isExternal: boolean;
   archived: boolean;
   member: boolean;
 }
@@ -147,6 +157,8 @@ async function conversationInfo(
         is_mpim?: boolean;
         is_archived?: boolean;
         is_member?: boolean;
+        is_ext_shared?: boolean;
+        is_pending_ext_shared?: boolean;
       }
     | undefined;
   if (!found) return undefined;
@@ -154,6 +166,7 @@ async function conversationInfo(
   return {
     isPrivate: found.is_private !== false,
     isDirect,
+    isExternal: found.is_ext_shared === true || found.is_pending_ext_shared === true,
     archived: found.is_archived === true,
     // Slack leaves is_member out of a DM's info; a DM Sym can read is one it is in.
     member: found.is_member === true || found.is_im === true,

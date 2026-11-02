@@ -15,7 +15,8 @@ export default defineTool({
     "#releases' or 'tell them in this thread: <link>'. Pass the target as the person gave it: a " +
     "message or thread link, a #channel, or a channel mention. A message link posts in that " +
     "message's thread; a channel posts at the top level. Write the message for the people in " +
-    "that channel. Never post on your own. Use main_thread_post for a code channel's main thread. " +
+    "that channel, in your own voice. Mention the person who asked (<@their user ID>) only when " +
+    "they ask you to. Never post on your own. Use main_thread_post for a code channel's main thread. " +
     "If the tool says it can't reach the conversation, say so in one line and do not guess why.",
   inputSchema: z.object({
     target: z.string().min(1).max(500).describe("A Slack link, #channel, or channel mention."),
@@ -23,8 +24,8 @@ export default defineTool({
   }),
   approval: {
     request: ({ session, toolInput }) =>
-      postNeedsConfirmation(ledgerDeps(), session.id, toolInput?.target).then((ask) =>
-        ask ? "user-approval" : "not-applicable",
+      postNeedsConfirmation(ledgerDeps(), session.id, toolInput?.target, toolInput?.text).then(
+        (ask) => (ask ? "user-approval" : "not-applicable"),
       ),
     response: ({ request, response }) =>
       response.principal.principalId === request.principal?.principalId

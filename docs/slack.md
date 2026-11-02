@@ -32,7 +32,7 @@ After 45 minutes Sym asks once whether to stop.
 | "Type your answer" modal | Free-text answers | Eve, inside `ctx.ask` | Milestone 1 |
 | Feedback buttons | 👍/👎 on job results only | Sym: renderer posts the reply with a `context_actions` block | Built |
 | Reactions | A rare emoji on a person's message: 😂 funny, 💡 good idea, 🙌 good news, 🫡 ack. Never 👀, never on every message (decision 051) | Brain: `slack_react` and `slack_emoji`, limits in code | Built |
-| Posts elsewhere | A post in another channel or thread on request, ending "Posted for @name". From a DM or private channel, Sym asks first (decision 081) | Brain: `slack_post`, checks in `lib/slack/reach.ts` | Built |
+| Posts elsewhere | A post in another channel or thread on request, in Sym's voice. Sym can edit or delete it, or add and remove a reaction on a linked message, when the same person asks. Some posts need the requester's approval first (decisions 081, 082) | Brain: `slack_post`, `slack_edit`, `slack_delete`, `slack_react`; checks in `lib/slack/reach.ts` | Built |
 | Ephemeral replies | `/sym status`, private sign-in prompts, stranger lines | Eve, Sym | Production |
 | Long output | Long completed replies as a Markdown file | Eve | Production |
 | Modals | "New schedule" form | Sym: `views.open` with the `trigger_id` | Team phase |
@@ -189,9 +189,15 @@ launches need approval.
 A person can ask Sym to act in another conversation: "post this in #releases", or "tell them in
 this thread" with a link (decision 081). `lib/slack/reach.ts` decides. The requester must be on
 the allow-list, and both Sym and the requester must be members of the target. Every refusal says
-"I can't reach that conversation", so a non-member learns nothing about the target. A post ends
-"Posted for @name". When the request comes from a DM or private channel, Sym asks the requester
-to approve the post first. Decision 081 lists the tools that follow `slack_post`.
+"I can't reach that conversation", so a non-member learns nothing about the target.
+
+Sym posts in its own voice and mentions the requester only when they ask. The ledger records who
+asked for each post (`requested_posts`), and only that person can have Sym edit or delete it.
+Each person gets 10 posts an hour. The requester approves a post first when it pings a whole
+channel or user group, goes to a Slack Connect channel, or carries words out of a DM or private
+channel into another conversation (decision 082). On request, `slack_react` adds or removes
+Sym's reaction on a linked message under the same membership rule. Decision 081 lists the tools
+still to come.
 
 ## Code channels
 

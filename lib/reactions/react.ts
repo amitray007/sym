@@ -1,6 +1,12 @@
 import type { Sql } from "../db.ts";
 import { getSessionThread } from "../ledger/threads.ts";
 import { type SlackApi, SlackApiError } from "../slack/api.ts";
+import {
+  parseSlackTarget,
+  type ReachDeps,
+  reachConversation,
+  UNREACHABLE,
+} from "../slack/reach.ts";
 import { normalizeEmoji } from "./emoji.ts";
 
 // A reaction on the message that started the turn (decision 051). Code holds the limits, not the
@@ -126,4 +132,84 @@ export async function reactToTurn(
     }
     return `Slack refused the reaction (${code}). Do not retry.`;
   }
+}
+
+// Takes Sym's reaction off the message that started the turn, when a person asks.
+export async function unreactToTurn(
+  deps: ReactDeps,
+  sessionId: string,
+  emoji: string,
+): Promise<string> {
+  const normalized = normalizeEmoji(emoji);
+  if (!normalized.ok) return normalized.message;
+  if (!deps.api) return "Sym has no Slack access, so it cannot react.";
+  const thread = await getSessionThread(deps.sql, sessionId);
+  const messageTs = thread
+    ? deps.messageTs === undefined
+      ? await turnMessageTs(deps.sql, sessionId)
+      : deps.messageTs
+    : null;
+  if (!thread || !messageTs) return "This conversation has no Slack message to react to.";
+  const removed = await setReaction(deps.api, thread.channelId, messageTs, normalized.name, false);
+  if (removed === "done") {
+    await deps.sql`
+      delete from reactions where channel_id = ${thread.channelId} and message_ts = ${messageTs}
+    `;
+  }
+  return reactionReply(removed, normalized.name, false);
+}
+
+// Adds or removes Sym's reaction on a linked message, when a person asks (decision 082). The
+// requester must be allowed and a member of that conversation, as for posts.
+export async function reactToLinkedMessage(
+  deps: ReactDeps & ReachDeps,
+  requester: string | undefined,
+  link: string,
+  emoji: string,
+  add: boolean,
+): Promise<string> {
+  const normalized = normalizeEmoji(emoji);
+  if (!normalized.ok) return normalized.message;
+  const target = parseSlackTarget(link);
+  if (!target?.messageTs) return "Give me a link to the message.";
+  if (!(await reachConversation({ ...deps, slack: deps.api }, requester, target.channel))) {
+    return UNREACHABLE;
+  }
+  const result = await setReaction(
+    deps.api as SlackApi,
+    target.channel,
+    target.messageTs,
+    normalized.name,
+    add,
+  );
+  return reactionReply(result, normalized.name, add);
+}
+
+type ReactionResult = "done" | "already" | "unknown_emoji" | "refused";
+
+async function setReaction(
+  api: SlackApi,
+  channel: string,
+  timestamp: string,
+  name: string,
+  add: boolean,
+): Promise<ReactionResult> {
+  try {
+    await api.call(add ? "reactions.add" : "reactions.remove", { channel, timestamp, name });
+    return "done";
+  } catch (error) {
+    const code = error instanceof SlackApiError ? error.code : "request_failed";
+    if (code === "already_reacted" || code === "no_reaction") return "already";
+    if (code === "invalid_name") return "unknown_emoji";
+    console.warn(`Sym could not ${add ? "add" : "remove"} a reaction: ${code}`);
+    return "refused";
+  }
+}
+
+function reactionReply(result: ReactionResult, name: string, add: boolean): string {
+  if (result === "done") return add ? `Reacted with :${name}:.` : `Removed :${name}:.`;
+  if (result === "already")
+    return add ? `Already reacted with :${name}:.` : `No :${name}: of mine there.`;
+  if (result === "unknown_emoji") return `Slack does not know :${name}:.`;
+  return "Slack refused. Do not retry.";
 }

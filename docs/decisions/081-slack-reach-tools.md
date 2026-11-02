@@ -23,7 +23,7 @@ private channel holds, or Sym could carry words out of a DM into a channel.
 3. Every refusal reads the same: "I can't reach that conversation." The reply is identical for a
    channel that does not exist, a channel Sym is not in, a channel the requester is not in, and
    a Slack error. A non-member learns nothing about the target.
-4. Each post names the person who asked for it ("Posted for @name").
+4. Superseded by decision 082: Sym posts in its own voice, and the ledger records who asked.
 5. When the source conversation is private (a DM, a group DM, or a private channel), a post that
    carries text into another conversation waits for the requester to approve it. Eve's tool
    approval shows the target and the text. An unknown source counts as private. Only the
@@ -41,9 +41,9 @@ The tools land in this order, each with its own PR:
 | Tool | Does | Status |
 |---|---|---|
 | `slack_post` | Post in a channel, or in the thread of a linked message | Built |
-| `slack_react` with a link | React to a linked message | Planned |
+| `slack_react` with a link | Add or remove a reaction on a linked message | Built (082) |
 | `slack_read` | Read a linked message or thread | Planned |
-| `slack_edit`, `slack_delete` | Change or remove Sym's own posts | Planned |
+| `slack_edit`, `slack_delete` | Change or remove Sym's own posts | Built (082) |
 | `slack_dm` | Send a person a DM | Planned |
 | `slack_pin` | Pin a message or add a channel bookmark (`pins:write`, `bookmarks:write`) | Planned |
 | `slack_canvas` | Write a canvas (`canvases:write`) | Planned |

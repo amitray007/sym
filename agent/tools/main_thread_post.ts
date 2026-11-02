@@ -1,6 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller } from "../../lib/callers.ts";
+import { slackUserOfPrincipal } from "../../lib/owner.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { postToMainThread } from "../../lib/slack/main-thread.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
@@ -19,6 +20,11 @@ export default defineTool({
   }),
   async execute({ text }, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return "Worker threads cannot post in Slack.";
-    return postToMainThread(ledgerDeps(), { sessionId: ctx.session.id, callId: ctx.callId, text });
+    return postToMainThread(ledgerDeps(), {
+      sessionId: ctx.session.id,
+      callId: ctx.callId,
+      requester: slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+      text,
+    });
   },
 });
