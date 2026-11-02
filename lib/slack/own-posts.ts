@@ -1,6 +1,7 @@
 import type { Sql } from "../db.ts";
 import type { LedgerDeps } from "../jobs/run.ts";
 import { type SlackApi, SlackApiError } from "./api.ts";
+import { isSlackUserAllowed } from "./guard.ts";
 import { POST_MAX, postAndConfirm } from "./post.ts";
 import { parseSlackTarget, type ReachDeps, reachConversation, UNREACHABLE } from "./reach.ts";
 
@@ -98,7 +99,7 @@ export async function editOwnPost(
   if (!text) return "The message is empty.";
   const post = await findOwnPost(deps.sql, input.requester, input.sessionId, input.message);
   if (!post) return NOT_YOURS;
-  if (!(await reachConversation(deps, input.requester, post.channelId))) return UNREACHABLE;
+  if (!(await mayChange(deps, input.requester, post))) return UNREACHABLE;
   const { outcome } = await postAndConfirm(deps, {
     key: `slack-edit:${input.sessionId}:${input.callId}`,
     channel: post.channelId,
@@ -113,13 +114,26 @@ export async function editOwnPost(
 export async function deleteOwnPost(deps: OwnPostDeps, input: OwnPostInput): Promise<string> {
   const post = await findOwnPost(deps.sql, input.requester, input.sessionId, input.message);
   if (!post) return NOT_YOURS;
-  if (!(await reachConversation(deps, input.requester, post.channelId))) return UNREACHABLE;
+  if (!(await mayChange(deps, input.requester, post))) return UNREACHABLE;
   const deleted = await deleteMessage(deps.slack as SlackApi, post);
   if (!deleted) return "I couldn't delete it: Slack refused.";
   await deps.sql`
     update requested_posts set deleted_at = now() where post_key = ${post.postKey}
   `;
   return "Deleted.";
+}
+
+// A DM Sym sent for someone is a conversation they are not in, so for a DM the allow-list and
+// the ledger's record of who asked decide. Elsewhere the decision 081 checks apply.
+async function mayChange(
+  deps: OwnPostDeps,
+  requester: string | undefined,
+  post: RequestedPost,
+): Promise<boolean> {
+  if (!post.channelId.startsWith("D")) {
+    return (await reachConversation(deps, requester, post.channelId)) !== undefined;
+  }
+  return isSlackUserAllowed(deps.pack, deps.usersEnv ?? process.env.SYM_SLACK_USERS, requester);
 }
 
 // A post someone already removed counts as deleted.

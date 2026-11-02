@@ -128,6 +128,16 @@ export async function isPrivateConversation(slack: SlackApi, channel: string): P
   }
 }
 
+// True for a one-to-one DM, not a group DM. Unknown counts as not a DM.
+export async function isDirectMessage(slack: SlackApi, channel: string): Promise<boolean> {
+  try {
+    const info = await slack.call("conversations.info", { channel });
+    return (info.channel as { is_im?: boolean } | undefined)?.is_im === true;
+  } catch {
+    return false;
+  }
+}
+
 // True for a Slack Connect channel, shared with another organization. Unknown counts as shared.
 export async function isExternalConversation(slack: SlackApi, channel: string): Promise<boolean> {
   try {

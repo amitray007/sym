@@ -5,6 +5,7 @@ import { requesterResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { postToMainThread } from "../../lib/slack/main-thread.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
+import { readInTurn } from "../../lib/slack/read.ts";
 import { hasBroadcastMention } from "../../lib/slack/slack-post.ts";
 
 // Posts in the thread a code channel came from, when a person asks (decision 079). A code channel
@@ -22,8 +23,10 @@ export default defineTool({
   }),
   // A ping to a whole channel or group waits for the requester (decision 082).
   approval: {
-    request: ({ toolInput }) =>
-      hasBroadcastMention(toolInput?.text ?? "") ? "user-approval" : "not-applicable",
+    request: ({ session, toolInput }) =>
+      hasBroadcastMention(toolInput?.text ?? "") || readInTurn(session)
+        ? "user-approval"
+        : "not-applicable",
     response: requesterResponse("Only the person who asked can approve this post."),
     prompt: ({ input }) => `Post this in the main thread?\n\n${input.text}`,
   },
