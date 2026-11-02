@@ -54,6 +54,11 @@ export async function reservePost(
   });
 }
 
+export async function isReserved(sql: Sql, key: string): Promise<boolean> {
+  const [row] = await sql`select 1 from requested_posts where post_key = ${key}`;
+  return row !== undefined;
+}
+
 export const OVER_CAP = `You've asked for ${POSTS_PER_HOUR} posts in the last hour. Try again later.`;
 
 // The requester's post named by a link, or their latest post from this conversation. Only a post

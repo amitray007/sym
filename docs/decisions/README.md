@@ -88,3 +88,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [081](081-slack-reach-tools.md) | Slack tools act in other conversations only for allowed members, with one uniform refusal; posts name who asked, and a post out of a private source waits for approval |
 | [082](082-post-safeguards-and-edits.md) | Posts use Sym's voice and record who asked; only that person can edit or delete them; 10 posts an hour per person; broadcast pings and Slack Connect targets need approval; reactions on linked messages |
 | [083](083-read-dm-and-people.md) | `slack_read` returns private content only in that conversation or the requester's DM; `slack_dm` DMs current workspace people under the post cap; `slack_user` looks people up |
+| [084](084-pins-bookmarks-canvases.md) | `slack_pin`, `slack_bookmark`, and `slack_canvas` act for members on request; a canvas write only creates or appends; new scopes need a reinstall |

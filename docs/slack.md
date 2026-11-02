@@ -32,7 +32,7 @@ After 45 minutes Sym asks once whether to stop.
 | "Type your answer" modal | Free-text answers | Eve, inside `ctx.ask` | Milestone 1 |
 | Feedback buttons | 👍/👎 on job results only | Sym: renderer posts the reply with a `context_actions` block | Built |
 | Reactions | A rare emoji on a person's message: 😂 funny, 💡 good idea, 🙌 good news, 🫡 ack. Never 👀, never on every message (decision 051) | Brain: `slack_react` and `slack_emoji`, limits in code | Built |
-| Posts elsewhere | A post in another channel or thread on request, in Sym's voice. Sym can edit or delete it, or add and remove a reaction on a linked message, when the same person asks. Some posts need the requester's approval first (decisions 081, 082) | Brain: `slack_post`, `slack_edit`, `slack_delete`, `slack_react`, `slack_dm`, `slack_read`, `slack_user`; checks in `lib/slack/reach.ts` | Built |
+| Posts elsewhere | A post in another channel or thread on request, in Sym's voice. Sym can edit or delete it, or add and remove a reaction on a linked message, when the same person asks. Some posts need the requester's approval first (decisions 081, 082) | Brain: `slack_post`, `slack_edit`, `slack_delete`, `slack_react`, `slack_dm`, `slack_read`, `slack_user`, `slack_pin`, `slack_bookmark`, `slack_canvas`; checks in `lib/slack/reach.ts` | Built |
 | Ephemeral replies | `/sym status`, private sign-in prompts, stranger lines | Eve, Sym | Production |
 | Long output | Long completed replies as a Markdown file | Eve | Production |
 | Modals | "New schedule" form | Sym: `views.open` with the `trigger_id` | Team phase |
@@ -163,6 +163,7 @@ with the public host before you import it.
 | `users:read` | Resolve the approver for DM routing, and display names in a shared thread |
 | `code_channels:manage` | Create, archive, and label a job's code channel (decision 067) |
 | `channels:write.invites`, `groups:write.invites` | Invite mentioned people into code channels on request (decision 074); reinstall the app to grant these scopes |
+| `pins:write`, `bookmarks:write`, `canvases:write` | Pin messages, add link bookmarks, and write channel canvases on request (decision 084); reinstall the app to grant these scopes |
 | `channels:read`, `groups:read`, `mpim:read` | Tell a code channel apart (`conversations.info`); check membership and find a `#name` for posts elsewhere (decision 081) |
 
 Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reaction_added`, `app_home_opened`,
@@ -202,8 +203,13 @@ Sym's reaction on a linked message under the same membership rule.
 only in that conversation or in the requester's DM with Sym, so a channel never sees what its
 members cannot. `slack_dm` sends a current, human member of the workspace a DM under the same
 cap, with approval when the request comes from a DM or private channel. `slack_user` gives a
-person's name, title, time zone and local time, and status (decision 083). Decision 081 lists the
-tools still to come.
+person's name, title, time zone and local time, and status (decision 083).
+
+`slack_pin` pins or unpins a linked message, `slack_bookmark` adds an https link bookmark to a
+channel, and `slack_canvas` writes Markdown to a channel's canvas: it creates the canvas when
+the channel has none and otherwise adds to its end, never replacing what people wrote. Bookmarks
+and canvases follow the post approval rules, and a canvas write counts toward the hourly cap
+(decision 084).
 
 ## Code channels
 
