@@ -197,6 +197,37 @@ describe("event triggers", () => {
     expect(botPostsIn(other)).toEqual([]);
   });
 
+  it("asks before a person's follow-up in a run's thread posts in another channel", async () => {
+    const channel = newConversation(h).channel;
+    const other = newConversation(h).channel;
+    h.slack.members[other] = [OWNER, BOT];
+    await watch({ channel, instruction: "Answer release questions. fixture-say" });
+    const message = await sayInChannel(h, channel, "When does it ship?", AUTHOR);
+    await until(() => botPostsIn(channel, message.ts)[0], { label: "the run's reply" });
+    // The event text stays in the session's context, so a person's turn there counts as read.
+    const text = `<@${BOT}> continue: fixture-post-now <#${other}>`;
+    const reply = h.slack.addMessage({ channel, user: OWNER, text, thread_ts: message.ts });
+    await send(
+      appMentionRequest({
+        signingSecret: SIGNING_SECRET,
+        channel,
+        user: OWNER,
+        text,
+        ts: reply.ts,
+        threadTs: message.ts,
+      }),
+    );
+    await until(
+      () =>
+        botPostsIn(channel, message.ts).find(
+          (m) => /Post this in/.test(messageText(m)) && (m.blocks ?? []).length > 0,
+        ),
+      { label: "the approval prompt for the person's post", timeoutMs: 90_000 },
+    );
+    await settle(h);
+    expect(botPostsIn(other)).toEqual([]);
+  });
+
   it("shows Start when a person in an auto trigger run's thread names the trigger", async () => {
     const channel = newConversation(h).channel;
     // The run itself finds nothing to do.

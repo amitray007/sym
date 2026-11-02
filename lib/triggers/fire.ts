@@ -9,10 +9,12 @@ import { triggerRunMessage } from "./format.ts";
 import { matchesKeywords, normalizeEmoji } from "./match.ts";
 import {
   claimDeferredRuns,
+  claimThread,
   endDeferred,
   getTrigger,
   type RunTarget,
   reserveTriggerRun,
+  setRunTarget,
   type Trigger,
   type TriggerEvent,
   triggerRef,
@@ -98,8 +100,6 @@ export async function fireMessageTriggers(
     link: messageLink(input.channel, input.ts),
   };
   return fireAll(deps, triggers, facts, `message:${input.channel}:${input.ts}`, send, {
-    // The message's own thread is new, so no session holds it yet.
-    threadBusy: false,
     deferElsewhere: true,
   });
 }
@@ -144,45 +144,26 @@ export async function fireReactionTriggers(
     reactor: input.reactor,
   };
   return fireAll(deps, triggers, facts, `reaction:${input.channel}:${input.ts}`, send, {
-    // A thread that already talks with Sym keeps its own session.
-    threadBusy: await threadHasSession(deps.sql, input.channel, facts.threadTs),
     deferElsewhere: false,
   });
 }
 
 // One run per matching trigger, each in its own session, so each acts for its own creator. Eve
-// gives a Slack thread one session, so at most one run can live in the event's thread: the
-// oldest trigger that posts there, and none when a session already holds the thread. Every other
-// trigger that posts in the thread runs in its creator's DM instead (decision 088).
+// gives a Slack thread one session, so one run owns the event's thread: the first eligible run to
+// claim it in the ledger, from the message or the reaction path, and none when a session already
+// holds it. Every other run that would post in that thread runs in its creator's DM instead
+// (decision 088).
 async function fireAll(
   deps: FireDeps,
   triggers: Trigger[],
   facts: TriggerEvent,
   eventKey: string,
   send: SendRun,
-  options: { threadBusy: boolean; deferElsewhere: boolean },
+  options: { deferElsewhere: boolean },
 ): Promise<FireResult[]> {
-  let threadTaken = options.threadBusy;
   const results: FireResult[] = [];
   for (const trigger of triggers) {
-    let target: RunTarget | undefined;
-    if (trigger.destination) target = { channelId: trigger.destination };
-    else if (!threadTaken) {
-      target = { channelId: facts.channel, threadTs: facts.threadTs };
-      threadTaken = true;
-    } else {
-      const dm = await openDm(deps.slack, trigger.owner);
-      target = dm ? { channelId: dm } : undefined;
-    }
-    if (!target) {
-      results.push({ trigger: triggerRef(trigger.id), status: "no_destination" });
-      continue;
-    }
-    const status = await fire(deps, trigger, facts, eventKey, {
-      target,
-      deferred: options.deferElsewhere && target.threadTs === undefined,
-      send,
-    });
+    const status = await fire(deps, trigger, facts, eventKey, { ...options, send });
     results.push({ trigger: triggerRef(trigger.id), status });
   }
   return results;
@@ -234,19 +215,24 @@ async function creatorMayRun(deps: FireDeps, trigger: Trigger): Promise<boolean>
   return reached !== undefined;
 }
 
+// Reserves the run, checks the creator, and only then picks where it starts, so a run that is
+// rate-limited or refused never takes the event's thread from a run that may start.
 async function fire(
   deps: FireDeps,
   trigger: Trigger,
   facts: TriggerEvent,
   eventKey: string,
-  options: { target: RunTarget; deferred: boolean; send: SendRun },
+  options: { deferElsewhere: boolean; send: SendRun },
 ): Promise<string> {
+  const wanted: RunTarget = trigger.destination
+    ? { channelId: trigger.destination }
+    : { channelId: facts.channel, threadTs: facts.threadTs };
   const reserved = await reserveTriggerRun(deps.sql, {
     triggerId: trigger.id,
     eventKey,
     facts,
-    target: options.target,
-    deferred: options.deferred,
+    target: wanted,
+    deferred: false,
     firedAt: deps.now ?? new Date(),
     maxPerHour: deps.maxPerHour ?? runsPerHour(),
   });
@@ -254,15 +240,26 @@ async function fire(
     console.warn(`Skipped ${triggerRef(trigger.id)}: it reached its hourly run limit.`);
   }
   if (reserved.status !== "reserved") return reserved.status;
+  const runId = reserved.run.id;
   // Checked after the reservation, so a retried event finds the failed run and fires nothing.
   if (!(await creatorMayRun(deps, trigger))) {
     console.warn(`Skipped ${triggerRef(trigger.id)}: its creator left the allow-list or channel.`);
-    await finishRun(deps.sql, reserved.run.id, "failed");
-    if (options.deferred) await endDeferred(deps.sql, reserved.run.id);
+    await finishRun(deps.sql, runId, "failed");
     return "creator_not_allowed";
   }
-  if (options.deferred) return "deferred";
-  const sent = await sendRun(deps, trigger, reserved.run.id, facts, options.target, options.send);
+  let target = wanted;
+  if (wanted.threadTs && !(await claimThread(deps.sql, { ...facts, runId }))) {
+    const dm = await openDm(deps.slack, trigger.owner);
+    if (!dm) {
+      await finishRun(deps.sql, runId, "failed");
+      return "no_destination";
+    }
+    target = { channelId: dm };
+  }
+  const deferred = options.deferElsewhere && target.threadTs === undefined;
+  if (target !== wanted || deferred) await setRunTarget(deps.sql, runId, target, deferred);
+  if (deferred) return "deferred";
+  const sent = await sendRun(deps, trigger, runId, facts, target, options.send);
   return sent ? "sent" : "failed";
 }
 
@@ -292,14 +289,6 @@ async function sendRun(
     await finishRun(deps.sql, runId, "failed").catch(() => {});
     return false;
   }
-}
-
-async function threadHasSession(sql: Sql, channel: string, threadTs: string): Promise<boolean> {
-  const [row] = await sql`
-    select 1 from session_threads
-    where channel_id = ${channel} and thread_ts = ${threadTs} limit 1
-  `;
-  return Boolean(row);
 }
 
 // True when Slack says the user is a bot. A failed lookup counts as a bot, so it fires nothing.

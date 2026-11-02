@@ -19,6 +19,7 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A message that says "thinking out loud" calls no_reply (side talk, decision 050).
 // - A message that says "move this to a code channel" calls code_channel, then answers in one line.
 // - A message with "fixture-react <emoji>" calls slack_react, then ends the turn with no_reply.
+// - A message with "fixture-post-now <target>" calls slack_post.
 // - A repeated-work review calls repeated_work, proposes one playbook for any title seen 3 or more
 //   times, then ends the turn with no_reply.
 // - A task result, or a tool result with `posted: true`, ends the turn with no_reply.
@@ -119,6 +120,12 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
     return `Fixture trigger run saw: ${text.slice(0, 200)}`;
   }
   if (brief) return { toolCalls: [{ name: "worker_job", input: brief }] };
+  const personPost = /\bfixture-post-now\s+(\S+)/.exec(message)?.[1];
+  if (personPost) {
+    return {
+      toolCalls: [{ name: "slack_post", input: { target: personPost, text: "Fixture post." } }],
+    };
+  }
   const reaction = /\bfixture-react\s+(\S+)/.exec(message)?.[1];
   if (reaction) return { toolCalls: [{ name: "slack_react", input: { emoji: reaction } }] };
   if (/\bsign in to the worker\b/i.test(message)) {

@@ -207,6 +207,42 @@ export async function endDeferred(sql: Sql, runId: number): Promise<void> {
   `;
 }
 
+// Claims a Slack thread for one trigger run (decision 088). Eve gives a thread one session, so
+// the first run to claim it owns it, whichever event, message or reaction, came first. A thread
+// that already has a session, such as a person's conversation with Sym, cannot be claimed.
+// Atomic: of two concurrent claims, one wins.
+export async function claimThread(
+  sql: Sql,
+  input: { channel: string; threadTs: string; runId: number },
+): Promise<boolean> {
+  const rows = await sql`
+    insert into trigger_threads (channel_id, thread_ts, run_id)
+    select ${input.channel}, ${input.threadTs}, ${input.runId}
+    where not exists (
+      select 1 from session_threads
+      where channel_id = ${input.channel} and thread_ts = ${input.threadTs}
+    )
+    on conflict (channel_id, thread_ts) do nothing
+    returning run_id
+  `;
+  return rows.length > 0;
+}
+
+// Moves a reserved run to the target it will start at, and queues it for the dispatcher when
+// its sender cannot reach that target.
+export async function setRunTarget(
+  sql: Sql,
+  runId: number,
+  target: RunTarget,
+  deferred: boolean,
+): Promise<void> {
+  await sql`
+    update schedule_runs
+    set event = jsonb_set(event, '{target}', ${json(sql, target)}), deferred = ${deferred}
+    where id = ${runId}
+  `;
+}
+
 // Remembers that a person's turn ran in this session's thread (decision 088).
 export async function markPersonTurn(sql: Sql, sessionId: string): Promise<void> {
   await sql`update session_threads set person_turn = true where session_id = ${sessionId}`;
@@ -218,7 +254,7 @@ export async function markPersonTurn(sql: Sql, sessionId: string): Promise<void>
 export async function isTriggerRunSession(
   sql: Sql,
   sessionId: string,
-  options: { attempts?: number; delayMs?: number } = {},
+  options: { attempts?: number; delayMs?: number; wait?: boolean } = {},
 ): Promise<boolean> {
   const attempts = options.attempts ?? 20;
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -226,6 +262,8 @@ export async function isTriggerRunSession(
       select trigger_id is not null as trigger from schedule_runs where session_id = ${sessionId}
     `;
     if (row) return row.trigger;
+    // Only the run's own first turn can come before the attach.
+    if (options.wait === false) return false;
     const [pending] = await sql`
       select 1 from schedule_runs
       where session_id is null and outcome = 'started' and (not deferred or sent_at is not null)

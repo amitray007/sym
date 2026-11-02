@@ -178,11 +178,21 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     });
 
   // A sender that records each send and returns a new session.
+  // The session a send reaches, as Eve picks it: a thread is one session, and a send without a
+  // thread starts a new one chosen by its key.
+  const sessionOf = (input: Parameters<SendRun>[0] | undefined) =>
+    !input
+      ? ""
+      : input.target.threadTs
+        ? `thread-${input.target.channelId}:${input.target.threadTs}`
+        : `session-${input.key}`;
+
+  // A sender that records each send and returns its session.
   function sender() {
     const sent: Parameters<SendRun>[0][] = [];
     const send: SendRun = async (input) => {
       sent.push(input);
-      return `session-${input.key}`;
+      return sessionOf(input);
     };
     return { sent, send };
   }
@@ -217,7 +227,7 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     expect(sent[0]?.message).toContain(`Trigger run of T-${trigger.id}`);
     const runs = await runsOf(trigger.id);
     expect(runs).toHaveLength(1);
-    expect(runs[0]?.sessionId).toBe(sent[0] ? `session-${sent[0].key}` : "");
+    expect(runs[0]?.sessionId).toBe(sessionOf(sent[0]));
   });
 
   it("ignores thread replies, keyword misses, and paused triggers", async () => {
@@ -318,6 +328,93 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     expect(await creator(b?.sessionId ?? null)).toBe("UOTHER");
   });
 
+  describe("one run per thread, whichever event comes first", () => {
+    const setup = async () => {
+      const where = channel();
+      const onMessage = await make({ channel: where });
+      const onReaction = await make({
+        channel: where,
+        kind: "reaction",
+        emoji: "eyes",
+        owner: "UOTHER",
+      });
+      const slack = fakeSlack([
+        { channel: where, ts: "18.1", text: "Bug: login", user: "UAUTHOR" },
+      ]);
+      const deps = { ...base(), slack };
+      const reaction = {
+        channel: where,
+        ts: "18.1",
+        emoji: "eyes",
+        reactor: "UOTHER",
+        botUserId: "UBOT",
+      };
+      return { where, onMessage, onReaction, deps, reaction };
+    };
+    const sessions = async (ids: number[]) => {
+      const rows = await ledger.sql()<{ sessionId: string | null; triggerId: number }[]>`
+        select session_id, trigger_id from schedule_runs where trigger_id in ${ledger.sql()(ids)}
+      `;
+      return rows.map((row) => row.sessionId);
+    };
+
+    it("reaction first: the late message's run goes to its creator's DM", async () => {
+      const { where, onMessage, onReaction, deps, reaction } = await setup();
+      const { sent, send } = sender();
+      expect((await fireReactionTriggers(deps, reaction, send)).map((r) => r.status)).toEqual([
+        "sent",
+      ]);
+      expect(sent[0]?.target).toEqual({ channelId: where, threadTs: "18.1" });
+      const late = await fireMessageTriggers(deps, message(where, "18.1"), send);
+      expect(late.map((r) => r.status)).toEqual(["deferred"]);
+      const dispatcher = sender();
+      expect(await sendDeferredRuns(deps, dispatcher.send)).toBe(1);
+      expect(dispatcher.sent[0]?.target).toEqual({ channelId: "DUCREATOR" });
+      const ids = await sessions([onMessage.id, onReaction.id]);
+      expect(ids).toHaveLength(2);
+      expect(new Set(ids).size).toBe(2);
+    });
+
+    it("message first: the late reaction's run goes to its creator's DM", async () => {
+      const { where, onMessage, onReaction, deps, reaction } = await setup();
+      const { sent, send } = sender();
+      await fireMessageTriggers(deps, message(where, "18.1"), send);
+      expect(sent[0]?.target).toEqual({ channelId: where, threadTs: "18.1" });
+      expect((await fireReactionTriggers(deps, reaction, send)).map((r) => r.status)).toEqual([
+        "sent",
+      ]);
+      expect(sent[1]?.target).toEqual({ channelId: "DUOTHER" });
+      const ids = await sessions([onMessage.id, onReaction.id]);
+      expect(new Set(ids).size).toBe(2);
+    });
+
+    it("a refused or rate-limited trigger does not take the thread", async () => {
+      const where = channel();
+      const limited = await make({ channel: where, keywords: ["old"] });
+      const valid = await make({ channel: where, owner: "UOTHER", keywords: ["bug"] });
+      const { sent, send } = sender();
+      // The oldest trigger uses its one run of the hour.
+      await fireMessageTriggers(base({ maxPerHour: 1 }), message(where, "19.0", "old news"), send);
+      const result = await fireMessageTriggers(
+        base({ maxPerHour: 1 }),
+        message(where, "19.1", "old bug"),
+        send,
+      );
+      expect(result).toEqual([
+        { trigger: `T-${limited.id}`, status: "limited" },
+        { trigger: `T-${valid.id}`, status: "sent" },
+      ]);
+      expect(sent.at(-1)?.target).toEqual({ channelId: where, threadTs: "19.1" });
+
+      // A creator who left the channel does not take it either.
+      leftChannel.add(`UCREATOR:${where}`);
+      const removed = await fireMessageTriggers(base(), message(where, "19.2", "old bug"), send);
+      leftChannel.delete(`UCREATOR:${where}`);
+      expect(removed.map((r) => r.status)).toEqual(["creator_not_allowed", "sent"]);
+      expect(sent.at(-1)?.target).toEqual({ channelId: where, threadTs: "19.2" });
+    });
+  });
+
   it("resends a deferred run claimed by a dispatcher that crashed", async () => {
     const where = channel();
     const trigger = await make({ channel: where, destination: "DUCREATOR" });
@@ -374,7 +471,7 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     const trigger = await make({ channel: where, builder: "auto" });
     const { sent, send } = sender();
     await fireMessageTriggers(base(), message(where, "15.1"), send);
-    const sessionId = sent[0] ? `session-${sent[0].key}` : "";
+    const sessionId = sessionOf(sent[0]);
     const session = { id: sessionId, auth: { current: APP_AUTH } };
     expect(await requesterOf(session, () => ({ sql: ledger.sql() }))).toBe("UCREATOR");
     // A person in the same thread acts for themselves.
@@ -408,17 +505,21 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     await make({ channel: where });
     const { sent, send } = sender();
     await fireMessageTriggers(base(), message(where, "17.1"), send);
-    const sessionId = sent[0] ? `session-${sent[0].key}` : "";
+    const sessionId = sessionOf(sent[0]);
     const sql = () => ledger.sql();
     const turn = { id: "turn-1" };
     expect(
       await readUntrustedInTurn({ id: sessionId, turn, auth: { current: APP_AUTH } }, sql),
     ).toBe(true);
-    // A person's own turn in that thread reads nothing untrusted by itself.
+    // A person's later turn in that thread still has the event text in context.
     const person = { principalId: "slack:T1:UOTHER" };
     expect(await readUntrustedInTurn({ id: sessionId, turn, auth: { current: person } }, sql)).toBe(
-      false,
+      true,
     );
+    // A person's turn in an ordinary conversation reads nothing untrusted by itself.
+    expect(
+      await readUntrustedInTurn({ id: "a-person-thread", turn, auth: { current: person } }, sql),
+    ).toBe(false);
     // A scheduled run is the creator's own instruction.
     expect(
       await readUntrustedInTurn({ id: "no-run", turn, auth: { current: APP_AUTH } }, sql),
@@ -440,7 +541,7 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     await make({ channel: where });
     const { sent, send } = sender();
     await fireMessageTriggers(base(), message(where, "16.1"), send);
-    const sessionId = sent[0] ? `session-${sent[0].key}` : "";
+    const sessionId = sessionOf(sent[0]);
     await recordSessionThread(ledger.sql(), {
       sessionId,
       teamId: "T1",

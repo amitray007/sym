@@ -58,3 +58,18 @@ export const triggerRunLeaseMigration: Migration = {
     alter table session_threads add column person_turn boolean not null default false;
   `,
 };
+
+// Decision 088: Eve gives a Slack thread one session, so one trigger run owns a thread. The
+// message and reaction paths claim it here atomically; a later match runs in its creator's DM.
+export const triggerThreadsMigration: Migration = {
+  version: "039_trigger_threads",
+  sql: `
+    create table trigger_threads (
+      channel_id text not null,
+      thread_ts text not null,
+      run_id bigint not null references schedule_runs (id),
+      claimed_at timestamptz not null default now(),
+      primary key (channel_id, thread_ts)
+    );
+  `,
+};

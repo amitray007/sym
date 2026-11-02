@@ -234,10 +234,11 @@ each trigger starts at most `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour (default 20
 
 A run acts for the trigger's creator. The message's author is not the requester; the event's
 text reaches the brain as JSON data that grants nothing, and a post, DM, edit, bookmark, or
-canvas write the run makes outside its own reply waits for the creator's approval. The creator
+canvas write in another conversation waits for approval, in the run's turns and in a person's
+later turns in its thread. The creator
 must stay allowed and a member of the watched channel, or runs fail closed. When two triggers
-match one message, each run gets its own session: one in the message's thread, the others in
-their creators' DMs. A run shows no status line, because it sits in someone else's thread and
+match one message, or a message and a reaction on it, each run gets its own session: the first
+eligible run owns the message's thread, and the others run in their creators' DMs. A run shows no status line, because it sits in someone else's thread and
 most runs end in silence. After a silent run, people's replies in that thread start no turn
 until someone talks to Sym there; a mention always does.
 

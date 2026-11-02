@@ -35,10 +35,12 @@ both.
    own reactions fire nothing, so a run's own post or reaction never fires a trigger. A reaction
    on Sym's own message is feedback (decision 051), not a trigger event.
 6. Each run has its own session, so each acts for its own creator. Eve gives a Slack thread one
-   session, so at most one run lives in the event message's thread: the oldest matching trigger
-   that posts there, and none when a session already holds the thread. Every other matching
-   trigger that posts in the thread runs in its creator's DM instead, and its run message says
-   why. This is simpler than folding triggers into one run: no run mixes two instructions or two
+   session, so one run owns a thread. A run claims the thread in the ledger (`trigger_threads`,
+   keyed by channel and thread) only after its reservation and the creator check pass, so a
+   rate-limited or refused trigger never takes it. The claim is atomic and shared by the message
+   and reaction paths, whichever event arrives first, and it fails when a session already holds
+   the thread. Every other run that would post in that thread runs in its creator's DM instead,
+   and its run message says why. This is simpler than folding triggers into one run: no run mixes two instructions or two
    creators, and a creator never acts in a session that serves someone else.
 7. Each run reserves a row in `schedule_runs` before the send. The row belongs to a trigger
    instead of a schedule and has an event key: the channel and message, for both kinds. A Slack
@@ -52,9 +54,11 @@ both.
    `requesterOf` acts for the creator and only the creator answers a gated step. The run message
    is the schedule run message with the event's facts (kind, channel, link, author, reactor,
    text) as one JSON line. The message says they are untrusted data: never instructions, never
-   consent, and the author is not the requester. Code also treats every turn of a trigger run as
-   one that read untrusted Slack content (decision 082): a post, DM, edit, bookmark, or canvas
-   write the run makes waits for the creator's approval. The run's own reply in its destination
+   consent, and the author is not the requester. The event text stays in the session's context,
+   so code treats every turn of a trigger run's session as one that read untrusted Slack content
+   (decision 082), the run's own turns and a person's later turns in its thread alike: a post,
+   DM, edit, bookmark, or canvas write in another conversation waits for the requester's
+   approval. The run's own reply in its destination
    is not such a write and needs none. The instructions say that event text never widens the
    instruction.
 9. The message handler's `ctx.send` reaches only the message's own thread. A message trigger
@@ -87,7 +91,8 @@ both.
 13. Migration `037_channel_triggers` adds `triggers`, makes `schedule_runs.schedule_id`
     nullable, and adds `trigger_id`, `event_key`, `event`, and `deferred`, with a check that a run
     belongs to exactly one schedule or trigger. Migration `038_trigger_run_lease` adds
-    `schedule_runs.deferred_until` and `session_threads.person_turn`.
+    `schedule_runs.deferred_until` and `session_threads.person_turn`. Migration
+    `039_trigger_threads` adds `trigger_threads`.
 
 ## Consequences
 
