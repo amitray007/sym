@@ -150,12 +150,8 @@ export async function unreactToTurn(
       : deps.messageTs
     : null;
   if (!thread || !messageTs) return "This conversation has no Slack message to react to.";
+  // The reactions row stays, so a removal never frees a slot in the thread's hourly cap.
   const removed = await setReaction(deps.api, thread.channelId, messageTs, normalized.name, false);
-  if (removed === "done") {
-    await deps.sql`
-      delete from reactions where channel_id = ${thread.channelId} and message_ts = ${messageTs}
-    `;
-  }
   return reactionReply(removed, normalized.name, false);
 }
 

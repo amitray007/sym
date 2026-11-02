@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
+import { requesterResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
 import { postNeedsConfirmation, postToConversation } from "../../lib/slack/slack-post.ts";
@@ -27,10 +27,7 @@ export default defineTool({
       postNeedsConfirmation(ledgerDeps(), session.id, toolInput?.target, toolInput?.text).then(
         (ask) => (ask ? "user-approval" : "not-applicable"),
       ),
-    response: ({ request, response }) =>
-      response.principal.principalId === request.principal?.principalId
-        ? { status: "allowed" }
-        : { status: "rejected", reason: "Only the person who asked can approve this post." },
+    response: requesterResponse("Only the person who asked can approve this post."),
     prompt: ({ input }) => `Post this in ${input.target}?\n\n${input.text}`,
   },
   label: { start: () => "Post in Slack" },

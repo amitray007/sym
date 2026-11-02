@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
+import { requesterResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { editOwnPost } from "../../lib/slack/own-posts.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
@@ -26,10 +26,7 @@ export default defineTool({
         toolInput?.message,
         toolInput?.text,
       ).then((ask) => (ask ? "user-approval" : "not-applicable")),
-    response: ({ request, response }) =>
-      response.principal.principalId === request.principal?.principalId
-        ? { status: "allowed" }
-        : { status: "rejected", reason: "Only the person who asked can approve this edit." },
+    response: requesterResponse("Only the person who asked can approve this edit."),
     prompt: ({ input }) => `Change the post to this?\n\n${input.text}`,
   },
   label: { start: () => "Edit a post" },

@@ -2,7 +2,7 @@ import type { Sql } from "../db.ts";
 import type { LedgerDeps } from "../jobs/run.ts";
 import { getSessionThread } from "../ledger/threads.ts";
 import { jobOfCodeChannel } from "./code-channel.ts";
-import { recordRequestedPost } from "./own-posts.ts";
+import { OVER_CAP, reservePost } from "./own-posts.ts";
 import { POST_MAX, postAndConfirm } from "./post.ts";
 
 // The thread a code channel came from, and Sym's posts there on request (decision 079). A code
@@ -52,20 +52,22 @@ export async function postToMainThread(
   if (!text) return "The message is empty.";
   const main = await mainThreadOf(deps.sql, input.sessionId);
   if (!main) return "This conversation has no main thread to post in. Reply here instead.";
-  const { outcome, ts } = await postAndConfirm(deps, {
-    key: `main-thread:${input.sessionId}:${input.callId}`,
+  const key = `main-thread:${input.sessionId}:${input.callId}`;
+  if (input.requester) {
+    const reservation = {
+      key,
+      channelId: main.channel,
+      requester: input.requester,
+      sessionId: input.sessionId,
+    };
+    if (!(await reservePost(deps.sql, reservation))) return OVER_CAP;
+  }
+  const { outcome } = await postAndConfirm(deps, {
+    key,
     channel: main.channel,
     threadTs: main.threadTs,
     text,
   });
-  if (ts && input.requester) {
-    await recordRequestedPost(deps.sql, {
-      channelId: main.channel,
-      messageTs: ts,
-      requester: input.requester,
-      sessionId: input.sessionId,
-    });
-  }
   if (outcome === "sent") return "Posted in the main thread.";
   if (outcome === "pending")
     return "The post will appear in the main thread once Slack accepts it.";

@@ -43,3 +43,18 @@ export function ownerResponse(pack: () => Pack | undefined) {
       ? { status: "allowed" as const }
       : { status: "rejected" as const, reason: OWNER_ONLY };
 }
+
+// An Eve approval response policy for a person's own request (decision 081): only the person
+// whose turn asked can approve or cancel it.
+export function requesterResponse(reason: string) {
+  return ({
+    request,
+    response,
+  }: {
+    request: { principal: { principalId: string } | null };
+    response: { principal: { principalId: string } };
+  }) =>
+    response.principal.principalId === request.principal?.principalId
+      ? { status: "allowed" as const }
+      : { status: "rejected" as const, reason };
+}

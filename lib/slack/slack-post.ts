@@ -1,6 +1,6 @@
 import type { LedgerDeps } from "../jobs/run.ts";
 import { getSessionThread } from "../ledger/threads.ts";
-import { findOwnPost, OVER_CAP, overHourlyCap, recordRequestedPost } from "./own-posts.ts";
+import { findOwnPost, OVER_CAP, reservePost } from "./own-posts.ts";
 import { POST_MAX, postAndConfirm } from "./post.ts";
 import {
   isExternalConversation,
@@ -32,28 +32,28 @@ export async function postToConversation(deps: PostDeps, input: SlackPostInput):
   if (!target || target.channel.startsWith("D")) return UNREACHABLE;
   const reached = await reachConversation(deps, input.requester, target.channel);
   if (!reached || reached.isDirect) return UNREACHABLE;
-  if (await overHourlyCap(deps.sql, input.requester)) return OVER_CAP;
-  const { outcome, ts } = await postAndConfirm(deps, {
-    key: `slack-post:${input.sessionId}:${input.callId}`,
+  const key = `slack-post:${input.sessionId}:${input.callId}`;
+  const reservation = {
+    key,
+    channelId: target.channel,
+    requester: input.requester,
+    sessionId: input.sessionId,
+  };
+  if (!(await reservePost(deps.sql, reservation))) return OVER_CAP;
+  const { outcome } = await postAndConfirm(deps, {
+    key,
     channel: target.channel,
     threadTs: target.threadTs ?? target.messageTs,
     text,
   });
-  if (ts) {
-    await recordRequestedPost(deps.sql, {
-      channelId: target.channel,
-      messageTs: ts,
-      requester: input.requester,
-      sessionId: input.sessionId,
-    });
-  }
   if (outcome === "sent") return "Posted.";
   if (outcome === "pending") return "The post will appear once Slack accepts it.";
   return "I couldn't post there: Slack refused it.";
 }
 
 // Slack's broadcast tokens and user-group mentions, and their plain-text forms.
-const BROADCAST = /<!(?:channel|here|everyone)\b|<!subteam\^|(?:^|\s)@(?:channel|here|everyone)\b/i;
+const BROADCAST =
+  /<!(?:channel|here|everyone|group)\b|<!subteam\^|(?:^|[^\w@.])@(?:channel|here|everyone)\b/i;
 
 export function hasBroadcastMention(text: string): boolean {
   return BROADCAST.test(text);

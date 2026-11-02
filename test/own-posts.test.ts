@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { deliverNow } from "../lib/jobs/run.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { reactToLinkedMessage, unreactToTurn } from "../lib/reactions/react.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
@@ -8,6 +9,7 @@ import {
   NOT_YOURS,
   OVER_CAP,
   POSTS_PER_HOUR,
+  reservePost,
 } from "../lib/slack/own-posts.ts";
 import { UNREACHABLE } from "../lib/slack/reach.ts";
 import { postToConversation } from "../lib/slack/slack-post.ts";
@@ -111,6 +113,46 @@ describe.skipIf(!hasDatabase)("posts made on request", () => {
       }),
     ).toBe(OVER_CAP);
     expect(slack.messages.length).toBe(before);
+  });
+
+  it("counts parallel posts against the cap", async () => {
+    const reserve = (i: number) =>
+      reservePost(ledger.sql(), {
+        key: `race-${i}`,
+        channelId: "C0RELEASE",
+        requester: "URACE",
+        sessionId: "s-race",
+      });
+    const claims = await Promise.all(
+      Array.from({ length: POSTS_PER_HOUR + 5 }, (_, i) => reserve(i)),
+    );
+    expect(claims.filter(Boolean)).toHaveLength(POSTS_PER_HOUR);
+    expect(await reserve(0)).toBe(true);
+  });
+
+  it("can edit a post that was pending when the tool returned", async () => {
+    slack.failNext("chat.postMessage", "ratelimited");
+    expect(
+      await postToConversation(deps(), {
+        sessionId: "s-late",
+        callId: "late",
+        requester: "UASKER",
+        target: "#releases",
+        text: "late news",
+      }),
+    ).toBe("The post will appear once Slack accepts it.");
+    await deliverNow(deps());
+    const late = slack.messages.find((m) => m.text === "late news");
+    expect(late).toBeDefined();
+    expect(
+      await editOwnPost(deps(), {
+        sessionId: "s-late",
+        callId: "late-edit",
+        requester: "UASKER",
+        text: "later news",
+      }),
+    ).toBe("Edited.");
+    expect(textOf(late?.ts ?? "")).toBe("later news");
   });
 
   it("adds and removes a reaction on a linked message for a member", async () => {

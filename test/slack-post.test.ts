@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import mainThreadPost from "../agent/tools/main_thread_post.ts";
 import slackPost from "../agent/tools/slack_post.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
@@ -53,7 +54,8 @@ describe.skipIf(!hasDatabase)("slack_post", () => {
     const posted = postedIn("C0RELEASE");
     expect(posted.map((m) => [m.text, m.thread_ts])).toEqual([["v2.4 is out.", undefined]]);
     const rows = await ledger.sql()<{ requester: string }[]>`
-      select requester from requested_posts where message_ts = ${posted[0]?.ts ?? ""}
+      select p.requester from requested_posts p join outbox o on o.idempotency_key = p.post_key
+      where o.slack_ts = ${posted[0]?.ts ?? ""}
     `;
     expect(rows.map((row) => row.requester)).toEqual(["UASKER"]);
   });
@@ -134,5 +136,15 @@ describe("slack_post approval", () => {
     expect(answer("slack:T1:UASKER", "slack:T1:UASKER")).toBe("allowed");
     expect(answer("slack:T1:UASKER", "slack:T1:UOWNER")).toBe("rejected");
     expect(answer(null, "slack:T1:UASKER")).toBe("rejected");
+  });
+});
+
+// Decision 082: a main-thread post that pings a whole channel waits for the requester.
+describe("main_thread_post approval", () => {
+  const request = (mainThreadPost.approval as { request: (ctx: unknown) => unknown }).request;
+  it("asks only for a broadcast ping", () => {
+    expect(request({ toolInput: { text: "<!here> shipped" } })).toBe("user-approval");
+    expect(request({ toolInput: { text: "shipped, see (@here) notes" } })).toBe("user-approval");
+    expect(request({ toolInput: { text: "shipped" } })).toBe("not-applicable");
   });
 });

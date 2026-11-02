@@ -19,13 +19,10 @@ export interface ConfirmedPost {
   text: string;
 }
 
-export interface PostResult {
-  outcome: PostOutcome;
-  // The message's Slack ts once Slack accepted it.
-  ts?: string | undefined;
-}
-
-export async function postAndConfirm(deps: LedgerDeps, post: ConfirmedPost): Promise<PostResult> {
+export async function postAndConfirm(
+  deps: LedgerDeps,
+  post: ConfirmedPost,
+): Promise<{ outcome: PostOutcome }> {
   await enqueuePost(deps.sql, {
     idempotencyKey: post.key,
     method: post.editTs ? "chat.update" : "chat.postMessage",
@@ -47,9 +44,9 @@ export async function postAndConfirm(deps: LedgerDeps, post: ConfirmedPost): Pro
     }),
   });
   await deliverNow(deps);
-  const [row] = await deps.sql<{ status: string; slackTs: string | null }[]>`
-    select status, slack_ts from outbox where idempotency_key = ${post.key}
+  const [row] = await deps.sql<{ status: string }[]>`
+    select status from outbox where idempotency_key = ${post.key}
   `;
-  if (row?.status === "sent") return { outcome: "sent", ts: row.slackTs ?? undefined };
+  if (row?.status === "sent") return { outcome: "sent" };
   return { outcome: row?.status === "pending" ? "pending" : "failed" };
 }

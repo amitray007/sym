@@ -13,36 +13,50 @@ const HOUR_MS = 60 * 60 * 1000;
 export const NOT_YOURS = "I can only change a post I made because you asked for it.";
 
 export interface RequestedPost {
+  postKey: string;
   channelId: string;
   messageTs: string;
   requester: string;
   sessionId: string;
 }
 
-export async function recordRequestedPost(sql: Sql, post: RequestedPost): Promise<void> {
-  await sql`
-    insert into requested_posts (channel_id, message_ts, requester, session_id)
-    values (${post.channelId}, ${post.messageTs}, ${post.requester}, ${post.sessionId})
-    on conflict do nothing
-  `;
+export interface PostReservation {
+  key: string;
+  channelId: string;
+  requester: string;
+  sessionId: string;
 }
 
-export async function overHourlyCap(
+// Claims one of the requester's hourly posts before the post is sent, so a post still pending in
+// the outbox counts and stays theirs. A lock per requester keeps parallel calls under the cap.
+// A retried call with the same key keeps its claim. False when the requester is over the cap.
+export async function reservePost(
   sql: Sql,
-  requester: string,
+  post: PostReservation,
   now = new Date(),
 ): Promise<boolean> {
   const since = new Date(now.getTime() - HOUR_MS);
-  const [row] = await sql<{ count: number }[]>`
-    select count(*)::int as count from requested_posts
-    where requester = ${requester} and created_at > ${since}
-  `;
-  return (row?.count ?? 0) >= POSTS_PER_HOUR;
+  return sql.begin(async (tx) => {
+    await tx`select pg_advisory_xact_lock(hashtextextended(${`requested-posts:${post.requester}`}, 0))`;
+    const [held] = await tx`select 1 from requested_posts where post_key = ${post.key}`;
+    if (held) return true;
+    const [row] = await tx<{ count: number }[]>`
+      select count(*)::int as count from requested_posts
+      where requester = ${post.requester} and created_at > ${since}
+    `;
+    if ((row?.count ?? 0) >= POSTS_PER_HOUR) return false;
+    await tx`
+      insert into requested_posts (post_key, channel_id, requester, session_id)
+      values (${post.key}, ${post.channelId}, ${post.requester}, ${post.sessionId})
+    `;
+    return true;
+  });
 }
 
 export const OVER_CAP = `You've asked for ${POSTS_PER_HOUR} posts in the last hour. Try again later.`;
 
-// The requester's post named by a link, or their latest post from this conversation.
+// The requester's post named by a link, or their latest post from this conversation. Only a post
+// Slack accepted has a ts to change.
 export async function findOwnPost(
   sql: Sql,
   requester: string | undefined,
@@ -50,20 +64,19 @@ export async function findOwnPost(
   message: string | undefined,
 ): Promise<RequestedPost | undefined> {
   if (!requester) return undefined;
-  if (message) {
-    const target = parseSlackTarget(message);
-    if (!target?.messageTs) return undefined;
-    const [row] = await sql<RequestedPost[]>`
-      select channel_id, message_ts, requester, session_id from requested_posts
-      where channel_id = ${target.channel} and message_ts = ${target.messageTs}
-        and requester = ${requester} and deleted_at is null
-    `;
-    return row;
-  }
+  const target = message ? parseSlackTarget(message) : undefined;
+  if (message && !target?.messageTs) return undefined;
   const [row] = await sql<RequestedPost[]>`
-    select channel_id, message_ts, requester, session_id from requested_posts
-    where requester = ${requester} and session_id = ${sessionId} and deleted_at is null
-    order by created_at desc limit 1
+    select p.post_key, p.channel_id, o.slack_ts as message_ts, p.requester, p.session_id
+    from requested_posts p join outbox o on o.idempotency_key = p.post_key
+    where p.requester = ${requester} and p.deleted_at is null
+      and o.status = 'sent' and o.slack_ts is not null
+      and ${
+        target
+          ? sql`p.channel_id = ${target.channel} and o.slack_ts = ${target.messageTs ?? ""}`
+          : sql`p.session_id = ${sessionId}`
+      }
+    order by p.created_at desc limit 1
   `;
   return row;
 }
@@ -104,8 +117,7 @@ export async function deleteOwnPost(deps: OwnPostDeps, input: OwnPostInput): Pro
   const deleted = await deleteMessage(deps.slack as SlackApi, post);
   if (!deleted) return "I couldn't delete it: Slack refused.";
   await deps.sql`
-    update requested_posts set deleted_at = now()
-    where channel_id = ${post.channelId} and message_ts = ${post.messageTs}
+    update requested_posts set deleted_at = now() where post_key = ${post.postKey}
   `;
   return "Deleted.";
 }
