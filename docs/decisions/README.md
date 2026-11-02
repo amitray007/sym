@@ -84,3 +84,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [077](077-start-in-the-code-channel.md) | With code channels on, the brief and Start post in the job's code channel, not the thread; Sym ignores Slack's origin quote there |
 | [078](078-close-summary-in-origin-thread.md) | Superseded by 079. `job_close` could post a summary in the original thread before it archives the code channel; the brain plans multi-part requests |
 | [079](079-main-thread-posts-on-request.md) | A code channel posts in its main thread with `main_thread_post` whenever a person asks; close posts no summary |
+| [080](080-direct-model-provider.md) | `SYM_MODEL_PROVIDER=anthropic` or `openai` calls the provider directly with its own API key; the gateway stays the default |

@@ -13,7 +13,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Feature | API | Decision | How Sym uses it | Limits |
 |---|---|---|---|---|
 | Agent definition | `agent/agent.ts` `defineAgent` | Use | Model, limits, compaction | Self-hosted upgrades strand running sessions |
-| Model | Gateway model ID from `SYM_MODEL`, read by `defineDynamic` before each model call (decision 018) | Use | Chat, briefs, triage, summaries. Workers do heavy work | Needs `AI_GATEWAY_API_KEY` off Vercel. The model is fixed per session |
+| Model | Gateway model ID from `SYM_MODEL`, read by `defineDynamic` before each model call (decision 018), or a direct Anthropic or OpenAI model when `SYM_MODEL_PROVIDER` names one (decision 080) | Use | Chat, briefs, triage, summaries. Workers do heavy work | Needs `AI_GATEWAY_API_KEY` off Vercel, or the direct provider's API key. The model is fixed per session |
 | Dynamic model | `defineDynamic(ctx => model)` with a turn-keyed `ctx.memo` | Later | Cheap model for status, stronger model for planning | Switching mid-session loses the prompt cache |
 | Spend limits | `limits.sessionUsage` | Use | $2 of brain model cost per window, then Eve asks to continue or stop; Continue starts a new window (`agent/agent.ts`) | Cost tracking needs reported cost |
 | Instructions | `agent/instructions.md`, `instructions/` | Use | Persona, consent, Slack style | TS instructions evaluate at build time |
