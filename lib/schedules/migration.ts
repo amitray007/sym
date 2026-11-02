@@ -111,3 +111,10 @@ export const runSettlementsMigration: Migration = {
     );
   `,
 };
+
+// Decision 085: when the dispatcher last tried to deliver a run. A retried delivery comes after
+// the lease runs out, so the run's fire time is too old to tell that its attach is still to come.
+export const runSendMigration: Migration = {
+  version: "036_schedule_run_sent_at",
+  sql: "alter table schedule_runs add column sent_at timestamptz;",
+};

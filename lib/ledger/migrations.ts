@@ -19,6 +19,7 @@ import { quietMigration } from "../quiet/migration.ts";
 import { reactionsMigration } from "../reactions/migration.ts";
 import {
   agentSchedulesMigration,
+  runSendMigration,
   runSettlementsMigration,
   schedulePackKeyMigration,
   schedulesMigration,
@@ -319,4 +320,5 @@ export const migrations: Migration[] = [
   },
   agentSchedulesMigration,
   runSettlementsMigration,
+  runSendMigration,
 ];

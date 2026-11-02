@@ -1,3 +1,4 @@
+import type postgres from "postgres";
 import type { Sql } from "../db.ts";
 import { nextFire } from "./cron.ts";
 
@@ -241,8 +242,8 @@ export async function claimRunForJob(
 }
 
 // The dispatcher sends first and attaches the session to its run right after, so a fast model
-// can ask before the attach lands. While this schedule has a run reserved in the last 2 minutes
-// and not yet attached, wait a little and claim again. Without such a run, there is nothing to
+// can ask before the attach lands. While this schedule has a run sent or reserved in the last 2
+// minutes and not yet attached, wait a little and claim again. Without such a run, there is nothing to
 // wait for.
 export async function claimRunWhenAttached(
   sql: Sql,
@@ -257,7 +258,7 @@ export async function claimRunWhenAttached(
     const [pending] = await sql`
       select 1 from schedule_runs
       where schedule_id = ${scheduleId} and session_id is null and job_id is null
-        and fired_at >= now() - interval '2 minutes'
+        and coalesce(sent_at, fired_at) >= now() - interval '2 minutes'
       limit 1
     `;
     // The attach can land between the claim and this check. Claim once more before giving up.
@@ -279,10 +280,11 @@ export async function runCreatorOf(
   for (let attempt = 0; attempt < attempts; attempt++) {
     const owner = await creatorOfSession(sql, sessionId);
     if (owner) return owner;
+    // A delivery in the last 2 minutes, a retried one included, may not be attached yet.
     const [pending] = await sql`
       select 1 from schedule_runs
       where session_id is null and outcome = 'started'
-        and fired_at >= now() - interval '2 minutes'
+        and coalesce(sent_at, fired_at) >= now() - interval '2 minutes'
       limit 1
     `;
     // The attach can land between the two reads. Read once more before giving up.
@@ -302,41 +304,58 @@ async function creatorOfSession(sql: Sql, sessionId: string): Promise<string | u
 
 // Ends a run whose turn started no job, from what the turn posted (decision 085). The first
 // settlement of a session wins. A turn can settle before the dispatcher attaches its session, so
-// the settlement is kept by session and attachSession applies it. A run that has a job keeps
-// waiting: the job's end sets its outcome.
+// the settlement is kept by session and attachSession applies it. Both take the same session
+// lock, so neither can miss the other. A run that has a job keeps waiting: the job's end sets
+// its outcome.
 export async function finishRunWithoutJob(
   sql: Sql,
   sessionId: string,
   outcome: Exclude<RunOutcome, "started">,
 ): Promise<void> {
-  await sql`
-    insert into schedule_run_settlements (session_id, outcome) values (${sessionId}, ${outcome})
-    on conflict (session_id) do nothing
-  `;
-  await sql`
-    update schedule_runs r set outcome = st.outcome
-    from schedule_run_settlements st
-    where r.session_id = ${sessionId} and st.session_id = r.session_id
-      and r.outcome = 'started' and r.job_id is null
-      and not exists (select 1 from jobs where session_id = ${sessionId})
-  `;
+  await sql.begin(async (tx) => {
+    await lockSession(tx, sessionId);
+    await tx`
+      insert into schedule_run_settlements (session_id, outcome) values (${sessionId}, ${outcome})
+      on conflict (session_id) do nothing
+    `;
+    await tx`
+      update schedule_runs r set outcome = st.outcome
+      from schedule_run_settlements st
+      where r.session_id = ${sessionId} and st.session_id = r.session_id
+        and r.outcome = 'started' and r.job_id is null
+        and not exists (select 1 from jobs where session_id = ${sessionId})
+    `;
+  });
+}
+
+// Marks a delivery attempt of a reserved run, so a lookup waits for its attach (runCreatorOf).
+export async function markSending(sql: Sql, runId: number): Promise<void> {
+  await sql`update schedule_runs set sent_at = now() where id = ${runId}`;
 }
 
 // Sets the session of a reserved run, after the send, and applies a turn that already settled.
 export async function attachSession(sql: Sql, runId: number, sessionId: string): Promise<void> {
-  await sql`
-    update schedule_runs r set session_id = ${sessionId},
-      outcome = case
-        when r.outcome = 'started' and r.job_id is null
-          and not exists (select 1 from jobs where session_id = ${sessionId})
-        then coalesce(
-          (select outcome from schedule_run_settlements where session_id = ${sessionId}),
-          r.outcome
-        )
-        else r.outcome
-      end
-    where r.id = ${runId}
-  `;
+  await sql.begin(async (tx) => {
+    await lockSession(tx, sessionId);
+    await tx`
+      update schedule_runs r set session_id = ${sessionId},
+        outcome = case
+          when r.outcome = 'started' and r.job_id is null
+            and not exists (select 1 from jobs where session_id = ${sessionId})
+          then coalesce(
+            (select outcome from schedule_run_settlements where session_id = ${sessionId}),
+            r.outcome
+          )
+          else r.outcome
+        end
+      where r.id = ${runId}
+    `;
+  });
+}
+
+// Serializes the attach and the settlement of one session, until the transaction ends.
+async function lockSession(tx: postgres.TransactionSql, sessionId: string): Promise<void> {
+  await tx`select pg_advisory_xact_lock(hashtext(${`schedule-session:${sessionId}`}))`;
 }
 
 export async function recordRun(

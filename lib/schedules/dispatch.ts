@@ -5,6 +5,7 @@ import {
   claimDueSchedules,
   completeClaim,
   finishRun,
+  markSending,
   reserveRun,
   type Schedule,
   type ScheduleRun,
@@ -62,6 +63,7 @@ async function fire(deps: DispatchDeps, schedule: Schedule): Promise<boolean> {
 
 async function deliver(deps: DispatchDeps, schedule: Schedule, run: ScheduleRun): Promise<boolean> {
   try {
+    await markSending(deps.sql, run.id);
     const sessionId = await deps.send(schedule, dispatchMessage(schedule), deliveryKey(run.id));
     await attachSession(deps.sql, run.id, sessionId);
     return true;

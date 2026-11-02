@@ -69,11 +69,14 @@ schedule also needed the owner's approval, even when the person who asked was on
     `all_clear` when it stayed silent (`no_reply`), and `failed` when the turn did not complete.
     A turn that called `worker_job` leaves the outcome to the job's end, as before. Migration
     `035_schedule_run_settlements` keeps the first settlement by session, so a turn that ends
-    before the dispatcher attaches its session still sets the outcome on attach.
+    before the dispatcher attaches its session still sets the outcome on attach. The attach and
+    the settlement take the same per-session advisory lock, so neither misses the other.
 12. Each run is delivered with the idempotency key `sym-schedule-run:<run id>`, so a retry
     reaches the same Slack session. A one-time run that a dispatcher reserved but never
     delivered is sent again, for up to an hour, before its row is `done`. A recurring fire left
-    undelivered is skipped, and its run ends `failed`.
+    undelivered is skipped, and its run ends `failed`. Migration `036_schedule_run_sent_at`
+    records each delivery attempt, so a turn that starts before the attach of a retried
+    delivery still waits for it and acts for the creator.
 13. `runMessage` in `lib/schedules/format.ts` builds a run message from the reference, title,
    instruction, Builder mode, and creator. It is the seam a later event trigger can use: a
    message in a watched channel is also an instruction, a Builder mode, and a destination.

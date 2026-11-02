@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { threadUserOf } from "../lib/requester.ts";
 import {
   type DispatchDeps,
   deliveryKey,
@@ -31,9 +32,18 @@ const base = {
   owner: "UCREATOR",
 };
 
+const APP = {
+  principalId: "eve:app",
+  authenticator: "app",
+  principalType: "runtime",
+  attributes: {},
+};
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 describe.skipIf(!hasDatabase)("dispatchDue", () => {
   const ledger = useLedger();
   let counter = 0;
+  afterEach(() => vi.unstubAllEnvs());
 
   const deps = (now: Date, send: DispatchDeps["send"], mayRun = () => true): DispatchDeps => ({
     sql: ledger.sql(),
@@ -159,5 +169,66 @@ describe.skipIf(!hasDatabase)("dispatchDue", () => {
       return sql(strings, ...(values as []));
     }) as unknown as typeof sql;
     expect(await runCreatorOf(racing, "s-race", { attempts: 1 })).toBe("UCREATOR");
+  });
+
+  it("binds the creator for a retried delivery whose turn starts before the attach", async () => {
+    const sql = ledger.sql();
+    vi.stubEnv("SYM_SLACK_USERS", "UCREATOR");
+    const now = Date.now();
+    const schedule = await createSchedule(
+      sql,
+      { ...base, title: "Retried", runAt: new Date(now - 11 * 60_000) },
+      new Date(now - 20 * 60_000),
+    );
+    // The first delivery fails ten minutes ago; the run's fire time is now old.
+    const down = async (): Promise<string> => {
+      throw new Error("slack down");
+    };
+    await dispatchDue(deps(new Date(now - 10 * 60_000), down));
+    let lookup: Promise<string | null> | undefined;
+    // The retry's turn starts and records its thread before the dispatcher attaches it.
+    const send = async (fired: Schedule) => {
+      if (fired.id !== schedule.id) return `s-other-${fired.id}`;
+      const session = { id: "s-retried", auth: { current: APP } };
+      lookup = threadUserOf(session, null, () => ({ sql }));
+      await pause(200);
+      return session.id;
+    };
+    await dispatchDue(deps(new Date(now), send));
+    expect(await lookup).toBe("UCREATOR");
+    expect((await runsOf(schedule.id))[0]?.sessionId).toBe("s-retried");
+  });
+
+  it("applies a settlement that commits while the attach waits on the run", async () => {
+    const sql = ledger.sql();
+    const schedule = await oneTime();
+    const due = schedule.nextFireAt as Date;
+    const run = await reserveRun(sql, { scheduleId: schedule.id, dueAt: due, firedAt: due });
+    if (!run) throw new Error("expected a run");
+    // A third connection holds the run's row, so the attach starts its statement and waits.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked = () => {};
+    const isLocked = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    const blocker = sql.begin(async (tx) => {
+      await tx`select id from schedule_runs where id = ${run.id} for update`;
+      locked();
+      await held;
+    });
+    await isLocked;
+    const attaching = attachSession(sql, run.id, "s-overlap");
+    await pause(200);
+    // The turn settles while the attach waits. Without the session lock, the settlement sees no
+    // attached run, and the attach misses the settlement.
+    const settling = finishRunWithoutJob(sql, "s-overlap", "needs_attention");
+    await pause(200);
+    release();
+    await Promise.all([blocker, attaching, settling]);
+    const [after] = await runsOf(schedule.id);
+    expect(after).toMatchObject({ sessionId: "s-overlap", outcome: "needs_attention" });
   });
 });
