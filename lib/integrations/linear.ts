@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { allowedSlackUserFor } from "../identities.ts";
 import type { LedgerDeps } from "../jobs/run.ts";
 import { handOff, quote } from "../slack/send-to-sym.ts";
@@ -32,7 +33,14 @@ export interface LinearSessionEvent {
     creatorId?: string | null | undefined;
     issue?: { identifier?: string; title?: string; url?: string } | null | undefined;
   };
-  agentActivity?: { id: string; body?: string | undefined; user?: LinearUser | undefined };
+  agentActivity?:
+    | {
+        id: string;
+        body?: string | undefined;
+        // The immutable ID of the person who wrote the prompt.
+        userId?: string | null | undefined;
+      }
+    | undefined;
 }
 
 export interface LinearSessionContext {
@@ -49,6 +57,16 @@ export const LINEAR_HANDED_OFF =
   "for your Start first.";
 const LINEAR_UNREACHABLE = "I couldn't reach you in Slack just now. Please ask me there.";
 
+// Agent Session events Sym already answered in Linear. In memory: the DM itself is deduped by
+// the outbox key, so a restart may repeat one answer at most.
+const answered = new Set<string>();
+function firstReply(key: string): boolean {
+  if (answered.has(key)) return false;
+  if (answered.size > 10_000) answered.clear();
+  answered.add(key);
+  return true;
+}
+
 export async function onLinearAgentSession(
   deps: LinearDeps,
   ctx: LinearSessionContext,
@@ -56,13 +74,19 @@ export async function onLinearAgentSession(
 ): Promise<"ignored" | "handed_off" | "refused" | "unreachable"> {
   if (event.action !== "created" && event.action !== "prompted") return "ignored";
   const env = deps.env ?? process.env;
-  const person =
+  // A delegation counts for the session's creator. A follow-up prompt counts only for the
+  // prompt's own author, by their immutable ID: someone else may write in a session that an
+  // allowed person started. No ID, no request.
+  const creator = event.agentSession.creator;
+  const ids =
     event.action === "prompted"
-      ? (event.agentActivity?.user ?? event.agentSession.creator)
-      : event.agentSession.creator;
-  const ids = [person?.email, person?.id, event.agentSession.creatorId];
+      ? [event.agentActivity?.userId]
+      : [creator?.id, event.agentSession.creatorId, creator?.email];
   const user = allowedSlackUserFor("linear", ids, deps.pack, env);
+  const reply = `${event.agentSession.id}:${event.agentActivity?.id ?? "created"}`;
   if (!user) {
+    // A redelivery of the same event answers once.
+    if (!firstReply(reply)) return "refused";
     await ctx.linear.createActivity({ type: "response", body: LINEAR_REFUSAL });
     return "refused";
   }
@@ -72,13 +96,14 @@ export async function onLinearAgentSession(
   const said = event.agentActivity?.body?.trim();
   const handed = await handOff(deps, {
     user,
-    key: `linear:${event.agentSession.id}:${event.agentActivity?.id ?? "created"}`,
+    key: `linear:${reply}`,
     text: [
       `You handed me ${link} in Linear${said ? ":" : "."}`,
       ...(said ? [quote(said)] : []),
       "What should I do with it? Reply in this thread.",
     ].join("\n"),
   });
+  if (!firstReply(reply)) return handed ? "handed_off" : "unreachable";
   await ctx.linear.createActivity(
     handed
       ? { type: "response", body: LINEAR_HANDED_OFF }
@@ -97,9 +122,13 @@ export async function onLinearData(
   const delivery =
     event.delivery.id ??
     `${String(data.id)}:${String(event.raw.action)}:${String(event.raw.webhookTimestamp)}`;
+  // The verified payload, timestamp included, names the event, so a redelivery under another
+  // delivery header fires nothing.
+  const content = createHash("sha256").update(JSON.stringify(event.raw)).digest("hex");
   return fireSourceTriggers(
     { sql: deps.sql, slack: deps.slack, pack: deps.pack },
     linearFacts(event.raw),
-    delivery,
+    `linear:${delivery}`,
+    [`linear:content:${content}`],
   );
 }

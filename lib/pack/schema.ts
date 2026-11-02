@@ -64,17 +64,23 @@ export const packSchema = z
     persona: relativeFile.optional(),
     playbooks: z.array(relativeFile).default([]),
     skills: z.array(relativeFile).default([]),
-    // Who a GitHub login or a Linear user is in Slack (decision 091). A mention on GitHub or a
+    // Who a GitHub account or a Linear user is in Slack (decision 091). A mention on GitHub or a
     // delegation in Linear counts as a person's request only through this mapping.
     identities: z
       .array(
         z.strictObject({
           slackUserId: slackUserId,
+          // The GitHub account's numeric ID, which never changes. The login is for display only.
+          githubId: z.number().int().positive().optional(),
           github: z.string().min(1).optional(),
-          // A Linear user's email or ID.
+          // A Linear user's ID, or their email for a delegation.
           linear: z.string().min(1).optional(),
         }),
       )
+      .default([]),
+    // The GitHub repositories, as `owner/name`, whose events Sym may read (decision 091).
+    githubRepositories: z
+      .array(z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, "must look like owner/name"))
       .default([]),
   })
   .superRefine((pack, ctx) => {

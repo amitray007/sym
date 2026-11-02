@@ -1,4 +1,6 @@
 import type { Sql } from "../db.ts";
+import { allowedGitHubRepos } from "../github-repos.ts";
+import type { Pack } from "../pack/load.ts";
 import { scheduleDestination } from "../schedules/destination.ts";
 import {
   parseSlackTarget,
@@ -15,7 +17,13 @@ import {
   type SourceFilter,
   type Trigger,
 } from "./rows.ts";
-import { GITHUB_OFF, githubConfigured, LINEAR_OFF, linearConfigured } from "./sources.ts";
+import {
+  GITHUB_NO_REPOS,
+  GITHUB_OFF,
+  githubConfigured,
+  LINEAR_OFF,
+  linearConfigured,
+} from "./sources.ts";
 import { newHookId, WEBHOOKS_OFF, webhookKey } from "./webhook.ts";
 
 // Sets up an event trigger (decision 088). Slack sends Sym events only from channels it is in,
@@ -79,7 +87,7 @@ async function setUpOffSlack(
   input: TriggerInput & { requester: string; current: string | undefined },
   env: NodeJS.ProcessEnv,
 ): Promise<{ trigger: Trigger } | { refusal: string }> {
-  const source = sourceSetup(input, env);
+  const source = sourceSetup(input, env, deps.pack);
   if ("refusal" in source) return source;
   const wanted = input.destination?.trim();
   const resolved = await scheduleDestination(deps, {
@@ -110,6 +118,7 @@ const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 function sourceSetup(
   input: TriggerInput,
   env: NodeJS.ProcessEnv,
+  pack: Pack | undefined,
 ): { hookId?: string; sourceFilter?: SourceFilter } | { refusal: string } {
   const actions = (input.actions ?? []).map((a) => a.trim().toLowerCase()).filter(Boolean);
   const label = input.label?.trim() || null;
@@ -120,6 +129,12 @@ function sourceSetup(
     if (!githubConfigured(env)) return { refusal: GITHUB_OFF };
     const repository = input.repository?.trim().toLowerCase() ?? "";
     if (!REPOSITORY.test(repository)) return { refusal: "Name the repository as owner/name." };
+    // The owner's repository list decides which events Sym may read; with none, nothing.
+    const repos = allowedGitHubRepos(pack, env);
+    if (repos.length === 0) return { refusal: GITHUB_NO_REPOS };
+    if (!repos.includes(repository)) {
+      return { refusal: `I can watch only these repositories: ${repos.join(", ")}.` };
+    }
     const filter: GitHubFilter = {
       repository,
       events: [...new Set(input.events ?? [])],

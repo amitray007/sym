@@ -1,4 +1,5 @@
 import type { Sql } from "../db.ts";
+import { isGitHubRepoAllowed } from "../github-repos.ts";
 import type { Pack } from "../pack/load.ts";
 import { deliveryKey } from "../schedules/dispatch.ts";
 import { attachSession, finishRun, markSending } from "../schedules/rows.ts";
@@ -222,6 +223,11 @@ export async function sendDeferredRuns(
 export async function creatorMayRun(deps: FireDeps, trigger: Trigger): Promise<boolean> {
   const usersEnv = deps.usersEnv ?? process.env.SYM_SLACK_USERS;
   if (!isSlackUserAllowed(deps.pack, usersEnv, trigger.owner, () => {})) return false;
+  // A GitHub trigger reads only a repository still on the owner's list (decision 091).
+  const filter = trigger.sourceFilter;
+  if (filter && "repository" in filter && !isGitHubRepoAllowed(filter.repository, deps.pack)) {
+    return false;
+  }
   const conversation = trigger.channel ?? trigger.destination;
   if (!conversation) return false;
   if (!trigger.channel && conversation.startsWith("D")) return true;

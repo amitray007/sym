@@ -67,7 +67,8 @@ Tailscale Funnel limited to the Slack path also works.
 | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET` | Optional. A GitHub App for `github` triggers and app mentions. Without all three, `/eve/v1/github` answers 404 (decision 091) |
 | `GITHUB_APP_SLUG` | Optional. The app's name in mentions, such as `sym-app`. Without it, Sym ignores mentions |
 | `LINEAR_AGENT_ACCESS_TOKEN`, `LINEAR_WEBHOOK_SECRET` | Optional. A Linear app for delegated issues and `linear` triggers. Without both, `/eve/v1/linear` answers 404 (decision 091) |
-| `SYM_GITHUB_USERS`, `SYM_LINEAR_USERS` | Optional, without a pack. Comma-separated `<GitHub login or Linear email or ID>=<Slack user ID>` pairs. A pack's `identities` replaces them |
+| `SYM_GITHUB_USERS`, `SYM_LINEAR_USERS` | Optional, without a pack. Comma-separated `<id>=<Slack user ID>` pairs: a GitHub account's numeric ID (a login maps nobody), or a Linear user ID or email. A pack's `identities` replaces them |
+| `SYM_GITHUB_REPOS` | The repositories, comma-separated `owner/name`, whose events Sym may read. Without it (and without a pack's `githubRepositories`), GitHub triggers cannot be created (decision 091) |
 | `SYM_TRIGGER_RUNS_PER_HOUR` | Optional. The most runs one trigger starts per hour, for Slack and webhook triggers. Default 20 (decision 088) |
 | `SYM_MCP_<NAME>_TOKEN` | Bearer token for an MCP connection that needs one, such as `SYM_MCP_EXAMPLE_TRACKER_TOKEN` for `example-tracker`. Sym tells the owner the exact name when the owner connects the server. Sym reads only variables named `SYM_MCP_*_TOKEN` (decision 045) |
 | `T3_MCP_URL` | Worker MCP URL when the pack has no `workers` entry |
@@ -209,7 +210,9 @@ Sym only reads events; it never edits repositories.
    `GITHUB_WEBHOOK_SECRET`, plus `GITHUB_APP_SLUG` for mentions. Keep them in the secret store.
 5. Install the app on the repositories Sym may see. Every allowed person can watch any of
    them with a trigger, so install it only where that is fine.
-6. Map people: the pack's `identities` (`github: <login>`), or `SYM_GITHUB_USERS`.
+6. List the repositories Sym may read in `SYM_GITHUB_REPOS` or the pack's `githubRepositories`.
+   Map people by GitHub account ID: the pack's `identities` (`githubId: <id>`), or
+   `SYM_GITHUB_USERS`. `gh api users/<login> --jq .id` prints an account's ID.
 7. Expose `/eve/v1/github` publicly, unrewritten, and redeploy.
 
 ## Linear app

@@ -24,6 +24,9 @@ const TEXT_MAX = 2000;
 export const GITHUB_OFF =
   "GitHub triggers are off: the owner connects a GitHub App first (GITHUB_APP_ID, " +
   "GITHUB_APP_PRIVATE_KEY, and GITHUB_WEBHOOK_SECRET).";
+export const GITHUB_NO_REPOS =
+  "GitHub triggers need the owner's repository list first (SYM_GITHUB_REPOS, or the pack's " +
+  "githubRepositories). Ask the owner to add the repository.";
 export const LINEAR_OFF =
   "Linear triggers are off: the owner connects a Linear app first (LINEAR_AGENT_ACCESS_TOKEN " +
   "and LINEAR_WEBHOOK_SECRET).";
@@ -78,11 +81,14 @@ export function matchesLinear(filter: LinearFilter, event: LinearTriggerEvent): 
   return !filter.label || lower(event.labels).includes(filter.label.toLowerCase());
 }
 
-// Fires every matching trigger once for this delivery. Never sends: the dispatcher does.
+// Fires every matching trigger once for this event. Never sends: the dispatcher does. The event
+// key names the delivery; `aliases` name its signed content, so a redelivery under another
+// delivery ID fires nothing (decision 091).
 export async function fireSourceTriggers(
   deps: FireDeps,
   event: GitHubTriggerEvent | LinearTriggerEvent,
-  delivery: string,
+  eventKey: string,
+  aliases: string[] = [],
 ): Promise<FireResult[]> {
   const results: FireResult[] = [];
   for (const trigger of await sourceTriggers(deps.sql, event.kind)) {
@@ -95,7 +101,7 @@ export async function fireSourceTriggers(
     if (!matches || !trigger.destination) continue;
     results.push({
       trigger: triggerRef(trigger.id),
-      status: await fire(deps, trigger, event, delivery),
+      status: await fire(deps, trigger, event, eventKey, aliases),
     });
   }
   return results;
@@ -107,11 +113,13 @@ async function fire(
   deps: FireDeps,
   trigger: Trigger,
   event: GitHubTriggerEvent | LinearTriggerEvent,
-  delivery: string,
+  eventKey: string,
+  aliases: string[],
 ): Promise<string> {
   const reserved = await reserveTriggerRun(deps.sql, {
     triggerId: trigger.id,
-    eventKey: `${event.kind}:${delivery}`,
+    eventKey,
+    aliases,
     facts: event,
     target: { channelId: trigger.destination ?? "" },
     deferred: true,

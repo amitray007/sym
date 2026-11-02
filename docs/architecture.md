@@ -213,16 +213,19 @@ mentions the GitHub App in a PR, or delegates a Linear issue to Sym.
 2. Triggers: `trigger_create` with `on: github` stores a filter (repository, event types
    `pull_request`, `issues`, `check_suite`, `issue_comment`, actions, label, branch); `on:
    linear` stores a team, actions, and label for issue events. Each matching event reserves one
-   deferred run per trigger, keyed by the delivery ID, under the hourly cap of flow 2b. The hooks
-   have no `to()`, so the next `dispatch` tick sends the run as the app principal into a new
-   thread at the destination, within a minute. The creator check of flow 2b applies to the
+   deferred run per trigger, keyed by the delivery ID and a hash of the signed content, on a
+   listed repository only, under the hourly cap of flow 2b. The hooks have no `to()`, so the next
+   `dispatch` tick sends the run as the app principal into a new thread at the destination,
+   within a minute. The creator check of flow 2b applies to the
    destination channel, after the reservation and before the send. The run message carries the
    event's facts (repository, number, title, link, sender, labels, branch, conclusion, body) as
    untrusted JSON data, and every turn of the session counts as having read untrusted content.
    The run acts for the creator; `worker_job` keeps the auto and ask rules.
 3. Requests: a GitHub comment that mentions `@<GITHUB_APP_SLUG>`, or a Linear Agent Session (a
    delegation or a follow-up prompt), counts as a request only when the pack's `identities` (or
-   `SYM_GITHUB_USERS`, `SYM_LINEAR_USERS`) maps the user to an allowed Slack person. Sym then
+   `SYM_GITHUB_USERS`, `SYM_LINEAR_USERS`) maps the user to an allowed Slack person: a GitHub
+   account by its numeric ID, a Linear prompt by its author's user ID. Only repositories on the
+   owner's list (`SYM_GITHUB_REPOS` or the pack's `githubRepositories`) count at all. Sym then
    posts in that person's DM like Send to Sym: a link, a quote, and "What should I do with it?".
    Their reply is their own request, with Start / Not now for Builder work. Sym answers on GitHub
    with a comment, or in Linear with a `response` activity, saying where to continue. Anyone else

@@ -68,8 +68,11 @@ playbooks: [playbooks/release-steps.md]  # existing packs keep working
 skills: [skills/investigate.md]
 identities:                       # optional; who a GitHub or Linear user is in Slack
   - slackUserId: U0123456789
-    github: octo-dev               # a GitHub login
-    linear: sam@example.com        # a Linear user's email or ID
+    githubId: 501                  # the GitHub account's numeric ID; a login alone maps nobody
+    github: octo-dev               # optional; the login, for display
+    linear: sam@example.com        # a Linear user's ID, or their email for a delegation
+githubRepositories:               # optional; the repositories GitHub triggers may read
+  - example-org/example-app
 ```
 
 Rules (decision 026):
@@ -87,9 +90,15 @@ Rules (decision 026):
   project is refused in code, and the brain sees only these names. An empty list allows nothing.
   Without a pack, `SYM_PROJECTS` plays this role.
 - The owner is always allowed; `allowList` adds people.
-- `identities` maps GitHub logins and Linear users to Slack people (decision 091). A mention of
+- `identities` maps GitHub accounts and Linear users to Slack people (decision 091). A mention of
   the GitHub App or a delegation in Linear counts as a request only from a mapped person who is
-  also allowed. Without a pack, `SYM_GITHUB_USERS` and `SYM_LINEAR_USERS` play this role.
+  also allowed. GitHub maps by `githubId`, the account's numeric ID, because a login can change
+  hands; an entry with only a `github` login maps nobody and logs a warning. A Linear follow-up
+  prompt maps by its author's user ID. Without a pack, `SYM_GITHUB_USERS` and
+  `SYM_LINEAR_USERS` play this role.
+- `githubRepositories` lists the repositories, as `owner/name`, whose events Sym may read
+  (decision 091). With none, GitHub triggers cannot be created. Without a pack,
+  `SYM_GITHUB_REPOS` plays this role.
 - Instruction, playbook, and skill files are listed by path and stay inside the pack folder,
   including their resolved symlink targets. Skill names must be valid Eve names and cannot use
   the reserved `eve` namespace. Names must be unique, ignoring case, across `playbooks` and

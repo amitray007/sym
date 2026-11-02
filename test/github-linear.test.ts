@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Sql } from "../lib/db.ts";
+import { allowedGitHubRepos } from "../lib/github-repos.ts";
 import { allowedSlackUserFor } from "../lib/identities.ts";
 import {
   GITHUB_HANDED_OFF,
@@ -29,6 +30,7 @@ import {
   type TriggerRun,
 } from "../lib/triggers/rows.ts";
 import {
+  GITHUB_NO_REPOS,
   GITHUB_OFF,
   githubConfigured,
   githubFacts,
@@ -269,20 +271,32 @@ describe("GitHub and Linear trigger filters", () => {
 });
 
 describe("identity mapping", () => {
-  it("maps only explicit, allowed people", () => {
+  it("maps only explicit, allowed people, and GitHub accounts by numeric ID", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const env = {
       SYM_SLACK_USERS: "UALLOWED",
-      SYM_GITHUB_USERS: "Octo-Dev=UALLOWED, other-dev=UGONE, bad=not-a-user",
-      SYM_LINEAR_USERS: "person@example.com=UALLOWED",
+      SYM_GITHUB_USERS: "501=UALLOWED, 777=UGONE, octo-dev=UALLOWED, 9=not-a-user",
+      SYM_LINEAR_USERS: "person@example.com=UALLOWED, lin-user-1=UALLOWED",
     };
-    expect(allowedSlackUserFor("github", ["octo-dev"], undefined, env)).toBe("UALLOWED");
-    expect(allowedSlackUserFor("github", ["other-dev"], undefined, env)).toBeUndefined();
-    expect(allowedSlackUserFor("github", ["bad"], undefined, env)).toBeUndefined();
-    expect(allowedSlackUserFor("github", ["stranger"], undefined, env)).toBeUndefined();
+    expect(allowedSlackUserFor("github", [501], undefined, env)).toBe("UALLOWED");
+    expect(allowedSlackUserFor("github", [777], undefined, env)).toBeUndefined();
+    expect(allowedSlackUserFor("github", [9], undefined, env)).toBeUndefined();
+    // A login maps nobody: logins can be renamed and taken. The entry warns.
+    expect(allowedSlackUserFor("github", ["octo-dev"], undefined, env)).toBeUndefined();
+    expect(warn.mock.calls.flat().join(" ")).toMatch(/login without a numeric ID/);
     expect(allowedSlackUserFor("linear", [undefined, "Person@Example.com"], undefined, env)).toBe(
       "UALLOWED",
     );
-    expect(allowedSlackUserFor("linear", ["octo-dev"], undefined, env)).toBeUndefined();
+    expect(allowedSlackUserFor("linear", ["lin-user-1"], undefined, env)).toBe("UALLOWED");
+    expect(allowedSlackUserFor("linear", ["501"], undefined, env)).toBeUndefined();
+    warn.mockRestore();
+  });
+
+  it("reads the owner's repository list, failing closed", () => {
+    expect(allowedGitHubRepos(undefined, {})).toEqual([]);
+    expect(
+      allowedGitHubRepos(undefined, { SYM_GITHUB_REPOS: "Example-Org/Example-App, bad, a/b" }),
+    ).toEqual(["example-org/example-app", "a/b"]);
   });
 
   it("finds the app mention as a whole token", () => {
@@ -318,8 +332,9 @@ describe.skipIf(!hasDatabase)("GitHub and Linear events", () => {
       }),
     };
     vi.stubEnv("SYM_SLACK_USERS", "UALLOWED");
-    vi.stubEnv("SYM_GITHUB_USERS", "octo-dev=UALLOWED");
-    vi.stubEnv("SYM_LINEAR_USERS", "person@example.com=UALLOWED");
+    vi.stubEnv("SYM_GITHUB_USERS", "501=UALLOWED");
+    vi.stubEnv("SYM_LINEAR_USERS", "person@example.com=UALLOWED,lin-person=UALLOWED");
+    vi.stubEnv("SYM_GITHUB_REPOS", "example-org/example-app");
     for (const [name, value] of Object.entries({ ...GITHUB_ENV, ...LINEAR_ENV })) {
       vi.stubEnv(name, value);
     }
@@ -379,6 +394,12 @@ describe.skipIf(!hasDatabase)("GitHub and Linear events", () => {
     // GitHub redelivers the same delivery: it fires nothing.
     const again = await route(github, githubRequest("pull_request", "gh-1", pullRequest()));
     await again.settle();
+    // The same signed payload under a new, unsigned delivery header: still nothing.
+    const relabeled = await route(github, githubRequest("pull_request", "gh-1b", pullRequest()));
+    await relabeled.settle();
+    // An event from a repository off the owner's list fires nothing.
+    const offList = pullRequest({ repository: { ...REPO, full_name: "example-org/private-app" } });
+    await (await route(github, githubRequest("pull_request", "gh-off", offList))).settle();
     // A forged signature never reaches the hooks.
     const forged = await route(
       github,
@@ -435,6 +456,32 @@ describe.skipIf(!hasDatabase)("GitHub and Linear events", () => {
     expect(sent.filter((s) => s.message.includes(`T-${trigger.id}:`))).toEqual([]);
   });
 
+  it("drops a run whose repository left the owner's list before delivery", async () => {
+    const trigger = await make({
+      kind: "github",
+      sourceFilter: {
+        repository: "example-org/example-app",
+        events: ["issues"],
+        actions: [],
+        label: null,
+        branch: null,
+      },
+    });
+    const issue = {
+      action: "opened",
+      repository: REPO,
+      sender: SENDER,
+      issue: { number: 31, title: "Later", html_url: "https://example.test/31", labels: [] },
+    };
+    await (await route(github, githubRequest("issues", "gh-list", issue))).settle();
+    expect((await runsOf(trigger.id))[0]?.deferred).toBe(true);
+    vi.stubEnv("SYM_GITHUB_REPOS", "example-org/other");
+    const { sent, send } = dispatcher();
+    await sendDeferredRuns({ sql: ledger.sql(), slack: runtime.slack }, send);
+    expect(sent.filter((s) => s.message.includes(`T-${trigger.id}:`))).toEqual([]);
+    expect((await runsOf(trigger.id))[0]).toMatchObject({ outcome: "failed", deferred: false });
+  });
+
   it("fires a Linear trigger from an issue webhook", async () => {
     const trigger = await make({
       kind: "linear",
@@ -453,10 +500,17 @@ describe.skipIf(!hasDatabase)("GitHub and Linear events", () => {
         labels: [],
       },
     };
-    const { response, settle } = await route(linear, linearRequest("lin-1", payload));
+    const signed = linearRequest("lin-1", payload);
+    const relabeled = new Request(signed.url, {
+      method: "POST",
+      headers: { ...Object.fromEntries(signed.headers), "linear-delivery": "lin-other" },
+      body: await signed.clone().text(),
+    });
+    const { response, settle } = await route(linear, signed);
     expect(response.status).toBe(200);
     await settle();
-    await (await route(linear, linearRequest("lin-1", payload))).settle();
+    // The same signed body under another delivery header fires nothing.
+    await (await route(linear, relabeled)).settle();
     expect(await runsOf(trigger.id)).toHaveLength(1);
     const { sent, send } = dispatcher();
     await sendDeferredRuns({ sql: ledger.sql(), slack: runtime.slack }, send);
@@ -466,39 +520,55 @@ describe.skipIf(!hasDatabase)("GitHub and Linear events", () => {
 
   it("hands a mapped person's GitHub mention to their DM and refuses anyone else", async () => {
     const replies: string[] = [];
-    const ctx = (login: string, delivery: string) => ({
-      repository: { fullName: "example-org/example-app" },
+    const ctx = (login: string, delivery: string, repo = "example-org/example-app") => ({
+      repository: { fullName: repo },
       sender: { login, type: "User" },
       delivery: { id: delivery },
       conversation: { issueNumber: 3, pullRequestNumber: null },
       thread: { post: async (text: string) => replies.push(text) },
     });
-    const comment = (login: string, body: string) => ({
-      author: { login, type: "User" },
+    let commentIds = 100;
+    const comment = (id: number, login: string, body: string, commentId = ++commentIds) => ({
+      author: { id, login, type: "User" },
       body,
-      htmlUrl: "https://github.com/example-org/example-app/issues/3#c1",
-      raw: { action: "created", issue: { number: 3 }, comment: { body } },
+      htmlUrl: `https://github.com/example-org/example-app/issues/3#c${commentId}`,
+      raw: { id: commentId, body },
     });
     const deps = { sql: ledger.sql(), allowedProjects: [], slack: runtime.slack } as LedgerDeps;
 
-    expect(
-      await onGitHubComment(deps, ctx("octo-dev", "c-1"), comment("octo-dev", "@sym-app why?")),
-    ).toBe("handed_off");
+    const mention = comment(501, "octo-dev", "@sym-app why?");
+    expect(await onGitHubComment(deps, ctx("octo-dev", "c-1"), mention)).toBe("handed_off");
     expect(posts).toHaveLength(1);
     expect(posts[0]?.channel).toBe("DUALLOWED");
     expect(posts[0]?.text).toContain("You mentioned me on GitHub");
     expect(posts[0]?.text).toContain("> @sym-app why?");
     expect(replies).toEqual([GITHUB_HANDED_OFF]);
+    // The same comment redelivered under another ID: no second DM, no second reply.
+    expect(await onGitHubComment(deps, ctx("octo-dev", "c-1b"), mention)).toBe("repeated");
+    expect(posts).toHaveLength(1);
+    expect(replies).toHaveLength(1);
 
-    expect(
-      await onGitHubComment(deps, ctx("stranger", "c-2"), comment("stranger", "@sym-app do it")),
-    ).toBe("refused");
+    // A login that matches a mapped person's old name, on another account ID, is a stranger.
+    const impostor = comment(999, "octo-dev", "@sym-app do it");
+    expect(await onGitHubComment(deps, ctx("octo-dev", "c-2"), impostor)).toBe("refused");
     expect(replies.at(-1)).toBe(GITHUB_REFUSAL);
+    // Refusals cool down per person and issue.
+    const again = comment(999, "octo-dev", "@sym-app please");
+    expect(await onGitHubComment(deps, ctx("octo-dev", "c-3"), again)).toBe("repeated");
+    expect(replies.filter((r) => r === GITHUB_REFUSAL)).toHaveLength(1);
+
+    const plain = comment(501, "octo-dev", "no mention");
+    expect(await onGitHubComment(deps, ctx("octo-dev", "c-4"), plain)).toBe("ignored");
+    const bot = {
+      ...comment(7, "sym-app[bot]", "@sym-app hi"),
+      author: { id: 7, login: "x", type: "Bot" },
+    };
+    expect(await onGitHubComment(deps, ctx("x", "c-5"), bot)).toBe("ignored");
+    // A repository off the owner's list gets nothing, not even a refusal.
+    const offList = comment(501, "octo-dev", "@sym-app hi");
     expect(
-      await onGitHubComment(deps, ctx("octo-dev", "c-3"), comment("octo-dev", "no mention")),
+      await onGitHubComment(deps, ctx("octo-dev", "c-6", "example-org/private-app"), offList),
     ).toBe("ignored");
-    const bot = { ...comment("sym-app[bot]", "@sym-app hi"), author: { login: "x", type: "Bot" } };
-    expect(await onGitHubComment(deps, ctx("x", "c-4"), bot)).toBe("ignored");
     expect(posts).toHaveLength(1);
   });
 
@@ -535,6 +605,26 @@ describe.skipIf(!hasDatabase)("GitHub and Linear events", () => {
     );
     expect(activities.at(-1)).toEqual({ type: "response", body: LINEAR_REFUSAL });
     expect(posts).toHaveLength(1);
+
+    // A follow-up prompt counts only for its own author's ID, never the session's creator.
+    const prompted = (activity: { id: string; userId?: string | null }) => ({
+      ...event("person@example.com", "s-3"),
+      action: "prompted",
+      agentActivity: { body: "do the thing", ...activity },
+    });
+    expect(
+      await onLinearAgentSession(deps, ctx, prompted({ id: "a-1", userId: "lin-other" })),
+    ).toBe("refused");
+    expect(await onLinearAgentSession(deps, ctx, prompted({ id: "a-2" }))).toBe("refused");
+    expect(await onLinearAgentSession(deps, ctx, prompted({ id: "a-3", userId: null }))).toBe(
+      "refused",
+    );
+    expect(posts).toHaveLength(1);
+    expect(
+      await onLinearAgentSession(deps, ctx, prompted({ id: "a-4", userId: "lin-person" })),
+    ).toBe("handed_off");
+    expect(posts).toHaveLength(2);
+    expect(posts[1]?.text).toContain("> do the thing");
   });
 
   it("creates GitHub and Linear triggers only when each is set up", async () => {
@@ -560,6 +650,15 @@ describe.skipIf(!hasDatabase)("GitHub and Linear events", () => {
     vi.stubEnv("GITHUB_APP_ID", GITHUB_ENV.GITHUB_APP_ID);
     expect(await call({ ...base, on: "github", repository: "not a repo" })).toBe(
       "Name the repository as owner/name.",
+    );
+    // No repository list: GitHub triggers cannot be created at all.
+    vi.stubEnv("SYM_GITHUB_REPOS", "");
+    expect(await call({ ...base, on: "github", repository: "example-org/example-app" })).toBe(
+      GITHUB_NO_REPOS,
+    );
+    vi.stubEnv("SYM_GITHUB_REPOS", "example-org/example-app");
+    expect(await call({ ...base, on: "github", repository: "example-org/private-app" })).toBe(
+      "I can watch only these repositories: example-org/example-app.",
     );
     const created = await call({
       ...base,

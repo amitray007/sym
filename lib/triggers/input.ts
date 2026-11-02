@@ -23,7 +23,7 @@ export const TriggerInput = z.object({
     .string()
     .max(200)
     .optional()
-    .describe("For 'github' only: the repository as owner/name."),
+    .describe("For 'github' only: the repository as owner/name, from the owner's list."),
   events: z
     .array(z.enum(["pull_request", "issues", "check_suite", "issue_comment"]))
     .max(4)
