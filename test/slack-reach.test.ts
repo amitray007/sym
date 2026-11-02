@@ -35,6 +35,20 @@ describe("parseSlackTarget", () => {
     expect(parseSlackTarget("C0RELEASE")).toEqual({ channel: "C0RELEASE" });
   });
 
+  it("reads a labeled link and Sym's own app_redirect thread link", () => {
+    expect(
+      parseSlackTarget("<https://acme.slack.com/archives/C0123ABC/p1730000000123456|that message>"),
+    ).toEqual({ channel: "C0123ABC", messageTs: "1730000000.123456" });
+    expect(
+      parseSlackTarget(
+        "https://slack.com/app_redirect?channel=C0123ABC&message_ts=1730000000.123456",
+      ),
+    ).toEqual({ channel: "C0123ABC", messageTs: "1730000000.123456" });
+    expect(parseSlackTarget("https://slack.com/app_redirect?channel=C0123ABC")).toEqual({
+      channel: "C0123ABC",
+    });
+  });
+
   it("rejects links outside Slack and plain names", () => {
     expect(parseSlackTarget("https://evil.example/archives/C0123ABC")).toBeUndefined();
     expect(parseSlackTarget("http://acme.slack.com/archives/C0123ABC")).toBeUndefined();

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import slackPost from "../agent/tools/slack_post.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
 import { UNREACHABLE } from "../lib/slack/reach.ts";
@@ -16,8 +17,14 @@ describe.skipIf(!hasDatabase)("slack_post", () => {
         C0SOURCE: { name: "general" },
         C0RELEASE: { name: "releases" },
         G0PRIV: { name: "secret", is_private: true },
+        G0GROUP: { is_private: true, is_mpim: true },
       },
-      members: { C0RELEASE: ["UASKER"], G0PRIV: ["UOTHER"], C0SOURCE: ["UASKER"] },
+      members: {
+        C0RELEASE: ["UASKER"],
+        G0PRIV: ["UOTHER"],
+        C0SOURCE: ["UASKER"],
+        G0GROUP: ["UASKER", "UOTHER"],
+      },
     });
   });
   afterAll(async () => slack.close());
@@ -61,6 +68,7 @@ describe.skipIf(!hasDatabase)("slack_post", () => {
     expect(await post("<#G0PRIV|secret>", "call-4")).toBe(UNREACHABLE);
     expect(await post("#nowhere", "call-5")).toBe(UNREACHABLE);
     expect(await post("DUASKER", "call-6")).toBe(UNREACHABLE);
+    expect(await post("G0GROUP", "call-8")).toBe(UNREACHABLE);
     expect(await post("#releases", "call-7", "USTRANGER")).toBe(UNREACHABLE);
     expect(slack.messages.length).toBe(before);
     vi.restoreAllMocks();
@@ -84,5 +92,22 @@ describe.skipIf(!hasDatabase)("slack_post", () => {
     expect(await postNeedsConfirmation(deps(), "s-dm", "#releases")).toBe(true);
     expect(await postNeedsConfirmation(deps(), "s-private", "<#G0PRIV|secret>")).toBe(false);
     expect(await postNeedsConfirmation(deps(), "s-unknown", "#releases")).toBe(true);
+  });
+});
+
+describe("slack_post approval", () => {
+  const approval = slackPost.approval as {
+    response: (ctx: unknown) => { status: string };
+  };
+  const answer = (requester: string | null, responder: string) =>
+    approval.response({
+      request: { principal: requester ? { principalId: requester } : null },
+      response: { decision: "approve", principal: { principalId: responder } },
+    }).status;
+
+  it("lets only the person who asked approve the post", () => {
+    expect(answer("slack:T1:UASKER", "slack:T1:UASKER")).toBe("allowed");
+    expect(answer("slack:T1:UASKER", "slack:T1:UOWNER")).toBe("rejected");
+    expect(answer(null, "slack:T1:UASKER")).toBe("rejected");
   });
 });

@@ -30,6 +30,7 @@ export interface Conversation {
 }
 
 const CHANNEL_ID = /^[CGD][A-Z0-9]{2,}$/;
+const TS = /^\d{10}\.\d{6}$/;
 
 // A link, a channel mention, or a channel ID. A #name needs a lookup, so it gives undefined
 // here; `resolveTarget` handles it.
@@ -38,7 +39,7 @@ export function parseSlackTarget(input: string): SlackTarget | undefined {
   const mention = /^<#([CG][A-Z0-9]+)(?:\|[^>]*)?>$/.exec(text);
   if (mention?.[1]) return { channel: mention[1] };
   if (CHANNEL_ID.test(text)) return { channel: text };
-  return parseLink(text.replace(/^<|>$/g, ""));
+  return parseLink(text.replace(/^<([^|>]*)(?:\|[^>]*)?>$/, "$1"));
 }
 
 function parseLink(text: string): SlackTarget | undefined {
@@ -49,13 +50,22 @@ function parseLink(text: string): SlackTarget | undefined {
     return undefined;
   }
   if (url.protocol !== "https:" || !/(^|\.)slack\.com$/.test(url.hostname)) return undefined;
+  if (url.pathname === "/app_redirect") return parseRedirect(url);
   const match = /^\/archives\/([CGD][A-Z0-9]+)(?:\/p(\d{10})(\d{6}))?\/?$/.exec(url.pathname);
   if (!match?.[1]) return undefined;
   const target: SlackTarget = { channel: match[1] };
   if (match[2] && match[3]) target.messageTs = `${match[2]}.${match[3]}`;
   const threadTs = url.searchParams.get("thread_ts");
-  if (threadTs && /^\d{10}\.\d{6}$/.test(threadTs)) target.threadTs = threadTs;
+  if (threadTs && TS.test(threadTs)) target.threadTs = threadTs;
   return target;
+}
+
+// Sym's own thread links (lib/jobs/names.ts) use Slack's app_redirect form.
+function parseRedirect(url: URL): SlackTarget | undefined {
+  const channel = url.searchParams.get("channel") ?? "";
+  if (!CHANNEL_ID.test(channel)) return undefined;
+  const messageTs = url.searchParams.get("message_ts");
+  return messageTs && TS.test(messageTs) ? { channel, messageTs } : { channel };
 }
 
 // Parses the target, and looks a #name up among the channels Sym belongs to.

@@ -26,6 +26,10 @@ export default defineTool({
       postNeedsConfirmation(ledgerDeps(), session.id, toolInput?.target).then((ask) =>
         ask ? "user-approval" : "not-applicable",
       ),
+    response: ({ request, response }) =>
+      response.principal.principalId === request.principal?.principalId
+        ? { status: "allowed" }
+        : { status: "rejected", reason: "Only the person who asked can approve this post." },
     prompt: ({ input }) => `Post this in ${input.target}?\n\n${input.text}`,
   },
   label: { start: () => "Post in Slack" },

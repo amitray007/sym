@@ -26,7 +26,10 @@ private channel holds, or Sym could carry words out of a DM into a channel.
 4. Each post names the person who asked for it ("Posted for @name").
 5. When the source conversation is private (a DM, a group DM, or a private channel), a post that
    carries text into another conversation waits for the requester to approve it. Eve's tool
-   approval shows the target and the text. An unknown source counts as private.
+   approval shows the target and the text. An unknown source counts as private. Only the
+   requester can settle it. The Slack channel therefore passes approval clicks from every allowed
+   person to Eve, and each tool's response policy decides who counts. Owner tools keep
+   `ownerResponse`.
 6. Reading is one-way by default. A read tool returns content only when the source conversation
    cannot show it to a non-member of the target: the target is the source, the target is a public
    channel, or the source is the requester's DM with Sym.
@@ -50,6 +53,8 @@ The tools land in this order, each with its own PR:
 
 - The membership check reads the target's member list on each call. A very large channel costs
   several Slack calls.
-- Posting into a DM goes through `slack_dm`, so `slack_post` refuses a DM target.
+- Posting into a DM goes through `slack_dm`, so `slack_post` refuses a DM or group DM target.
+- An allowed person who is not the owner can now cancel an owner approval. `ownerResponse`
+  already allowed that; the channel used to drop the click first.
 - New scopes need an app reinstall when their tool lands.
 - Message search stays out. The classic Slack search API needs a user token.

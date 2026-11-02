@@ -4,7 +4,7 @@ import { POST_MAX, postAndConfirm } from "./post.ts";
 import { isPrivateConversation, reachConversation, resolveTarget, UNREACHABLE } from "./reach.ts";
 
 // Posts in another channel or thread on request (decision 081). The post names who asked for
-// it. DMs go through their own tool, so a D channel is out of reach here.
+// it. DMs and group DMs go through their own tool, so they are out of reach here.
 
 export interface SlackPostInput {
   sessionId: string;
@@ -23,7 +23,7 @@ export async function postToConversation(deps: PostDeps, input: SlackPostInput):
   const target = await resolveTarget(deps.slack, input.target).catch(() => undefined);
   if (!target || target.channel.startsWith("D")) return UNREACHABLE;
   const reached = await reachConversation(deps, input.requester, target.channel);
-  if (!reached) return UNREACHABLE;
+  if (!reached || reached.isDirect) return UNREACHABLE;
   const outcome = await postAndConfirm(deps, {
     key: `slack-post:${input.sessionId}:${input.callId}`,
     channel: target.channel,

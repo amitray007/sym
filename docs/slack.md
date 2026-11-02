@@ -172,9 +172,11 @@ on the Home tab: reinstall the app after you import this change, or Slack sends 
 `app_home_opened`. To post the digest in a channel, invite Sym to it first;
 the manifest has no `chat:write.public`.
 
-Allow-list: the pack's owner and `allowList`, or `SYM_SLACK_USERS` without a pack. Approvals
-(tool approvals such as schedules, playbooks, and Stop) count only from the owner: the pack owner,
-else `SYM_OWNER_SLACK_USER`. Start / Not now proposals and worker questions stay open to allowed
+Allow-list: the pack's owner and `allowList`, or `SYM_SLACK_USERS` without a pack. Owner
+approvals (tool approvals such as schedules, playbooks, and Stop) count only from the owner: the
+pack owner, else `SYM_OWNER_SLACK_USER`. Each tool's response policy enforces this, and an allowed
+person may still cancel one. A `slack_post` approval counts only from the person who asked
+(decision 081). Start / Not now proposals and worker questions stay open to allowed
 users. Every inbound
 handler checks it and fails closed, including answers to buttons. Free-text answers go through
 Eve's "Type your answer" box, so the same check covers them; a reply typed in the thread is a new
