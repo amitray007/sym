@@ -385,10 +385,17 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
           is_channel: !channel.startsWith("D"),
           is_im: channel.startsWith("D"),
           is_private: false,
+          is_member: true,
           ...known,
         },
       };
     },
+    "users.conversations": () => ({
+      channels: Object.entries(options.channels ?? {})
+        .filter(([, channel]) => channel.is_member !== false && channel.name !== undefined)
+        .map(([id, channel]) => ({ id, name: channel.name })),
+      response_metadata: { next_cursor: "" },
+    }),
     "conversations.open": (b) => {
       if (!b.users) throw "users_list_not_supplied";
       return { channel: { id: `D${String(b.users).split(",")[0]}` } };
