@@ -1,6 +1,7 @@
 import { digestEnabled } from "./digest/post.ts";
 import { prFollowEnabled } from "./jobs/pr-wakes.ts";
 import { verifierEnabled } from "./jobs/verify.ts";
+import { sandboxEnabled, sandboxNetwork } from "./sandbox/config.ts";
 import { codeChannelsOn } from "./slack/code-channel.ts";
 
 // What this deployment can do, for the brain's instructions (decision 068). Each line reads the
@@ -27,6 +28,7 @@ export function capabilityInstructions(env: Record<string, string | undefined> =
       ? "- Sym follows a job's pull request and reports CI and review changes."
       : "- Sym does not follow pull requests after a job ends.",
     digestEnabled(env) ? "- Sym posts a daily digest." : "- The daily digest is off.",
+    ...sandboxLines(env),
   ];
   return [
     "# What Sym can do here",
@@ -35,4 +37,21 @@ export function capabilityInstructions(env: Record<string, string | undefined> =
     "",
     ...lines,
   ].join("\n");
+}
+
+// The sandbox (decision 089): what it is for, what it cannot reach, and the repository rule.
+function sandboxLines(env: Record<string, string | undefined>): string[] {
+  if (!sandboxEnabled(env)) {
+    return [
+      "- The sandbox is off. You cannot run commands or open shared files; a shared file reaches you as a note with its name. If someone asks, say the owner can turn the sandbox on (`SYM_SANDBOX`).",
+    ];
+  }
+  return [
+    "- You have a sandbox for this conversation: a private Linux workspace with `bash`, `read_file`, `write_file`, `glob`, and `grep` (the default image also has Python 3, Node.js, and jq). Use it to compute, to open and analyze files people share in Slack (they appear as attached files under .eve/attachments), to run small scripts, and to prepare text or data.",
+    sandboxNetwork(env)
+      ? "- Sandbox commands can reach the network. Fetch only what the request needs."
+      : "- The sandbox has no network. Do not try to install packages or call outside services from it.",
+    "- The sandbox holds no secrets and no repository credentials. Never clone a repository to change it, and never push from it: code changes and repository checkouts go to the worker as a job. Production and customer data stay read-only there too.",
+    "- If a sandbox tool says the sandbox is unavailable, say so briefly and answer without it.",
+  ];
 }

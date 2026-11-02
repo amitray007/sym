@@ -196,9 +196,10 @@ export class Conversation {
     this.channel = channel;
   }
 
-  // Posts the root message as the owner and sends Sym the signed app_mention.
-  async mention(text: string, user = OWNER): Promise<void> {
-    const root = this.h.slack.addMessage({ channel: this.channel, user, text });
+  // Posts the root message as the owner and sends Sym the signed app_mention. `files` are Slack
+  // file objects from `h.slack.addFile`.
+  async mention(text: string, user = OWNER, files?: unknown[]): Promise<void> {
+    const root = this.h.slack.addMessage({ channel: this.channel, user, text, files });
     this.rootTs = root.ts;
     await postSlack(
       this.h,
@@ -208,6 +209,7 @@ export class Conversation {
         user,
         text,
         ts: root.ts,
+        ...(files ? { files } : {}),
       }),
     );
   }

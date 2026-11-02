@@ -3,3 +3,8 @@ minimumReleaseAgeStrict: true
 allowBuilds:
   esbuild: true
   sharp: false
+# just-bash (the dev and e2e sandbox, decision 089) lists native codecs as optional. Basic shell
+# and file work does not need them, so they are skipped, as `eve dev` does when it installs it.
+ignoredOptionalDependencies:
+  - "@mongodb-js/zstd"
+  - node-liblzma

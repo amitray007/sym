@@ -26,6 +26,18 @@ services:
       DATABASE_URL: postgres://sym:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@sym-postgres:5432/sym
     volumes:
       - workflow-data:/app/.eve/.workflow-data
+      # Sandbox (decision 089), opt-in: uncomment this line and `group_add` below, and set
+      # SYM_SANDBOX=on and DOCKER_GID (the group that owns the socket: `stat -c %g
+      # /var/run/docker.sock` on the host). Sym then starts one limited container per Slack
+      # thread for the brain's shell and file tools.
+      # Trade-off: the Docker socket controls the host's Docker daemon, which is root on the host.
+      # The brain never reaches it (its commands run inside a sandbox container with no socket),
+      # but anyone who takes over the Sym process would. To keep that off this host, leave the
+      # socket out and set DOCKER_HOST to a separate Docker host, such as a small VM that runs
+      # only sandboxes (docs/self-hosting.md).
+      # - /var/run/docker.sock:/var/run/docker.sock
+    # group_add:
+    #   - ${DOCKER_GID:?set DOCKER_GID}
     depends_on:
       postgres:
         condition: service_healthy

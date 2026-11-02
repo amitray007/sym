@@ -13,8 +13,13 @@ WORKDIR /app
 # and playbooks) before the Eve build. Without the flag this stage is empty and the build adds nothing.
 FROM scratch AS pack
 
-# Build stage: all dependencies, then the Eve build. Sym sets defaultTools: false and uses no
-# sandbox, so the build skips the sandbox image prewarm.
+# The docker CLI, for the sandbox (decision 089). Sym runs sandbox containers through the host's
+# Docker daemon when compose.yaml mounts its socket. Without the socket the sandbox stays off.
+FROM docker:29.4.0-cli AS docker-cli
+
+# Build stage: all dependencies, then the full Eve build. It records the sandbox artifact that
+# `eve start` needs. Sym's Docker provider builds no template image, so this step needs no Docker
+# daemon (decision 089).
 FROM base AS build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
@@ -22,7 +27,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 COPY . .
 RUN --mount=type=bind,from=pack,target=/pack \
     if [ -f /pack/sym.config.yaml ]; then node scripts/pack-overlay.ts /pack /app; fi
-RUN pnpm build:compile
+RUN pnpm build
 
 # Dependency stage: production dependencies only.
 FROM base AS prod-deps
@@ -34,6 +39,7 @@ FROM node:${NODE_VERSION}-slim AS runtime
 ENV NODE_ENV=production \
     PORT=3000
 WORKDIR /app
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/.output ./.output
 COPY --from=build /app/.eve ./.eve
