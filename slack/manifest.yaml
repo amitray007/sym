@@ -44,6 +44,10 @@ oauth_config:
       - reactions:read
       - reactions:write
       - users:read
+      # Pins, bookmarks, and channel canvases on request (decision 084).
+      - pins:write
+      - bookmarks:write
+      - canvases:write
       # Code channels: create, archive, status, and context bar (decision 067). Eve reads
       # conversations.info to tell a code channel apart, which needs the read scopes.
       - code_channels:manage

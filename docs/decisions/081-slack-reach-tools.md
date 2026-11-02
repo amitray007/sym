@@ -45,8 +45,8 @@ The tools land in this order, each with its own PR:
 | `slack_read` | Read a linked message or thread | Built (083) |
 | `slack_edit`, `slack_delete` | Change or remove Sym's own posts | Built (082) |
 | `slack_dm` | Send a person a DM | Built (083) |
-| `slack_pin` | Pin a message or add a channel bookmark (`pins:write`, `bookmarks:write`) | Planned |
-| `slack_canvas` | Write a canvas (`canvases:write`) | Planned |
+| `slack_pin`, `slack_bookmark` | Pin a message or add a channel bookmark (`pins:write`, `bookmarks:write`) | Built (084) |
+| `slack_canvas` | Write a canvas (`canvases:write`) | Built (084) |
 | `slack_user` | Look up a person's name, time zone, and status | Built (083) |
 
 ## Consequences

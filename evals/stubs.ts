@@ -56,6 +56,14 @@ export const writeToolStubs = [
   { id: "slack-react", tool: "slack_react", outcome: { response: "Reacted with :tada:." } },
   // Decision 083: DMs write; reads and lookups reach Slack, so they are stubbed too.
   { id: "slack-dm", tool: "slack_dm", outcome: { response: "Sent to Priya." } },
+  // Decision 084: pins, bookmarks, and canvases change a channel.
+  { id: "slack-pin", tool: "slack_pin", outcome: { response: "Pinned." } },
+  { id: "slack-bookmark", tool: "slack_bookmark", outcome: { response: "Bookmarked." } },
+  {
+    id: "slack-canvas",
+    tool: "slack_canvas",
+    outcome: { response: "Added to the channel canvas." },
+  },
   {
     id: "slack-read",
     tool: "slack_read",

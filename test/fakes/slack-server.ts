@@ -136,6 +136,7 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
   const botUserId = options.botUserId ?? "UBOT";
   const teamId = options.teamId ?? "T0FAKE";
   const calls: FakeSlackCall[] = [];
+  const pins = new Set<string>();
   const messages: FakeSlackMessage[] = [];
   const ephemerals: FakeSlackMessage[] = [];
   const reactions: FakeSlackReaction[] = [];
@@ -293,6 +294,35 @@ export async function startFakeSlack(options: FakeSlackOptions = {}): Promise<Fa
         .slice(0, limit)
         .map((m) => (m.ts === root.ts ? { ...m, thread_ts: root.ts } : m));
       return { messages: kept, has_more: false };
+    },
+    "pins.add": (b) => {
+      const key = `${String(b.channel)}:${String(b.timestamp)}`;
+      if (!find(b.channel, b.timestamp)) throw "message_not_found";
+      if (pins.has(key)) throw "already_pinned";
+      pins.add(key);
+      return {};
+    },
+    "pins.remove": (b) => {
+      if (!pins.delete(`${String(b.channel)}:${String(b.timestamp)}`)) throw "no_pin";
+      return {};
+    },
+    "bookmarks.add": (b) => ({
+      bookmark: { id: `Bk${calls.length}`, channel_id: b.channel_id, title: b.title, link: b.link },
+    }),
+    "conversations.canvases.create": (b) => {
+      const channel = String(b.channel_id);
+      options.channels = options.channels ?? {};
+      const known = options.channels[channel] ?? {};
+      if ((known.properties as { canvas?: unknown } | undefined)?.canvas) {
+        throw "channel_canvas_already_exists";
+      }
+      const id = `FCANVAS${channel}`;
+      options.channels[channel] = { ...known, properties: { canvas: { file_id: id } } };
+      return { canvas_id: id };
+    },
+    "canvases.edit": (b) => {
+      if (!String(b.canvas_id).startsWith("F")) throw "canvas_not_found";
+      return {};
     },
     "conversations.history": (b) => {
       const limit = b.limit === undefined ? 100 : Number(b.limit);
