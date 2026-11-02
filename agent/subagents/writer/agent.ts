@@ -4,8 +4,8 @@ import { stepModel } from "../../../lib/brain/model.ts";
 
 // The `writer` subagent (decision 062). Only worker_job calls it, through ctx.agent with an
 // output schema, so the brain does not see it as a tool. It writes a finished job's result in
-// the persona's voice. It uses the same model selection as the brain (agent/agent.ts): SYM_MODEL,
-// a gateway model ID, or `fixture` for the scripted writer in local end-to-end runs.
+// the persona's voice. It uses the same model selection as the brain (agent/agent.ts): a
+// gateway or direct model from SYM_MODEL and SYM_MODEL_PROVIDER, or `fixture` for the scripted writer in local end-to-end runs.
 
 export default defineAgent({
   description: "Write a finished worker job's result message in Sym's voice. Called by worker_job.",
