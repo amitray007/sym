@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { capabilityInstructions } from "../lib/capabilities.ts";
 
 describe("capabilityInstructions", () => {
+  it("offers public-page reads and makes search conditional on the model route", () => {
+    for (const env of [{}, { SYM_MODEL: "fixture" }, { SYM_MODEL_PROVIDER: "openai" }]) {
+      const instructions = capabilityInstructions(env);
+      expect(instructions).toContain("Sym can read public web pages.");
+      expect(instructions).toContain("Web search depends on the current model route");
+      expect(instructions).toContain("use it only when the tool is available");
+    }
+  });
+
   it("names the code channel tool only when code channels are on", () => {
     const on = capabilityInstructions({ SYM_CODE_CHANNELS: "on" });
     expect(on).toContain("Code channels are on.");

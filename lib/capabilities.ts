@@ -18,6 +18,7 @@ export function capabilityInstructions(env: Record<string, string | undefined> =
       ];
   const lines = [
     ...codeChannels,
+    "- Sym can read public web pages. Web search depends on the current model route; use it only when the tool is available. If search is unavailable, read a known URL or ask for one.",
     verifierEnabled(env)
       ? "- A model check (the verifier) reviews each finished code job against its brief."
       : "- Finished code jobs get rule checks only; the model check (the verifier) is off.",
