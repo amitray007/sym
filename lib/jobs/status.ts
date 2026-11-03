@@ -61,6 +61,18 @@ export function jobListAnswer(jobs: Job[], now: Date): string {
     .join("\n");
 }
 
+export function jobStatusList(jobs: Job[], now: Date) {
+  return {
+    answer: jobListAnswer(jobs, now),
+    jobs: jobs.map((job) => ({
+      job: jobRef(job.id),
+      title: job.title,
+      status: job.status,
+      updatedAt: job.updatedAt.toISOString(),
+    })),
+  };
+}
+
 // "for 14m" while a job runs, "14m ago" once it ended.
 function age(job: Job, now: Date): string {
   if (job.finishedAt) return `${formatDuration(now.getTime() - job.finishedAt.getTime())} ago`;

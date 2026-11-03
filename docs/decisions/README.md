@@ -91,3 +91,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [084](084-pins-bookmarks-canvases.md) | `slack_pin`, `slack_bookmark`, and `slack_canvas` act for members on request; a canvas write only creates or appends; new scopes need a reinstall |
 | [085](085-agent-schedules.md) | A schedule is an instruction for the brain, with a Builder mode (`ask` or `auto`) and a destination; anyone allowed creates one, active at once; `at` makes a one-time run; a run acts for its creator |
 | [086](086-web-tools.md) | The brain reads public web pages and uses provider-managed search when supported; other default tools stay off and workers get no web access through Sym |
+| [087](087-subagents-and-skills.md) | The brain uses a read-only researcher and loads repo and pack skills on demand; workers get neither |

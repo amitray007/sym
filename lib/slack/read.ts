@@ -104,9 +104,12 @@ function toMessages(raw: unknown): ReadMessage[] {
     }));
 }
 
-// Turns that read Slack content (decision 083). That content may carry instructions, so any
-// write the brain makes later in the same turn waits for the requester's approval.
-const readTurns = new Set<string>();
+// Posts and DMs after untrusted source reads need requester approval (decisions 083 and 087).
+// Workflow steps and approval policies have separate bundles in the same app process.
+const readTurnsKey = Symbol.for("sym.slack.read-turns");
+const shared = globalThis as typeof globalThis & { [readTurnsKey]?: Set<string> };
+shared[readTurnsKey] ??= new Set<string>();
+const readTurns = shared[readTurnsKey];
 
 export function markReadInTurn(sessionId: string, turnId: string): void {
   readTurns.add(`${sessionId}:${turnId}`);

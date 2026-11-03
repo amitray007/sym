@@ -15,9 +15,9 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Agent definition | `agent/agent.ts` `defineAgent` | Use | Model, limits, compaction | Self-hosted upgrades strand running sessions |
 | Model | Gateway model ID from `SYM_MODEL`, read by `defineDynamic` before each model call (decision 018), or a direct Anthropic or OpenAI model when `SYM_MODEL_PROVIDER` names one (decision 080) | Use | Chat, briefs, triage, summaries. Workers do heavy work | Needs `AI_GATEWAY_API_KEY` off Vercel, or the direct provider's API key. The model is fixed per session |
 | Dynamic model | `defineDynamic(ctx => model)` with a turn-keyed `ctx.memo` | Later | Cheap model for status, stronger model for planning | Switching mid-session loses the prompt cache |
-| Spend limits | `limits.sessionUsage` | Use | $2 of brain model cost per window, then Eve asks to continue or stop; Continue starts a new window (`agent/agent.ts`) | Only AI Gateway reports cost. A direct provider is priced from its tokens at reference rates (`lib/brain/budget.ts`, decision 080) |
+| Spend limits | `limits.sessionUsage` | Use | $2 of brain model cost per window, then Eve asks to continue or stop; Continue starts a new window (`agent/agent.ts`) | Research has its own $0.50 window (`SYM_RESEARCH_BUDGET_USD`); other children inherit the root threshold. Child tokens and cost roll into the parent when their task ends. Parallel calls can overshoot before the next check. A direct provider is priced from its tokens at reference rates (`lib/brain/budget.ts`, decisions 080 and 087) |
 | Instructions | `agent/instructions.md`, `instructions/` | Use | Persona, consent, Slack style | TS instructions evaluate at build time |
-| Skills | `agent/skills/*.md` | Use | Pack playbooks through the overlay (decision 035). The brief rules live in `agent/instructions.md`, and the progress and result rules in code (`lib/jobs/progress.ts`, `lib/jobs/verify.ts`) | Supporting files need a sandbox |
+| Skills | `agent/skills/*.md` | Use | Repo procedures and pack `skills` or legacy `playbooks` through the overlay; `eve__skill` loads their text on demand (decision 087). Approved Layer 2 rows stay instructions | Supporting files need a sandbox. Worker MCP does not publish skills |
 
 ## Tools and durable work
 
@@ -30,8 +30,8 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Questions | `ctx.ask` | Use | Worker questions become Slack buttons | `unavailable` in Markdown schedule sessions |
 | Durable timer | `sleep()` from `workflow` | Use | Waits between worker checks, no compute | |
 | Callback URL | `createWebhook()` | Use | The worker POSTs its result for instant completion | Race with `sleep()` for the polling fallback |
-| Subagents | `ctx.agent(name).send(msg, { outputSchema })` | Use | `verifier` (`tool: false`, no tools) checks a code result against the brief from the `worker_job` body (decision 032) | Body only, not in a step. Shares the parent's token budget |
-| Fan-out | `workflow({ maxSubagents })` | Later | Parallel triage | The program cannot call tools |
+| Subagents | `ctx.agent(name).send(msg, { outputSchema })` | Use | `researcher` uses only web tools, Slack reads, and saved ledger status through a caller-guarded task (decision 087). `verifier` and `writer` stay private to `worker_job`, with no tools | Body only, not in a step. Each child has its own usage window; its usage reaches the parent when the task ends |
+| Fan-out | Independent `research` tasks | Use | Separate read-only questions run in parallel | Instructions limit research to three concurrent calls; no hard concurrency cap. Eve allows 32 working tasks per session. No sandbox or `workflow({ maxSubagents })` tool. Root `agent` copies are disabled because they inherit writes |
 | Opt-in tools | `no_reply` | Use | Silence for a clean scheduled check | |
 | Default tools | `web_fetch`, `web_search` | Use only web tools | `defaultTools: false`; add back public-page reads and provider-managed search (decision 086). Workers do repository work | Fetch refuses workers and private network destinations. Eve excludes provider-managed search from MCP publication. Gateway search uses Exa; direct models use native search when supported. Unsupported routes, including the fixture, omit search |
 | Sandbox | Docker, microsandbox, just-bash | Skip | Not needed while workers do the work | Docker needs the host socket |

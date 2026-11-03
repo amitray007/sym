@@ -1,8 +1,8 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { checkJob } from "../../lib/jobs/run.ts";
-import { freshJobStatus, jobListAnswer } from "../../lib/jobs/status.ts";
-import { jobRef, recentJobs } from "../../lib/ledger/jobs.ts";
+import { freshJobStatus, jobStatusList } from "../../lib/jobs/status.ts";
+import { recentJobs } from "../../lib/ledger/jobs.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
 import { requesterOf } from "../../lib/requester.ts";
 import { ledger, ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
@@ -26,10 +26,7 @@ export default defineTool({
       const today = new Date(now);
       today.setUTCHours(0, 0, 0, 0);
       const jobs = await recentJobs(sql, today);
-      return {
-        answer: jobListAnswer(jobs, now),
-        jobs: jobs.map((job) => ({ job: jobRef(job.id), title: job.title, status: job.status })),
-      };
+      return jobStatusList(jobs, now);
     }
     const status = await freshJobStatus(
       sql,

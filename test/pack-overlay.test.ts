@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PackError } from "../lib/pack/load.ts";
-import { applyPackOverlay, skillMarkdown } from "../lib/pack/overlay.ts";
+import { applyPackOverlay } from "../lib/pack/overlay.ts";
+import { skillMarkdown } from "../lib/pack/skills.ts";
 
 const FIXTURE = join(import.meta.dirname, "fixtures/pack");
 let app: string;
@@ -77,4 +78,41 @@ describe("skillMarkdown", () => {
       '---\ndescription: "Hello"\ndeferred: true\n---\nHello\n',
     );
   });
+});
+
+it("overlays explicit pack skills and rejects bad skills before writing", () => {
+  const dir = mkdtempSync(join(tmpdir(), "sym-skills-"));
+  try {
+    writeFileSync(
+      join(dir, "sym.config.yaml"),
+      JSON.stringify({
+        owner: { slackUserId: "UOWNER" },
+        skills: ["investigate.md"],
+      }),
+    );
+    writeFileSync(join(dir, "investigate.md"), "Compare sources.\nRead two sources.\n");
+    const result = applyPackOverlay(dir, app);
+    expect(result.skills).toEqual(["agent/skills/investigate.md"]);
+    expect(readFileSync(join(app, "agent/skills/investigate.md"), "utf8")).toContain(
+      'description: "Compare sources."',
+    );
+    writeFileSync(join(dir, "investigate.md"), "---\ndescription: []\n---\nBody");
+    expect(() => applyPackOverlay(dir, app)).toThrow(/invalid skill frontmatter/);
+    expect(readFileSync(join(app, "agent/skills/investigate.md"), "utf8")).toContain(
+      "Read two sources.",
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it.each([
+  "---\nRead two sources.\n",
+  "---\n---\nRead two sources.\n",
+  "---\nA section\n---\nRead sources.",
+])("normalizes legacy Markdown rules and empty frontmatter for Eve", (content) => {
+  const markdown = skillMarkdown("legacy", content);
+  expect(markdown).toMatch(/^---\ndescription: /);
+  expect(markdown).toContain("Read");
+  expect(markdown).not.toContain('description: "Playbook legacy."');
 });

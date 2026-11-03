@@ -4,6 +4,7 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse } from "yaml";
 import { type PackSchedule, parsePackSchedules, SCHEDULES_NAME } from "./schedules.ts";
 import { findSecretFields, type PackConfig, packSchema } from "./schema.ts";
+import { validatePackSkills } from "./skills.ts";
 
 export const MANIFEST_NAME = "sym.config.yaml";
 
@@ -23,6 +24,7 @@ export interface Pack {
   instructions: PackFile[];
   persona?: PackFile;
   playbooks: PackFile[];
+  skills: PackFile[];
   // The schedules to seed from schedules.yaml (decision 055). Empty without the file.
   schedules: PackSchedule[];
 }
@@ -121,12 +123,16 @@ export function loadPack(dir: string): Pack {
 
   const config = parsed.data;
   const persona = config.persona ? readReferenced(root, [config.persona], "persona")[0] : undefined;
+  const playbooks = readReferenced(root, config.playbooks, "playbooks");
+  const skills = readReferenced(root, config.skills, "skills");
+  validatePackSkills(playbooks, skills);
   return {
     dir: root,
     config,
     instructions: readReferenced(root, config.instructions, "instructions"),
     ...(persona ? { persona } : {}),
-    playbooks: readReferenced(root, config.playbooks, "playbooks"),
+    playbooks,
+    skills,
     schedules: readSchedules(root, config),
   };
 }

@@ -20,15 +20,17 @@ export default defineTool({
   label: { start: () => "Read Slack" },
   async execute({ target }, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
+    const source = ctx.session.parent ?? { sessionId: ctx.session.id, turn: ctx.session.turn };
     const result = await readConversation(
       { sql: ledger(), slack: slackFromEnv(), pack: pack() },
       {
-        sessionId: ctx.session.id,
-        requester: await requesterOf(ctx.session, ledgerDeps),
+        sessionId: source.sessionId,
+        // A researcher reads for the parent session's requester, a run's creator included.
+        requester: await requesterOf({ id: source.sessionId, auth: ctx.session.auth }, ledgerDeps),
         target,
       },
     );
-    if (typeof result !== "string") markReadInTurn(ctx.session.id, ctx.session.turn.id);
+    if (typeof result !== "string") markReadInTurn(source.sessionId, source.turn.id);
     return result;
   },
 });

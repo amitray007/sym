@@ -418,6 +418,7 @@ describe.skipIf(!hasDatabase)("job buttons", () => {
       }),
       instructions: [],
       playbooks: [],
+      skills: [],
       schedules: [],
     };
     const ref = `J-${job.id}`;

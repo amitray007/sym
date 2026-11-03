@@ -180,3 +180,77 @@ describe("pack policy", () => {
     expect(isAllowedSlackUser(ownerOnly, "U0SAM0001")).toBe(false);
   });
 });
+
+describe("pack skills", () => {
+  it("loads a flat skill beside existing playbooks", () => {
+    const dir = packWith(
+      { ...base, skills: ["investigate.md"] },
+      { "investigate.md": "---\ndescription: Compare sources.\n---\nRead two sources.\n" },
+    );
+    expect(loadPack(dir).skills).toEqual([
+      { path: "investigate.md", content: expect.stringContaining("Read two sources.") },
+    ]);
+    expect(loadPack(packWith(base)).skills).toEqual([]);
+  });
+
+  it.each([
+    ["bad name.md", "Read sources.", /invalid.*skill name/],
+    ["eve__skill.md", "Read sources.", /reserved skill name/],
+    ["empty.md", "   ", /body is empty/],
+    ["bad.md", "---\ndescription: [wrong]\n---\nRead sources.", /invalid skill frontmatter/],
+    [
+      "bad.md",
+      "---\ndescription: Fine\ndeferred: yes\n---\nRead sources.",
+      /invalid skill frontmatter/,
+    ],
+    ["bad.md", "---\ndescription: Fine\nRead sources.", /unclosed frontmatter/],
+  ])("refuses invalid skill %s", (name, content, error) => {
+    const dir = packWith({ ...base, skills: [name] }, { [name]: content });
+    expect(() => loadPack(dir)).toThrow(error);
+  });
+
+  it("refuses skills outside the pack, including symlinks", () => {
+    const outside = packWith(base, { "source.md": "Read sources." });
+    const dir = packWith({ ...base, skills: ["linked.md"] });
+    symlinkSync(join(outside, "source.md"), join(dir, "linked.md"));
+    expect(() => loadPack(dir)).toThrow(/outside the pack folder/);
+    expect(() => loadPack(packWith({ ...base, skills: ["../outside.md"] }))).toThrow(/outside/);
+  });
+
+  it("refuses names repeated across skills and legacy playbooks", () => {
+    const dir = packWith(
+      { ...base, skills: ["shared.md"], playbooks: ["shared.md"] },
+      { "shared.md": "Read sources." },
+    );
+    expect(() => loadPack(dir)).toThrow(/Two pack skills/);
+  });
+});
+
+it.each([
+  "---\nRead two sources.\n",
+  "---\n---\nRead two sources.\n",
+  "---\nA section\n---\nRead sources.",
+])("keeps legacy Markdown rules and empty frontmatter", (content) => {
+  const dir = packWith({ ...base, playbooks: ["legacy.md"] }, { "legacy.md": content });
+  expect(loadPack(dir).playbooks[0]?.content).toBe(content);
+});
+
+it("rejects skill files larger than 64 KiB of UTF-8 text", () => {
+  const dir = packWith({ ...base, skills: ["large.md"] }, { "large.md": "é".repeat(32_768) });
+  expect(loadPack(dir).skills).toHaveLength(1);
+  writeFileSync(join(dir, "large.md"), "é".repeat(32_769));
+  expect(() => loadPack(dir)).toThrow(/skills "large.md": skill exceeds 65536 bytes/);
+});
+
+it("rejects case-insensitive collisions across legacy playbooks and skills", () => {
+  const dir = packWith(
+    { ...base, playbooks: ["Shared.md"], skills: ["shared.md"] },
+    { "shared.md": "Read sources.", "Shared.md": "Read sources." },
+  );
+  expect(() => loadPack(dir)).toThrow(/Two pack skills/);
+});
+
+it("names the playbooks field for legacy file validation errors", () => {
+  const dir = packWith({ ...base, playbooks: ["bad name.md"] }, { "bad name.md": "Read sources." });
+  expect(() => loadPack(dir)).toThrow(/playbooks "bad name.md"/);
+});

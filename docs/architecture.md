@@ -52,7 +52,12 @@ Job statuses: `launching`, `running`, `waiting_input`, `waiting_permission`, `qu
 
 Example: "@sym add retry with backoff to the billing sync in sync-service, open a draft PR".
 
-The brain checks read-only facts with its own tools first. A problem report does not grant
+The brain checks read-only facts with its own tools first. A multi-source question can use the
+isolated `researcher`, which reads public web pages, searches when supported, reads Slack under
+the parent conversation's privacy rules, and reads saved job status. It cannot post, change state,
+use connections, or start Builder work. Independent research tasks can run in parallel. Repo and
+pack skills load procedure text on demand through `eve__skill`; neither research nor skills give
+worker callers new access (decision 087). A problem report does not grant
 Builder consent (decision 071). A job needs an explicit Builder request or acceptance of a
 specific offer, including for repository investigations. Sym never edits repositories itself.
 Interactive chat requests show Start / Not now, even for trusted playbooks. Runs of a schedule
