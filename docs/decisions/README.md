@@ -18,13 +18,13 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [010](010-adopter-packs.md) | Adopter specifics live in packs |
 | [011](011-display-rule-in-code.md) | The display rule lives in code |
 | [012](012-mit-license.md) | MIT license |
-| [013](013-project-tooling.md) | Project tooling |
+| [013](013-project-tooling.md) | Project tooling; the deploy build changed by 089 |
 | [014](014-local-postgres.md) | Local Postgres and the database client |
 | [015](015-adapter-mcp-client.md) | Worker adapters call the worker from code |
 | [016](016-ledger-migrations.md) | Ledger migrations live in code |
 | [017](017-t3-job-task.md) | `t3_job` is a task with ledger-backed steps |
 | [018](018-gateway-model.md) | The brain model goes through the AI Gateway |
-| [019](019-container-image.md) | Container image and API token |
+| [019](019-container-image.md) | Container image and API token; the full build and the docker CLI added by 089 |
 | [020](020-job-presentation.md) | The ledger holds the job card, and delivery syncs it |
 | [021](021-brief-approval-in-task.md) | The owner starts each job from the brief |
 | [022](022-reconcile-drives-orphans.md) | Reconcile drives orphaned jobs in code |
@@ -93,3 +93,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [086](086-web-tools.md) | The brain reads public web pages and uses provider-managed search when supported; other default tools stay off and workers get no web access through Sym |
 | [087](087-subagents-and-skills.md) | The brain uses a read-only researcher and loads repo and pack skills on demand; workers get neither |
 | [088](088-channel-triggers.md) | A trigger is a schedule fired by a new message or a reaction in a watched channel Sym shares with its creator; runs act for the creator, the event is untrusted data, one run per event under an hourly cap; "Send to Sym" opens a DM about a message |
+| [089](089-sandbox.md) | With `SYM_SANDBOX=on` the brain gets a sandbox per Slack thread with Eve's `bash`, `read_file`, `write_file`, `glob`, and `grep`: Sym's Docker provider in production (limits, no network by default, no secrets, opt-in socket mount) and just-bash in dev; Slack files open there; repository work still goes to Builder |

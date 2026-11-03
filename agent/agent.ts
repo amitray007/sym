@@ -7,7 +7,8 @@ import { stepModel } from "../lib/brain/model.ts";
 // (decisions 018, 080), shared with the subagents. Workers run their own models on the worker host.
 
 export default defineAgent({
-  // Workers do repository work, so Sym needs no shell or file tools (docs/eve.md).
+  // Sym adds each tool explicitly. The sandbox tools (bash, read_file, write_file, glob, grep)
+  // are for compute and shared files only; workers still do all repository work (decision 089).
   defaultTools: false,
   // Root copies would inherit worker_job and Slack write tools.
   tool: false,

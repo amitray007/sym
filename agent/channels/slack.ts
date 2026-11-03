@@ -680,9 +680,15 @@ export default slackChannel({
   // Off unless SYM_CODE_CHANNELS is on: Eve then serves each code channel as one session, and the
   // generated manifest asks for the code channel scopes and events.
   codeChannels: codeChannelsOn(),
-  // Undefined keeps Slack's own host. Tests and the local e2e point it at a fake Slack server.
+  // Undefined keeps Slack's own host. Tests and the local e2e point it at a fake Slack server,
+  // whose private file downloads live on the same host (decision 089).
   ...(process.env.SLACK_API_BASE_URL
-    ? { api: { apiBaseUrl: process.env.SLACK_API_BASE_URL } }
+    ? {
+        api: {
+          apiBaseUrl: process.env.SLACK_API_BASE_URL,
+          fileBaseUrl: new URL("/", process.env.SLACK_API_BASE_URL).href,
+        },
+      }
     : {}),
   // A session's first turn reads the whole thread. Later turns read what came after Sym's last
   // post, because the session already holds the rest (docs/eve.md, decision 050).

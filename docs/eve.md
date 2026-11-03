@@ -34,7 +34,8 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Fan-out | Independent `research` tasks | Use | Separate read-only questions run in parallel | Instructions limit research to three concurrent calls; no hard concurrency cap. Eve allows 32 working tasks per session. No sandbox or `workflow({ maxSubagents })` tool. Root `agent` copies are disabled because they inherit writes |
 | Opt-in tools | `no_reply` | Use | Silence for a clean scheduled check | |
 | Default tools | `web_fetch`, `web_search` | Use only web tools | `defaultTools: false`; add back public-page reads and provider-managed search (decision 086). Workers do repository work | Fetch refuses workers and private network destinations. Eve excludes provider-managed search from MCP publication. Gateway search uses Exa; direct models use native search when supported. Unsupported routes, including the fixture, omit search |
-| Sandbox | Docker, microsandbox, just-bash | Skip | Not needed while workers do the work | Docker needs the host socket |
+| Default tools | `bash`, `read_file`, `write_file`, `glob`, `grep` | Use, opt-in | `defaultTools: false` stays. Each tool has its own slot in `agent/tools/`, wrapped by `lib/sandbox/tools.ts`: workers are refused, input carrying a secret is refused, and an off or missing sandbox is a tool error the brain reads. No per-command approval (decision 089) | Workers still do repository work |
+| Sandbox | `agent/sandbox.ts` `defineSandbox`, `defineSandboxProvider` | Use, opt-in | `SYM_SANDBOX=on`: one sandbox per session. Production uses Sym's `sym-docker` provider (`lib/sandbox/docker.ts`): no template build, 1 GB (`SYM_SANDBOX_MEMORY`), 1 CPU, 256 processes, no capabilities, read-only root with memory-backed `/workspace` and `/tmp`, no network unless `SYM_SANDBOX_NETWORK=on`, no container log, capped reads and output, container-side timeouts, non-root images only, removed with its files after 30 idle minutes by the `sandbox` schedule. `eve dev`, `eve eval`, and the e2e use just-bash. Slack files are staged under `/workspace/.eve/attachments`. Subagents share the parent's (decision 089) | Docker needs the host socket or `DOCKER_HOST`. Eve's Docker provider builds its template during `eve build`, which a Dockerfile build cannot do, and sets no limits. Eve's Docker network policy is only `allow-all` or `deny-all` |
 
 ## Channels
 
@@ -67,7 +68,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 
 | Feature | API | Decision | How Sym uses it | Limits |
 |---|---|---|---|---|
-| Handler schedules | `defineSchedule({ cron, run })` | Use | `dispatch` (1 min), `reconcile` (3 min), `digest`, `learn` | Cron in UTC. `eve start` runs the scheduler. One replica |
+| Handler schedules | `defineSchedule({ cron, run })` | Use | `dispatch` (1 min), `reconcile` (3 min), `digest`, `learn`, `sandbox` (1 min: removes idle sandbox containers, decision 089) | Cron in UTC. `eve start` runs the scheduler. One replica |
 | Markdown schedules | `.md` with `cron` | Skip | | Output discarded. Approvals fail the session |
 | Dynamic scheduling | dispatcher + rows + CRUD tools | Use | Schedules as rows, each an instruction for the brain (decision 085); event triggers share the run rows (decision 088) | At-least-once. Lease each row |
 | Durable notifications | outbox + schedule + `callSlackApi` | Use | Posts that retry | At-least-once. Idempotency key per post |

@@ -20,6 +20,10 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A message that says "move this to a code channel" calls code_channel, then answers in one line.
 // - A message with "fixture-react <emoji>" calls slack_react, then ends the turn with no_reply.
 // - A message with "fixture-post-now <target>" calls slack_post.
+// - A message with "fixture-bash <command>" runs the command with `bash` in the sandbox, then
+//   answers "Sandbox output: <stdout>", or "Sandbox error: <error>" when the tool fails.
+// - A message with "fixture-read-attachment" opens the first attached file Eve staged in the
+//   sandbox with `read_file`, then answers "Sandbox file: <content>".
 // - A repeated-work review calls repeated_work, proposes one playbook for any title seen 3 or more
 //   times, then ends the turn with no_reply.
 // - A task result, or a tool result with `posted: true`, ends the turn with no_reply.
@@ -59,6 +63,8 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
     }
     // A reaction stands in for the reply.
     if (result?.name === "slack_react") return quiet(request);
+    if (result?.name === "bash") return sandboxAnswer(result.output);
+    if (result?.name === "read_file") return `Sandbox file: ${String(toolText(result.output))}`;
     if (result?.name === "repeated_work") return proposeRepeated(request, result.output);
     if (result?.name === "repeated_work_propose") return quiet(request);
     if (result?.name === "schedule_create")
@@ -126,6 +132,16 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
       toolCalls: [{ name: "slack_post", input: { target: personPost, text: "Fixture post." } }],
     };
   }
+  if (/\bfixture-read-attachment\b/.test(message)) {
+    // Eve labels each staged file "Attached file <sandbox path> (<media type>)".
+    const staged = request.messages
+      .map((m) => /Attached file (\S+) \(/.exec(m.text)?.[1])
+      .find((path) => path !== undefined);
+    if (!staged) return "Sandbox file: none attached";
+    return { toolCalls: [{ name: "read_file", input: { filePath: staged } }] };
+  }
+  const command = /\bfixture-bash\s+(.+)$/m.exec(message)?.[1];
+  if (command) return { toolCalls: [{ name: "bash", input: { command: command.trim() } }] };
   const reaction = /\bfixture-react\s+(\S+)/.exec(message)?.[1];
   if (reaction) return { toolCalls: [{ name: "slack_react", input: { emoji: reaction } }] };
   if (/\bsign in to the worker\b/i.test(message)) {
@@ -174,6 +190,19 @@ function proposeRepeated(request: MockModelRequest, output: unknown): MockModelR
   return {
     toolCalls: [{ name: "repeated_work_propose", input: { proposals: [{ name, body, jobs }] } }],
   };
+}
+
+// The bash result as one line: its stdout, or the error the tool gave.
+function sandboxAnswer(output: unknown): string {
+  const data = toolData(output) as { stdout?: unknown } | string;
+  if (data && typeof data === "object" && typeof data.stdout === "string") {
+    return `Sandbox output: ${data.stdout.trim().slice(0, 200)}`;
+  }
+  return `Sandbox error: ${(typeof data === "string" ? data : JSON.stringify(data)).slice(0, 300)}`;
+}
+
+function toolText(output: unknown): string {
+  return (typeof output === "string" ? output : JSON.stringify(output)).slice(0, 300);
 }
 
 function briefIn(text: string): Record<string, unknown> | undefined {

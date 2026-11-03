@@ -48,7 +48,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm knip
       - run: pnpm test
-      # Compile only. Sym has no sandbox tools, and deploy images run the full `eve build`.
+      # Compile only. The deploy image runs the full `eve build`, which records the sandbox
+      # artifact (decision 089).
       - run: pnpm build:compile
 
   e2e:

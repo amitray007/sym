@@ -1,0 +1,134 @@
+# 089. A sandbox for the brain
+
+Status: accepted
+Date: 2026-11-03
+
+## Context
+
+Sym had `defaultTools: false` and no sandbox (decisions 013, 019). The brain could not add up a
+column in a CSV someone shared, run a small script, or open a file people posted in Slack. Eve
+stages Slack attachments into the session sandbox, but the deploy image built with
+`--skip-sandbox-prewarm`, so production had no sandbox to stage into: every shared file reached
+the brain as a note with its name.
+
+Eve's built-in Docker provider prepares a template image during `eve build`. A Dockerfile
+`RUN eve build` step has no Docker daemon, so that build would record nothing to start from. Eve's
+provider also sets no memory, CPU, or process limits.
+
+## Decision
+
+1. The brain gets a sandbox when `SYM_SANDBOX=on` (default off). One sandbox per Eve session, so
+   one per Slack thread. `agent/sandbox.ts` defines it; `lib/sandbox/` holds the code.
+2. Production (`eve build`, `eve start`) uses Sym's own Docker provider, `sym-docker`
+   (`lib/sandbox/docker.ts`), built on Eve's documented `defineSandboxProvider`. It builds no
+   template, so the image build needs no Docker daemon: `prepare` only records where the agent's
+   skill and workspace files are. Each session container starts from the base image, which the
+   first session pulls, and `docker exec` writes those files in. It talks to Docker through the
+   `docker` CLI, which the runtime image now holds, and honors `DOCKER_HOST`.
+3. `eve dev`, `eve eval`, and `pnpm test:e2e` use Eve's just-bash provider: a JavaScript shell and
+   virtual filesystem, with no Docker. The choice reads `EVE_DEV` and `EVE_EVALUATION`, which
+   Eve sets itself, so a build and the server it produces agree. just-bash has no process or
+   network isolation, so production never uses it. `just-bash` is a dev dependency.
+4. The image is Eve's sandbox image (`ghcr.io/vercel/eve`, Ubuntu with Node.js 24, Python 3, git,
+   ripgrep, jq, curl), pinned to the tag Eve 0.88 uses. `SYM_SANDBOX_IMAGE` replaces it. The
+   image must run with a read-only root filesystem and give its default user bash and coreutils
+   (`timeout`, `stat`, `id`). `$HOME` is `/tmp/home`. Its default user must not be root: setup
+   checks `id -u` and refuses UID 0, because root in the container could rewrite the
+   root-owned activity and ready files.
+5. Each container runs with 1 GB of memory and no extra swap (`SYM_SANDBOX_MEMORY` changes it),
+   1 CPU, 256 processes, `--init`, every Linux capability dropped, and `no-new-privileges`, so
+   `sudo` in the image does nothing.
+6. Disk is bounded. The root filesystem is read-only (`--read-only`). The writable paths are
+   tmpfs mounts: `/workspace` gets half the memory limit and `/tmp` (with `$HOME`) a quarter.
+   The kernel charges tmpfs pages to the container's memory limit, so a sandbox cannot fill the
+   host's disk, and nothing is bind-mounted from the host. `--ulimit fsize` and `ulimit -f` in
+   each command cap one file at the workspace size. `--storage-opt` is not used: with a
+   read-only root nothing writes to the container layer. The container has no log
+   (`--log-driver none`): Sym reads output through `docker exec`, and a command writing to the
+   main process's stdout would otherwise grow Docker's log file on the host's disk.
+7. Files last while the sandbox is active. Sym keeps the idle clock: it touches
+   `/run/sym/active` as root on each call, in a root-owned tmpfs the sandbox's user can read but
+   not change. The `sandbox` schedule runs every minute and removes (`docker rm -f`, by
+   container ID) every sandbox container not touched for 30 minutes, with its files. A command
+   still running in it is killed, so 30 minutes past the last call is the time limit. The
+   enforcement runs in Sym, outside the sandbox, so a command cannot stop it; the container's
+   own idle loop, which a command could pause with SIGSTOP, is only a backstop for when Sym is
+   down. The container runs with `--rm`, so one that stops is gone too; its files lived in
+   memory anyway. The next call starts an empty sandbox (Eve reruns the selector), and a file
+   staged earlier reads as missing. A single `bash` call waits 30 seconds and then keeps running
+   in the background, as Eve's tool does. Session end removes the container.
+8. What Sym reads back is bounded. `read_file` and Eve's reads accept only a regular file of at
+   most 32 MiB (just over Slack's 25 MiB upload limit), checked inside the container, read with
+   `head -c`, and capped again in Sym. A command's stdout and stderr each pass at most 8 MiB to
+   Sym; past that Sym stops the command. Every docker call Sym buffers has a byte cap and a
+   timeout, an early docker exit that breaks stdin settles as a failed call, and a cancel stops
+   the process. Each read, write, remove, and setup call also runs under the container's own
+   `timeout -s KILL` (55 seconds, before Sym's 60), so a call Sym gives up on, such as a write
+   blocked on a FIFO, leaves no process behind to use up the process limit.
+9. Setup is all or nothing. A new container gets a root-owned ready marker only after its setup
+   (user check, workspace check, skill files) succeeds, and the setup has 2 minutes from the
+   container's creation. A failed or late setup removes its own container by ID, never by name,
+   so it cannot delete a newer container another caller made. A start that finds a container
+   without the marker waits until that container's 2 minutes (by its Docker creation time) have
+   passed, then replaces it. Concurrent starts in one process share one setup. Nothing here
+   assumes one Sym process: the marker, the creation time, and the IDs live in Docker. The
+   session's state records the container ID, so a replaced container reads as gone.
+10. Network: none by default (`--network none`). A command cannot send a shared file anywhere,
+    reach the Docker host's private network or tailnet, or read a cloud metadata endpoint, and it
+    cannot install packages. `SYM_SANDBOX_NETWORK=on` gives the container Docker's default
+    bridge, with full egress. Eve's web tools (decision 086) run in the app runtime and need no
+    sandbox network.
+11. The tools are Eve's `bash`, `read_file`, `write_file`, `glob`, and `grep`, each in its own
+    slot under `agent/tools/` with `defaultTools: false` kept. `lib/sandbox/tools.ts` puts Sym's
+    checks in front: a worker caller is refused (Eve's MCP channel publishes every plain tool);
+    with the sandbox off the tool says so without opening one; input that carries the value of
+    one of Sym's secret variables (names with TOKEN, SECRET, PASSWORD, API_KEY, AUTHKEY,
+    CREDENTIAL, or DATABASE_URL) is refused; and a sandbox that cannot open becomes a short "not
+    available" error. Each refusal is a tool error, so the brain reads it and the turn continues.
+    There is no per-command approval: the sandbox holds no secrets and no credentials.
+12. Secrets stay out. A container's environment is exactly `AI_AGENT=eve` and `HOME=/tmp/home`,
+    always passed as `NAME=value`. The docker CLI runs with `PATH`, `HOME`, `TMPDIR`,
+    `XDG_RUNTIME_DIR`, and `DOCKER_*` only. The sandbox has no repository credentials and no git
+    push credentials.
+13. The repository rule holds. The brain may use the sandbox to compute, analyze files people
+    share in Slack, run small scripts, and prepare text or data. Code changes and repository
+    checkouts go to Builder (decision 063). It must not clone a repository to change it. The
+    capability note (decision 068) and the `bash` description say so, and say that sandbox files
+    last only while the sandbox is active. Production and customer data stay read-only.
+14. Slack files: Eve stages each attachment under `/workspace/.eve/attachments/` and labels it
+    with that path, so `read_file` and `bash` open it. With the sandbox off, or when it cannot
+    open, Eve gives the brain a note with the file's name instead and the turn goes on. The
+    local e2e points Eve's file downloads at the fake Slack host (`fileBaseUrl`), and a scenario
+    opens a shared CSV with `read_file`. The voice-notes layer (decision 092) transcribes audio
+    before the turn and keeps Eve from staging audio, so a voice note reaches the brain as text
+    and never as a sandbox file; this decision does not change that.
+15. The verifier and writer subagents have no tools, so they share the parent's sandbox
+    (`defineParentSandbox`) and need no template of their own.
+16. Deploy: the Dockerfile build stage runs the full `pnpm build`, which records the sandbox
+    artifact, and the runtime stage copies the docker CLI from `docker:29.4.0-cli`.
+    `compose.yaml` carries the socket mount and `group_add` commented out. CI keeps
+    `pnpm build:compile` (decision 013).
+
+## Consequences
+
+- This changes decisions 013 and 019 in part: deploy images now run the full `eve build`. It does
+  not need Docker or pull Eve's image at build time.
+- Mounting `/var/run/docker.sock` gives the Sym process control of the host's Docker daemon,
+  which is root on that host. The brain never reaches the socket: its commands run inside a
+  container that has none, and Sym runs only the fixed docker commands in `lib/sandbox/docker.ts`.
+  But a bug in Sym or a compromised dependency would reach it. `DOCKER_HOST` pointing at a
+  separate Docker host keeps that off the Sym host.
+- The first sandbox call on a host pulls about 550 MB. Pre-pull the image to avoid the wait.
+- A thread that goes quiet for 30 minutes loses its sandbox files, shared files included. The
+  brain says so and asks for a file again. No stopped container is left on the host.
+- The tmpfs files, Docker's `/dev/shm` (64 MB), and the commands' own memory share one 1 GiB
+  memory cgroup. A sandbox that fills its workspace and then runs a large command can be killed
+  by the kernel's out-of-memory killer. That ends the sandbox, not Sym, which runs in its own
+  container. Raise `SYM_SANDBOX_MEMORY` for larger files.
+- The secret check matches exact values of Sym's secret variables. It stops an accidental paste;
+  it does not stop a value the brain was never given, and Sym gives the brain none.
+- With the sandbox on, files people share in a thread live in that thread's container while it
+  is active.
+- Containers from before these fixes (state protocols 1 and 2) start fresh.
+- Changing `SANDBOX_LIMITS` or the image takes effect for new containers. Upgrading Eve may change
+  its image tag; keep `DEFAULT_SANDBOX_IMAGE` in step.

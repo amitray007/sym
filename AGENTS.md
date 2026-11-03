@@ -12,7 +12,9 @@ planning or building anything.
   after its session dies.
 - Every Slack post goes through `chooseDisplay` in `lib/display.ts`. The outbox refuses a post
   without a display choice.
-- Sym never edits repositories itself. Workers do, through an adapter.
+- Sym never edits repositories itself. Workers do, through an adapter. The brain's sandbox
+  (decision 089) is for compute and shared files: it holds no secrets or repository credentials,
+  and the brain never clones a repository there to change it.
 - Every interactive chat job shows Start / Not now. Runs of a schedule set to `auto` start
   without a click (decision 085); the trust ladder no longer auto-starts jobs. Briefs keep production and customer data read-only. A job can
   prepare a production change; a person runs it (decision 064).
@@ -41,7 +43,8 @@ worker models, the project allow-list, the worker label, owner-managed MCP conne
 shared-thread manners, stranger replies, results written in the persona's voice, and opt-in Slack
 code channels for started jobs, conversational working notes and results, stored choices,
 follow-up proposals, recoverable closure, explicit consent before Builder work, event triggers on
-new messages and reactions, and the "Send to Sym" message shortcut.
+new messages and reactions, the "Send to Sym" message shortcut, and an opt-in sandbox for the
+brain's shell and file tools.
 
 ## Commands
 
@@ -51,7 +54,10 @@ Node 24 and pnpm, pinned in `mise.toml`. Run tools through mise, for example
 - `pnpm install`
 - `pnpm lint` (Biome), `pnpm typecheck` (tsc), `pnpm test` (Vitest), `pnpm knip`
 - `pnpm build:compile` compiles the agent without sandbox preparation. CI runs it.
-- `pnpm build` is the full `eve build` for deploy images. It pulls Eve's sandbox image.
+- `pnpm build` is the full `eve build` for deploy images. It records the sandbox artifact and
+  needs no Docker (decision 089).
+- `SYM_SANDBOX_DOCKER_TEST=1 pnpm exec vitest run test/sandbox-docker.test.ts` runs the sandbox
+  provider against a real Docker daemon. It is skipped by default.
 - `pnpm dev` starts `eve dev` with the terminal UI. Agents use `pnpm exec eve dev --no-ui` in a
   background process, then stop it after the check.
 - `pnpm eval` runs `eve eval` (decision 039). It uses the real brain model and spends tokens, so

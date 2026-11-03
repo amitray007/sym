@@ -26,6 +26,7 @@
 | Reconcile | Compares the ledger with each worker every 3 minutes and repairs drift |
 | Dispatch | Fires due schedule rows every minute, with a lease per row, and sends deferred trigger runs |
 | Outbox | Durable Slack posts with an idempotency key per post |
+| Sandbox | Opt-in (`SYM_SANDBOX`). One limited Docker container per Slack thread for the brain's shell and file tools: compute, shared files, small scripts. No secrets, no repository credentials, no network by default. Repository work stays with workers (decision 089) |
 
 Only the Slack route is public. The MCP channel, the HTTP channel, and the worker stay on a
 private network such as a tailnet ([self-hosting.md](self-hosting.md)).
@@ -264,5 +265,6 @@ The digest, when it is on, carries the rest. The digest, the verifier, and PR fo
 | Eve upgrade | Running sessions stranded | The ledger is the truth. Reconcile re-attaches jobs. Upgrade when no jobs run |
 | Worker restart | Running turns interrupted | Reconcile sees `interrupted` and asks whether to resume |
 | Brain model error | Turn fails | Eve posts a failure notice. The worker job keeps running; reconcile picks it up |
-| Prompt injection from untrusted text | Bad actions | Reading sessions get no write tools. Writes need approval |
+| Prompt injection from untrusted text | Bad actions | Reading sessions get no write tools. Writes need approval. The sandbox holds no secrets and has no network by default, so injected commands there reach nothing outside it |
 | Busy watched channel | Many trigger runs, model spend | Keywords narrow the events; each trigger starts at most `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour; a Slack retry finds its run |
+| Sandbox unavailable (sandbox off, no Docker socket, daemon down) | Shell and file tools fail | Each tool returns a short error and the turn continues. Shared files reach the brain as a note with their name (decision 089) |
