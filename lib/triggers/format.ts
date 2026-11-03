@@ -5,6 +5,7 @@ const INSTRUCTION_PREVIEW = 300;
 
 // What fires the trigger, in words.
 function firesOn(trigger: Trigger): string {
+  if (trigger.kind === "webhook") return "a signed webhook request";
   if (trigger.kind === "reaction") return `a :${trigger.emoji}: reaction in <#${trigger.channel}>`;
   const words = trigger.keywords.length ? ` with ${trigger.keywords.join(", ")}` : "";
   return `a new message${words} in <#${trigger.channel}>`;
@@ -22,11 +23,17 @@ export function triggerLine(trigger: Trigger): string {
   return `${trigger.title}: on ${firesOn(trigger)} - ${trigger.status}`;
 }
 
-export function triggerList(triggers: Trigger[]): string {
-  return triggers.length === 0 ? "There are no triggers." : triggers.map(details).join("\n");
+// `urlOf` gives a webhook trigger's URL. A list never shows a secret (decision 090).
+export function triggerList(
+  triggers: Trigger[],
+  urlOf: (trigger: Trigger) => string | undefined = () => undefined,
+): string {
+  return triggers.length === 0
+    ? "There are no triggers."
+    : triggers.map((trigger) => details(trigger, urlOf(trigger))).join("\n");
 }
 
-function details(trigger: Trigger): string {
+function details(trigger: Trigger, url: string | undefined): string {
   const instruction = trigger.instruction.replace(/\s+/g, " ").trim();
   const preview =
     instruction.length > INSTRUCTION_PREVIEW
@@ -38,13 +45,14 @@ function details(trigger: Trigger): string {
       : "Builder work asks for Start";
   return [
     triggerLine(trigger),
+    ...(url ? [`  URL: ${url}`] : []),
     `  Posts in ${postsIn(trigger)}. ${builder}.`,
     `  Does: ${preview}`,
   ].join("\n");
 }
 
-// The message that starts a trigger run (decision 088): the schedule run message with the
-// event's facts as untrusted data and where the run posts.
+// The message that starts a trigger run (decisions 088 and 090): the schedule run message with
+// the event's facts as untrusted data and where the run posts.
 // `target` is where the session starts. A run moved out of a shared event thread says so.
 export function triggerRunMessage(
   trigger: Trigger,

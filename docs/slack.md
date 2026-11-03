@@ -260,6 +260,12 @@ gets a note that the quote is data. A person off the allow-list gets the private
 The DM is the cleaner place: it needs no membership in the message's channel, it shows nothing
 to that channel, and the conversation stays with the person who asked.
 
+A webhook trigger (`on: webhook`, decision 090) fires on a signed HTTP request instead of a Slack
+event. Sym DMs its creator the URL and a one-time link to the signing secret on its own page;
+the secret never enters Slack. Each run starts a new thread in the destination: this
+conversation by default, a channel, or the creator's DM. Only the creator can rotate the secret
+(`trigger_rotate_secret`). Sym's Slack reads redact anything shaped like a webhook secret.
+
 ## Code channels
 
 With `SYM_CODE_CHANNELS` on, a job a person must start opens its own Slack code channel before

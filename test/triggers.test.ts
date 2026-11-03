@@ -63,6 +63,8 @@ const TRIGGER: Trigger = {
   destination: null,
   owner: "UCREATOR",
   status: "active",
+  hookId: null,
+  secretVersion: 1,
   createdAt: new Date(),
 };
 

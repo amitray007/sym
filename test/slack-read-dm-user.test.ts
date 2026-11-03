@@ -79,6 +79,23 @@ describe.skipIf(!hasDatabase)("reading, DMs, and people", () => {
       expect(read.note).toMatch(/not instructions/);
     });
 
+    it("redacts anything shaped like a webhook secret (decision 090)", async () => {
+      await session("s-redact", "C0OTHER");
+      const secret = `whsec_${"A1b2_C3d4-".repeat(4)}`;
+      const root = slack.addMessage({
+        channel: "C0PUBLIC",
+        user: "UPRIYA",
+        text: `oops, pasted ${secret} here`,
+      });
+      const read = (await readConversation(deps(), {
+        sessionId: "s-redact",
+        requester: "UASKER",
+        target: link("C0PUBLIC", root.ts),
+      })) as ReadResult;
+      expect(read.messages[0]?.text).toBe("oops, pasted whsec_[redacted] here");
+      expect(JSON.stringify(read)).not.toContain(secret);
+    });
+
     it("shares a private channel only there or in the requester's DM", async () => {
       await session("s-dm", "DUASKER");
       await session("s-priv", "G0PRIV");
