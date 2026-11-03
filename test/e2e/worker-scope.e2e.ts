@@ -27,6 +27,30 @@ afterAll(async () => {
   await h?.close();
 });
 
+it("refuses web fetch and hides provider-managed search for workers", async () => {
+  const client = new Client({ name: "web-scope-test", version: "1" });
+  try {
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`${h.eveUrl()}/eve/v1/mcp`), {
+        authProvider: { token: async () => "fake-shared-read-token" },
+      }),
+    );
+    const names = (await client.listTools()).tools.map((tool) => tool.name);
+    expect(names).toContain("jobs_status");
+    expect(names).toContain("web_fetch");
+    expect(names).not.toContain("web_search");
+    const refusal = await client.callTool({
+      name: "web_fetch",
+      arguments: { url: "https://127.0.0.1/" },
+    });
+    expect(refusal.structuredContent).toMatchObject({
+      content: "Worker threads cannot call this tool.",
+    });
+  } finally {
+    await client.close();
+  }
+});
+
 it("provisions scoped callbacks on launch and Fix and enforces scope through the real MCP route", async () => {
   const c = newConversation(h);
   const { approval, job, ref } = await startJob(h, c, "Worker scope");

@@ -33,7 +33,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Subagents | `ctx.agent(name).send(msg, { outputSchema })` | Use | `verifier` (`tool: false`, no tools) checks a code result against the brief from the `worker_job` body (decision 032) | Body only, not in a step. Shares the parent's token budget |
 | Fan-out | `workflow({ maxSubagents })` | Later | Parallel triage | The program cannot call tools |
 | Opt-in tools | `no_reply` | Use | Silence for a clean scheduled check | |
-| Default tools | `bash`, `web_fetch` | Skip most | Workers do repository work. `defaultTools: false` | |
+| Default tools | `web_fetch`, `web_search` | Use only web tools | `defaultTools: false`; add back public-page reads and provider-managed search (decision 086). Workers do repository work | Fetch refuses workers and private network destinations. Eve excludes provider-managed search from MCP publication. Gateway search uses Exa; direct models use native search when supported. Unsupported routes, including the fixture, omit search |
 | Sandbox | Docker, microsandbox, just-bash | Skip | Not needed while workers do the work | Docker needs the host socket |
 
 ## Channels
