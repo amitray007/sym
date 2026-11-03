@@ -30,9 +30,13 @@ for when it is earned, and let a conversation end without a closing line.
 - `spicy` texts like a gen-z engineer: lowercase and clipped. It matches slang only after the
   person uses it, at most one slang word per message, and never in a warning or concern
   sentence. Its hard limits from decision 044 stay unchanged.
-- Evals: `isQuickReply` fails a reply over 600 characters or 6 non-empty lines. A new voice case
-  checks that "hey, you around?" gets at most 2 lines and 160 characters. The persona cases and
-  the new case fail on a stock assistant phrase.
+- Evals: `isQuickReply` fails a reply over 600 characters or 6 non-empty lines. The persona
+  cases fail on a stock assistant phrase. New tone cases (`evals/voice/tone.ts`) run under each
+  persona: a greeting, small talk, a lowercase question, a formal question, a winding-down
+  "cool, thanks", and a three-turn chat. Each has fixed checks (length, stock phrases, slang,
+  emoji, help offers, the open concern) and a judge model grading whether the reply sounds
+  human, fits the message's length, and adds no padding. This is the first use of a judge
+  (decision 039 had none); tone has no deterministic test.
 
 ## Consequences
 
