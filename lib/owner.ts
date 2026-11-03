@@ -1,5 +1,5 @@
 // Who owns Sym's standing decisions (docs/learning.md, docs/slack.md). The owner approves
-// playbooks, rules, and schedules. Allowed users can still ask questions and start jobs.
+// playbooks and rules. Allowed users can still ask questions, start jobs, and set up schedules.
 import type { Pack } from "./pack/load.ts";
 
 // The pack's owner, then SYM_OWNER_SLACK_USER. Undefined when the deployment names no one.
@@ -42,19 +42,4 @@ export function ownerResponse(pack: () => Pack | undefined) {
     mayDecideAsOwner(slackUserOfPrincipal(response.principal.principalId), pack())
       ? { status: "allowed" as const }
       : { status: "rejected" as const, reason: OWNER_ONLY };
-}
-
-// An Eve approval response policy for a person's own request (decision 081): only the person
-// whose turn asked can approve or cancel it.
-export function requesterResponse(reason: string) {
-  return ({
-    request,
-    response,
-  }: {
-    request: { principal: { principalId: string } | null };
-    response: { principal: { principalId: string } };
-  }) =>
-    response.principal.principalId === request.principal?.principalId
-      ? { status: "allowed" as const }
-      : { status: "rejected" as const, reason };
 }

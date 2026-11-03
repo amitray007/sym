@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { requesterResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
+import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { addBookmark } from "../../lib/slack/pins.ts";
 import { readInTurn } from "../../lib/slack/read.ts";
@@ -26,7 +26,7 @@ export default defineTool({
         toolInput?.target,
         `${toolInput?.title ?? ""} ${toolInput?.url ?? ""}`,
       ).then((ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable")),
-    response: requesterResponse("Only the person who asked can approve this bookmark."),
+    response: requesterResponse("Only the person who asked can approve this bookmark.", ledgerDeps),
     prompt: ({ input }) => `Bookmark "${input.title}" (${input.url}) in ${input.target}?`,
   },
   label: { start: () => "Add a bookmark" },
@@ -34,7 +34,7 @@ export default defineTool({
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
     return addBookmark(
       { slack: slackFromEnv(), pack: pack() },
-      slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+      await requesterOf(ctx.session, ledgerDeps),
       { target, title, url },
     );
   },

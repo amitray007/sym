@@ -1,24 +1,28 @@
+import type postgres from "postgres";
 import type { Sql } from "../db.ts";
-import { json } from "../ledger/jobs.ts";
-import { nextFire, parseCron } from "./cron.ts";
-import { sameJson } from "./match.ts";
+import { nextFire } from "./cron.ts";
 
-// Schedule rows (docs/architecture.md, flow 2). Only an approved row fires. The owner approves
-// the row once, and that covers every fire of that exact brief.
+// Schedule rows (docs/architecture.md, flow 2; decision 085). A row holds an instruction for the
+// brain. The person who set it up consented to its runs, so a new row is active at once.
 
-export type ScheduleStatus = "pending_approval" | "active" | "paused" | "deleted";
+export type ScheduleStatus = "active" | "paused" | "done" | "deleted";
 export type RunOutcome = "started" | "all_clear" | "needs_attention" | "failed";
+// Whether a run may start Builder work without a Start click.
+export type BuilderMode = "ask" | "auto";
 
 export interface Schedule {
   id: number;
-  cron: string;
+  // Five fields in UTC, or null for a one-time row.
+  cron: string | null;
+  // The one-time run, or null for a recurring row.
+  runAt: Date | null;
   title: string;
-  brief: unknown;
+  instruction: string;
+  builder: BuilderMode;
+  // The Slack channel each run posts in. A DM destination is the DM channel.
   channel: string;
   owner: string;
   status: ScheduleStatus;
-  approvedBy: string | null;
-  approvedAt: Date | null;
   leaseUntil: Date | null;
   lastFiredAt: Date | null;
   nextFireAt: Date | null;
@@ -36,13 +40,17 @@ export interface ScheduleRun {
   jobId: number | null;
 }
 
-export interface NewSchedule {
-  cron: string;
+export type ScheduleTiming =
+  | { cron: string; runAt?: undefined }
+  | { cron?: undefined; runAt: Date };
+
+export type NewSchedule = ScheduleTiming & {
   title: string;
-  brief: unknown;
+  instruction: string;
+  builder: BuilderMode;
   channel: string;
   owner: string;
-}
+};
 
 export const scheduleRef = (id: number) => `S-${id}`;
 
@@ -52,14 +60,40 @@ export function parseScheduleRef(ref: string): number | undefined {
   return match?.[1] ? Number(match[1]) : undefined;
 }
 
-// Throws on a bad cron, so a bad row never exists.
-export async function createSchedule(sql: Sql, input: NewSchedule): Promise<Schedule> {
-  parseCron(input.cron);
+// The first fire after `after`: the next cron time, or the one-time run while it is ahead.
+// Throws on a bad cron.
+export function nextFireOf(
+  timing: { cron: string | null | undefined; runAt: Date | null | undefined },
+  after: Date,
+): Date | undefined {
+  if (timing.cron) return nextFire(timing.cron, after);
+  return timing.runAt && timing.runAt > after ? timing.runAt : undefined;
+}
+
+// A schedule that can never fire again. Its message is safe to show.
+export class ScheduleTimingError extends Error {
+  override name = "ScheduleTimingError";
+}
+
+function firstFire(timing: { cron: string | null; runAt: Date | null }, now: Date): Date {
+  const next = nextFireOf(timing, now);
+  if (next) return next;
+  throw new ScheduleTimingError(
+    timing.cron ? `Cron "${timing.cron}" never fires.` : "That time has passed.",
+  );
+}
+
+// Throws on a bad cron, a cron that never fires, or a one-time run in the past, so a bad row
+// never exists.
+export async function createSchedule(sql: Sql, input: NewSchedule, now: Date): Promise<Schedule> {
+  const cron = input.cron?.trim() ?? null;
+  const runAt = input.runAt ?? null;
+  const next = firstFire({ cron, runAt }, now);
   const [row] = await sql<Schedule[]>`
-    insert into schedules (cron, title, brief, channel, owner)
+    insert into schedules (cron, run_at, title, instruction, builder, channel, owner, next_fire_at)
     values (
-      ${input.cron.trim()}, ${input.title}, ${json(sql, input.brief)}, ${input.channel},
-      ${input.owner}
+      ${cron}, ${runAt}, ${input.title}, ${input.instruction}, ${input.builder}, ${input.channel},
+      ${input.owner}, ${next}
     )
     returning *
   `;
@@ -72,32 +106,12 @@ export async function getSchedule(sql: Sql, id: number): Promise<Schedule | unde
   return row ? normalize(row) : undefined;
 }
 
-// Lists schedules that are not deleted, oldest first.
+// Lists schedules that can still run, oldest first.
 export async function listSchedules(sql: Sql): Promise<Schedule[]> {
   const rows = await sql<Schedule[]>`
-    select * from schedules where status <> 'deleted' order by id
+    select * from schedules where status not in ('deleted', 'done') order by id
   `;
   return rows.map(normalize);
-}
-
-// Approves a pending row and sets its first fire time. Returns undefined for any other state.
-export async function approveSchedule(
-  sql: Sql,
-  id: number,
-  approvedBy: string,
-  now: Date,
-): Promise<Schedule | undefined> {
-  const row = await getSchedule(sql, id);
-  if (row?.status !== "pending_approval") return undefined;
-  const next = nextFire(row.cron, now);
-  if (!next) throw new Error(`Cron "${row.cron}" never fires.`);
-  const [updated] = await sql<Schedule[]>`
-    update schedules
-    set status = 'active', approved_by = ${approvedBy}, approved_at = ${now}, next_fire_at = ${next}
-    where id = ${id} and status = 'pending_approval'
-    returning *
-  `;
-  return updated ? normalize(updated) : undefined;
 }
 
 export async function pauseSchedule(sql: Sql, id: number): Promise<Schedule | undefined> {
@@ -109,7 +123,8 @@ export async function pauseSchedule(sql: Sql, id: number): Promise<Schedule | un
   return row ? normalize(row) : undefined;
 }
 
-// Resumes a paused row. It fires at the next cron time, so a pause leaves no backlog.
+// Resumes a paused row. It fires at the next cron time, so a pause leaves no backlog. Throws
+// when it can never fire again, such as a one-time run whose time passed.
 export async function resumeSchedule(
   sql: Sql,
   id: number,
@@ -117,8 +132,7 @@ export async function resumeSchedule(
 ): Promise<Schedule | undefined> {
   const row = await getSchedule(sql, id);
   if (row?.status !== "paused") return undefined;
-  const next = nextFire(row.cron, now);
-  if (!next) throw new Error(`Cron "${row.cron}" never fires.`);
+  const next = firstFire(row, now);
   const [updated] = await sql<Schedule[]>`
     update schedules set status = 'active', next_fire_at = ${next}
     where id = ${id} and status = 'paused'
@@ -163,14 +177,16 @@ export async function claimDueSchedules(
 }
 
 // Ends a claim: records the fire and moves to the next cron time after `now`. A missed window
-// is skipped, not replayed. A row paused or deleted during the fire keeps its status.
+// is skipped, not replayed. A one-time row is done. A row paused or deleted during the fire
+// keeps its status.
 // Only the claim owner ends the claim: the lease must still be the one `schedule` carries.
 // Returns false when another dispatcher took over after the lease ran out.
 export async function completeClaim(sql: Sql, schedule: Schedule, now: Date): Promise<boolean> {
-  const next = nextFire(schedule.cron, now) ?? null;
+  const next = nextFireOf(schedule, now) ?? null;
   const rows = await sql`
     update schedules
     set last_fired_at = ${now}, lease_until = null,
+      status = case when status = 'active' and run_at is not null then 'done' else status end,
       next_fire_at = case when status = 'active' then ${next} else next_fire_at end
     where id = ${schedule.id} and lease_until = ${schedule.leaseUntil}
     returning id
@@ -193,6 +209,21 @@ export async function reserveRun(
   return row ? normalizeRun(row) : undefined;
 }
 
+// The run of this fire that a dispatcher reserved and never delivered, such as one that crashed
+// before its send.
+export async function unsentRun(
+  sql: Sql,
+  scheduleId: number,
+  dueAt: Date,
+): Promise<ScheduleRun | undefined> {
+  const [row] = await sql<ScheduleRun[]>`
+    select * from schedule_runs
+    where schedule_id = ${scheduleId} and due_at = ${dueAt} and session_id is null
+      and outcome = 'started'
+  `;
+  return row ? normalizeRun(row) : undefined;
+}
+
 // Binds a pre-approved job to the run of this session. The run must belong to the named
 // schedule and have no job yet. The same job may claim it again (a replayed step).
 export async function claimRunForJob(
@@ -204,15 +235,15 @@ export async function claimRunForJob(
   const rows = await sql`
     update schedule_runs set job_id = ${jobId}
     where session_id = ${sessionId} and schedule_id = ${scheduleId}
-      and (job_id is null or job_id = ${jobId})
+      and (job_id is null or job_id = ${jobId}) and outcome = 'started'
     returning id
   `;
   return rows.length > 0;
 }
 
 // The dispatcher sends first and attaches the session to its run right after, so a fast model
-// can ask before the attach lands. While this schedule has a run reserved in the last 2 minutes
-// and not yet attached, wait a little and claim again. Without such a run, there is nothing to
+// can ask before the attach lands. While this schedule has a run sent or reserved in the last 2
+// minutes and not yet attached, wait a little and claim again. Without such a run, there is nothing to
 // wait for.
 export async function claimRunWhenAttached(
   sql: Sql,
@@ -227,7 +258,7 @@ export async function claimRunWhenAttached(
     const [pending] = await sql`
       select 1 from schedule_runs
       where schedule_id = ${scheduleId} and session_id is null and job_id is null
-        and fired_at >= now() - interval '2 minutes'
+        and coalesce(sent_at, fired_at) >= now() - interval '2 minutes'
       limit 1
     `;
     // The attach can land between the claim and this check. Claim once more before giving up.
@@ -237,9 +268,94 @@ export async function claimRunWhenAttached(
   return false;
 }
 
-// Sets the session of a reserved run, after the send.
+// The creator of the schedule whose run this session is, for a run that acts on their behalf
+// (decision 085). Like claimRunWhenAttached, it waits briefly while a recent run still waits
+// for its session.
+export async function runCreatorOf(
+  sql: Sql,
+  sessionId: string,
+  options: { attempts?: number; delayMs?: number } = {},
+): Promise<string | undefined> {
+  const attempts = options.attempts ?? 20;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const owner = await creatorOfSession(sql, sessionId);
+    if (owner) return owner;
+    // A delivery in the last 2 minutes, a retried one included, may not be attached yet.
+    const [pending] = await sql`
+      select 1 from schedule_runs
+      where session_id is null and outcome = 'started'
+        and coalesce(sent_at, fired_at) >= now() - interval '2 minutes'
+      limit 1
+    `;
+    // The attach can land between the two reads. Read once more before giving up.
+    if (!pending) return creatorOfSession(sql, sessionId);
+    await new Promise((resolve) => setTimeout(resolve, options.delayMs ?? 500));
+  }
+  return undefined;
+}
+
+async function creatorOfSession(sql: Sql, sessionId: string): Promise<string | undefined> {
+  const [row] = await sql<{ owner: string }[]>`
+    select s.owner from schedule_runs r join schedules s on s.id = r.schedule_id
+    where r.session_id = ${sessionId}
+  `;
+  return row?.owner;
+}
+
+// Ends a run whose turn started no job, from what the turn posted (decision 085). The first
+// settlement of a session wins. A turn can settle before the dispatcher attaches its session, so
+// the settlement is kept by session and attachSession applies it. Both take the same session
+// lock, so neither can miss the other. A run that has a job keeps waiting: the job's end sets
+// its outcome.
+export async function finishRunWithoutJob(
+  sql: Sql,
+  sessionId: string,
+  outcome: Exclude<RunOutcome, "started">,
+): Promise<void> {
+  await sql.begin(async (tx) => {
+    await lockSession(tx, sessionId);
+    await tx`
+      insert into schedule_run_settlements (session_id, outcome) values (${sessionId}, ${outcome})
+      on conflict (session_id) do nothing
+    `;
+    await tx`
+      update schedule_runs r set outcome = st.outcome
+      from schedule_run_settlements st
+      where r.session_id = ${sessionId} and st.session_id = r.session_id
+        and r.outcome = 'started' and r.job_id is null
+        and not exists (select 1 from jobs where session_id = ${sessionId})
+    `;
+  });
+}
+
+// Marks a delivery attempt of a reserved run, so a lookup waits for its attach (runCreatorOf).
+export async function markSending(sql: Sql, runId: number): Promise<void> {
+  await sql`update schedule_runs set sent_at = now() where id = ${runId}`;
+}
+
+// Sets the session of a reserved run, after the send, and applies a turn that already settled.
 export async function attachSession(sql: Sql, runId: number, sessionId: string): Promise<void> {
-  await sql`update schedule_runs set session_id = ${sessionId} where id = ${runId}`;
+  await sql.begin(async (tx) => {
+    await lockSession(tx, sessionId);
+    await tx`
+      update schedule_runs r set session_id = ${sessionId},
+        outcome = case
+          when r.outcome = 'started' and r.job_id is null
+            and not exists (select 1 from jobs where session_id = ${sessionId})
+          then coalesce(
+            (select outcome from schedule_run_settlements where session_id = ${sessionId}),
+            r.outcome
+          )
+          else r.outcome
+        end
+      where r.id = ${runId}
+    `;
+  });
+}
+
+// Serializes the attach and the settlement of one session, until the transaction ends.
+async function lockSession(tx: postgres.TransactionSql, sessionId: string): Promise<void> {
+  await tx`select pg_advisory_xact_lock(hashtext(${`schedule-session:${sessionId}`}))`;
 }
 
 export async function recordRun(
@@ -301,11 +417,4 @@ function normalizeRun(row: ScheduleRun): ScheduleRun {
     scheduleId: Number(row.scheduleId),
     jobId: row.jobId === null ? null : Number(row.jobId),
   };
-}
-
-// True when the schedule is active and `brief` is the brief the owner approved. worker_job uses this
-// to skip the Start prompt for a scheduled run, so the model cannot widen an approved brief.
-export async function isApprovedBrief(sql: Sql, id: number, brief: unknown): Promise<boolean> {
-  const row = await getSchedule(sql, id);
-  return row?.status === "active" && sameJson(row.brief, brief);
 }

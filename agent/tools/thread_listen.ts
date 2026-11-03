@@ -2,8 +2,8 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
-import { ledger } from "../../lib/runtime.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps } from "../../lib/runtime.ts";
 import { LISTEN_MODES } from "../../lib/slack/addressing.ts";
 import { changeListenMode } from "../../lib/slack/listen-setting.ts";
 
@@ -27,7 +27,7 @@ export default defineTool({
       sql,
       thread: await getSessionThread(sql, ctx.session.id),
       mode,
-      userId: slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+      userId: await requesterOf(ctx.session, ledgerDeps),
     });
   },
 });

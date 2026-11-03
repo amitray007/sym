@@ -1,63 +1,53 @@
 import { defineTool } from "eve/tools";
-import { always } from "eve/tools/approval";
-import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
-import { ownerResponse } from "../../lib/owner.ts";
-import { checkProject } from "../../lib/projects/allowed.ts";
-import { allowedFromEnv, ledger, pack } from "../../lib/runtime.ts";
-import { nextFire } from "../../lib/schedules/cron.ts";
+import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
+import { scheduleManager } from "../../lib/schedules/access.ts";
+import { scheduleDestination } from "../../lib/schedules/destination.ts";
 import { scheduleLine } from "../../lib/schedules/format.ts";
-import { ScheduleInput } from "../../lib/schedules/input.ts";
-import { approveSchedule, createSchedule, scheduleRef } from "../../lib/schedules/rows.ts";
+import { ScheduleInput, scheduleTiming } from "../../lib/schedules/input.ts";
+import { createSchedule, ScheduleTimingError, scheduleRef } from "../../lib/schedules/rows.ts";
 
-// Creates a recurring job (docs/architecture.md, flow 2). The owner's approval of this call is
-// the approval for every fire, so the prompt shows the cron in UTC and the whole brief. The row
-// starts as pending_approval and turns active here, once the owner approves.
+// Creates a schedule (docs/architecture.md, flow 2; decision 085). The person who sets it up
+// consents to its runs, so the row is active at once. Each run gives the brain the instruction.
 
 export default defineTool({
   description:
     "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
-    "Schedule a recurring worker job. Convert the person's local time to UTC first and say so. " +
-    "The owner approves the schedule once, and the approval covers every run. Each run opens " +
-    "a new thread, and you call no_reply when a run finds nothing.",
+    "Schedule an instruction to run on a cron or once at a time. Convert the person's local " +
+    "time to UTC first and say so. Each run reads the instruction and does what it asks with " +
+    "your tools. It starts right away; no approval.",
   inputSchema: ScheduleInput,
-  approval: {
-    request: always(),
-    response: ownerResponse(pack),
-    prompt: ({ input }) =>
-      [
-        `Create schedule "${input.title}"?`,
-        `Cron (UTC): ${input.cron}`,
-        `Project: ${input.brief.project}`,
-        `Goal: ${input.brief.goal}`,
-        `Done when: ${input.brief.doneWhen.join("; ")}`,
-        `Full scope for each run: ${JSON.stringify(input.brief)}`,
-        "Runs without asking again. Production and customer data stay read-only.",
-      ].join("\n"),
-  },
   label: { start: ({ title }) => `Schedule: ${title}` },
   async execute(input, ctx) {
-    if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
-    const refusal = checkProject(allowedFromEnv(), input.brief.project);
-    if (refusal) return refusal;
     const sql = ledger();
+    const manager = scheduleManager(ctx.session.auth.current, pack(), process.env.SYM_SLACK_USERS);
+    if ("refusal" in manager) return manager.refusal;
+    const timing = scheduleTiming(input);
+    if (!timing) return "Give either a cron or a one-time `at` time, not both.";
     const thread = await getSessionThread(sql, ctx.session.id);
-    const channel = input.channel ?? thread?.channelId;
-    if (!channel) return "No channel. Give a Slack channel ID for the run threads.";
-    if (!thread?.userId) return "Sym cannot tell who owns this schedule. Ask in Slack.";
-    if (!nextFire(input.cron, new Date())) return `Cron "${input.cron}" never fires.`;
-
-    const created = await createSchedule(sql, {
-      cron: input.cron,
-      title: input.title,
-      brief: input.brief,
-      channel,
-      owner: thread.userId,
+    const destination = await scheduleDestination(ledgerDeps(), {
+      requester: manager.requester,
+      current: thread?.channelId,
+      destination: input.destination,
     });
-    const active = await approveSchedule(sql, created.id, thread.userId, new Date());
-    return {
-      schedule: scheduleRef(created.id),
-      answer: active ? `Created ${scheduleLine(active)}` : "The schedule was not approved.",
-    };
+    if ("refusal" in destination) return destination.refusal;
+    try {
+      const created = await createSchedule(
+        sql,
+        {
+          ...timing,
+          title: input.title,
+          instruction: input.instruction,
+          builder: input.builder,
+          channel: destination.channel,
+          owner: manager.requester,
+        },
+        new Date(),
+      );
+      return { schedule: scheduleRef(created.id), answer: `Created ${scheduleLine(created)}` };
+    } catch (error) {
+      if (error instanceof ScheduleTimingError) return error.message;
+      throw error;
+    }
   },
 });

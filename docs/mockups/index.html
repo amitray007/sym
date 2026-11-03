@@ -596,11 +596,11 @@ footer p + p { margin-top: 8px; }
   <!-- 5. Scheduled -->
   <section class="section" id="sched" aria-labelledby="sched-h">
     <h2 id="sched-h">5. Scheduled work</h2>
-    <p class="prose muted">Eve's dispatcher claims due rows every minute and starts a session aimed at #sym. The Slack thread exists only once Sym has something to post, so a clean run leaves no trace in the channel.</p>
+    <p class="prose muted">Eve's dispatcher claims due rows every minute and starts a session aimed at the schedule's channel, here #sym. The session gets the schedule's instruction and decides what to do. The Slack thread exists only once Sym has something to post, so a clean run leaves no trace in the channel.</p>
     <div class="figure">
       <svg viewBox="0 0 1000 400" role="img" aria-labelledby="sch-title sch-desc">
         <title id="sch-title">Scheduled check flow</title>
-        <desc id="sch-desc">The dispatcher claims a due schedule row with a lease and starts a Sym session aimed at the channel. The session runs a T3 check thread. A clean result posts nothing and adds a digest line. Findings open a thread with text and conversation choices. A requested fix proposes Start / Not now before any Builder work starts.</desc>
+        <desc id="sch-desc">The dispatcher claims a due schedule row with a lease and starts a Sym session aimed at the channel. The session follows the instruction; this schedule is set to auto-start Builder, so it runs a T3 check thread without a click. A clean result posts nothing and adds a digest line. Findings open a thread with text and conversation choices. A requested fix proposes Start / Not now before any Builder work starts.</desc>
         <defs>
           <marker id="c-arr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#878787"/></marker>
           <marker id="c-acc" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#50a8ff"/></marker>
@@ -641,6 +641,32 @@ footer p + p { margin-top: 8px; }
         <text x="470" y="312" fill="#ededed" font-size="13" font-weight="600" font-family="Geist, -apple-system, 'Segoe UI', sans-serif" text-anchor="middle">Code job</text>
         <text x="470" y="330" fill="#a0a0a0" font-size="10" font-family="'Geist Mono', SFMono-Regular, Consolas, monospace" text-anchor="middle">Start / Not now → note</text>
       </svg>
+    </div>
+
+    <div class="scene">
+      <div class="slack">
+        <div class="sl-top"><b># team</b><span>Channel</span></div>
+        <div class="sl-body">
+          <div class="msg thread-root"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>16:40</time></div><div class="mt"><span class="mention">@Sym</span> every Monday at 08:00 UTC, have Builder update the dependencies of example-app and open a draft PR</div></div></div>
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>16:40</time></div>
+            <div class="mt"><p>Sure. Should Builder start on its own each Monday, or ask you first?</p></div></div></div>
+          <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>16:41</time></div><div class="mt">ask me first</div></div></div>
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>16:41</time></div>
+            <div class="mt"><p>Where should I ask: here, another channel, or a DM to you?</p></div></div></div>
+          <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>16:41</time></div><div class="mt">DM me</div></div></div>
+          <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>16:41</time></div>
+            <div class="mt"><p>Done. Every Monday at 08:00 UTC I'll DM you the dependency update with Start / Not now.</p></div></div></div>
+        </div>
+      </div>
+      <div class="notes">
+        <h3>Setting up a schedule</h3>
+        <p class="muted">A schedule is an instruction Sym follows on each run, with its normal tools (decision 085). Anyone on the allow-list sets one up; there is no owner approval.</p>
+        <ul>
+          <li>Sym asks one question only when a run might need Builder: start on its own, or ask each time. "Ask" adds where: here, another channel, or a DM.</li>
+          <li>"Remind me at 3pm" is a one-time run. It ends after it fires.</li>
+          <li>A read-only check, such as "list the open PRs every morning", starts at once with no question.</li>
+        </ul>
+      </div>
     </div>
 
     <div class="pair">
@@ -825,7 +851,7 @@ footer p + p { margin-top: 8px; }
           <li>Everything is text, rows, or code you can read and revert. No model training.</li>
           <li>The weekly message is one ping, even with several proposals.</li>
           <li>Repeated work: when the same kind of job finished 3 times, the weekly review drafts a playbook from those briefs for you to approve (decision 058).</li>
-          <li>Every chat request shows Start / Not now. Approved schedules start without a click (decision 024). The trust ladder no longer auto-starts jobs; historical trust rows remain stored (decision 071).</li>
+          <li>Every chat request shows Start / Not now. Runs of a schedule set to auto-start Builder start without a click (decision 085). The trust ladder no longer auto-starts jobs; historical trust rows remain stored (decision 071).</li>
         </ul>
       </div>
     </div>

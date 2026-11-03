@@ -1,6 +1,7 @@
 import type { MockModelRequest } from "eve/evals";
 import { describe, expect, it } from "vitest";
 import { respondAsFixture } from "../lib/brain/fixture.ts";
+import { runMessage } from "../lib/schedules/format.ts";
 
 type Message = MockModelRequest["messages"][number];
 type ToolResult = MockModelRequest["toolResults"][number];
@@ -186,10 +187,26 @@ describe("respondAsFixture", () => {
 });
 
 describe("respondAsFixture scheduled runs", () => {
-  it("calls worker_job with the stored brief and the schedule reference", () => {
-    const text = `Scheduled run of S-3: On-call check.\n\nCall worker_job.\n\n\`\`\`brief\n${JSON.stringify(BRIEF)}\n\`\`\`\n\nWhen nothing, call no_reply.`;
+  const run = (instruction: string) =>
+    runMessage({ ref: "S-3", title: "On-call check", instruction, builder: "auto", owner: "U1" });
+
+  it("calls worker_job with a brief in the instruction and the schedule reference", () => {
+    const text = run(`Start this.\n\`\`\`brief\n${JSON.stringify(BRIEF)}\n\`\`\``);
     expect(respondAsFixture(request(text))).toEqual({
       toolCalls: [{ name: "worker_job", input: { ...BRIEF, schedule: "S-3" } }],
     });
+  });
+
+  it("stays quiet on a run without a brief", () => {
+    const text = run("Check the open pull requests.");
+    expect(respondAsFixture(request(text, { tools: ["no_reply"] }))).toMatchObject({
+      toolCalls: [{ name: "no_reply" }],
+    });
+  });
+
+  it("posts one line on a run that says fixture-say", () => {
+    expect(respondAsFixture(request(run("Check the queue. fixture-say")))).toBe(
+      "Fixture run: this needs a look.",
+    );
   });
 });

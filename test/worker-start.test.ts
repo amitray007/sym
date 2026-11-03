@@ -7,7 +7,7 @@ import { approvePlaybook, propose } from "../lib/learning/rows.ts";
 import { linkPlaybook, recordOutcome } from "../lib/learning/trust.ts";
 import { createJob } from "../lib/ledger/jobs.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
-import { approveSchedule, createSchedule, recordRun } from "../lib/schedules/rows.ts";
+import { type BuilderMode, createSchedule, recordRun } from "../lib/schedules/rows.ts";
 import { handleProposal, handleTypedProposal } from "../lib/slack/job-actions.ts";
 import { FakeWorker } from "./fakes/worker.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
@@ -56,15 +56,27 @@ import workerJob from "../agent/tools/worker_job.ts";
 describe.skipIf(!hasDatabase)("worker_job Start wait", () => {
   const ledger = useLedger();
   afterEach(() => vi.unstubAllEnvs());
-  async function run(key: string, playbook?: string, scheduled = false) {
+  // `schedule` makes the session a run of a schedule with that builder mode. The dispatcher
+  // starts such a session as the app principal, unless `byPerson` sends the same message.
+  async function run(
+    key: string,
+    playbook?: string,
+    schedule?: {
+      builder: BuilderMode;
+      byPerson?: boolean;
+      personReplies?: boolean;
+      project?: string;
+    },
+  ) {
     runtime.sql = ledger.sql();
     runtime.sleeps.length = 0;
     runtime.holdSleep = false;
     runtime.wakes.clear();
     runtime.deps = { sql: runtime.sql, worker: new FakeWorker(), allowedProjects: TEST_PROJECTS };
     vi.stubEnv("SYM_CODE_CHANNELS", "off");
+    vi.stubEnv("SYM_SLACK_USERS", "U1");
     const brief = Brief.parse({
-      project: "test-repo",
+      project: schedule?.project ?? "test-repo",
       title: key,
       goal: "add retries",
       doneWhen: ["Test"],
@@ -88,27 +100,36 @@ describe.skipIf(!hasDatabase)("worker_job Start wait", () => {
       callId: key,
       abortSignal: new AbortController().signal,
     };
-    let schedule: string | undefined;
-    if (scheduled) {
-      const row = await createSchedule(runtime.sql, {
-        cron: "0 9 * * *",
-        title: key,
-        brief,
-        channel: "C1",
-        owner: "U1",
-      });
-      await approveSchedule(runtime.sql, row.id, "U1", new Date());
+    let ref: string | undefined;
+    if (schedule) {
+      const row = await createSchedule(
+        runtime.sql,
+        {
+          cron: "0 9 * * *",
+          title: key,
+          instruction: "Add retries to test-repo.",
+          builder: schedule.builder,
+          channel: "C1",
+          owner: "U1",
+        },
+        new Date(),
+      );
       await recordRun(runtime.sql, { scheduleId: row.id, firedAt: new Date(), sessionId: key });
-      context.session.auth.initiator = {
-        principalId: "eve:app",
-        authenticator: "app",
-        principalType: "runtime",
-      } as typeof context.session.auth.initiator;
-      schedule = `S-${row.id}`;
+      if (!schedule.byPerson) {
+        const app = {
+          principalId: "eve:app",
+          authenticator: "app",
+          principalType: "runtime",
+        } as typeof context.session.auth.initiator;
+        context.session.auth.initiator = app;
+        // A person who replies later in the run's thread is the current principal.
+        if (!schedule.personReplies) context.session.auth.current = app;
+      }
+      ref = `S-${row.id}`;
     }
     // biome-ignore lint/suspicious/noExplicitAny: invoke the registered workflow body without its runtime compiler
     return (workerJob as any).task(
-      { ...brief, ...(schedule ? { schedule } : {}) },
+      { ...brief, ...(ref ? { schedule: ref } : {}) },
       context,
     ) as AsyncGenerator<{ status: string }, { status: string }>;
   }
@@ -206,15 +227,75 @@ describe.skipIf(!hasDatabase)("worker_job Start wait", () => {
     ).toBe("pending");
     await task.return({ status: "test-ended" });
   });
-  it("keeps an approved scheduled run automatic", async () => {
-    const task = await run("approved-schedule", undefined, true);
+  const launches = () => (runtime.deps?.worker as FakeWorker | undefined)?.launches;
+  const proposals = (key: string) =>
+    ledger.sql()`select p.id from job_proposals p join jobs j on j.id = p.job_id where j.request_key = ${`${key}:${key}`}`;
+
+  it("starts a run of an auto-start schedule without a click", async () => {
+    const task = await run("auto-schedule", undefined, { builder: "auto" });
     expect((await task.next()).value?.status).toContain("Starting scheduled run");
     expect((await task.next()).value?.status).toContain("Launching");
     expect((await task.next()).value?.status).toContain("thread started");
-    expect(
-      await ledger.sql()`select p.id from job_proposals p join jobs j on j.id = p.job_id where j.request_key = 'approved-schedule:approved-schedule'`,
-    ).toHaveLength(0);
+    expect(await proposals("auto-schedule")).toHaveLength(0);
     expect(runtime.sleeps).toEqual([]);
     await task.return({ status: "test-ended" });
+  });
+
+  it("shows Start for a run of a schedule that asks", async () => {
+    const task = await run("ask-schedule", undefined, { builder: "ask" });
+    expect((await task.next()).value?.status).toContain("Waiting for Start");
+    expect(await proposals("ask-schedule")).toHaveLength(1);
+    expect(launches()).toBe(0);
+    await task.return({ status: "test-ended" });
+  });
+
+  it("shows Start when a person sends an auto-start schedule's reference", async () => {
+    const task = await run("person-schedule", undefined, { builder: "auto", byPerson: true });
+    expect((await task.next()).value?.status).toContain("Waiting for Start");
+    expect(await proposals("person-schedule")).toHaveLength(1);
+    await task.return({ status: "test-ended" });
+  });
+
+  it("shows Start when a person replies in an auto-start run's thread with the reference", async () => {
+    const task = await run("reply-schedule", undefined, { builder: "auto", personReplies: true });
+    expect((await task.next()).value?.status).toContain("Waiting for Start");
+    expect(await proposals("reply-schedule")).toHaveLength(1);
+    expect(launches()).toBe(0);
+    await task.return({ status: "test-ended" });
+  });
+
+  it("refuses a scheduled run on a project outside the list, and the run fails", async () => {
+    const task = await run("outside-schedule", undefined, {
+      builder: "auto",
+      project: "other-repo",
+    });
+    await expect(task.next()).resolves.toMatchObject({
+      done: true,
+      value: { status: "not_started" },
+    });
+    expect(
+      await ledger.sql()`select id from jobs where request_key = 'outside-schedule:outside-schedule'`,
+    ).toHaveLength(0);
+    const [runRow] =
+      await ledger.sql()`select outcome from schedule_runs where session_id = 'outside-schedule'`;
+    expect(runRow?.outcome).toBe("failed");
+    expect(launches()).toBe(0);
+  });
+
+  it("refuses Builder work when the creator left the allow-list after the dispatch", async () => {
+    const task = await run("revoked-schedule", undefined, { builder: "auto" });
+    // The dispatcher sent the run while U1 was allowed. Then the owner removed U1.
+    vi.stubEnv("SYM_SLACK_USERS", "UOTHER");
+    await expect(task.next()).resolves.toMatchObject({
+      done: true,
+      value: { status: "not_started", reason: expect.stringContaining("allow-list") },
+    });
+    expect(
+      await ledger.sql()`select id from jobs where request_key = 'revoked-schedule:revoked-schedule'`,
+    ).toHaveLength(0);
+    const [runRow] =
+      await ledger.sql()`select outcome from schedule_runs where session_id = 'revoked-schedule'`;
+    expect(runRow?.outcome).toBe("failed");
+    expect(launches()).toBe(0);
   });
 });

@@ -2,56 +2,33 @@ import { describe, expect, it } from "vitest";
 import { canSkipStart } from "../lib/schedules/approval.ts";
 import { runOutcome } from "../lib/schedules/outcome.ts";
 
-const brief = { project: "p", title: "On-call check", goal: "g", doneWhen: ["d"] };
-const active = { status: "active" as const, brief };
+const auto = { status: "active" as const, builder: "auto" as const };
 
 describe("canSkipStart", () => {
-  const ok = { isSchedulePrincipal: true, schedule: active, brief };
+  const ok = { isSchedulePrincipal: true, schedule: auto };
 
-  it("skips the click for the schedule principal, an active row, and the same brief", () => {
+  it("skips the click for the schedule principal and an active auto-start row", () => {
     expect(canSkipStart(ok)).toBe(true);
-    // Key order and explicit defaults do not matter.
-    expect(
-      canSkipStart({
-        ...ok,
-        brief: {
-          doneWhen: ["d"],
-          goal: "g",
-          title: "On-call check",
-          project: "p",
-          constraints: [],
-        },
-      }),
-    ).toBe(true);
+  });
+
+  it("skips it for a one-time row that is done because this run fired it", () => {
+    expect(canSkipStart({ ...ok, schedule: { ...auto, status: "done" } })).toBe(true);
+  });
+
+  it("asks when the schedule asks for Start", () => {
+    expect(canSkipStart({ ...ok, schedule: { ...auto, builder: "ask" } })).toBe(false);
   });
 
   it("asks when someone else started the session", () => {
     expect(canSkipStart({ ...ok, isSchedulePrincipal: false })).toBe(false);
   });
 
-  it.each(["pending_approval", "paused", "deleted"] as const)("asks for a %s row", (status) => {
-    expect(canSkipStart({ ...ok, schedule: { ...active, status } })).toBe(false);
+  it.each(["paused", "deleted"] as const)("asks for a %s row", (status) => {
+    expect(canSkipStart({ ...ok, schedule: { ...auto, status } })).toBe(false);
   });
 
-  it("asks without a row, or when the brief differs", () => {
+  it("asks without a row", () => {
     expect(canSkipStart({ ...ok, schedule: undefined })).toBe(false);
-    expect(canSkipStart({ ...ok, brief: { ...brief, goal: "something wider" } })).toBe(false);
-    expect(canSkipStart({ ...ok, brief: { ...brief, constraints: ["x"] } })).toBe(false);
-    expect(canSkipStart({ ...ok, brief: "nonsense" })).toBe(false);
-  });
-
-  it("pins the model: a changed model needs the click", () => {
-    const pinned = { ...brief, model: "codex/gpt-6-luna", modelReason: "cheap check" };
-    const row = { status: "active" as const, brief: pinned };
-    expect(canSkipStart({ ...ok, schedule: row, brief: pinned })).toBe(true);
-    expect(
-      canSkipStart({
-        ...ok,
-        schedule: row,
-        brief: { ...pinned, model: "claudeAgent/claude-opus-5-5" },
-      }),
-    ).toBe(false);
-    expect(canSkipStart({ ...ok, schedule: row, brief })).toBe(false);
   });
 });
 

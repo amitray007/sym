@@ -60,3 +60,61 @@ export const schedulePackKeyMigration: Migration = {
     create unique index schedules_pack_key on schedules (pack_key) where pack_key is not null;
   `,
 };
+
+// Decision 085: a schedule holds an instruction for the brain, not a stored brief. Anyone allowed
+// creates one, active at once. `builder` says whether a run may start Builder work without a
+// click. A row fires on a cron or once at `run_at`, and a one-time row ends as `done`. An old
+// row keeps its brief inside the instruction; an approved one keeps its click-free start. A row
+// that waited for approval was never approved, so it becomes paused.
+export const agentSchedulesMigration: Migration = {
+  version: "034_agent_schedules",
+  sql: `
+    alter table schedules add column instruction text;
+    alter table schedules add column builder text not null default 'ask'
+      check (builder in ('ask', 'auto'));
+    alter table schedules add column run_at timestamptz;
+    alter table schedules alter column cron drop not null;
+
+    update schedules set
+      instruction = 'Start the builder with this brief.' || E'\\n\\n\`\`\`brief\\n'
+        || jsonb_pretty(brief) || E'\\n\`\`\`',
+      builder = case when approved_by is not null then 'auto' else 'ask' end;
+    update schedules set status = 'paused', next_fire_at = null, lease_until = null
+      where status = 'pending_approval';
+
+    alter table schedules drop constraint schedules_active_ready;
+    alter table schedules drop constraint schedules_status_check;
+    alter table schedules add constraint schedules_status_check
+      check (status in ('active', 'paused', 'done', 'deleted'));
+    alter table schedules alter column status set default 'active';
+    alter table schedules alter column instruction set not null;
+    alter table schedules add constraint schedules_instruction
+      check (length(trim(instruction)) > 0);
+    -- Exactly one of a cron and a one-time run.
+    alter table schedules add constraint schedules_timing
+      check (coalesce((cron is null) <> (run_at is null), false));
+    alter table schedules add constraint schedules_active_ready
+      check (coalesce(status <> 'active' or next_fire_at is not null, false));
+    alter table schedules drop column brief, drop column approved_by, drop column approved_at;
+  `,
+};
+
+// Decision 085: how a scheduled run's turn ended, kept by session. A fast turn can settle before
+// the dispatcher attaches its session to the run; the attach then applies it.
+export const runSettlementsMigration: Migration = {
+  version: "035_schedule_run_settlements",
+  sql: `
+    create table schedule_run_settlements (
+      session_id text primary key,
+      outcome text not null check (outcome in ('all_clear', 'needs_attention', 'failed')),
+      settled_at timestamptz not null default now()
+    );
+  `,
+};
+
+// Decision 085: when the dispatcher last tried to deliver a run. A retried delivery comes after
+// the lease runs out, so the run's fire time is too old to tell that its attach is still to come.
+export const runSendMigration: Migration = {
+  version: "036_schedule_run_sent_at",
+  sql: "alter table schedule_runs add column sent_at timestamptz;",
+};

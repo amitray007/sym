@@ -1,6 +1,6 @@
 # 042. Sym touches only the projects on its allow-list
 
-Status: accepted
+Status: accepted; point 3 superseded by [085](085-agent-schedules.md): schedules hold instructions, so `worker_job` checks the project when a run starts Builder work.
 Date: 2026-10-20
 
 ## Context

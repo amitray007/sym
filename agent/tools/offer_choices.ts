@@ -7,8 +7,8 @@ import { defuse } from "../../lib/jobs/blocks.ts";
 import { ChoiceLabels, choiceBlocks, storeChoices } from "../../lib/ledger/choices.ts";
 import { enqueuePost } from "../../lib/ledger/outbox.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
-import { ledger, pack, slackFromEnv } from "../../lib/runtime.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
 
 export default defineTool({
@@ -16,7 +16,7 @@ export default defineTool({
     "Offer two or three next steps in the conversation. Buttons are replies as the clicker, never approval or direct work. Any typed reply still works. Do not repeat the message after this tool posts it.",
   inputSchema: z.object({ message: z.string().trim().min(1).max(6000), choices: ChoiceLabels }),
   async execute(input, ctx) {
-    const by = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    const by = await requesterOf(ctx.session, ledgerDeps);
     if (!isSlackUserAllowed(pack(), process.env.SYM_SLACK_USERS, by))
       return { posted: false, reason: "This needs an allowed person in Slack." };
     const sql = ledger();

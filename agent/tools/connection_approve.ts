@@ -5,14 +5,9 @@ import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { approvalPrompt, reviewOf, sameReview } from "../../lib/connections/format.ts";
 import { hasTokenEnv, tokenEnvVar } from "../../lib/connections/names.ts";
 import { activateConnection, getConnection } from "../../lib/connections/rows.ts";
-import {
-  mayDecideAsOwner,
-  OWNER_ONLY,
-  ownerResponse,
-  ownerUserId,
-  slackUserOfPrincipal,
-} from "../../lib/owner.ts";
-import { ledger, pack } from "../../lib/runtime.ts";
+import { mayDecideAsOwner, OWNER_ONLY, ownerResponse, ownerUserId } from "../../lib/owner.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
 
 // The second half of adding a connection (decision 045). Eve's approval prompt can read only
 // the tool input, so the input repeats the review from connection_add, and execute refuses it
@@ -38,7 +33,7 @@ export default defineTool({
   label: { start: ({ name }) => `Approve ${name}` },
   async execute(input, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
-    const caller = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    const caller = await requesterOf(ctx.session, ledgerDeps);
     if (!mayDecideAsOwner(caller, pack())) return OWNER_ONLY;
     const sql = ledger();
     const row = await getConnection(sql, input.name);

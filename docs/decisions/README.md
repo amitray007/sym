@@ -29,7 +29,7 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [021](021-brief-approval-in-task.md) | The owner starts each job from the brief |
 | [022](022-reconcile-drives-orphans.md) | Reconcile drives orphaned jobs in code |
 | [023](023-local-end-to-end.md) | Local end-to-end runs use fakes and a fixture brain |
-| [024](024-schedule-rows.md) | Schedules are approved rows behind one dispatcher |
+| [024](024-schedule-rows.md) | Schedules are rows behind one dispatcher; approval and the stored brief superseded by 085 |
 | [025](025-postgres-memory.md) | Memory lives in Postgres, per person |
 | [026](026-pack-format.md) | The pack manifest is validated YAML without secrets |
 | [027](027-worker-mcp-channel.md) | Worker threads call Sym through the MCP channel, and tools check the caller |
@@ -60,7 +60,7 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [052](052-app-home.md) | The App Home tab is a read-only dashboard: jobs, schedules, projects, and owner-only connections; `views.publish` is the one Slack write outside the outbox |
 | [053](053-stranger-replies.md) | A person off the allow-list who tags Sym, writes to it, or names it in a thread gets one private persona line per hour that points to the owner, with no model call and an off switch |
 | [054](054-opt-in-proactive-features.md) | The daily digest, the verifier, and PR follow are off unless `SYM_DIGEST`, `SYM_VERIFIER`, or `SYM_PR_FOLLOW` is on |
-| [055](055-pack-schedules.md) | A pack's `schedules.yaml` seeds schedule rows as `pending_approval`; the owner approves each once with `schedule_approve`, a changed brief asks again, and a removed key is deleted |
+| [055](055-pack-schedules.md) | A pack's `schedules.yaml` seeds schedule rows, and a removed key is deleted; the approval step is superseded by 085 |
 | [056](056-result-buttons.md) | The card has Steer and the result has Looks good, Fix, and Close; Steer and Fix post a text box, a Fix runs as a follow-up job on the same worker thread, and Close settles it |
 | [057](057-pr-fact-checks.md) | A finished code job stores the worker's pull request facts and runs generic rule checks on them; the verifier judges production-touching changes; CI status comes only from PR-follow wakes |
 | [058](058-repeated-work.md) | A weekly review lets the brain find repeated work in recent briefs and draft playbooks for the owner to approve |
@@ -89,3 +89,4 @@ Format: title, `Status`, `Date`, then Context, Decision, and Consequences. One s
 | [082](082-post-safeguards-and-edits.md) | Posts use Sym's voice and record who asked; only that person can edit or delete them; 10 posts an hour per person; broadcast pings and Slack Connect targets need approval; reactions on linked messages |
 | [083](083-read-dm-and-people.md) | `slack_read` returns private content only in that conversation or the requester's DM; `slack_dm` DMs current workspace people under the post cap; `slack_user` looks people up |
 | [084](084-pins-bookmarks-canvases.md) | `slack_pin`, `slack_bookmark`, and `slack_canvas` act for members on request; a canvas write only creates or appends; new scopes need a reinstall |
+| [085](085-agent-schedules.md) | A schedule is an instruction for the brain, with a Builder mode (`ask` or `auto`) and a destination; anyone allowed creates one, active at once; `at` makes a one-time run; a run acts for its creator |

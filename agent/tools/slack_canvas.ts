@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { requesterResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
+import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledger, ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { CANVAS_MAX, writeChannelCanvas } from "../../lib/slack/canvas.ts";
 import { readInTurn } from "../../lib/slack/read.ts";
@@ -27,7 +27,7 @@ export default defineTool({
         toolInput?.target,
         `${toolInput?.title ?? ""}\n${toolInput?.markdown ?? ""}`,
       ).then((ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable")),
-    response: requesterResponse("Only the person who asked can approve this canvas."),
+    response: requesterResponse("Only the person who asked can approve this canvas.", ledgerDeps),
     prompt: ({ input }) =>
       `Add this to the ${input.target} canvas${input.title ? ` ("${input.title}")` : ""}?\n\n${input.markdown}`,
   },
@@ -39,7 +39,7 @@ export default defineTool({
       {
         sessionId: ctx.session.id,
         callId: ctx.callId,
-        requester: slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+        requester: await requesterOf(ctx.session, ledgerDeps),
         target,
         markdown,
         title,

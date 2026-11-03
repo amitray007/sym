@@ -96,17 +96,17 @@ Rules (decision 026):
   title: Weekday check
   cron: "0 9 * * 1-5"         # five fields, in UTC
   channel: C0123456789        # optional; default is channels.default
-  brief:                      # the same brief Sym writes for a job
-    project: example-app      # must be one of the pack's projects
-    title: Weekday check
-    goal: Look for failing checks and report each one.
-    doneWhen: ["The report lists every failing check"]
+  instruction: >-             # what each run does, in plain words
+    Look for failing checks on example-app and report each one.
+  builder: ask                # optional; ask (default) or auto
 ```
 
-A pack never widens Sym's rules. A seeded row starts as `pending_approval`, and Sym sends the
-owner one DM that lists it. The owner asks Sym to approve it, and approves the call once. If the
-cron, title, channel, or brief changes in the file, the row goes back to `pending_approval`. A key
-that leaves the file is deleted. A deleted key that returns waits for approval again (decision 055).
+The deployer wrote each entry, so a seeded row is active at once and Sym sends no notice. The
+`instruction` is the same text a person gives Sym in chat. With `builder: auto`, a run may start
+Builder work without a Start click; with `ask`, it shows Start / Not now. If the cron, title,
+channel, instruction, or builder mode changes in the file, Sym updates the row. A row someone
+paused stays paused. A key that leaves the file is deleted, and a deleted key that returns is
+active again. An entry with the old `brief` field fails the pack check (decisions 055 and 085).
 
 ## How Sym loads a pack
 

@@ -4,8 +4,8 @@ import { checkJob } from "../../lib/jobs/run.ts";
 import { freshJobStatus, jobListAnswer } from "../../lib/jobs/status.ts";
 import { jobRef, recentJobs } from "../../lib/ledger/jobs.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
-import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
 import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
 
 // "What's the update?" (docs/architecture.md, flow 5). The ledger answers; for one running job,
@@ -39,7 +39,7 @@ export default defineTool({
       (await getSessionThread(sql, ctx.session.id)) ?? undefined,
     );
     if (!status) return { status: "not_found", job: ref };
-    const by = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    const by = await requesterOf(ctx.session, ledgerDeps);
     if (by && isSlackUserAllowed(pack(), process.env.SYM_SLACK_USERS, by)) return status;
     // Shared status readers keep their existing summary access. Full briefs belong to the
     // allowed Slack conversation and can contain instructions outside that read capability.

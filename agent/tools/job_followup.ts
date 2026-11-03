@@ -3,8 +3,8 @@ import { z } from "zod";
 import { proposeFollowUp } from "../../lib/jobs/followup.ts";
 import { jobReply } from "../../lib/jobs/names.ts";
 import { jobRef } from "../../lib/ledger/jobs.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
-import { ledger, pack, withJobDeps } from "../../lib/runtime.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
 import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
 
 export default defineTool({
@@ -12,7 +12,7 @@ export default defineTool({
     "Propose a specific follow-up on a finished job's worker thread and branch. Posts Start / Not now. Never starts work itself. Use for requested changes after discussing a result.",
   inputSchema: z.object({ ref: z.string(), change: z.string().trim().min(1).max(1000) }),
   async execute({ ref, change }, ctx) {
-    const by = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    const by = await requesterOf(ctx.session, ledgerDeps);
     if (!isSlackUserAllowed(pack(), process.env.SYM_SLACK_USERS, by))
       return { posted: false, reason: "This needs an allowed person in Slack." };
     const result = await withJobDeps((deps) =>

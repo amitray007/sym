@@ -1,6 +1,6 @@
 # 024. Schedules are approved rows behind one dispatcher
 
-Status: accepted
+Status: superseded in part by [085](085-agent-schedules.md). The rows, lease, and dispatcher remain; owner approval and the stored brief are retired.
 Date: 2026-10-20
 
 ## Context

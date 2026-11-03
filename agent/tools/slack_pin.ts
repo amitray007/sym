@@ -1,8 +1,8 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
-import { pack, slackFromEnv } from "../../lib/runtime.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { pinMessage } from "../../lib/slack/pins.ts";
 
 // Pins or unpins a linked message when a person asks (decision 084).
@@ -19,7 +19,7 @@ export default defineTool({
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
     return pinMessage(
       { slack: slackFromEnv(), pack: pack() },
-      slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+      await requesterOf(ctx.session, ledgerDeps),
       message,
       !remove,
     );

@@ -5,8 +5,9 @@ import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { jobReply } from "../../lib/jobs/names.ts";
 import { stopJob } from "../../lib/jobs/steer.ts";
 import { getJobByRef } from "../../lib/ledger/jobs.ts";
-import { mayDecideAsOwner, ownerResponse, slackUserOfPrincipal } from "../../lib/owner.ts";
-import { pack, withJobDeps } from "../../lib/runtime.ts";
+import { mayDecideAsOwner, ownerResponse } from "../../lib/owner.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
 import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
 
 // "Stop it" in a job thread (docs/architecture.md, flow 5). It interrupts the worker thread and
@@ -31,7 +32,7 @@ export default defineTool({
   label: { start: ({ title }) => `Stop ${title}` },
   async execute({ job, title }, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
-    const by = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    const by = await requesterOf(ctx.session, ledgerDeps);
     if (
       !isSlackUserAllowed(pack(), process.env.SYM_SLACK_USERS, by) ||
       !mayDecideAsOwner(by, pack())

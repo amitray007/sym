@@ -4,13 +4,9 @@ import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { removePrompt } from "../../lib/connections/format.ts";
 import { disableConnection } from "../../lib/connections/rows.ts";
-import {
-  mayDecideAsOwner,
-  OWNER_ONLY,
-  ownerResponse,
-  slackUserOfPrincipal,
-} from "../../lib/owner.ts";
-import { ledger, pack } from "../../lib/runtime.ts";
+import { mayDecideAsOwner, OWNER_ONLY, ownerResponse } from "../../lib/owner.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
 
 // Removes a connection (decision 045): the row turns disabled and its stored sign-in is deleted.
 export default defineTool({
@@ -27,7 +23,7 @@ export default defineTool({
   label: { start: ({ name }) => `Remove ${name}` },
   async execute({ name }, ctx) {
     if (isWorkerCaller(ctx.session.auth.current)) return NOT_FOR_WORKERS;
-    const caller = slackUserOfPrincipal(ctx.session.auth.current?.principalId);
+    const caller = await requesterOf(ctx.session, ledgerDeps);
     if (!mayDecideAsOwner(caller, pack())) return OWNER_ONLY;
     const row = await disableConnection(ledger(), name);
     if (!row) return `There is no connection named "${name}".`;

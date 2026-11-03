@@ -1,11 +1,10 @@
 import { jobName } from "../jobs/names.ts";
 import { statusWords } from "../jobs/status.ts";
 import type { Job } from "../ledger/jobs.ts";
-import type { Schedule } from "../schedules/rows.ts";
 import { workerLabel } from "../worker-label.ts";
 
 // The App Home tab (decision 052). Pure: data in, Block Kit out. The caller decides who gets which
-// role and gathers the data (lib/home/collect.ts). Text from jobs and schedules is data, so it is
+// role and gathers the data (lib/home/collect.ts). Text from jobs is data, so it is
 // escaped and cut before it reaches a block.
 
 // Slack allows 100 blocks per Home view and 3000 characters per section text.
@@ -42,7 +41,6 @@ export interface HomeData {
   closures?: Job[];
   approvedStarts?: number[];
   finished: { done: number; failed: number; cancelled: number; latest: Job[] };
-  schedules: Schedule[];
   // The allow-list names only. The collector never reads any other project.
   projects: string[];
   // Present for the owner only.
@@ -195,10 +193,7 @@ export function homeView(role: HomeRole, data?: HomeData): HomeView {
         .map((job) => [job.id, job]),
     ).values(),
   ];
-  const pendingSchedules = data.schedules.filter(
-    (schedule) => schedule.status === "pending_approval",
-  );
-  const count = attention.length + pendingSchedules.length;
+  const count = attention.length;
   const running = data.active.filter((job) => !needsYou(job, now));
   const blocks: Block[] = [
     section(
@@ -224,12 +219,7 @@ export function homeView(role: HomeRole, data?: HomeData): HomeView {
     blocks.push(
       section(
         listLines(
-          [
-            ...attention.map((job) => jobLine(job, now, data.approvedStarts)),
-            ...pendingSchedules.map(
-              (schedule) => `${esc(clip(schedule.title, MAX_TITLE_CHARS))} · waiting for approval`,
-            ),
-          ],
+          attention.map((job) => jobLine(job, now, data.approvedStarts)),
           MAX_ACTIVE_JOBS,
         ),
       ),

@@ -8,7 +8,6 @@ import type { Pack } from "../pack/load.ts";
 import { getStoredPersona, personaStatus } from "../persona-setting.ts";
 import { allowedProjects } from "../projects/allowed.ts";
 import { getQuietUntil } from "../quiet/quiet.ts";
-import { listSchedules } from "../schedules/rows.ts";
 import type { SlackApi } from "../slack/api.ts";
 import { isSlackUserAllowed } from "../slack/guard.ts";
 import {
@@ -113,11 +112,10 @@ async function incompleteClosures(sql: Sql): Promise<Job[]> {
 export async function collectHome(deps: HomeDeps, role: HomeRole): Promise<HomeData> {
   const now = (deps.now ?? (() => new Date()))();
   const { sql } = deps;
-  const [worker, active, finished, schedules, stored, closures] = await Promise.all([
+  const [worker, active, finished, stored, closures] = await Promise.all([
     workerHealth(deps),
     activeJobs(sql),
     finishedSince(sql, new Date(now.getTime() - DAY_MS)),
-    listSchedules(sql),
     getStoredPersona(sql).catch(() => undefined),
     incompleteClosures(sql),
   ]);
@@ -132,7 +130,6 @@ export async function collectHome(deps: HomeDeps, role: HomeRole): Promise<HomeD
     approvedStarts: starts.map((row) => Number(row.jobId)),
     closures,
     finished,
-    schedules,
     projects: allowedProjects(deps.pack, deps.env.SYM_PROJECTS).map((p) => p.name),
   };
   if (role === "owner") {

@@ -1,7 +1,7 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
-import { slackUserOfPrincipal } from "../../lib/owner.ts";
+import { requesterOf } from "../../lib/requester.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { deleteOwnPost } from "../../lib/slack/own-posts.ts";
 
@@ -20,7 +20,7 @@ export default defineTool({
     return deleteOwnPost(ledgerDeps(), {
       sessionId: ctx.session.id,
       callId: ctx.callId,
-      requester: slackUserOfPrincipal(ctx.session.auth.current?.principalId),
+      requester: await requesterOf(ctx.session, ledgerDeps),
       message,
     });
   },
