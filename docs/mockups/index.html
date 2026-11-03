@@ -134,6 +134,8 @@ footer p + p { margin-top: 8px; }
 .sb.go { background: var(--sl-green); border-color: var(--sl-green); color: #fff; }
 .sb.danger { background: var(--sl-red); border-color: var(--sl-red); color: #fff; }
 .sb.done { opacity: .55; }
+.clip { display: inline-flex; align-items: center; gap: 8px; margin-top: 2px; padding: 6px 12px; border: 1px solid #ffffff21; border-radius: 18px; background: #ffffff0d; font-size: 13px; }
+.clip b { color: var(--sl-link); }
 .ctxline { margin-top: 6px; color: var(--sl-muted); font-size: 12px; line-height: 18px; }
 .fb { display: inline-flex; gap: 2px; margin-top: 6px; border: 1px solid #ffffff21; border-radius: 4px; }
 .fb span { padding: 1px 8px; font-size: 13px; color: var(--sl-muted); }
@@ -588,6 +590,30 @@ footer p + p { margin-top: 8px; }
           <div class="sl-body">
             <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>15:03</time></div><div class="mt"><p>v2.4 is out: faster sync and the retry fix.</p></div></div></div>
             <div class="compose">Message #releases</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pair">
+      <div>
+        <p class="label">A voice note: Sym reads the transcript and answers what Sam said</p>
+        <div class="slack">
+          <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>16:10</time></div><div class="mt"><span class="clip"><b>&#9654;</b> 0:12 · Audio clip</span></div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>16:10</time></div><div class="mt"><p>The nightly build failed at the lint step, two unused imports in billing sync. Want me to have Builder fix them?</p></div></div></div>
+            <div class="compose">Message Sym</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="label">No transcription model configured: one line, no guess</p>
+        <div class="slack">
+          <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>16:12</time></div><div class="mt"><span class="clip"><b>&#9654;</b> 0:08 · Audio clip</span></div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>16:12</time></div><div class="mt"><p>I can't listen to voice notes here. Could you type it?</p></div></div></div>
+            <div class="compose">Message Sym</div>
           </div>
         </div>
       </div>

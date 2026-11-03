@@ -3,6 +3,7 @@ import { prFollowEnabled } from "./jobs/pr-wakes.ts";
 import { verifierEnabled } from "./jobs/verify.ts";
 import { sandboxEnabled, sandboxNetwork } from "./sandbox/config.ts";
 import { codeChannelsOn } from "./slack/code-channel.ts";
+import { transcriptionRoute } from "./voice/route.ts";
 
 // What this deployment can do, for the brain's instructions (decision 068). Each line reads the
 // same switch the code reads, so the brain never claims a feature that is off or denies one that
@@ -29,6 +30,9 @@ export function capabilityInstructions(env: Record<string, string | undefined> =
       : "- Sym does not follow pull requests after a job ends.",
     digestEnabled(env) ? "- Sym posts a daily digest." : "- The daily digest is off.",
     ...sandboxLines(env),
+    transcriptionRoute(env)
+      ? "- Sym transcribes voice notes and audio clips that people send it, so you read their words as text."
+      : "- Sym cannot hear voice notes or audio here. Ask the person to type it. If someone asks, say the owner can turn transcription on with an AI Gateway key or `OPENAI_API_KEY`.",
   ];
   return [
     "# What Sym can do here",

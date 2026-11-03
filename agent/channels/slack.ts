@@ -5,6 +5,7 @@ import {
   type SlackEventContext,
   type SlackInboundEventContext,
   type SlackInboundMessageContext,
+  type SlackMentionResult,
   type SlackMessage,
   type SlackRenderHandler,
   slackChannel,
@@ -104,6 +105,8 @@ import {
   type SendRun,
 } from "../../lib/triggers/fire.ts";
 import { isSilentRunThread, markPersonTurn } from "../../lib/triggers/rows.ts";
+import { EVE_FILE_TYPES, voiceNoteContext } from "../../lib/voice/notes.ts";
+import { transcriptionRoute } from "../../lib/voice/route.ts";
 
 // The Slack channel (docs/slack.md). It reads SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET from the
 // environment. A valid signature proves Slack sent the event, not that the sender may use Sym,
@@ -675,6 +678,152 @@ async function sentToSymNote(message: SlackMessage): Promise<string | undefined>
   return sent ? SENT_NOTE : undefined;
 }
 
+// Adds a context note with the transcript of each voice note or audio clip in the message
+// (decision 092). A message without audio, or a dropped one, passes through unchanged.
+async function withVoiceNotes(
+  message: SlackMessage,
+  result: SlackMentionResult,
+): Promise<SlackMentionResult> {
+  if (!result) return result;
+  const note = await voiceNoteContext(
+    { slack: slackFromEnv(), route: transcriptionRoute() },
+    message,
+  ).catch(() => undefined);
+  return note ? { ...result, context: [...(result.context ?? []), note] } : result;
+}
+
+async function mentionTurn(
+  ctx: SlackInboundMessageContext,
+  message: SlackMessage,
+): Promise<SlackMentionResult> {
+  if (ctx.slack.codeChannel && isOriginQuote(message.raw)) return null;
+  if (!fromAllowedHuman(message)) {
+    await replyToStranger(ctx, message, "tag");
+    return null;
+  }
+  if (await typedDecision(ctx, message)) return null;
+  setQuiet(message, false);
+  const auth = defaultSlackAuth(message, ctx);
+  if (ctx.slack.codeChannel) {
+    const note = await codeChannelNote(message.channelId);
+    return note ? { auth, context: [note] } : { auth };
+  }
+  await noteSession(ctx, message);
+  if (message.threadTs === message.ts) return { auth };
+  const note = await participantsContext(
+    ctx,
+    message.author?.userId ?? "",
+    await peopleOf(ctx).then((people) => people.ids),
+  ).catch(() => undefined);
+  const jobNote = await threadJobNote(message.channelId, message.threadTs);
+  const context = [note, jobNote].filter((value): value is string => Boolean(value));
+  return context.length ? { auth, context } : { auth };
+}
+
+async function directTurn(
+  ctx: SlackInboundMessageContext,
+  message: SlackMessage,
+): Promise<SlackMentionResult> {
+  if (!fromAllowedHuman(message)) {
+    await replyToStranger(ctx, message, "direct");
+    return null;
+  }
+  if (await typedDecision(ctx, message)) return null;
+  setQuiet(message, false);
+  await noteSession(ctx, message);
+  const notes = [
+    await threadJobNote(message.channelId, message.threadTs),
+    await sentToSymNote(message),
+  ].filter((note): note is string => Boolean(note));
+  return { auth: defaultSlackAuth(message, ctx), ...(notes.length ? { context: notes } : {}) };
+}
+
+// Replies in a thread that already has a session continue it without a new mention, when they
+// are meant for Sym. Side talk between people starts no turn (decision 050).
+async function threadTurn(
+  ctx: SlackInboundMessageContext,
+  message: SlackMessage,
+): Promise<SlackMentionResult> {
+  if (ctx.slack.codeChannel && isOriginQuote(message.raw)) return null;
+  // A new top-level message is never a reply to Sym; a mention took the app_mention path. It
+  // can fire event triggers (decision 088), whoever wrote it.
+  if (!ctx.slack.codeChannel && message.threadTs === message.ts) {
+    await fireTriggersOnMessage(ctx, message);
+    return null;
+  }
+  if (!fromAllowedHuman(message)) {
+    await replyToStranger(ctx, message, "thread");
+    return null;
+  }
+  // Everything in a code channel is meant for Sym: it needs no tag, triage, or listen mode.
+  if (ctx.slack.codeChannel) {
+    if (await typedDecision(ctx, message)) return null;
+    const auth = defaultSlackAuth(message, ctx);
+    const note = await codeChannelNote(message.channelId);
+    return note ? { auth, context: [note] } : { auth };
+  }
+  if (!(await ctx.isSubscribed())) return null;
+  // A trigger run that stayed silent leaves the thread to its people (decision 088).
+  if (await isSilentRunThread(ledger(), message.channelId, message.threadTs).catch(() => false)) {
+    return null;
+  }
+  await noteSession(ctx, message, true);
+  const senderId = message.author?.userId ?? "";
+  const auth = defaultSlackAuth(message, ctx);
+  const { channelId, threadTs } = message;
+  // A failed lookup could hide a mention-only setting, so it skips the message.
+  const listenMode = await getListenMode(ledger(), channelId, threadTs).catch((error: unknown) => {
+    console.warn("Sym could not read a thread's listen mode.", String(error));
+    return undefined;
+  });
+  if (!listenMode) return null;
+  const [partnerId, people] = await Promise.all([
+    lastTurnUser(ledger(), channelId, threadTs).catch(() => undefined),
+    peopleOf(ctx),
+  ]);
+  const jobNote = await threadJobNote(channelId, threadTs);
+  const addressing = triageThreadMessage({
+    senderId,
+    text: message.text,
+    mentionsBot: ctx.isBotMentioned(),
+    botName: botName(),
+    listenMode,
+    people,
+    partnerId,
+    jobThread: Boolean(jobNote),
+  });
+  if (addressing === "skip") return null;
+  if (ctx.isBotMentioned()) {
+    if (await typedDecision(ctx, message)) return null;
+  } else if (partnerId === senderId) {
+    // Refresh before binding a bare decision. A partial thread window cannot prove that
+    // nothing came between this reply and Sym's proposal, so it never grants approval.
+    const refreshed = await ctx.thread.refresh().then(
+      () => true,
+      () => false,
+    );
+    const messages = ctx.thread.recentMessages;
+    const previous = [...messages]
+      .filter((item) => Number(item.ts) < Number(message.ts))
+      .sort((a, b) => Number(b.ts) - Number(a.ts))[0];
+    if (
+      refreshed &&
+      messages.length < 50 &&
+      previous?.isMe &&
+      (await typedDecision(ctx, message, previous.ts))
+    )
+      return null;
+  }
+  const note = await participantsContext(ctx, senderId, people.ids).catch(() => undefined);
+  const context = [
+    ...(addressing === "maybe" ? [MAYBE_NOTE] : []),
+    ...(note ? [note] : []),
+    ...(jobNote ? [jobNote] : []),
+  ];
+  setQuiet(message, addressing === "maybe");
+  return context.length > 0 ? { auth, context } : { auth };
+}
+
 export default slackChannel({
   renderers: [symRenderer],
   // Off unless SYM_CODE_CHANNELS is on: Eve then serves each code channel as one session, and the
@@ -693,127 +842,19 @@ export default slackChannel({
   // A session's first turn reads the whole thread. Later turns read what came after Sym's last
   // post, because the session already holds the rest (docs/eve.md, decision 050).
   threadContext: { since: isLastPostBoundary },
+  // Sym transcribes audio itself (decision 092), so Eve stages every other file type only.
+  uploadPolicy: { allowedMediaTypes: EVE_FILE_TYPES },
+  // Voice notes reach the brain as text (decision 092), after the allow-list and triage, so
+  // audio that is not meant for Sym, and trigger event messages, never reach a transcription
+  // model.
   async onAppMention(ctx, message) {
-    if (ctx.slack.codeChannel && isOriginQuote(message.raw)) return null;
-    if (!fromAllowedHuman(message)) {
-      await replyToStranger(ctx, message, "tag");
-      return null;
-    }
-    if (await typedDecision(ctx, message)) return null;
-    setQuiet(message, false);
-    const auth = defaultSlackAuth(message, ctx);
-    if (ctx.slack.codeChannel) {
-      const note = await codeChannelNote(message.channelId);
-      return note ? { auth, context: [note] } : { auth };
-    }
-    await noteSession(ctx, message);
-    if (message.threadTs === message.ts) return { auth };
-    const note = await participantsContext(
-      ctx,
-      message.author?.userId ?? "",
-      await peopleOf(ctx).then((people) => people.ids),
-    ).catch(() => undefined);
-    const jobNote = await threadJobNote(message.channelId, message.threadTs);
-    const context = [note, jobNote].filter((value): value is string => Boolean(value));
-    return context.length ? { auth, context } : { auth };
+    return withVoiceNotes(message, await mentionTurn(ctx, message));
   },
   async onDirectMessage(ctx, message) {
-    if (!fromAllowedHuman(message)) {
-      await replyToStranger(ctx, message, "direct");
-      return null;
-    }
-    if (await typedDecision(ctx, message)) return null;
-    setQuiet(message, false);
-    await noteSession(ctx, message);
-    const notes = [
-      await threadJobNote(message.channelId, message.threadTs),
-      await sentToSymNote(message),
-    ].filter((note): note is string => Boolean(note));
-    return { auth: defaultSlackAuth(message, ctx), ...(notes.length ? { context: notes } : {}) };
+    return withVoiceNotes(message, await directTurn(ctx, message));
   },
-  // Replies in a thread that already has a session continue it without a new mention, when they
-  // are meant for Sym. Side talk between people starts no turn (decision 050).
   async onMessage(ctx, message) {
-    if (ctx.slack.codeChannel && isOriginQuote(message.raw)) return null;
-    // A new top-level message is never a reply to Sym; a mention took the app_mention path. It
-    // can fire event triggers (decision 088), whoever wrote it.
-    if (!ctx.slack.codeChannel && message.threadTs === message.ts) {
-      await fireTriggersOnMessage(ctx, message);
-      return null;
-    }
-    if (!fromAllowedHuman(message)) {
-      await replyToStranger(ctx, message, "thread");
-      return null;
-    }
-    // Everything in a code channel is meant for Sym: it needs no tag, triage, or listen mode.
-    if (ctx.slack.codeChannel) {
-      if (await typedDecision(ctx, message)) return null;
-      const auth = defaultSlackAuth(message, ctx);
-      const note = await codeChannelNote(message.channelId);
-      return note ? { auth, context: [note] } : { auth };
-    }
-    if (!(await ctx.isSubscribed())) return null;
-    // A trigger run that stayed silent leaves the thread to its people (decision 088).
-    if (await isSilentRunThread(ledger(), message.channelId, message.threadTs).catch(() => false)) {
-      return null;
-    }
-    await noteSession(ctx, message, true);
-    const senderId = message.author?.userId ?? "";
-    const auth = defaultSlackAuth(message, ctx);
-    const { channelId, threadTs } = message;
-    // A failed lookup could hide a mention-only setting, so it skips the message.
-    const listenMode = await getListenMode(ledger(), channelId, threadTs).catch(
-      (error: unknown) => {
-        console.warn("Sym could not read a thread's listen mode.", String(error));
-        return undefined;
-      },
-    );
-    if (!listenMode) return null;
-    const [partnerId, people] = await Promise.all([
-      lastTurnUser(ledger(), channelId, threadTs).catch(() => undefined),
-      peopleOf(ctx),
-    ]);
-    const jobNote = await threadJobNote(channelId, threadTs);
-    const addressing = triageThreadMessage({
-      senderId,
-      text: message.text,
-      mentionsBot: ctx.isBotMentioned(),
-      botName: botName(),
-      listenMode,
-      people,
-      partnerId,
-      jobThread: Boolean(jobNote),
-    });
-    if (addressing === "skip") return null;
-    if (ctx.isBotMentioned()) {
-      if (await typedDecision(ctx, message)) return null;
-    } else if (partnerId === senderId) {
-      // Refresh before binding a bare decision. A partial thread window cannot prove that
-      // nothing came between this reply and Sym's proposal, so it never grants approval.
-      const refreshed = await ctx.thread.refresh().then(
-        () => true,
-        () => false,
-      );
-      const messages = ctx.thread.recentMessages;
-      const previous = [...messages]
-        .filter((item) => Number(item.ts) < Number(message.ts))
-        .sort((a, b) => Number(b.ts) - Number(a.ts))[0];
-      if (
-        refreshed &&
-        messages.length < 50 &&
-        previous?.isMe &&
-        (await typedDecision(ctx, message, previous.ts))
-      )
-        return null;
-    }
-    const note = await participantsContext(ctx, senderId, people.ids).catch(() => undefined);
-    const context = [
-      ...(addressing === "maybe" ? [MAYBE_NOTE] : []),
-      ...(note ? [note] : []),
-      ...(jobNote ? [jobNote] : []),
-    ];
-    setQuiet(message, addressing === "maybe");
-    return context.length > 0 ? { auth, context } : { auth };
+    return withVoiceNotes(message, await threadTurn(ctx, message));
   },
   // `/sym status`, `/sym jobs`, `/sym quiet`: ephemeral answers from the ledger, no model call.
   async onSlashCommand(command, ctx) {
