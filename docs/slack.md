@@ -54,7 +54,8 @@ Notes:
 
 Sym uses short sentences in one configured persona (decisions 070 and 071). It gives the point
 first and preserves facts, links, warnings, scope boundaries, and uncertainty. Plain is calm,
-casual is warm and practical, and spicy is dry and playful. Failures and concerns never get jokes.
+casual is warm and practical, and spicy texts like a gen-z teammate. Failures and concerns never
+get jokes. Most replies are one to three short lines and match the person's length and style (decision 093).
 The persona comes from the pack, then the saved owner setting, then `SYM_PERSONA`, then casual.
 The initial status fallback is "Working...". Tool labels replace it with known steps.
 

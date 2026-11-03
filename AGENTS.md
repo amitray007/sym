@@ -66,7 +66,8 @@ Node 24 and pnpm, pinned in `mise.toml`. Run tools through mise, for example
   or `eve link`), `SYM_MODEL`, and Postgres. Setup moves the run to its own database,
   `SYM_EVAL_DATABASE_URL` (default `sym_eval` on the local Postgres), and creates and migrates
   it (decision 064). `pnpm eval <id>` runs one case. On a free-tier key, add
-  `--max-concurrency 1`. `SYM_MODEL=fixture pnpm eval` proves the wiring with no provider; the
+  `--max-concurrency 1`. Without a gateway, set `SYM_MODEL_PROVIDER=anthropic`, `SYM_MODEL`, and
+  `ANTHROPIC_API_KEY`; the tone judge then uses the same key (decision 093). `SYM_MODEL=fixture pnpm eval` proves the wiring with no provider; the
   routing cases then fail.
   The script sets `SYM_PROJECTS=example-app`, the project the eval cases use (decision 042). It
   skips the persona cases. `pnpm eval:plain` and `pnpm eval:spicy` run those, each with its
