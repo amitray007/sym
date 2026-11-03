@@ -4,8 +4,8 @@ import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { addBookmark } from "../../lib/slack/pins.ts";
-import { readInTurn } from "../../lib/slack/read.ts";
 import { postNeedsConfirmation } from "../../lib/slack/slack-post.ts";
+import { readUntrustedInTurn } from "../../lib/triggers/untrusted.ts";
 
 // Adds a link bookmark to a channel when a person asks (decision 084). It follows the post
 // approval rules, since its title and link carry words into the channel.
@@ -25,7 +25,11 @@ export default defineTool({
         session.id,
         toolInput?.target,
         `${toolInput?.title ?? ""} ${toolInput?.url ?? ""}`,
-      ).then((ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable")),
+      ).then(async (ask) =>
+        ask || (await readUntrustedInTurn(session, () => ledgerDeps().sql))
+          ? "user-approval"
+          : "not-applicable",
+      ),
     response: requesterResponse("Only the person who asked can approve this bookmark.", ledgerDeps),
     prompt: ({ input }) => `Bookmark "${input.title}" (${input.url}) in ${input.target}?`,
   },

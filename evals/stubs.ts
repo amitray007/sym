@@ -30,6 +30,10 @@ export const writeToolStubs = [
   { id: "schedule-create", tool: "schedule_create", outcome: { response: NOTHING_RAN } },
   { id: "schedule-delete", tool: "schedule_delete", outcome: { response: NOTHING_RAN } },
   { id: "schedule-pause", tool: "schedule_pause", outcome: { response: NOTHING_RAN } },
+  // Decision 088: event triggers.
+  { id: "trigger-create", tool: "trigger_create", outcome: { response: NOTHING_RAN } },
+  { id: "trigger-delete", tool: "trigger_delete", outcome: { response: NOTHING_RAN } },
+  { id: "trigger-pause", tool: "trigger_pause", outcome: { response: NOTHING_RAN } },
   { id: "thread-listen", tool: "thread_listen", outcome: { response: NOTHING_RAN } },
   { id: "job-steer", tool: "job_steer", outcome: { response: NOTHING_RAN } },
   { id: "job-stop", tool: "job_stop", outcome: { response: NOTHING_RAN } },

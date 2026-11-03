@@ -24,7 +24,7 @@
 | Worker adapter | Starts, watches, steers, and stops worker threads. T3 Code first ([workers.md](workers.md)) |
 | Postgres | Job ledger, schedules, outbox, feedback, memory, approved playbooks |
 | Reconcile | Compares the ledger with each worker every 3 minutes and repairs drift |
-| Dispatch | Fires due schedule rows every minute, with a lease per row |
+| Dispatch | Fires due schedule rows every minute, with a lease per row, and sends deferred trigger runs |
 | Outbox | Durable Slack posts with an idempotency key per post |
 
 Only the Slack route is public. The MCP channel, the HTTP channel, and the worker stay on a
@@ -40,6 +40,8 @@ strands running sessions, so every job keeps enough state to continue in a new s
 | `jobs` | ID, kind, Slack channel and thread, brief, worker, thread ID, launched model, status, cursor, last summary, job card `ts`, display choice, parent job and close (decision 056), playbook and outcome (decision 059), credential-free worker identity (decision 065) |
 | `worker_capabilities` | Private per-job worker credentials and MCP endpoints; terminal jobs cannot use them (decision 065) |
 | `schedules` | Cron (UTC) or one-time run, instruction, Builder mode, destination channel, creator, status, lease |
+| `triggers` | Event trigger: kind (message or reaction), watched channel, keywords or emoji, instruction, Builder mode, destination, creator, status (decision 088) |
+| `schedule_runs` | One row per run of a schedule or a trigger: outcome, session, job; a trigger run also keeps its event key and facts |
 | `outbox` | Pending Slack posts with an idempotency key and the `chooseDisplay` result. Refuses level 0 and missing choices |
 | `feedback` | Buttons, reactions, "Fix" replies, brief edits, linked to a job |
 | `memory` | Facts and preferences (learning layer 1) |
@@ -117,6 +119,45 @@ A pack can seed schedules from `schedules.yaml`. They start active (decisions 05
 
 Sym owns schedules instead of the worker (decision 008). Sym then knows each run before it starts,
 so it can open the thread, record the job, and pick the display level.
+
+## Flow 2b: an event trigger fires
+
+Example: "When someone posts a bug report in #support, draft a ticket in its thread."
+
+1. A person on the allow-list says it once. Sym calls `trigger_create` with a title, the
+   instruction, `on` (`message`, with optional keywords, or `reaction`, with one emoji), the
+   watched channel, and an optional destination: the event message's thread (the default), a
+   channel, or the creator's DM. Sym and the person must both be in the watched channel, because
+   Slack sends events only from channels Sym is in (decisions 081 and 088). The Builder question
+   is the same as for schedules. The row is active at once.
+2. A new top-level message reaches `onMessage`, and a reaction reaches `onEvent`. Messages that
+   mention Sym and replies in threads keep their normal path; only a new top-level message or a
+   reaction can fire a trigger. Bots and Sym's own posts and reactions fire nothing, so a run
+   cannot fire itself. Anyone's message can fire a trigger; its author is not the requester.
+3. For each matching trigger, Sym reserves a `schedule_runs` row keyed by the trigger and the
+   event (one run per message), so a Slack retry fires nothing. Each trigger starts at most
+   `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour (default 20). The creator must still be allowed and
+   a member of the watched channel, or the run fails closed. Each run gets its own session: the
+   first eligible run claims the event's thread in `trigger_threads`, across the message and
+   reaction paths, and any other runs in its creator's DM.
+4. Sym sends the run message as the app principal, the same proof of a run a schedule uses:
+   `ctx.send` in the event message's thread, or `ctx.send` with a target from `onEvent`. A
+   message handler can start a session only in its own thread, so a message trigger that posts
+   elsewhere leaves its run deferred, and the next `dispatch` tick claims it with a lease and
+   sends it with `to()`, rechecking the creator first. Every send uses the scheduled run's send
+   mark, delivery key, and locked attach.
+5. The run message carries the instruction and the event's facts (channel, link, author, text)
+   as JSON data that grants nothing. The brain decides from the instruction; most events need
+   nothing, so it calls `no_reply`. Steps 4 to 5 of flow 2 apply: the run acts for the creator,
+   and `worker_job` skips Start only for an active `auto` trigger whose run this session is, in
+   the run's own turn. Every turn of a run's session, a person's follow-up included, counts as
+   one that read untrusted content, so a post or DM elsewhere waits for approval (decision 082).
+6. A run that stays silent leaves its thread to the people there: their replies start no turn.
+   A mention still does, and once any person talks to Sym there the rule ends.
+
+"Send to Sym" on a message's menu is not a trigger. Sym posts a DM to the person who picked the
+message, quoting it and asking what to do. The person's reply in that thread is their own
+request. Eve's shortcut handler cannot start a session, so the reply starts it (decision 088).
 
 ## Flow 3: watching a running job
 
@@ -224,3 +265,4 @@ The digest, when it is on, carries the rest. The digest, the verifier, and PR fo
 | Worker restart | Running turns interrupted | Reconcile sees `interrupted` and asks whether to resume |
 | Brain model error | Turn fails | Eve posts a failure notice. The worker job keeps running; reconcile picks it up |
 | Prompt injection from untrusted text | Bad actions | Reading sessions get no write tools. Writes need approval |
+| Busy watched channel | Many trigger runs, model spend | Keywords narrow the events; each trigger starts at most `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour; a Slack retry finds its run |

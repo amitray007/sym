@@ -50,11 +50,15 @@ export function scheduleTiming(
   return undefined;
 }
 
-// The worker_job tool input: a brief, plus the schedule reference when a scheduled run starts
-// Builder work (decision 085).
+// The worker_job tool input: a brief, plus the schedule or trigger reference when a run starts
+// Builder work (decisions 085 and 088).
 export const ScheduledBrief = Brief.extend({
   schedule: z
     .string()
     .optional()
     .describe("Schedule reference such as S-3. Only for a scheduled run: the reference it names."),
+  trigger: z
+    .string()
+    .optional()
+    .describe("Trigger reference such as T-3. Only for a trigger run: the reference it names."),
 });

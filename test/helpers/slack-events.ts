@@ -234,6 +234,43 @@ export function viewSubmissionRequest(
   };
 }
 
+// A message shortcut (`message_action`), such as "Send to Sym". Slack sends it form-encoded as
+// `payload=<json>`.
+export function messageShortcutRequest(
+  input: EventContext & {
+    callbackId: string;
+    channel: string;
+    user: string;
+    message: { ts: string; text: string; user: string; threadTs?: string };
+  },
+): SlackRequestParts {
+  const payload = {
+    type: "message_action",
+    callback_id: input.callbackId,
+    trigger_id: "1337.44.fake",
+    user: { id: input.user, username: input.user.toLowerCase(), team_id: input.teamId ?? "T0FAKE" },
+    team: { id: input.teamId ?? "T0FAKE" },
+    api_app_id: input.appId ?? "A0FAKE",
+    channel: { id: input.channel },
+    message: {
+      type: "message",
+      ts: input.message.ts,
+      text: input.message.text,
+      user: input.message.user,
+      ...(input.message.threadTs ? { thread_ts: input.message.threadTs } : {}),
+    },
+    response_url: "https://hooks.slack.test/actions/T0FAKE/1/fake",
+  };
+  const body = new URLSearchParams({ payload: JSON.stringify(payload) }).toString();
+  return {
+    body,
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      ...signSlackRequest(body, input.signingSecret, input.timestamp),
+    },
+  };
+}
+
 // A slash command invocation. Slack sends it form-encoded.
 export function slashCommandRequest(
   input: EventContext & {

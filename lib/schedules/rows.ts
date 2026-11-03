@@ -31,9 +31,11 @@ export interface Schedule {
   packKey: string | null;
 }
 
+// A run of a schedule or of an event trigger (decision 088). Exactly one of the two is set.
 export interface ScheduleRun {
   id: number;
-  scheduleId: number;
+  scheduleId: number | null;
+  triggerId: number | null;
   firedAt: Date;
   sessionId: string | null;
   outcome: RunOutcome;
@@ -224,17 +226,29 @@ export async function unsentRun(
   return row ? normalizeRun(row) : undefined;
 }
 
+// What a run belongs to: a schedule, or an event trigger (decision 088). A bare number is a
+// schedule.
+export type RunSource = number | { schedule: number } | { trigger: number };
+
+function sourceColumn(source: RunSource): { column: "schedule_id" | "trigger_id"; id: number } {
+  if (typeof source === "number") return { column: "schedule_id", id: source };
+  return "trigger" in source
+    ? { column: "trigger_id", id: source.trigger }
+    : { column: "schedule_id", id: source.schedule };
+}
+
 // Binds a pre-approved job to the run of this session. The run must belong to the named
-// schedule and have no job yet. The same job may claim it again (a replayed step).
+// schedule or trigger and have no job yet. The same job may claim it again (a replayed step).
 export async function claimRunForJob(
   sql: Sql,
   sessionId: string,
-  scheduleId: number,
+  source: RunSource,
   jobId: number,
 ): Promise<boolean> {
+  const { column, id } = sourceColumn(source);
   const rows = await sql`
     update schedule_runs set job_id = ${jobId}
-    where session_id = ${sessionId} and schedule_id = ${scheduleId}
+    where session_id = ${sessionId} and ${sql(column)} = ${id}
       and (job_id is null or job_id = ${jobId}) and outcome = 'started'
     returning id
   `;
@@ -248,28 +262,32 @@ export async function claimRunForJob(
 export async function claimRunWhenAttached(
   sql: Sql,
   sessionId: string,
-  scheduleId: number,
+  source: RunSource,
   jobId: number,
   options: { attempts?: number; delayMs?: number } = {},
 ): Promise<boolean> {
+  const { column, id } = sourceColumn(source);
   const attempts = options.attempts ?? 30;
   for (let attempt = 0; attempt < attempts; attempt++) {
-    if (await claimRunForJob(sql, sessionId, scheduleId, jobId)) return true;
+    if (await claimRunForJob(sql, sessionId, source, jobId)) return true;
+    // A deferred trigger run waits for the dispatcher, not for an attach, until its send starts
+    // (decision 088).
     const [pending] = await sql`
       select 1 from schedule_runs
-      where schedule_id = ${scheduleId} and session_id is null and job_id is null
+      where ${sql(column)} = ${id} and session_id is null and job_id is null
+        and (not deferred or sent_at is not null)
         and coalesce(sent_at, fired_at) >= now() - interval '2 minutes'
       limit 1
     `;
     // The attach can land between the claim and this check. Claim once more before giving up.
-    if (!pending) return claimRunForJob(sql, sessionId, scheduleId, jobId);
+    if (!pending) return claimRunForJob(sql, sessionId, source, jobId);
     await new Promise((resolve) => setTimeout(resolve, options.delayMs ?? 500));
   }
   return false;
 }
 
-// The creator of the schedule whose run this session is, for a run that acts on their behalf
-// (decision 085). Like claimRunWhenAttached, it waits briefly while a recent run still waits
+// The creator of the schedule or trigger whose run this session is, for a run that acts on
+// their behalf (decisions 085 and 088). Like claimRunWhenAttached, it waits briefly while a recent run still waits
 // for its session.
 export async function runCreatorOf(
   sql: Sql,
@@ -280,10 +298,11 @@ export async function runCreatorOf(
   for (let attempt = 0; attempt < attempts; attempt++) {
     const owner = await creatorOfSession(sql, sessionId);
     if (owner) return owner;
-    // A delivery in the last 2 minutes, a retried one included, may not be attached yet.
+    // A delivery in the last 2 minutes, a retried one included, may not be attached yet. A
+    // deferred trigger run counts once its send starts (decision 088).
     const [pending] = await sql`
       select 1 from schedule_runs
-      where session_id is null and outcome = 'started'
+      where session_id is null and outcome = 'started' and (not deferred or sent_at is not null)
         and coalesce(sent_at, fired_at) >= now() - interval '2 minutes'
       limit 1
     `;
@@ -295,11 +314,13 @@ export async function runCreatorOf(
 }
 
 async function creatorOfSession(sql: Sql, sessionId: string): Promise<string | undefined> {
-  const [row] = await sql<{ owner: string }[]>`
-    select s.owner from schedule_runs r join schedules s on s.id = r.schedule_id
+  const [row] = await sql<{ owner: string | null }[]>`
+    select coalesce(s.owner, t.owner) as owner from schedule_runs r
+    left join schedules s on s.id = r.schedule_id
+    left join triggers t on t.id = r.trigger_id
     where r.session_id = ${sessionId}
   `;
-  return row?.owner;
+  return row?.owner ?? undefined;
 }
 
 // Ends a run whose turn started no job, from what the turn posted (decision 085). The first
@@ -414,7 +435,8 @@ function normalizeRun(row: ScheduleRun): ScheduleRun {
   return {
     ...row,
     id: Number(row.id),
-    scheduleId: Number(row.scheduleId),
+    scheduleId: row.scheduleId === null ? null : Number(row.scheduleId),
+    triggerId: row.triggerId === null || row.triggerId === undefined ? null : Number(row.triggerId),
     jobId: row.jobId === null ? null : Number(row.jobId),
   };
 }

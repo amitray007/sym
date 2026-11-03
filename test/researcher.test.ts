@@ -34,6 +34,12 @@ vi.mock("../lib/slack/read.ts", async (original) => ({
   readConversation: mocks.readConversation,
 }));
 
+// Not a trigger run: the post and DM gates then depend only on reads in the turn.
+vi.mock("../lib/triggers/rows.ts", async (original) => ({
+  ...(await original<object>()),
+  isTriggerRunSession: vi.fn().mockResolvedValue(false),
+}));
+
 vi.mock("../lib/slack/slack-post.ts", async (original) => ({
   ...(await original<object>()),
   postNeedsConfirmation: mocks.postNeedsConfirmation,

@@ -3,11 +3,13 @@ import {
   defineSlackRenderer,
   type SlackContext,
   type SlackEventContext,
+  type SlackInboundEventContext,
   type SlackInboundMessageContext,
   type SlackMessage,
   type SlackRenderHandler,
   slackChannel,
 } from "eve/channels/slack";
+import { isScheduleAuth } from "eve/schedules";
 import { takeChoice } from "../../lib/delivery/choices.ts";
 import { queueReply } from "../../lib/delivery/replies.ts";
 import {
@@ -75,6 +77,12 @@ import {
   type Role,
 } from "../../lib/slack/participants.ts";
 import {
+  isSentToSymThread,
+  SEND_TO_SYM,
+  SENT_NOTE,
+  sendToSym,
+} from "../../lib/slack/send-to-sym.ts";
+import {
   createStrangerCooldown,
   strangerKey,
   strangerLine,
@@ -89,6 +97,13 @@ import {
   markThreadSession,
   threadKey,
 } from "../../lib/slack/thread-state.ts";
+import {
+  APP_AUTH,
+  fireMessageTriggers,
+  fireReactionTriggers,
+  type SendRun,
+} from "../../lib/triggers/fire.ts";
+import { isSilentRunThread, markPersonTurn } from "../../lib/triggers/rows.ts";
 
 // The Slack channel (docs/slack.md). It reads SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET from the
 // environment. A valid signature proves Slack sent the event, not that the sender may use Sym,
@@ -295,10 +310,16 @@ type StatusEvent =
 
 function stayQuiet<T extends StatusEvent>(): SlackRenderHandler<T> {
   return async (event, ctx, next) => {
-    if (isQuietTurn(quietKey(ctx.channel))) return;
+    if (isQuietTurn(quietKey(ctx.channel)) || isRunTurn(ctx)) return;
     await next(event);
   };
 }
+
+// A scheduled or trigger run starts as the app principal (decisions 085 and 088). It shows no
+// status: most runs end in silence, and a trigger run sits in the thread of someone else's
+// message.
+const isRunTurn = (ctx: { session: { auth: { current?: unknown } } }) =>
+  isScheduleAuth(ctx.session.auth.current as Parameters<typeof isScheduleAuth>[0]);
 
 // Eve names a content part's kind on its first delta only, so the renderer remembers it. A part
 // ends with its content.completed, which removes it.
@@ -354,17 +375,22 @@ const symRenderer = defineSlackRenderer({
     async "turn.started"(event, ctx, next) {
       const channel = ctx.channel;
       const { channelId, threadTs, teamId, triggeringUserId } = channel.state;
-      const quiet = isQuietTurn(quietKey(channel));
+      const run = isRunTurn(ctx);
+      const quietTurn = isQuietTurn(quietKey(channel));
+      const quiet = quietTurn || run;
       if (channelId) {
         await recordSessionThread(ledger(), {
           sessionId: ctx.session.id,
           teamId: teamId ?? null,
           channelId,
           threadTs: threadTs ?? null,
-          // A quiet turn does not make its sender the person Sym serves.
-          userId: quiet
+          // A quiet turn does not make its sender the person Sym serves. A run serves its
+          // creator, never the author of the message that fired a trigger (decision 088).
+          userId: quietTurn
             ? null
-            : await threadUserOf(ctx.session, triggeringUserId, ledgerDeps).catch(() => null),
+            : await threadUserOf(ctx.session, run ? null : triggeringUserId, ledgerDeps).catch(
+                () => null,
+              ),
         })
           // The first message of the session, for slack_react (decision 051).
           .then(() =>
@@ -372,6 +398,8 @@ const symRenderer = defineSlackRenderer({
               ? recordTurnMessage(ledger(), ctx.session.id, channel.state.triggeringMessageTs)
               : undefined,
           )
+          // A person talking to Sym ends a silent trigger run's hold on the thread (decision 088).
+          .then(() => (run || quietTurn ? undefined : markPersonTurn(ledger(), ctx.session.id)))
           .catch((error: unknown) => {
             console.warn("Sym could not record the Slack thread of a session.", String(error));
           });
@@ -381,8 +409,8 @@ const symRenderer = defineSlackRenderer({
           console.warn("Sym could not capture the reaction target.", errorName(error));
         },
       );
-      // Eve's handler resets the turn state and shows "Thinking...". A quiet turn keeps the
-      // reset and skips the status.
+      // Eve's handler resets the turn state and shows "Thinking...". A quiet turn or a run keeps
+      // the reset and skips the status. A run serves its creator, not the message's author.
       if (quiet) {
         const state = channel.state as TurnBookkeeping;
         state.pendingTaskResults = null;
@@ -560,6 +588,93 @@ async function typedDecision(
   return true;
 }
 
+// Fires the message triggers that watch this channel (decision 088). Bots, Sym itself, and edits
+// fire nothing, so a run's own post never fires a trigger. The handler's send reaches only the
+// message's own thread; a trigger that posts elsewhere defers its run to the dispatcher. This
+// never throws.
+async function fireTriggersOnMessage(ctx: SlackInboundMessageContext, message: SlackMessage) {
+  const subtype = (message.raw as { subtype?: unknown } | undefined)?.subtype;
+  if (message.author?.isBot || message.author?.isMe) return;
+  if (subtype !== undefined && subtype !== "file_share") return;
+  const send: SendRun = async ({ message: text, target, key, title }) => {
+    if (target.channelId !== message.channelId || target.threadTs !== message.ts) return undefined;
+    const delivery = await ctx.send(text, { auth: APP_AUTH, idempotencyKey: key, title });
+    return delivery.sessionId;
+  };
+  try {
+    await fireMessageTriggers(
+      { sql: ledger(), slack: slackOf(ctx), pack: pack() },
+      {
+        channel: message.channelId,
+        ts: message.ts,
+        threadTs: message.threadTs,
+        author: message.author?.userId,
+        text: message.text,
+      },
+      send,
+    );
+  } catch (error) {
+    console.warn("Sym could not check the triggers of a message.", errorName(error));
+  }
+}
+
+// Fires the reaction triggers that watch the reacted message's channel. This never throws.
+async function fireTriggersOnReaction(
+  ctx: SlackInboundEventContext,
+  input: { channel: string; ts: string; name: string; user: string; botId: string | undefined },
+) {
+  const send: SendRun = async ({ message, target, key, title }) => {
+    const delivery = await ctx.send(message, {
+      auth: APP_AUTH,
+      idempotencyKey: key,
+      title,
+      target,
+    });
+    return delivery.sessionId;
+  };
+  try {
+    await fireReactionTriggers(
+      { sql: ledger(), slack: slackOf(ctx), pack: pack() },
+      {
+        channel: input.channel,
+        ts: input.ts,
+        emoji: input.name,
+        reactor: input.user,
+        botUserId: input.botId,
+      },
+      send,
+    );
+  } catch (error) {
+    console.warn("Sym could not check the triggers of a reaction.", errorName(error));
+  }
+}
+
+// The Slack API seam over an inbound handler's workspace handle.
+function slackOf(ctx: {
+  slack: { request(method: string, body: Record<string, unknown>): Promise<unknown> };
+}) {
+  return {
+    async call(method: string, body: Record<string, unknown>) {
+      const response = (await ctx.slack.request(method, body)) as Record<string, unknown>;
+      if (response.ok === false)
+        throw new SlackApiError(
+          method,
+          typeof response.error === "string" ? response.error : "unknown_error",
+        );
+      return response;
+    },
+  };
+}
+
+// A DM thread that started from the Send to Sym shortcut tells the brain what the quote is.
+async function sentToSymNote(message: SlackMessage): Promise<string | undefined> {
+  if (message.threadTs === message.ts) return undefined;
+  const sent = await isSentToSymThread(ledger(), message.channelId, message.threadTs).catch(
+    () => false,
+  );
+  return sent ? SENT_NOTE : undefined;
+}
+
 export default slackChannel({
   renderers: [symRenderer],
   // Off unless SYM_CODE_CHANNELS is on: Eve then serves each code channel as one session, and the
@@ -604,13 +719,22 @@ export default slackChannel({
     if (await typedDecision(ctx, message)) return null;
     setQuiet(message, false);
     await noteSession(ctx, message);
-    const note = await threadJobNote(message.channelId, message.threadTs);
-    return { auth: defaultSlackAuth(message, ctx), ...(note ? { context: [note] } : {}) };
+    const notes = [
+      await threadJobNote(message.channelId, message.threadTs),
+      await sentToSymNote(message),
+    ].filter((note): note is string => Boolean(note));
+    return { auth: defaultSlackAuth(message, ctx), ...(notes.length ? { context: notes } : {}) };
   },
   // Replies in a thread that already has a session continue it without a new mention, when they
   // are meant for Sym. Side talk between people starts no turn (decision 050).
   async onMessage(ctx, message) {
     if (ctx.slack.codeChannel && isOriginQuote(message.raw)) return null;
+    // A new top-level message is never a reply to Sym; a mention took the app_mention path. It
+    // can fire event triggers (decision 088), whoever wrote it.
+    if (!ctx.slack.codeChannel && message.threadTs === message.ts) {
+      await fireTriggersOnMessage(ctx, message);
+      return null;
+    }
     if (!fromAllowedHuman(message)) {
       await replyToStranger(ctx, message, "thread");
       return null;
@@ -623,6 +747,10 @@ export default slackChannel({
       return note ? { auth, context: [note] } : { auth };
     }
     if (!(await ctx.isSubscribed())) return null;
+    // A trigger run that stayed silent leaves the thread to its people (decision 088).
+    if (await isSilentRunThread(ledger(), message.channelId, message.threadTs).catch(() => false)) {
+      return null;
+    }
     await noteSession(ctx, message, true);
     const senderId = message.author?.userId ?? "";
     const auth = defaultSlackAuth(message, ctx);
@@ -832,10 +960,13 @@ export default slackChannel({
     const name = typeof event.reaction === "string" ? event.reaction : undefined;
     const item = event.item as { type?: string; channel?: string; ts?: string } | undefined;
     if (!user || !name || item?.type !== "message" || !item.channel || !item.ts) return;
+    const botId = ctx.envelope.authorizations?.find((a) => a.is_bot)?.user_id;
+    // A reaction can fire event triggers whoever added it (decision 088), and still count as
+    // feedback below.
+    await fireTriggersOnReaction(ctx, { channel: item.channel, ts: item.ts, name, user, botId });
     if (!isAllowed(user)) return;
     try {
       const jobId = await jobIdOfMessage(ledger(), item.channel, item.ts);
-      const botId = ctx.envelope.authorizations?.find((a) => a.is_bot)?.user_id;
       if (jobId === null && (!botId || event.item_user !== botId)) return;
       await recordFeedback(
         ledger(),
@@ -851,6 +982,38 @@ export default slackChannel({
       );
     } catch (error) {
       console.warn("Sym could not record a reaction.", String(error));
+    }
+  },
+  // "Send to Sym" (decision 088): a person picks a message, and Sym asks in their DM what to do
+  // with it. Their reply there is their own request.
+  async onShortcut(shortcut, ctx) {
+    if (shortcut.type !== "message_action" || shortcut.callbackId !== SEND_TO_SYM) return;
+    const user = shortcut.user.id;
+    const where = { channel: shortcut.channelId, user };
+    if (!isAllowed(user)) {
+      const straight = !strangerRepliesOn(process.env.SYM_STRANGER_REPLIES);
+      await sayPrivately(ctx.slack, where, await strangerText(straight)).catch(() => false);
+      return;
+    }
+    try {
+      const sent = await sendToSym(
+        { ...ledgerDeps(), slack: slackOf(ctx) },
+        {
+          user,
+          channel: shortcut.channelId,
+          ts: shortcut.message.ts,
+          author: shortcut.message.userId,
+          text: shortcut.message.text,
+        },
+      );
+      if (!sent) throw new Error("not sent");
+    } catch (error) {
+      console.warn("Sym could not open a conversation from the shortcut.", errorName(error));
+      await sayPrivately(
+        ctx.slack,
+        where,
+        "I couldn't open a DM about that message. Try again in a moment.",
+      ).catch(() => false);
     }
   },
   // Answers count from allowed people. Who may settle a tool approval is the tool's own response

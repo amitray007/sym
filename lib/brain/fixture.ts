@@ -10,11 +10,16 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A scheduled run message with a ```brief block calls worker_job with that brief and the
 //   schedule reference. A scheduled run that says "fixture-say" posts one line; any other run
 //   without a brief ends the turn with no_reply.
+// - A trigger run message reads only its instruction: a ```brief block calls worker_job with the
+//   trigger reference, "fixture-say" echoes the event's text, "fixture-post <target>" calls
+//   slack_post, "fixture-schedule" tries
+//   schedule_create, and anything else ends the turn with no_reply.
 // - A message that asks for an update or status calls jobs_status and repeats its answer.
 // - A message that says "sign in to the worker" calls worker_sign_in.
 // - A message that says "thinking out loud" calls no_reply (side talk, decision 050).
 // - A message that says "move this to a code channel" calls code_channel, then answers in one line.
 // - A message with "fixture-react <emoji>" calls slack_react, then ends the turn with no_reply.
+// - A message with "fixture-post-now <target>" calls slack_post.
 // - A repeated-work review calls repeated_work, proposes one playbook for any title seen 3 or more
 //   times, then ends the turn with no_reply.
 // - A task result, or a tool result with `posted: true`, ends the turn with no_reply.
@@ -56,6 +61,8 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
     if (result?.name === "slack_react") return quiet(request);
     if (result?.name === "repeated_work") return proposeRepeated(request, result.output);
     if (result?.name === "repeated_work_propose") return quiet(request);
+    if (result?.name === "schedule_create")
+      return `Fixture schedule result: ${String(result.output).slice(0, 200)}`;
     if (result?.name === "code_channel")
       return `Code channel: ${String(result.output).slice(0, 200)}`;
     // The worker_job receipt: the job card and the brief speak for Sym while the job runs.
@@ -78,7 +85,47 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
   if (schedule) {
     return /\bfixture-say\b/.test(message) ? "Fixture run: this needs a look." : quiet(request);
   }
+  // A trigger run reads only its instruction for the script. The event's text is data, so a
+  // brief or "fixture-say" written in the event message drives nothing (decision 088).
+  const trigger = /^Trigger run of (T-\d+):/m.exec(message)?.[1];
+  if (trigger) {
+    const instruction = /^Instruction:\n([\s\S]*?)\n\nA Slack event started this run\./m.exec(
+      message,
+    )?.[1];
+    const triggerBrief = briefIn(instruction ?? "");
+    if (triggerBrief) {
+      return { toolCalls: [{ name: "worker_job", input: { ...triggerBrief, trigger } }] };
+    }
+    if (/\bfixture-schedule\b/.test(instruction ?? "")) {
+      return {
+        toolCalls: [
+          {
+            name: "schedule_create",
+            input: { title: "Run-made", instruction: "Say hello.", cron: "0 9 * * *" },
+          },
+        ],
+      };
+    }
+    const postTarget = /\bfixture-post\s+(\S+)/.exec(instruction ?? "")?.[1];
+    if (postTarget) {
+      return {
+        toolCalls: [
+          { name: "slack_post", input: { target: postTarget, text: "Fixture run post." } },
+        ],
+      };
+    }
+    if (!/\bfixture-say\b/.test(instruction ?? "")) return quiet(request);
+    const event = /^Event \(JSON data\):\n(.*)$/m.exec(message)?.[1] ?? "{}";
+    const text = (toolData(event) as { text?: string }).text ?? "";
+    return `Fixture trigger run saw: ${text.slice(0, 200)}`;
+  }
   if (brief) return { toolCalls: [{ name: "worker_job", input: brief }] };
+  const personPost = /\bfixture-post-now\s+(\S+)/.exec(message)?.[1];
+  if (personPost) {
+    return {
+      toolCalls: [{ name: "slack_post", input: { target: personPost, text: "Fixture post." } }],
+    };
+  }
   const reaction = /\bfixture-react\s+(\S+)/.exec(message)?.[1];
   if (reaction) return { toolCalls: [{ name: "slack_react", input: { emoji: reaction } }] };
   if (/\bsign in to the worker\b/i.test(message)) {

@@ -19,11 +19,17 @@ export async function queueDigest(sql: Sql, channel: string, now: Date): Promise
 
   const titles = await sql<{ id: number; title: string }[]>`select id, title from schedules`;
   const titleOf = new Map(titles.map((row) => [Number(row.id), row.title]));
+  // Event trigger runs share the run rows (decision 088).
+  const triggers = await sql<{ id: number; title: string }[]>`select id, title from triggers`;
+  const triggerTitleOf = new Map(triggers.map((row) => [Number(row.id), row.title]));
   const text = digestMessage({
     day,
     jobs: await recentJobs(sql, dayStart),
     runs: (await runsSince(sql, dayStart)).map((run) => ({
-      title: titleOf.get(run.scheduleId) ?? `Schedule ${run.scheduleId}`,
+      title:
+        run.triggerId !== null
+          ? (triggerTitleOf.get(run.triggerId) ?? `Trigger ${run.triggerId}`)
+          : (titleOf.get(run.scheduleId ?? 0) ?? `Schedule ${run.scheduleId}`),
       outcome: run.outcome,
     })),
   });

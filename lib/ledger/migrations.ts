@@ -25,6 +25,11 @@ import {
   schedulesMigration,
 } from "../schedules/migration.ts";
 import { scheduleRunsMigration } from "../schedules/runs-migration.ts";
+import {
+  channelTriggersMigration,
+  triggerRunLeaseMigration,
+  triggerThreadsMigration,
+} from "../triggers/migration.ts";
 import { credentialsMigration } from "../workers/credentials-migration.ts";
 import { workerMigration } from "../workers/migration.ts";
 
@@ -321,4 +326,7 @@ export const migrations: Migration[] = [
   agentSchedulesMigration,
   runSettlementsMigration,
   runSendMigration,
+  channelTriggersMigration,
+  triggerRunLeaseMigration,
+  triggerThreadsMigration,
 ];

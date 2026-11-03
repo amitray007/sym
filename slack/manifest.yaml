@@ -20,6 +20,13 @@ features:
       description: Status, quiet mode, schedules, and persona
       usage_hint: status | jobs | schedules | quiet [minutes|off] | persona [name]
       should_escape: false
+  # "Send to Sym" on a message's menu opens a DM about it (decision 088). Reinstall the app after
+  # you add this.
+  shortcuts:
+    - name: Send to Sym
+      type: message
+      callback_id: sym_send_to_sym
+      description: Ask Sym about this message in a DM
   # Slack code channels (decision 067). Sym opens one per started job only when SYM_CODE_CHANNELS
   # is on. Reinstall the app after you add this.
   code_channels:

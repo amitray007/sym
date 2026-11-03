@@ -51,10 +51,11 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 | Status line | tool `label.start`, `label.delta` | Use | "Launching worker thread", "Tests running" | Cut at 50 characters. Cleared after 2 min idle |
 | Approval routing | `approvalChannel: "direct-message"` | Later | Approvals stay in the job thread for the owner-only allow-list; a DM route comes with team use | Fails closed if the user cannot be resolved |
 | Renderers | `defineSlackRenderer` | Use | Feedback buttons on job results only, the session's Slack thread, hiding Eve's card for `worker_job` | Clicks arrive in `onInteraction` |
-| Events | `onEvent` | Use | `reaction_added` for feedback. `app_home_opened` publishes the Home tab (decision 052) | |
+| Events | `onEvent` | Use | `reaction_added` for feedback and reaction triggers; a trigger run starts with `ctx.send(message, { auth, target })` (decision 088). `app_home_opened` publishes the Home tab (decision 052) | Runs after a message hook declines; a message hook claims every message event |
+| Event triggers | `onMessage` + `ctx.send(message, { auth })` | Use | A new top-level message in a watched channel starts a run as the app principal in its own thread (decision 088) | The bound `send` reaches only the message's thread, so a run that posts elsewhere waits for `dispatch` and its `to()` |
 | Slash commands | `onSlashCommand` | Use | `/sym status`, `/sym jobs`, `/sym schedules`, `/sym quiet`, answered ephemerally with `ctx.slack.request` | No model call |
-| Shortcuts | `onShortcut` | Later | "Send to Sym" on any message | `trigger_id` valid about 3 s |
-| Proactive posts | `to(slack, { channelId, threadTs? })` | Use | Schedule threads, recovery sessions, digests | Each fire is a new session unless `threadTs` is set |
+| Shortcuts | `onShortcut` | Use | "Send to Sym" on a message: Sym DMs the person a quote and asks what to do (decision 088) | The context has only `ctx.slack`, no `send` or `to()`, so the person's reply starts the session. `trigger_id` valid about 3 s |
+| Proactive posts | `to(slack, { channelId, threadTs? })` | Use | Schedule threads, deferred trigger runs, recovery sessions, digests | Each fire is a new session unless `threadTs` is set |
 | Plain posts | `callSlackApi`, `ctx.slack.request` | Use | Outbox, job card edits, reactions | |
 | MCP channel | `channels/mcp.ts`, `tools: true` | Use | Worker threads call `sym_post_progress`, `sym_ask_owner`, `sym_read_thread` with a job-scoped bearer (decision 065); `SYM_MCP_TOKEN` permits status reads | HTTPS unless loopback. No tool allow-list: every plain tool is published, so tools check the caller (decision 027). Workflow tools are never published. Approval tools return `approval_required` |
 | HTTP channel | `/eve/v1/session` | Use | Scripts and CI start a session | Use `operationId` for create-once |
@@ -68,7 +69,7 @@ Legend: **Use** = part of the design. **Later** = after milestone 1 or in the te
 |---|---|---|---|---|
 | Handler schedules | `defineSchedule({ cron, run })` | Use | `dispatch` (1 min), `reconcile` (3 min), `digest`, `learn` | Cron in UTC. `eve start` runs the scheduler. One replica |
 | Markdown schedules | `.md` with `cron` | Skip | | Output discarded. Approvals fail the session |
-| Dynamic scheduling | dispatcher + rows + CRUD tools | Use | Schedules as rows, each an instruction for the brain (decision 085) | At-least-once. Lease each row |
+| Dynamic scheduling | dispatcher + rows + CRUD tools | Use | Schedules as rows, each an instruction for the brain (decision 085); event triggers share the run rows (decision 088) | At-least-once. Lease each row |
 | Durable notifications | outbox + schedule + `callSlackApi` | Use | Posts that retry | At-least-once. Idempotency key per post |
 | Memory | `defineMemory`, `defineMemoryProvider` | Use | Learning layer 1 | `fileMemory` needs Vercel Blob off Vercel, so Sym uses its own Postgres provider (`lib/memory/provider.ts`) in the `owner` slot. `byPrincipal` scopes it per person and gives schedule turns no memory |
 | Session state | `defineState` | Use lightly | Per-thread scratch | Lost with the session |

@@ -4,8 +4,8 @@ import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledger, ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
 import { CANVAS_MAX, writeChannelCanvas } from "../../lib/slack/canvas.ts";
-import { readInTurn } from "../../lib/slack/read.ts";
 import { postNeedsConfirmation } from "../../lib/slack/slack-post.ts";
+import { readUntrustedInTurn } from "../../lib/triggers/untrusted.ts";
 
 // Writes to a channel's canvas when a person asks (decision 084). Sym adds to the end of an
 // existing canvas and never replaces what people wrote.
@@ -26,7 +26,11 @@ export default defineTool({
         session.id,
         toolInput?.target,
         `${toolInput?.title ?? ""}\n${toolInput?.markdown ?? ""}`,
-      ).then((ask) => (ask || readInTurn(session) ? "user-approval" : "not-applicable")),
+      ).then(async (ask) =>
+        ask || (await readUntrustedInTurn(session, () => ledgerDeps().sql))
+          ? "user-approval"
+          : "not-applicable",
+      ),
     response: requesterResponse("Only the person who asked can approve this canvas.", ledgerDeps),
     prompt: ({ input }) =>
       `Add this to the ${input.target} canvas${input.title ? ` ("${input.title}")` : ""}?\n\n${input.markdown}`,

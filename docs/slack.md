@@ -35,6 +35,8 @@ After 45 minutes Sym asks once whether to stop.
 | Posts elsewhere | A post in another channel or thread on request, in Sym's voice. Sym can edit or delete it, or add and remove a reaction on a linked message, when the same person asks. Some posts need the requester's approval first (decisions 081, 082) | Brain: `slack_post`, `slack_edit`, `slack_delete`, `slack_react`, `slack_dm`, `slack_read`, `slack_user`, `slack_pin`, `slack_bookmark`, `slack_canvas`; checks in `lib/slack/reach.ts` | Built |
 | Ephemeral replies | `/sym status`, private sign-in prompts, stranger lines | Eve, Sym | Production |
 | Long output | Long completed replies as a Markdown file | Eve | Production |
+| Event triggers | A run's reply in the thread of the message that fired it, or in a channel or the creator's DM; silent when the event needs nothing (decision 088) | Sym: `onMessage` for new top-level messages, `onEvent` for `reaction_added`; `trigger_create` and related tools | Built (not run on real Slack) |
+| Message shortcut | "Send to Sym" on a message's menu: Sym DMs the person a quote and asks what to do (decision 088) | Sym: `onShortcut` (`message_action`, callback `sym_send_to_sym`) | Built (not run on real Slack) |
 | Modals | "New schedule" form | Sym: `views.open` with the `trigger_id` | Team phase |
 | App Home tab | Persona and worker state with the sign-in expiry, running and waiting jobs, jobs finished in 24 hours, schedules, the project allow-list; for the owner also MCP connections, persona, and quiet mode (decision 052) | Sym: `app_home_opened` in `onEvent` + `views.publish` on each open | Built (not run on real Slack) |
 | Agent surface | Top-bar entry, suggested prompts, session titles | Sym: `assistant:write`, `assistant.threads.setSuggestedPrompts` | Later |
@@ -75,7 +77,8 @@ Sym checks read-only facts with its own tools first. A problem report does not a
 `worker_job` requires an explicit request for Builder work or acceptance of a specific offer,
 including for repository investigations. The brief still needs its code-owned Start approval.
 Interactive chat always shows Start / Not now, even for trusted playbooks. Runs of a schedule
-set to `auto` start without a click (decision 085). The trust ladder no longer auto-starts jobs.
+or an event trigger set to `auto` start without a click (decisions 085 and 088). The trust ladder
+no longer auto-starts jobs.
 
 - A question about a result stays chat.
 - A requested redirect of running work uses `job_steer`.
@@ -154,7 +157,7 @@ with the public host before you import it.
 | `app_mentions:read` | `@sym` in channels |
 | `chat:write` | Replies, job cards, card edits |
 | `im:history`, `im:read`, `im:write` | DMs and approval DMs |
-| `channels:history`, `groups:history` | Replies in job threads without a mention, and the people in a thread |
+| `channels:history`, `groups:history` | Replies in job threads without a mention, the people in a thread, new messages and reacted messages for event triggers (decision 088) |
 | `files:read`, `files:write` | Logs and screenshots in; long reports out |
 | `assistant:write` | The thread status line (`assistant.threads.setStatus`) |
 | `reactions:read`, `reactions:write` | Feedback reactions in; Sym's own reactions out |
@@ -167,7 +170,9 @@ with the public host before you import it.
 | `channels:read`, `groups:read`, `mpim:read` | Tell a code channel apart (`conversations.info`); check membership and find a `#name` for posts elsewhere (decision 081) |
 
 Events: `app_mention`, `message.im`, `message.channels`, `message.groups`, `reaction_added`, `app_home_opened`,
-`agent_session_stopped`. The manifest also turns on `features.code_channels`.
+`agent_session_stopped`. The manifest also turns on `features.code_channels` and adds the
+"Send to Sym" message shortcut (`features.shortcuts`, callback `sym_send_to_sym`); reinstall the
+app after you add it.
 Interactivity and the slash command use the same request URL, `/eve/v1/slack`. The manifest turns
 on the Home tab: reinstall the app after you import this change, or Slack sends no
 `app_home_opened`. To post the digest in a channel, invite Sym to it first;
@@ -210,6 +215,38 @@ channel, and `slack_canvas` writes Markdown to a channel's canvas: it creates th
 the channel has none and otherwise adds to its end, never replacing what people wrote. Bookmarks
 and canvases follow the post approval rules, and a canvas write counts toward the hourly cap
 (decision 084).
+
+## Event triggers
+
+Anyone allowed can ask Sym to act when something happens in a channel: "when someone posts a bug
+report here, draft a ticket", or "when someone adds :ticket: to a message, file it" (decision
+088). `trigger_create` stores the instruction, `message` (with optional keywords) or `reaction`
+(one emoji), the watched channel, the Builder mode, and where runs post: the event message's
+thread by default, a channel, or the creator's DM. Slack sends Sym events only from channels it
+is in, so Sym and the person must both be members of the watched channel; the refusal says so.
+`trigger_list`, `trigger_pause`, and `trigger_delete` manage them, with no owner approval. A run
+cannot create or change triggers or schedules.
+
+Only a new top-level message or a reaction fires a trigger. A mention or a reply in a thread
+keeps its normal path. Bots, Sym's own posts, and Sym's own reactions fire nothing, and neither
+does a reaction on Sym's message (that is feedback). Each Slack event fires a trigger once, and
+each trigger starts at most `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour (default 20).
+
+A run acts for the trigger's creator. The message's author is not the requester; the event's
+text reaches the brain as JSON data that grants nothing, and a post, DM, edit, bookmark, or
+canvas write in another conversation waits for approval, in the run's turns and in a person's
+later turns in its thread. The creator
+must stay allowed and a member of the watched channel, or runs fail closed. When two triggers
+match one message, or a message and a reaction on it, each run gets its own session: the first
+eligible run owns the message's thread, and the others run in their creators' DMs. A run shows no status line, because it sits in someone else's thread and
+most runs end in silence. After a silent run, people's replies in that thread start no turn
+until someone talks to Sym there; a mention always does.
+
+"Send to Sym" on a message's menu posts a DM to the person who picked it: a link, a quote, and
+"What should I do with it?". Their reply in that DM thread is their own request, and the brain
+gets a note that the quote is data. A person off the allow-list gets the private stranger line.
+The DM is the cleaner place: it needs no membership in the message's channel, it shows nothing
+to that channel, and the conversation stays with the person who asked.
 
 ## Code channels
 
