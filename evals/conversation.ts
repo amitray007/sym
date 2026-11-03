@@ -20,5 +20,16 @@ export function isQuickReply(value: unknown): boolean {
   const text = String(value ?? "").trim();
   const report =
     /^(?:#{1,6}\s|\*{0,2}(?:tl;dr|summary|status|result|checks|open questions|next steps)\*{0,2}\s*[:\n]|[-*]\s+\[[ x]\]|[☐☑✅])/im;
-  return text.length > 0 && !report.test(text);
+  // A quick reply fits in a few short lines (decision 093), not a wall of text.
+  const lines = text.split("\n").filter((line) => line.trim() !== "").length;
+  return text.length > 0 && text.length <= 600 && lines <= 6 && !report.test(text);
+}
+
+// Stock assistant phrases the Voice rules ban (decision 093). Narrow on purpose: a match is a
+// clear bot tell, not a judgment of tone.
+const BOT_PHRASES =
+  /\b(?:let me know if (?:you need|there's) anything|how can i help|happy to help|i'?d be happy to|great question|hope this helps|i apologi[sz]e for the confusion|no problem at all|anything else i can)\b/i;
+
+export function hasNoBotPhrases(value: unknown): boolean {
+  return !BOT_PHRASES.test(String(value ?? ""));
 }

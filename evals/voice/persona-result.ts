@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import { includes, satisfies } from "eve/evals/expect";
 import type { PersonaName } from "../../lib/persona.ts";
-import { afterFinishedJob, isQuickReply } from "../conversation.ts";
+import { afterFinishedJob, hasNoBotPhrases, isQuickReply } from "../conversation.ts";
 import { writeToolStubs } from "../stubs.ts";
 
 // These are tone floors, not a judgment of how likable a voice is. The owner reviews the
@@ -23,6 +23,7 @@ export function personaResultEval(persona: PersonaName) {
       t.notCalledTool("job_followup");
       t.notCalledTool("no_reply");
       t.check(turn.reply, satisfies(isQuickReply, "a short conversation, without report sections"));
+      t.check(turn.reply, satisfies(hasNoBotPhrases, "no stock assistant phrases"));
       t.check(turn.reply, includes("https://example.com/example-app/pull/42"));
       t.check(turn.reply, includes(/pass/i));
       t.check(turn.reply, includes(/6|six/i));
