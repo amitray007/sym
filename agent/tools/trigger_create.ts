@@ -18,10 +18,10 @@ export default defineTool({
   description:
     "Use the returned state and next step to answer naturally. Do not paste tool returns verbatim or name internal tools. " +
     "Set up a trigger: when a new message (optionally with keywords) or a reaction with an emoji " +
-    "appears in a channel that the person and you are both in, or when a signed request reaches " +
-    "a webhook URL, run an instruction with your tools. It starts right away; no approval. For a " +
-    "webhook, Sym DMs the person the URL and a one-time link to the secret; never ask for, " +
-    "open, or repeat that link or the secret.",
+    "appears in a channel that the person and you are both in, when a signed request reaches " +
+    "a webhook URL, or on a GitHub or Linear event, run an instruction with your tools. It " +
+    "starts right away; no approval. For a webhook, Sym DMs the person the URL and a one-time " +
+    "link to the secret; never ask for, open, or repeat that link or the secret.",
   inputSchema: TriggerInput,
   label: { start: ({ title }) => `Trigger: ${title}` },
   async execute(input, ctx) {
@@ -53,9 +53,10 @@ export default defineTool({
           : `Created ${triggerLine(trigger)}, but I couldn't DM you the secret's link. Ask me to rotate the secret to get one.`,
       };
     }
-    return {
-      trigger: triggerRef(trigger.id),
-      answer: `Created ${triggerLine(trigger)}. I'm in that channel, so Slack sends me its events.`,
-    };
+    const why =
+      trigger.kind === "github" || trigger.kind === "linear"
+        ? "Runs start within a minute of each matching event and post in a new thread."
+        : "I'm in that channel, so Slack sends me its events.";
+    return { trigger: triggerRef(trigger.id), answer: `Created ${triggerLine(trigger)}. ${why}` };
   },
 });

@@ -2,12 +2,36 @@ import type { Sql } from "../db.ts";
 import { json } from "../ledger/jobs.ts";
 import type { BuilderMode, ScheduleRun } from "../schedules/rows.ts";
 
-// Event trigger rows (docs/architecture.md, flow 2b; decisions 088 and 090). A trigger holds an
-// instruction for the brain, like a schedule, and fires on a Slack event in its watched channel or
-// on a signed request to its webhook URL. The person who set it up consented to its runs, so a
-// new row is active at once.
+// Event trigger rows (docs/architecture.md, flows 2b to 2d; decisions 088, 090, and 091). A
+// trigger holds an instruction for the brain, like a schedule, and fires on a Slack event in its
+// watched channel, on a signed request to its webhook URL, or on a GitHub or Linear event. The
+// person who set it up consented to its runs, so a new row is active at once.
 
-export type TriggerKind = "message" | "reaction" | "webhook";
+export type TriggerKind = "message" | "reaction" | "webhook" | "github" | "linear";
+export type SourceKind = "github" | "linear";
+
+// Which GitHub events fire a trigger (decision 091). Empty lists mean any.
+export interface GitHubFilter {
+  // `owner/name`, lowercase.
+  repository: string;
+  events: GitHubEventName[];
+  actions: string[];
+  // A label the issue or pull request must carry.
+  label: string | null;
+  // The pull request's base branch, or the check suite's head branch.
+  branch: string | null;
+}
+export type GitHubEventName = "pull_request" | "issues" | "check_suite" | "issue_comment";
+
+// Which Linear issue events fire a trigger (decision 091). Empty lists mean any.
+export interface LinearFilter {
+  // A team key such as `ENG`, uppercase.
+  team: string | null;
+  actions: string[];
+  label: string | null;
+}
+
+export type SourceFilter = GitHubFilter | LinearFilter;
 export type TriggerStatus = "active" | "paused" | "deleted";
 
 export interface Trigger {
@@ -27,16 +51,56 @@ export interface Trigger {
   // A webhook trigger: the unguessable ID in its URL, and the version its secret derives from.
   hookId: string | null;
   secretVersion: number;
+  // A GitHub or Linear trigger: which events fire it.
+  sourceFilter: SourceFilter | null;
   createdAt: Date;
 }
 
 export type NewTrigger = Pick<
   Trigger,
   "kind" | "channel" | "keywords" | "emoji" | "title" | "instruction" | "builder" | "destination"
-> & { owner: string; hookId?: string | null };
+> & { owner: string; hookId?: string | null; sourceFilter?: SourceFilter | null };
 
 // The facts of the event that fired a run. They are untrusted data for the brain.
-export type TriggerEvent = SlackTriggerEvent | WebhookTriggerEvent;
+export type TriggerEvent =
+  | SlackTriggerEvent
+  | WebhookTriggerEvent
+  | GitHubTriggerEvent
+  | LinearTriggerEvent;
+
+// A GitHub App webhook event (decision 091). Whoever acted on GitHub is not the requester.
+export interface GitHubTriggerEvent {
+  kind: "github";
+  event: GitHubEventName;
+  action: string | null;
+  repository: string;
+  // The issue or pull request number, when there is one.
+  number: number | null;
+  title: string | null;
+  url: string | null;
+  // The GitHub login that caused the event.
+  sender: string | null;
+  labels: string[];
+  branch: string | null;
+  // A check suite's conclusion, such as `failure`.
+  conclusion: string | null;
+  // The issue, pull request, or comment body, cut to fit.
+  text: string | null;
+}
+
+// A Linear issue webhook event (decision 091).
+export interface LinearTriggerEvent {
+  kind: "linear";
+  action: string | null;
+  identifier: string | null;
+  title: string | null;
+  url: string | null;
+  team: string | null;
+  state: string | null;
+  labels: string[];
+  // The issue description, cut to fit.
+  text: string | null;
+}
 
 // A signed request to a webhook trigger's URL (decision 090). Anyone holding the URL and the
 // secret could have sent it, so every field is data.
@@ -86,11 +150,13 @@ export function parseTriggerRef(ref: string): number | undefined {
 export async function createTrigger(sql: Sql, input: NewTrigger): Promise<Trigger> {
   const [row] = await sql<Trigger[]>`
     insert into triggers (
-      kind, channel, keywords, emoji, title, instruction, builder, destination, owner, hook_id
+      kind, channel, keywords, emoji, title, instruction, builder, destination, owner, hook_id,
+      source_filter
     ) values (
       ${input.kind}, ${input.channel}, ${input.keywords}, ${input.emoji}, ${input.title},
       ${input.instruction}, ${input.builder}, ${input.destination}, ${input.owner},
-      ${input.hookId ?? null}
+      ${input.hookId ?? null},
+      ${input.sourceFilter ? json(sql, input.sourceFilter) : null}
     )
     returning *
   `;
@@ -101,6 +167,14 @@ export async function createTrigger(sql: Sql, input: NewTrigger): Promise<Trigge
 export async function getTrigger(sql: Sql, id: number): Promise<Trigger | undefined> {
   const [row] = await sql<Trigger[]>`select * from triggers where id = ${id}`;
   return row ? normalize(row) : undefined;
+}
+
+// The active GitHub or Linear triggers. Code matches each event against their filters.
+export async function sourceTriggers(sql: Sql, kind: SourceKind): Promise<Trigger[]> {
+  const rows = await sql<Trigger[]>`
+    select * from triggers where kind = ${kind} and status = 'active' order by id
+  `;
+  return rows.map(normalize);
 }
 
 // The webhook trigger behind a URL, unless it was deleted.
@@ -390,6 +464,7 @@ function normalize(row: Trigger): Trigger {
     keywords: row.keywords ?? [],
     hookId: row.hookId ?? null,
     secretVersion: Number(row.secretVersion ?? 1),
+    sourceFilter: row.sourceFilter ?? null,
   };
 }
 

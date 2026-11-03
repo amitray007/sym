@@ -266,6 +266,11 @@ the secret never enters Slack. Each run starts a new thread in the destination: 
 conversation by default, a channel, or the creator's DM. Only the creator can rotate the secret
 (`trigger_rotate_secret`). Sym's Slack reads redact anything shaped like a webhook secret.
 
+GitHub and Linear triggers (`on: github`, `on: linear`, decision 091) fire on events that Eve's
+GitHub and Linear channels receive, and post their runs the same way, within a minute. A GitHub
+mention of the app or a Linear delegation from a mapped, allowed person arrives as a DM like Send
+to Sym; the person's reply is their own request.
+
 ## Code channels
 
 With `SYM_CODE_CHANNELS` on, a job a person must start opens its own Slack code channel before

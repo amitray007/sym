@@ -6,9 +6,25 @@ const INSTRUCTION_PREVIEW = 300;
 // What fires the trigger, in words.
 function firesOn(trigger: Trigger): string {
   if (trigger.kind === "webhook") return "a signed webhook request";
+  if (trigger.kind === "github" || trigger.kind === "linear") return sourceEvents(trigger);
   if (trigger.kind === "reaction") return `a :${trigger.emoji}: reaction in <#${trigger.channel}>`;
   const words = trigger.keywords.length ? ` with ${trigger.keywords.join(", ")}` : "";
   return `a new message${words} in <#${trigger.channel}>`;
+}
+
+// A GitHub or Linear trigger's filter, in words (decision 091).
+function sourceEvents(trigger: Trigger): string {
+  const filter = trigger.sourceFilter;
+  if (!filter) return `a ${trigger.kind} event`;
+  const actions = filter.actions.length ? ` (${filter.actions.join(", ")})` : "";
+  const label = filter.label ? ` labeled ${filter.label}` : "";
+  if ("repository" in filter) {
+    const events = filter.events.length ? filter.events.join(", ") : "any event";
+    const branch = filter.branch ? ` on ${filter.branch}` : "";
+    return `GitHub ${events}${actions}${label}${branch} in ${filter.repository}`;
+  }
+  const team = filter.team ? ` in team ${filter.team}` : "";
+  return `a Linear issue change${actions}${label}${team}`;
 }
 
 // Where the runs post. A DM channel ID starts with D.
