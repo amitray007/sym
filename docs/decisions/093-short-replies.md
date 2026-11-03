@@ -25,7 +25,12 @@ for when it is earned, and let a conversation end without a closing line.
   anything else" and "happy to help".
 - Warmth comes when the moment earns it. No praise for ordinary requests.
 - Jokes stay original and about the work, never two in a row unless the person jokes back.
+- A follow-up question gets only its answer. Facts and concerns already in the thread are not
+  repeated unless they bear on the question. A fact, reason, or offer is never repeated, and an
+  offer is made once.
 - When a conversation winds down, the brain reacts or calls `no_reply`.
+- Each persona's example table gains a follow-up row and a small-talk row; `plain` also gains a
+  "why, with a gap" row. Examples steer the model more than rules do.
 - The `writer` subagent aims for three to five short lines per job result.
 - `spicy` texts like a gen-z engineer: lowercase and clipped. It matches slang only after the
   person uses it, at most one slang word per message, and never in a warning or concern
@@ -36,7 +41,9 @@ for when it is earned, and let a conversation end without a closing line.
   "cool, thanks", and a three-turn chat. Each has fixed checks (length, stock phrases, slang,
   emoji, help offers, the open concern) and a judge model grading whether the reply sounds
   human, fits the message's length, and adds no padding. This is the first use of a judge
-  (decision 039 had none); tone has no deterministic test.
+  (decision 039 had none); tone has no deterministic test. With `SYM_MODEL_PROVIDER=anthropic`
+  the judge uses `ANTHROPIC_API_KEY` through `@ai-sdk/anthropic` (a dev dependency), so a run
+  needs no gateway; `SYM_EVAL_JUDGE_MODEL` overrides its model.
 
 ## Consequences
 

@@ -2,14 +2,15 @@ import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { includes, satisfies } from "eve/evals/expect";
 import type { PersonaName } from "../../lib/persona.ts";
 import { afterFinishedJob, hasNoBotPhrases } from "../conversation.ts";
-import { writeToolStubs } from "../stubs.ts";
+import { finishedStatusStub, writeToolStubs } from "../stubs.ts";
 
 // Tone cases for decision 093: does Sym text like a teammate or like a bot? Fixed checks catch
 // the clear tells; a judge model grades what a pattern cannot. The persona is process-wide
 // (decision 044), so each persona runs the same cases in its own eval script.
 
 const EMOJI = /\p{Extended_Pictographic}/u;
-const SLANG = /\b(?:ngl|lowkey|fr|bet|no cap|bestie|slay|it's giving|cooked|bussin)\b/i;
+// "no cap" is left out: "the wait has no cap" is plain English here.
+const SLANG = /\b(?:ngl|lowkey|fr|bet|bestie|slay|it's giving|cooked|bussin)\b/i;
 const HELP_OFFER = /\b(?:can i|could i|want me to|anything i can)\b/i;
 
 const VOICES: Record<PersonaName, string> = {
@@ -24,7 +25,7 @@ const lacks = (pattern: RegExp, label: string) =>
   satisfies((value) => !pattern.test(String(value)), label);
 
 async function ask(t: EveEvalContext, first: string, ...rest: string[]) {
-  const session = await t.session({ stubs: [...writeToolStubs] });
+  const session = await t.session({ stubs: [...writeToolStubs, finishedStatusStub] });
   const last = await session.send(first);
   const turns = [last];
   for (const message of rest) turns.push(await session.send(message));
@@ -72,7 +73,8 @@ function judgeTone(t: EveEvalContext, turn: EveEvalTurn, message: string, person
         type: "boolean",
         instructions:
           "Is the reply free of preamble and postamble: no echo of the request, no announcement " +
-          "of what it will do, no recap, no question about wanting more?",
+          "of what it will do, no recap, no sign-off offering help or more detail? One short " +
+          "question about an obvious next decision is fine.",
       },
       voice: {
         type: "boolean",
@@ -149,14 +151,14 @@ const CASES: Case[] = [
       const { session, turns } = await ask(
         t,
         afterFinishedJob("hey, where did this land?"),
-        "nice. anything i should worry about?",
-        "ok makes sense. should we cap it?",
+        "why would it add 6 minutes though?",
+        "ok. should we cap it?",
       );
       for (const turn of turns) checkShort(t, turn, 400, 4);
       t.judge(
         "Across the conversation, the assistant sounds like one consistent human teammate. It " +
-          "never repeats a fact it already gave, never stacks jokes, and each reply is about as " +
-          `long as the message before it. Persona: ${VOICES[persona]}.`,
+          "never repeats a fact or offer it already gave, never stacks jokes, and no reply is much " +
+          `longer than its question needs. Persona: ${VOICES[persona]}.`,
         { on: session.transcript },
       )
         .label("conversation")

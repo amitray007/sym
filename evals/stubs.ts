@@ -128,3 +128,16 @@ export const statusStub = {
     },
   },
 } satisfies ToolStub;
+
+// A status read for the finished job that `afterFinishedJob` replays.
+export const finishedStatusStub = {
+  id: "jobs-status-finished",
+  tool: "jobs_status",
+  outcome: {
+    response: {
+      job: "J-12",
+      answer:
+        "Add retries to example-app: done. Draft PR #42. Tests passed, including 4 new tests. Retry waits are not capped.",
+    },
+  },
+} satisfies ToolStub;
