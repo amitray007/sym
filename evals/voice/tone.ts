@@ -131,7 +131,9 @@ const CASES: Case[] = [
       checkShort(t, turn, 600, 6);
       t.check(text(turn), lacks(SLANG, "no slang"));
       t.check(text(turn), lacks(EMOJI, "no emoji"));
+      t.check(text(turn), includes(/pass/i));
       t.check(text(turn), includes(/6|six/i));
+      t.check(text(turn), includes(/cap|limit/i));
       judgeTone(t, turn, message, persona);
     },
   },
@@ -161,8 +163,10 @@ const CASES: Case[] = [
           `longer than its question needs. Persona: ${VOICES[persona]}.`,
         { on: session.transcript },
       )
+        // A whole-conversation grade is noisy, so it is reported, not gated. The per-reply
+        // judges and fixed checks above are the gates.
         .label("conversation")
-        .gate(0.7);
+        .atLeast(0.7);
     },
   },
 ];

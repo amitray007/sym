@@ -40,7 +40,8 @@ for when it is earned, and let a conversation end without a closing line.
   persona: a greeting, small talk, a lowercase question, a formal question, a winding-down
   "cool, thanks", and a three-turn chat. Each has fixed checks (length, stock phrases, slang,
   emoji, help offers, the open concern) and a judge model grading whether the reply sounds
-  human, fits the message's length, and adds no padding. This is the first use of a judge
+  human, fits the message's length, and adds no padding. The three-turn chat's whole-transcript
+  grade is a soft score, because it varies too much between runs to gate. This is the first use of a judge
   (decision 039 had none); tone has no deterministic test. With `SYM_MODEL_PROVIDER=anthropic`
   the judge uses `ANTHROPIC_API_KEY` through `@ai-sdk/anthropic` (a dev dependency), so a run
   needs no gateway; `SYM_EVAL_JUDGE_MODEL` overrides its model.
