@@ -5,6 +5,7 @@ import { deliveryKey } from "../schedules/dispatch.ts";
 import { attachSession, finishRun, markSending } from "../schedules/rows.ts";
 import type { SlackApi } from "../slack/api.ts";
 import { isSlackUserAllowed } from "../slack/guard.ts";
+import { findMessage } from "../slack/message.ts";
 import { reachConversation } from "../slack/reach.ts";
 import { redactSecrets } from "../slack/redact.ts";
 import { triggerRunMessage } from "./format.ts";
@@ -325,61 +326,5 @@ async function isBotUser(slack: SlackApi, user: string): Promise<boolean> {
     return (info.user as { is_bot?: boolean } | undefined)?.is_bot !== false;
   } catch {
     return true;
-  }
-}
-
-interface FoundMessage {
-  text: string;
-  user?: string | undefined;
-  botId?: string | undefined;
-  threadTs: string;
-}
-
-type RawMessage = {
-  ts?: string;
-  text?: string;
-  user?: string;
-  bot_id?: string;
-  thread_ts?: string;
-};
-
-// The reacted message: a top-level message from the channel history, else a reply found in its
-// thread. Never throws.
-async function findMessage(
-  slack: SlackApi,
-  channel: string,
-  ts: string,
-): Promise<FoundMessage | undefined> {
-  const pick = (messages: unknown): RawMessage | undefined =>
-    Array.isArray(messages) ? (messages as RawMessage[]).find((m) => m.ts === ts) : undefined;
-  try {
-    // Only the one message lies between `oldest` and `latest`.
-    const history = await slack.call("conversations.history", {
-      channel,
-      latest: ts,
-      oldest: ts,
-      inclusive: true,
-    });
-    let found = pick(history.messages);
-    if (!found) {
-      // A reply: its thread from the root up to the reply.
-      const replies = await slack.call("conversations.replies", {
-        channel,
-        ts,
-        latest: ts,
-        inclusive: true,
-        limit: 1000,
-      });
-      found = pick(replies.messages);
-    }
-    if (!found) return undefined;
-    return {
-      text: found.text ?? "",
-      user: found.user,
-      botId: found.bot_id,
-      threadTs: found.thread_ts ?? ts,
-    };
-  } catch {
-    return undefined;
   }
 }

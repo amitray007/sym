@@ -87,7 +87,10 @@ both.
     It is not a trigger run. The DM is cleaner than the message's thread: it needs no membership
     in that channel, shows nothing to its members, and keeps the conversation with the person who
     asked. Eve's `onShortcut` context has only the Slack API, no `send`, so the reply starts the
-    session.
+    session. The shortcut payload carries only the message's own text, and a forward keeps its
+    original in an attachment. When the text is empty, Sym reads the message back and quotes the
+    forwarded text and file names. In a channel Sym has not joined, the quote says Sym cannot read
+    it. The reaction trigger reads messages the same way (`lib/slack/message.ts`).
 13. Migration `037_channel_triggers` adds `triggers`, makes `schedule_runs.schedule_id`
     nullable, and adds `trigger_id`, `event_key`, `event`, and `deferred`, with a check that a run
     belongs to exactly one schedule or trigger. Migration `038_trigger_run_lease` adds
