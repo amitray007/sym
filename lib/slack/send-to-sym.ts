@@ -1,6 +1,7 @@
 import type { Sql } from "../db.ts";
 import type { LedgerDeps } from "../jobs/run.ts";
 import { messageLink } from "../triggers/fire.ts";
+import { findMessage } from "./message.ts";
 import { postAndConfirm } from "./post.ts";
 
 // The "Send to Sym" message shortcut (decision 088). A person picks a message, and Sym opens a
@@ -12,6 +13,8 @@ import { postAndConfirm } from "./post.ts";
 export const SEND_TO_SYM = "sym_send_to_sym";
 const KEY_PREFIX = "send-to-sym:";
 const QUOTE_MAX = 1500;
+const UNREADABLE =
+  "(I can't read this message from here, maybe because I'm not in that channel. Tell me what it says.)";
 
 export const SENT_NOTE =
   "This DM thread starts with something the person handed you: a message sent with the Send to " +
@@ -32,8 +35,17 @@ export async function sendToSym(deps: LedgerDeps, input: ShortcutMessage): Promi
   return handOff(deps, {
     user: input.user,
     key: `${input.channel}:${input.ts}:${input.user}`,
-    text: shortcutText(input),
+    text: shortcutText({ ...input, text: await readableText(deps, input) }),
   });
+}
+
+// The shortcut payload carries only a message's own text. A forward, a file, or a shared message
+// has none, so Sym reads the message back for its forwarded text and file names. That needs Sym
+// in the channel; elsewhere the quote says so, and the person's reply fills the gap.
+async function readableText(deps: LedgerDeps, input: ShortcutMessage): Promise<string> {
+  if (input.text.trim() || !deps.slack) return input.text;
+  const found = await findMessage(deps.slack, input.channel, input.ts);
+  return found ? found.text : UNREADABLE;
 }
 
 // Opens a DM conversation with a person about something they handed Sym: the shortcut, a GitHub
