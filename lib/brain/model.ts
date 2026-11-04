@@ -46,11 +46,37 @@ export function stepModel(
   const configured = env.SYM_MODEL?.trim() || undefined;
   // A live model has no gateway catalog entry, so the selection names its window.
   if (configured === "fixture") return { model: fixture(), modelContextWindowTokens: 1_000_000 };
-  return { model: selectModel(configured, env), reasoning: selectReasoning(reasoning, env) };
+  const model = selectModel(configured, env);
+  const level = selectReasoning(reasoning, env);
+  // Eve caches Anthropic prompts for 5 minutes by default and rejects promptCache on the gateway.
+  if (promptCacheTtl(env) === "1h" && selectedProvider(env) === "anthropic") {
+    const promptCache = { anthropic: { ttl: "1h" as const } };
+    return { model, reasoning: level, modelOptions: { promptCache } };
+  }
+  return { model, reasoning: level };
+}
+
+// SYM_PROMPT_CACHE_TTL=1h keeps the brain's cached prompt for an hour on the direct Anthropic
+// route (decision 094). Slack replies often come more than 5 minutes apart. A 1-hour cache write
+// costs 2x input instead of 1.25x; a read costs the same.
+export function promptCacheTtl(env: Record<string, string | undefined> = process.env): "5m" | "1h" {
+  const value = env.SYM_PROMPT_CACHE_TTL?.trim().toLowerCase();
+  if (!value || value === "5m") return "5m";
+  if (value === "1h") {
+    if (selectedProvider(env) !== "anthropic")
+      warnOnce("SYM_PROMPT_CACHE_TTL=1h applies only to SYM_MODEL_PROVIDER=anthropic.");
+    return "1h";
+  }
+  warnOnce(`unknown SYM_PROMPT_CACHE_TTL "${value}". Using "5m".`);
+  return "5m";
+}
+
+function selectedProvider(env: Record<string, string | undefined>) {
+  return env.SYM_MODEL_PROVIDER?.trim().toLowerCase() || "gateway";
 }
 
 function selectModel(configured: string | undefined, env: Record<string, string | undefined>) {
-  const provider = env.SYM_MODEL_PROVIDER?.trim().toLowerCase() || "gateway";
+  const provider = selectedProvider(env);
   if (isDirectProvider(provider)) return DIRECT_PROVIDERS[provider](configured);
   if (provider !== "gateway")
     warnOnce(`unknown SYM_MODEL_PROVIDER "${provider}". Using "gateway".`);

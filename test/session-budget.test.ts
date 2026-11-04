@@ -31,6 +31,17 @@ describe("overSessionBudget", () => {
     // 1M new input at $2/M is $2.
     expect(overSessionBudget(usage({ inputTokens: 1_000_000 }))).toBe(true);
   });
+
+  // Decision 094: input includes cache writes, priced above new input.
+  it("prices cache writes by the cache lifetime", () => {
+    const writes = usage({ inputTokens: 750_000, cacheWriteTokens: 750_000 });
+    // 750k writes at $2.50/M (1.25x) is $1.875.
+    expect(overSessionBudget(writes, 2, {})).toBe(false);
+    // 750k writes at $4/M (2x) is $3.
+    expect(
+      overSessionBudget(writes, 2, { SYM_MODEL_PROVIDER: "anthropic", SYM_PROMPT_CACHE_TTL: "1h" }),
+    ).toBe(true);
+  });
 });
 
 afterEach(() => vi.unstubAllEnvs());

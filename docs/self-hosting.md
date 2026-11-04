@@ -37,6 +37,7 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_TRANSCRIBE_MODEL` | Optional. The model for voice notes, default `openai/gpt-transcribe`. It uses the AI Gateway, or OpenAI directly as above; `off` turns transcription off (decision 092) |
 | `SYM_MODEL` | Optional. A gateway model ID, for example `anthropic/claude-sonnet-5.5`. With a direct provider, the provider's model ID, for example `claude-sonnet-5-5`; unset uses Eve's default for that provider |
 | `SYM_REASONING` | Optional. Replaces the reasoning level of the brain and its subagents: `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. Set `provider-default` for a model without reasoning, because some providers reject any level for it (decision 064). An unknown value warns and is ignored |
+| `SYM_PROMPT_CACHE_TTL` | Optional. `5m` (default) or `1h`. How long the brain's prompt cache lives. `1h` applies only with `SYM_MODEL_PROVIDER=anthropic`; a 1-hour cache write costs 2x input instead of 1.25x, so it pays off when replies land 5 to 60 minutes apart. The `model cache usage` log line shows the hit rate (decision 094) |
 | `SYM_WORKER_MODEL` | Optional. Overrides the default worker model, as `<provider>/<model>`, for example `codex/gpt-6-luna`. It joins the model list when missing (decision 041) |
 | `DATABASE_URL` | Postgres. `compose.yaml` builds it from `POSTGRES_PASSWORD` |
 | `SYM_PACK_DIR` | Path to the mounted pack |
