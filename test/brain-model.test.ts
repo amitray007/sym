@@ -84,4 +84,31 @@ describe("stepModel", () => {
       modelContextWindowTokens: 1_000_000,
     });
   });
+
+  // Decision 094: the 1-hour prompt cache applies only to the direct Anthropic route.
+  it("asks for a 1-hour Anthropic cache with SYM_PROMPT_CACHE_TTL=1h", () => {
+    const selection = stepModel(fixture, "medium", {
+      SYM_MODEL_PROVIDER: "anthropic",
+      SYM_MODEL: "claude-sonnet-5-5",
+      SYM_PROMPT_CACHE_TTL: " 1H ",
+    });
+    expect(selection).toMatchObject({
+      modelOptions: { promptCache: { anthropic: { ttl: "1h" } } },
+    });
+    expect(
+      stepModel(fixture, "medium", {
+        SYM_MODEL_PROVIDER: "anthropic",
+        SYM_MODEL: "claude-sonnet-5-5",
+      }),
+    ).not.toHaveProperty("modelOptions");
+  });
+
+  it("keeps the gateway's own caching when SYM_PROMPT_CACHE_TTL=1h", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(stepModel(fixture, "medium", { SYM_PROMPT_CACHE_TTL: "1h" })).toEqual({
+      model: "anthropic/claude-sonnet-5.5",
+      reasoning: "medium",
+    });
+    warn.mockRestore();
+  });
 });
