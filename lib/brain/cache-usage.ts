@@ -9,7 +9,7 @@ export type CacheUsageLine = {
 };
 
 // One line per model run and compaction summary (decision 094). A delegated call's record repeats
-// what its subagent already logged, so it gets no line.
+// what the subagent's own hook already logged, so it gets no line.
 export function cacheUsageLine(data: UsageRecordedData): CacheUsageLine | null {
   if (data.kind !== "model" || !data.owner || "callId" in data.owner) return null;
   const { inputTokens, cacheReadTokens, cacheWriteTokens } = data.usage;

@@ -26,8 +26,10 @@ nothing. An unknown value warns and uses `5m`.
 lifetime. New input is input minus cache reads and cache writes.
 
 The `agent/hooks/cache-usage.ts` hook logs one `model cache usage` line for each model run and
-compaction summary: input, cache reads, cache writes, uncached input, and the hit rate. It skips a
-delegated call's record, because the subagent's own runs already logged it.
+compaction summary: input, cache reads, cache writes, uncached input, and the hit rate. Declared
+subagents get no root hooks, so the researcher, verifier, and writer each re-export it from their
+own `hooks/` folder. The root skips a delegated call's record, because the subagent's hook already
+logged those runs.
 
 ## Consequences
 
