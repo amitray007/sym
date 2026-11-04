@@ -76,6 +76,7 @@ describe("researcher boundary", () => {
     expect(names).toEqual(["jobs_status", "slack_read", "web_fetch", "web_search"]);
     expect(readdirSync(new URL("../agent/subagents/researcher/", import.meta.url)).sort()).toEqual([
       "agent.ts",
+      "hooks",
       "instructions.md",
       "tools",
     ]);
