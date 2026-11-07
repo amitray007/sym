@@ -27,10 +27,14 @@ The catalog is json-render's standard set without `Image` and `Button`: `Card`, 
 loses its `imageUrl` prop. Sym has no handler for a card button, choices go through
 `offer_choices`, and images become links (decision 071).
 
-`lib/cards/card.ts` validates the spec, rejects a link that is not `http` or `https`, defuses
-mentions in every string, and enforces Slack's limits: one table, two charts, 100 table rows, and
-50 blocks. The adapter cuts blocks past its cap without an error, so code asks for one more and
-refuses the card. Sym passes no json-render `state`, so the tool rejects `$` expressions,
+`lib/cards/card.ts` validates the spec, rejects a link that is not `http` or `https` and two
+buttons with one link, defuses mentions in every prop, and enforces Slack's limits: one table
+(100 rows including the header, 20 columns, 10,000 cell characters), two charts (20 categories,
+50-character titles, 20-character labels), 10 fields, 3,000 characters of text, a 150-character
+title, and 50 blocks. The adapter cuts text, drops fields, and turns a chart or table it can't
+draw into a code block without an error, so code refuses those cards and checks that every chart
+and table came out as one. Markdown links in text become Slack links, and each link button gets
+its own action id. Sym passes no json-render `state`, so the tool rejects `$` expressions,
 `repeat`, and `visible`: they would render nothing, and an expression could build a mention after
 defusing. `defuse` now strips nested tokens such as `<<!channel>>` until none remain, for every
 caller. A bad spec returns its issues to the model, which fixes the spec and calls again. A good
@@ -39,7 +43,9 @@ spec becomes Block Kit plus the adapter's fallback text for notifications.
 The post goes through `chooseDisplay` (kind `card`) and the outbox like any reply. A card is a
 level 1 message: one post, one notification. A card table paginates, so the display rule's
 10-row document threshold applies to Markdown tables only; fallback text over 12,000 characters
-still refuses the card. Cards do not stream: the outbox posts the finished card once.
+still refuses the card. Cards do not stream: the outbox posts the finished card once. The card
+replaces the reply, so when its send fails the tool gives up on it and tells the brain to answer
+in text.
 
 Sym stays a text chat first. The brain uses a card only when the person asks for a chart, graph,
 table, or card, or when the data is too much for a few sentences: a trend over about six or more

@@ -9,7 +9,7 @@ export default defineEval({
   async test(t) {
     const session = await t.session({ stubs: [...writeToolStubs] });
     await session.send("let <@U0PRIYA> know the v2.4 release moved to Friday");
-    await approvePending(session);
+    await approvePending(session, ["slack_dm"]);
     t.succeeded();
     t.calledTool("slack_dm", { input: { person: /U0PRIYA/, text: /Friday/ }, count: 1 });
     t.notCalledTool("slack_post");

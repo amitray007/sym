@@ -35,13 +35,20 @@ export function hasNoBotPhrases(value: unknown): boolean {
 }
 
 type ApprovingSession = {
-  readonly pendingInteractions: readonly unknown[];
-  respondAll(optionId: string): Promise<unknown>;
+  readonly pendingInteractions: readonly { interactionId: string; call?: { name: string } }[];
+  respond(answers: { interactionId: string; optionId: string }[]): Promise<unknown>;
 };
 
 // An eval session has no Slack thread, so Sym can't tell that the conversation is public and
 // asks before a post or a DM, as it does from a private conversation (decisions 082 and 083).
-// The eval's person approves, like the requester would. These cases check routing, not the gate.
-export async function approvePending(session: ApprovingSession): Promise<void> {
-  while (session.pendingInteractions.length > 0) await session.respondAll("approve");
+// The eval's person approves those tools only, like the requester would; any other request stays
+// open and fails the case. These cases check routing, not the gate.
+export async function approvePending(session: ApprovingSession, tools: string[]): Promise<void> {
+  for (let round = 0; round < 3; round++) {
+    const asks = session.pendingInteractions.filter((ask) => tools.includes(ask.call?.name ?? ""));
+    if (asks.length === 0) return;
+    await session.respond(
+      asks.map(({ interactionId }) => ({ interactionId, optionId: "approve" })),
+    );
+  }
 }

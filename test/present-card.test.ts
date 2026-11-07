@@ -118,4 +118,30 @@ describe.skipIf(!hasDatabase)("present_card", () => {
     });
     expect(await outboxRows("card-long")).toHaveLength(0);
   });
+
+  it("tells the brain to answer in text when Slack refuses the card", async () => {
+    const ctx = await setup("card-refused");
+    runtime.slack = {
+      call: vi.fn(async (method: string) => {
+        if (method === "chat.postMessage") throw new Error("channel_not_found");
+        return { ok: true };
+      }),
+    };
+    expect(await present({ spec }, ctx)).toEqual({
+      posted: false,
+      reason: "The card didn't post. Answer in text instead.",
+    });
+    const [row] =
+      await ledger.sql()`select status from outbox where idempotency_key = 'card-refused:card:card'`;
+    expect(row?.status).toBe("failed");
+  });
+
+  it("counts a card it could not try yet as on its way", async () => {
+    const ctx = await setup("card-later");
+    runtime.slack = undefined;
+    expect(await present({ spec }, ctx)).toEqual({ posted: true });
+    const [row] =
+      await ledger.sql()`select status from outbox where idempotency_key = 'card-later:card:card'`;
+    expect(row?.status).toBe("pending");
+  });
 });

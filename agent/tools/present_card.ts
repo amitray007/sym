@@ -5,7 +5,7 @@ import { CardSpec, COMPONENT_GUIDE, renderCard } from "../../lib/cards/card.ts";
 import { deliver } from "../../lib/delivery/deliver.ts";
 import { chooseDisplay } from "../../lib/display.ts";
 import { jobIdOfThread } from "../../lib/feedback/feedback.ts";
-import { enqueuePost } from "../../lib/ledger/outbox.ts";
+import { abandonFailedPost, enqueuePost, postStatus } from "../../lib/ledger/outbox.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
 import { requesterOf } from "../../lib/requester.ts";
 import { ledger, ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
@@ -22,7 +22,13 @@ export default defineTool({
     "unsure, use text. The spec is { root, elements }: root names the Card " +
     "element, each element is { type, props, children }, children name other elements, and an " +
     "element without children has children: []. Use literal values only: no $ expressions, " +
-    "repeat, or visible. A card holds at most one Table (100 rows) and two Charts. " +
+    "repeat, or visible. Rules: the root is a Card; group parts with Section, not another Card. " +
+    "Field goes only inside Fields (at most 10), and LinkButton only inside Actions, each with " +
+    "its own link. Text is Slack text: *bold*, _italic_, `code`, and [label](https://url) " +
+    "links; no headings. A card holds at most one Table (99 rows plus the header, 20 columns) " +
+    "and two Charts. A bar, line, or area Chart has at most 20 unique categories and one value " +
+    "per category in each series; its title has at most 50 characters and each label at most " +
+    "20. Text has at most 3000 characters and the Card title at most 150. " +
     `Components:\n${COMPONENT_GUIDE}\n` +
     "Use only facts from the conversation or tools; never invent numbers. Keep text short. If the " +
     "tool returns issues, fix the spec and call it again. If it returns a reason, answer in text. " +
@@ -53,7 +59,7 @@ export default defineTool({
     if (display.level !== 1)
       return { posted: false, reason: "This is too long for a card. Reply in text instead." };
     const jobId = await jobIdOfThread(sql, thread.channelId, thread.threadTs ?? "");
-    await enqueuePost(sql, {
+    const post = await enqueuePost(sql, {
       idempotencyKey: `${ctx.session.id}:${ctx.callId}:card`,
       ...(jobId ? { jobId } : {}),
       method: "chat.postMessage",
@@ -67,6 +73,12 @@ export default defineTool({
     });
     const slack = slackFromEnv();
     if (slack) await deliver(sql, slack);
+    // The card replaces the reply, so a failed send must not end in silence. Sym gives up on the
+    // card instead of retrying it, so it can't arrive after the text answer. A card no one has
+    // tried yet, or one another sender holds, is still on its way.
+    const status = await postStatus(sql, post.id);
+    if (status === "failed" || (status === "pending" && (await abandonFailedPost(sql, post.id))))
+      return { posted: false, reason: "The card didn't post. Answer in text instead." };
     return { posted: true };
   },
 });

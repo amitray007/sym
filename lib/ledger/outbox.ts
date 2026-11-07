@@ -124,6 +124,18 @@ export async function dropPost(sql: Sql, id: number, reason: string): Promise<vo
   `;
 }
 
+// Gives up on a pending post whose last send failed and that no sender holds now, and says whether
+// it did. A caller that answers another way uses it, so the post can't arrive after that answer.
+export async function abandonFailedPost(sql: Sql, id: number): Promise<boolean> {
+  const rows = await sql`
+    update outbox set status = 'failed'
+    where id = ${id} and status = 'pending' and attempts > 0
+      and (claimed_until is null or claimed_until < now())
+    returning id
+  `;
+  return rows.length > 0;
+}
+
 export async function markPostSent(sql: Sql, id: number, slackTs: string | null): Promise<void> {
   await sql`
     update outbox set status = 'sent', slack_ts = ${slackTs}, sent_at = now(),

@@ -178,4 +178,83 @@ describe("generative cards", () => {
     }
     expect(COMPONENT_GUIDE).not.toContain("- Button:");
   });
+
+  const text = (content: string) => ({ type: "Text", props: { content }, children: [] });
+  const line = (categories: string[], title = "Latency") => ({
+    type: "Chart",
+    props: {
+      title,
+      chart: {
+        type: "line",
+        categories,
+        series: [{ name: "p95", values: categories.map(() => 1) }],
+      },
+    },
+    children: [],
+  });
+
+  it("defuses text in an element whose id is url", () => {
+    const result = renderCard(card(["url"], { url: text("hi <!channel> <@U1>") }));
+    if (!result.ok) throw new Error(result.issues.join("; "));
+    expect(JSON.stringify(result.blocks) + result.text).not.toMatch(/<!|<@/);
+  });
+
+  it("keeps element ids as written, so a mention in an id still renders", () => {
+    const result = renderCard(card(["here@here"], { "here@here": text("ok") }));
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses a chart Slack can't draw instead of posting it as text", () => {
+    const days = Array.from({ length: 30 }, (_, i) => `d${i + 1}`);
+    expect(renderCard(card(["c"], { c: line(days) }))).toMatchObject({
+      ok: false,
+      issues: [expect.stringContaining("at most 20 categories")],
+    });
+    expect(renderCard(card(["c"], { c: line(["a"], "x".repeat(51)) })).ok).toBe(false);
+    expect(renderCard(card(["c"], { c: line(["mon", "mon"]) }))).toMatchObject({
+      ok: false,
+      issues: [expect.stringContaining("could not become a Slack chart")],
+    });
+  });
+
+  it("refuses more than ten fields instead of dropping the rest", () => {
+    const ids = Array.from({ length: 11 }, (_, i) => `f${i}`);
+    const fields = Object.fromEntries(
+      ids.map((id) => [id, { type: "Field", props: { label: id, value: 1 }, children: [] }]),
+    );
+    const spec = card(["kpis"], { kpis: { type: "Fields", props: {}, children: ids }, ...fields });
+    expect(renderCard(spec).ok).toBe(false);
+  });
+
+  it("refuses text Slack would cut", () => {
+    expect(renderCard(card(["t"], { t: text("x".repeat(3001)) }))).toMatchObject({
+      ok: false,
+      issues: ["t.props.content: at most 3000 characters"],
+    });
+  });
+
+  it("refuses two link buttons with one link and gives each button its own id", () => {
+    const button = (url: string) => ({
+      type: "LinkButton",
+      props: { label: "Open", url },
+      children: [],
+    });
+    const links = (a: string, b: string) =>
+      card(["row"], {
+        row: { type: "Actions", props: {}, children: ["a", "b"] },
+        a: button(a),
+        b: button(b),
+      });
+    expect(renderCard(links("https://x.com", "https://x.com")).ok).toBe(false);
+    const result = renderCard(links("https://x.com/a", "https://x.com/b"));
+    if (!result.ok) throw new Error(result.issues.join("; "));
+    const ids = JSON.stringify(result.blocks).match(/sym_card_link_\d/g);
+    expect(ids).toEqual(["sym_card_link_0", "sym_card_link_1"]);
+  });
+
+  it("turns Markdown links in text into Slack links", () => {
+    const result = renderCard(card(["t"], { t: text("See [the board](https://x.com/b) now") }));
+    if (!result.ok) throw new Error(result.issues.join("; "));
+    expect(JSON.stringify(result.blocks)).toContain("<https://x.com/b|the board>");
+  });
 });

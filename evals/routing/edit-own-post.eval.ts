@@ -9,9 +9,9 @@ export default defineEval({
   async test(t) {
     const session = await t.session({ stubs: [...writeToolStubs] });
     await session.send("post in #releases that v2.4 is out");
-    await approvePending(session);
+    await approvePending(session, ["slack_post", "slack_edit"]);
     await session.send("oops, it's v2.5, fix that post");
-    await approvePending(session);
+    await approvePending(session, ["slack_post", "slack_edit"]);
     t.succeeded();
     t.calledTool("slack_post", { count: 1 });
     t.calledTool("slack_edit", { input: { text: /2\.5/ }, count: 1 });
