@@ -169,6 +169,21 @@ footer p + p { margin-top: 8px; }
 .state-card .label { margin-bottom: 8px; }
 .state-card .plan { margin-top: 0; max-width: none; font: 400 15px/22px var(--sl-font); color: var(--sl-text); }
 
+/* Generative card rendering (approximate, decision 095) */
+.gcard .plan-title { font-size: 16px; }
+.bars { display: grid; gap: 6px; margin-top: 10px; }
+.bar { display: grid; grid-template-columns: 56px minmax(0, 1fr) 24px; gap: 8px; align-items: center; font-size: 13px; }
+.bar i { display: block; height: 12px; border-radius: 3px; background: var(--sl-link); }
+.bar b { color: var(--sl-muted); font-weight: 400; text-align: right; }
+.kv { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.kv div { font-size: 13px; color: var(--sl-muted); }
+.kv div b { display: block; color: var(--sl-strong); font-size: 15px; }
+.dt { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 13px; }
+.dt th, .dt td { padding: 4px 6px; border-bottom: 1px solid var(--sl-border); text-align: left; }
+.dt th { color: var(--sl-muted); font-weight: 600; }
+.dt td:last-child, .dt th:last-child { text-align: right; }
+.pager { margin-top: 6px; color: var(--sl-muted); font-size: 12px; }
+
 /* App Home mockup */
 .home { display: grid; gap: 0; }
 .home-sec { padding: 12px 20px; border-bottom: 1px solid var(--sl-border); }
@@ -541,7 +556,7 @@ footer p + p { margin-top: 8px; }
   <!-- 4. Quick asks -->
   <section class="section" id="asks" aria-labelledby="asks-h">
     <h2 id="asks-h">4. Quick asks and updates</h2>
-    <p class="prose muted">Most messages are level 1. Under about 2 minutes there's no card, no reaction, and no buttons. The status line shows the work while it runs.</p>
+    <p class="prose muted">Most messages are level 1. Under about 2 minutes there's no card, no reaction, and no buttons. The status line shows the work while it runs. A chart or data table the brain draws is still level 1: one finished card, posted once (decision 095).</p>
     <div class="pair">
       <div>
         <p class="label">A question in DM: text</p>
@@ -614,6 +629,43 @@ footer p + p { margin-top: 8px; }
             <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>16:12</time></div><div class="mt"><span class="clip"><b>&#9654;</b> 0:08 · Audio clip</span></div></div></div>
             <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>16:12</time></div><div class="mt"><p>I can't listen to voice notes here. Could you type it?</p></div></div></div>
             <div class="compose">Message Sym</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pair">
+      <div>
+        <p class="label">A chart request with its numbers: one card, one notification</p>
+        <div class="slack">
+          <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av user">S</div><div><div class="mh"><b>Sam</b><time>17:05</time></div><div class="mt">chart deploys per service this week? api 4, web 2, worker 1</div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>17:05</time></div>
+              <div class="plan gcard"><div class="plan-title">Deploys this week</div>
+                <div class="bars" role="img" aria-label="Bar chart: api 4, web 2, worker 1">
+                  <div class="bar"><span>api</span><i style="width:100%"></i><b>4</b></div>
+                  <div class="bar"><span>web</span><i style="width:50%"></i><b>2</b></div>
+                  <div class="bar"><span>worker</span><i style="width:25%"></i><b>1</b></div>
+                </div>
+              </div></div></div>
+            <div class="compose">Message Sym</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="label">Key numbers and a data table that pages, with a link button only</p>
+        <div class="slack">
+          <div class="sl-top"><b># release-eng</b><span>Channel</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>17:20</time></div>
+              <div class="plan gcard"><div class="plan-title">Open incidents</div>
+                <div class="kv"><div>Open<b>3</b></div><div>Oldest<b>2d</b></div><div>Paged today<b>1</b></div></div>
+                <table class="dt"><thead><tr><th>Incident</th><th>Service</th><th>Age</th></tr></thead>
+                  <tbody><tr><td>Sync lag</td><td>billing</td><td>2d</td></tr><tr><td>Slow search</td><td>web</td><td>6h</td></tr><tr><td>Retry storm</td><td>worker</td><td>1h</td></tr></tbody></table>
+                <p class="pager">Page 1 of 1</p>
+                <div class="btns"><span class="sb">Open the board</span></div>
+              </div></div></div>
+            <div class="compose">Message #release-eng</div>
           </div>
         </div>
       </div>

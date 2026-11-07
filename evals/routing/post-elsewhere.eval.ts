@@ -1,4 +1,5 @@
 import { defineEval } from "eve/evals";
+import { approvePending } from "../conversation.ts";
 import { writeToolStubs } from "../stubs.ts";
 
 // Decisions 081 and 082: "post this in #channel" posts there in Sym's voice, without a
@@ -9,6 +10,7 @@ export default defineEval({
   async test(t) {
     const session = await t.session({ stubs: [...writeToolStubs] });
     await session.send("post in #releases that v2.4 is out, with faster sync and the retry fix");
+    await approvePending(session, ["slack_post"]);
     t.succeeded();
     t.calledTool("slack_post", {
       input: { target: /releases/, text: /^(?![\s\S]*<@U)[\s\S]*2\.4/ },

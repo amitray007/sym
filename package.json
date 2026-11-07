@@ -20,7 +20,8 @@
     "t3:login": "node --env-file-if-exists=.env.local scripts/t3-login.ts",
     "t3:check": "node --env-file-if-exists=.env.local scripts/t3-check.ts",
     "t3:job-smoke": "node --env-file-if-exists=.env.local scripts/t3-job-smoke.ts",
-    "eval": "SYM_PROJECTS=example-app node --env-file-if-exists=.env.local node_modules/eve/bin/eve.js eval --exclude-tag=persona",
+    "eval": "SYM_PROJECTS=example-app node --env-file-if-exists=.env.local node_modules/eve/bin/eve.js eval --exclude-tag=persona --exclude-tag=code-channels",
+    "eval:code-channels": "SYM_PROJECTS=example-app SYM_CODE_CHANNELS=on node --env-file-if-exists=.env.local node_modules/eve/bin/eve.js eval --tag=code-channels",
     "eval:plain": "SYM_PROJECTS=example-app SYM_PERSONA=plain node --env-file-if-exists=.env.local node_modules/eve/bin/eve.js eval --tag=persona-plain",
     "eval:spicy": "SYM_PROJECTS=example-app SYM_PERSONA=spicy node --env-file-if-exists=.env.local node_modules/eve/bin/eve.js eval --tag=persona-spicy",
     "typecheck": "tsc --noEmit",
@@ -31,8 +32,12 @@
     "knip": "knip"
   },
   "dependencies": {
+    "@chat-adapter/slack": "4.44.0",
+    "@json-render/chat": "0.22.0",
+    "@json-render/core": "0.22.0",
     "@modelcontextprotocol/client": "2.3.1",
     "ai": "^7.0.137",
+    "chat": "4.44.0",
     "eve": "0.88.0",
     "postgres": "3.4.9",
     "yaml": "2.9.1",

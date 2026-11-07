@@ -96,6 +96,7 @@ export const writeToolStubs = [
     },
   },
   { id: "offer-choices", tool: "offer_choices", outcome: { response: { posted: true } } },
+  { id: "present-card", tool: "present_card", outcome: { response: { posted: true } } },
   { id: "worker-sign-in", tool: "worker_sign_in", outcome: { response: NOTHING_RAN } },
   { id: "playbook-propose", tool: "playbook_propose", outcome: { response: NOTHING_RAN } },
   { id: "playbook-retire", tool: "playbook_retire", outcome: { response: NOTHING_RAN } },

@@ -92,6 +92,10 @@ no longer auto-starts jobs.
   at most 30 characters. A click checks the allow-list and stored conversation, consumes the
   choice once, and starts a normal turn as the actor. Typed replies still work. Choices grant
   no tool or approval authority.
+- `present_card` takes a json-render `{ root, elements }` spec for a chart, a grid of key
+  numbers, or a data table. Code checks it and posts Block Kit with `data_table` and
+  `data_visualization` blocks; a bad spec returns issues to the brain. Cards have link buttons
+  only, no action buttons or images (decision 095).
 
 A tool result with `posted: true` suppresses its duplicate reply only. Later questions still get
 answers. Saved preferences never grant consent for Builder work.
