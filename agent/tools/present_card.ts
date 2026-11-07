@@ -15,9 +15,11 @@ import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
 // it, and posts it through the display rule and the outbox like any other message.
 export default defineTool({
   description:
-    "Post a card in this conversation when a chart, a grid of numbers, or a data table shows the " +
-    "answer better than text, or when the person asks for a chart, graph, or card. Plain answers " +
-    "and short Markdown tables stay text. The spec is { root, elements }: root names the Card " +
+    "Post a card in this conversation. Text is the default. Use a card only when the person asks " +
+    "for a chart, graph, table, or card, or when the data is too much for a few sentences: a " +
+    "trend over about six or more points, shares of a whole, or five or more items compared on " +
+    "two or more numbers. A few numbers, a status, or a short comparison stays text. When " +
+    "unsure, use text. The spec is { root, elements }: root names the Card " +
     "element, each element is { type, props, children }, children name other elements, and an " +
     "element without children has children: []. Use literal values only: no $ expressions, " +
     "repeat, or visible. A card holds at most one Table (100 rows) and two Charts. " +

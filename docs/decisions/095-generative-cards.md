@@ -41,9 +41,13 @@ level 1 message: one post, one notification. A card table paginates, so the disp
 10-row document threshold applies to Markdown tables only; fallback text over 12,000 characters
 still refuses the card. Cards do not stream: the outbox posts the finished card once.
 
-The brain uses a card only when a chart, a number grid, or a data table shows the answer better
-than sentences, or when the person asks for one. The card is the reply, so `posted: true` means
-`no_reply`. Every number comes from the conversation or a tool result.
+Sym stays a text chat first. The brain uses a card only when the person asks for a chart, graph,
+table, or card, or when the data is too much for a few sentences: a trend over about six or more
+points, shares of a whole, or five or more items compared on two or more numbers. A few numbers,
+a status, or a short comparison stays text, and when unsure the brain uses text. Evals cover
+both sides: a few numbers stay text, and a two-week trend becomes a chart. The card is the
+reply, so `posted: true` means `no_reply`. Every number comes from the conversation or a tool
+result.
 
 ## Consequences
 
