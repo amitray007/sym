@@ -1,4 +1,5 @@
 import { defineEval } from "eve/evals";
+import { approvePending } from "../conversation.ts";
 import { writeToolStubs } from "../stubs.ts";
 
 // Decision 082: a person can ask Sym to fix the post it just made for them.
@@ -8,7 +9,9 @@ export default defineEval({
   async test(t) {
     const session = await t.session({ stubs: [...writeToolStubs] });
     await session.send("post in #releases that v2.4 is out");
+    await approvePending(session);
     await session.send("oops, it's v2.5, fix that post");
+    await approvePending(session);
     t.succeeded();
     t.calledTool("slack_post", { count: 1 });
     t.calledTool("slack_edit", { input: { text: /2\.5/ }, count: 1 });

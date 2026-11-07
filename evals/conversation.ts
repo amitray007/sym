@@ -33,3 +33,15 @@ const BOT_PHRASES =
 export function hasNoBotPhrases(value: unknown): boolean {
   return !BOT_PHRASES.test(String(value ?? ""));
 }
+
+type ApprovingSession = {
+  readonly pendingInteractions: readonly unknown[];
+  respondAll(optionId: string): Promise<unknown>;
+};
+
+// An eval session has no Slack thread, so Sym can't tell that the conversation is public and
+// asks before a post or a DM, as it does from a private conversation (decisions 082 and 083).
+// The eval's person approves, like the requester would. These cases check routing, not the gate.
+export async function approvePending(session: ApprovingSession): Promise<void> {
+  while (session.pendingInteractions.length > 0) await session.respondAll("approve");
+}

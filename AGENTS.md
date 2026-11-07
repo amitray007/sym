@@ -72,7 +72,10 @@ Node 24 and pnpm, pinned in `mise.toml`. Run tools through mise, for example
   routing cases then fail.
   The script sets `SYM_PROJECTS=example-app`, the project the eval cases use (decision 042). It
   skips the persona cases. `pnpm eval:plain` and `pnpm eval:spicy` run those, each with its
-  `SYM_PERSONA`, because the persona is one setting for the whole run (decision 044).
+  `SYM_PERSONA`, because the persona is one setting for the whole run (decision 044). It also
+  skips the code-channel cases; `pnpm eval:code-channels` runs them with `SYM_CODE_CHANNELS=on`.
+  An eval session has no Slack thread, so a post or DM asks for approval; those cases approve
+  it with `approvePending` from `evals/conversation.ts`.
 - `pnpm db:up` starts only the Postgres 18 service of `compose.yaml`, on `127.0.0.1:55432`. `pnpm db:down` stops
   it. Ledger tests need it and `DATABASE_URL=postgres://sym:sym@localhost:55432/sym`.
 - `pnpm db:migrate` applies pending ledger migrations (`lib/ledger/migrations.ts`).
