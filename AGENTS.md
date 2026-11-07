@@ -45,7 +45,8 @@ code channels for started jobs, conversational working notes and results, stored
 follow-up proposals, recoverable closure, explicit consent before Builder work, event triggers on
 new messages and reactions, the "Send to Sym" message shortcut, an opt-in sandbox for the
 brain's shell and file tools, signed webhook triggers, and GitHub and Linear triggers with
-mentions and delegations handed to the person's Slack DM.
+mentions and delegations handed to the person's Slack DM, and generative cards for charts and
+data tables.
 
 ## Commands
 

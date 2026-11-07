@@ -64,7 +64,9 @@ Runs of a schedule set to `auto` start without a click (decision 085). The trust
 A `posted: true` result suppresses only a duplicate reply to that tool result.
 
 Plain sentences are the default. Lists, tables, quotes, checkboxes, and code fit only content
-with that shape. Images become links. Lists stay flat. Slack markdown blocks hold 12,000
+with that shape. A chart, a grid of key numbers, or a long data table goes in a `present_card`
+card: one level 1 post through the outbox, no streaming. A card table paginates, so the 10-row
+document threshold applies to Markdown tables only (decision 095). Images become links. Lists stay flat. Slack markdown blocks hold 12,000
 characters. Longer completed brain replies use a Markdown file and their first paragraph as the comment through the
 outbox. Reactions are rare responses to a person's message, with code-owned limits.
 

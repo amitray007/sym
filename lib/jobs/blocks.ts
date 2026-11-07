@@ -156,9 +156,13 @@ export function writtenPost(
 // Model text shaped by a worker report must not ping anyone: Slack's special tokens, such as
 // <!channel>, <!here>, <@U123>, and <#C123>, lose their angle brackets and stay as plain text.
 export function defuse(text: string): string {
-  return text
-    .replace(/<([!@#][^<>]*)>/g, "$1")
-    .replace(/@(channel|here|everyone)\b/gi, "@\u200b$1");
+  return stripSpecialTokens(text).replace(/@(channel|here|everyone)\b/gi, "@\u200b$1");
+}
+
+// One pass turns <<!channel>> into <!channel>, so strip until nothing changes.
+function stripSpecialTokens(text: string): string {
+  const stripped = text.replace(/<([!@#][^<>]*)>/g, "$1");
+  return stripped === text ? text : stripSpecialTokens(stripped);
 }
 
 export function failurePost(job: JobFacts, reason?: string | null): BlockPost {

@@ -15,6 +15,7 @@ export default defineEval({
     t.calledTool("jobs_status", { count: 1 });
     t.notCalledTool("worker_job");
     t.notCalledTool("offer_choices");
+    t.notCalledTool("present_card");
     t.check(turn.reply, satisfies(isQuickReply, "plain answer without a report or checklist"));
     t.check(turn.reply, includes(/running/i));
   },

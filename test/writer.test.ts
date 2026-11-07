@@ -281,6 +281,7 @@ describe("writtenPost", () => {
     expect(defuse("ping <!channel> and <@U123>, see <#C9|general>, @here")).toBe(
       "ping !channel and @U123, see #C9|general, @\u200bhere",
     );
+    expect(defuse("ping <<!channel>> and <<<@U123>>>")).toBe("ping !channel and @U123");
     const post = writtenPost(job, request.contract, [], "<!here> done", null);
     expect(post.text).not.toContain("<!here>");
     expect(JSON.stringify(post.blocks)).not.toContain("<!here>");
