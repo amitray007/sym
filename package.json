@@ -32,6 +32,7 @@
     "knip": "knip"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "4.0.84",
     "@chat-adapter/slack": "4.44.0",
     "@json-render/chat": "0.22.0",
     "@json-render/core": "0.22.0",
@@ -44,7 +45,6 @@
     "zod": "4.5.4"
   },
   "devDependencies": {
-    "@ai-sdk/anthropic": "4.0.84",
     "@biomejs/biome": "^2.5.15",
     "@modelcontextprotocol/server": "2.3.1",
     "@types/node": "^24.19.2",

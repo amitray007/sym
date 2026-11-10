@@ -814,7 +814,7 @@ footer p + p { margin-top: 8px; }
         <p class="muted">A trigger is a schedule fired by a Slack event: a new message in a channel, or a reaction with one emoji (decision 088). Anyone on the allow-list sets one up; there is no owner approval.</p>
         <ul>
           <li>Sym watches only a channel it and the person both belong to. Slack sends it nothing from other channels.</li>
-          <li>Keywords narrow which messages reach Sym. Sym still decides from the instruction.</li>
+          <li>Keywords narrow which messages reach Sym, then a small decision model drops the triggers a message clearly does not need (decision 096). Sym still decides from the instruction.</li>
           <li>The one Builder question is the same as for schedules, and only when a run might need Builder.</li>
           <li>Runs post in the event message's thread unless the person names a channel or a DM.</li>
         </ul>

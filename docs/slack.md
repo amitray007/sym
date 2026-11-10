@@ -246,7 +246,10 @@ cannot create or change triggers or schedules.
 
 Only a new top-level message or a reaction fires a trigger. A mention or a reply in a thread
 keeps its normal path. Bots, Sym's own posts, and Sym's own reactions fire nothing, and neither
-does a reaction on Sym's message (that is feedback). Each Slack event fires a trigger once, and
+does a reaction on Sym's message (that is feedback). Before a message fires its triggers, a small
+decision model drops the ones it is sure the message does not need, so a trigger without
+keywords does not run the brain on every message; when the model is unsure or fails, the
+trigger fires (decision 096). Each Slack event fires a trigger once, and
 each trigger starts at most `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour (default 20).
 
 A run acts for the trigger's creator. The message's author is not the requester; the event's

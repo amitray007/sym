@@ -252,6 +252,32 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     expect(sent).toHaveLength(1);
   });
 
+  it("starts no run for a trigger the gate drops, and asks it only after a keyword match, with redacted text", async () => {
+    const where = channel();
+    const kept = await make({ channel: where });
+    const dropped = await make({ channel: where, keywords: ["checkout"] });
+    const asked: number[][] = [];
+    const texts: string[] = [];
+    const deps = base({
+      gate: async (text: string, triggers: readonly Trigger[]) => {
+        texts.push(text);
+        asked.push(triggers.map((t) => t.id));
+        return triggers.filter((t) => t.id === kept.id);
+      },
+    });
+    const { sent, send } = sender();
+    const secret = `whsec_${"A1b2_C3d4-".repeat(4)}`;
+    const text = `Bug: checkout fails, key ${secret}`;
+    await fireMessageTriggers(deps, message(where, "12.1", text), send);
+    expect(sent).toHaveLength(1);
+    expect(await runsOf(dropped.id)).toEqual([]);
+    expect(await runsOf(kept.id)).toHaveLength(1);
+    await fireMessageTriggers(deps, message(where, "12.2", "lunch?"), send);
+    expect(asked).toEqual([[kept.id, dropped.id], [kept.id]]);
+    // The gate reads the same redacted text as the run message.
+    expect(texts[0]).toBe("Bug: checkout fails, key whsec_[redacted]");
+  });
+
   it("caps the runs of one trigger per hour", async () => {
     const where = channel();
     const trigger = await make({ channel: where });

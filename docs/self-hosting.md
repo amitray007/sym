@@ -71,6 +71,7 @@ Tailscale Funnel limited to the Slack path also works.
 | `SYM_GITHUB_USERS`, `SYM_LINEAR_USERS` | Optional, without a pack. Comma-separated `<id>=<Slack user ID>` pairs: a GitHub account's numeric ID (a login maps nobody), or a Linear user ID or email. A pack's `identities` replaces them |
 | `SYM_GITHUB_REPOS` | The repositories, comma-separated `owner/name`, whose events Sym may read. Without it (and without a pack's `githubRepositories`), GitHub triggers cannot be created (decision 091) |
 | `SYM_TRIGGER_RUNS_PER_HOUR` | Optional. The most runs one trigger starts per hour, for Slack and webhook triggers. Default 20 (decision 088) |
+| `SYM_TRIGGER_GATE` | Optional. `off` turns off the decision-model check on new messages before message triggers fire. Any other value names the decision model. Default: Eve's default decision model on the gateway, `claude-haiku-5-5` on the direct Anthropic route, none on the direct OpenAI route (decision 096) |
 | `SYM_MCP_<NAME>_TOKEN` | Bearer token for an MCP connection that needs one, such as `SYM_MCP_EXAMPLE_TRACKER_TOKEN` for `example-tracker`. Sym tells the owner the exact name when the owner connects the server. Sym reads only variables named `SYM_MCP_*_TOKEN` (decision 045) |
 | `T3_MCP_URL` | Worker MCP URL when the pack has no `workers` entry |
 | `T3_TOKEN`, `T3_TOKEN_EXPIRES_AT` | Fallback worker token and its expiry, from `pnpm t3:login`. Sym uses them only when Postgres holds no sign-in for the worker |

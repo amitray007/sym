@@ -9,6 +9,7 @@ import { findMessage } from "../slack/message.ts";
 import { reachConversation } from "../slack/reach.ts";
 import { redactSecrets } from "../slack/redact.ts";
 import { triggerRunMessage } from "./format.ts";
+import type { TriggerGate } from "./gate.ts";
 import { matchesKeywords, normalizeEmoji } from "./match.ts";
 import {
   claimDeferredRuns,
@@ -54,6 +55,8 @@ export interface FireDeps {
   usersEnv?: string | undefined;
   now?: Date;
   maxPerHour?: number;
+  // The decision-model check on new messages (decision 096). Without it, every keyword match fires.
+  gate?: TriggerGate | undefined;
 }
 
 // Starts a run's session at the target and returns its session ID. A sender that cannot reach
@@ -95,16 +98,18 @@ export async function fireMessageTriggers(
   send: SendRun,
 ): Promise<FireResult[]> {
   if (input.threadTs !== input.ts) return [];
-  const triggers = (await watchingTriggers(deps.sql, input.channel, "message")).filter((t) =>
+  const matched = (await watchingTriggers(deps.sql, input.channel, "message")).filter((t) =>
     matchesKeywords(input.text, t.keywords),
   );
+  const text = clip(input.text);
+  const triggers = deps.gate ? await deps.gate(text, matched) : matched;
   const facts: SlackTriggerEvent = {
     kind: "message",
     channel: input.channel,
     ts: input.ts,
     threadTs: input.ts,
     author: input.author ?? null,
-    text: clip(input.text),
+    text,
     link: messageLink(input.channel, input.ts),
   };
   return fireAll(deps, triggers, facts, `message:${input.channel}:${input.ts}`, send, {
