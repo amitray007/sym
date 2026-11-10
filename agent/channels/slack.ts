@@ -104,6 +104,7 @@ import {
   fireReactionTriggers,
   type SendRun,
 } from "../../lib/triggers/fire.ts";
+import { triggerGate } from "../../lib/triggers/gate.ts";
 import { isSilentRunThread, markPersonTurn } from "../../lib/triggers/rows.ts";
 import { EVE_FILE_TYPES, voiceNoteContext } from "../../lib/voice/notes.ts";
 import { transcriptionRoute } from "../../lib/voice/route.ts";
@@ -606,7 +607,7 @@ async function fireTriggersOnMessage(ctx: SlackInboundMessageContext, message: S
   };
   try {
     await fireMessageTriggers(
-      { sql: ledger(), slack: slackOf(ctx), pack: pack() },
+      { sql: ledger(), slack: slackOf(ctx), pack: pack(), gate: triggerGate() },
       {
         channel: message.channelId,
         ts: message.ts,

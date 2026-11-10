@@ -140,7 +140,9 @@ Example: "When someone posts a bug report in #support, draft a ticket in its thr
    mention Sym and replies in threads keep their normal path; only a new top-level message or a
    reaction can fire a trigger. Bots and Sym's own posts and reactions fire nothing, so a run
    cannot fire itself. Anyone's message can fire a trigger; its author is not the requester.
-3. For each matching trigger, Sym reserves a `schedule_runs` row keyed by the trigger and the
+3. For a message, a decision model then drops the triggers it is sure the message does not need,
+   in one `decide` call; an unsure answer or a failure keeps them (decision 096).
+   For each matching trigger, Sym reserves a `schedule_runs` row keyed by the trigger and the
    event (one run per message), so a Slack retry fires nothing. Each trigger starts at most
    `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour (default 20). The creator must still be allowed and
    a member of the watched channel, or the run fails closed. Each run gets its own session: the
@@ -337,7 +339,7 @@ The digest, when it is on, carries the rest. The digest, the verifier, and PR fo
 | Worker restart | Running turns interrupted | Reconcile sees `interrupted` and asks whether to resume |
 | Brain model error | Turn fails | Eve posts a failure notice. The worker job keeps running; reconcile picks it up |
 | Prompt injection from untrusted text | Bad actions | Reading sessions get no write tools. Writes need approval. The sandbox holds no secrets and has no network by default, so injected commands there reach nothing outside it |
-| Busy watched channel | Many trigger runs, model spend | Keywords narrow the events; each trigger starts at most `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour; a Slack retry finds its run |
+| Busy watched channel | Many trigger runs, model spend | Keywords and a decision-model check narrow the events (decision 096); each trigger starts at most `SYM_TRIGGER_RUNS_PER_HOUR` runs an hour; a Slack retry finds its run |
 | Sandbox unavailable (sandbox off, no Docker socket, daemon down) | Shell and file tools fail | Each tool returns a short error and the turn continues. Shared files reach the brain as a note with their name (decision 089) |
 | GitHub or Linear event loop | A run's Builder work opens a PR that fires the same trigger again | Each delivery fires once, the hourly cap bounds the loop, and comments by bots fire nothing |
 | Leaked webhook secret | Anyone can start runs that act for the creator | Signatures expire after 5 minutes and each request fires once; the hourly cap bounds spend; the creator rotates the secret or pauses the trigger |
