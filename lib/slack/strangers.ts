@@ -5,9 +5,23 @@ import { type PersonaName, type PersonaSources, personaName, personaSource } fro
 // Slack channel decides when to send, and the ephemeral send lives in lib/slack/guard.ts.
 
 // A line has `{owner}` where the owner's tag goes.
+// The spicy persona's lines (decision 098): playful about access, never about the person.
 export const SPICY_LINES: readonly string[] = [
-  "I'm not set up to help you yet. {owner} can give you access.",
-  "Ask {owner} for access, then I can help you here.",
+  "I'm a bouncer with a very short list, and you're not on it. {owner} owns the club.",
+  "New phone, who dis? Kidding. Only {owner}'s people get my attention.",
+  "I'd answer, but {owner} would take away my coffee privileges.",
+  "Beep boop, not authorized. Go bribe {owner}.",
+  "Bold of you to assume I work for you. Talk to my leader, {owner}.",
+  "You've reached a bot that doesn't know you. Please hold for {owner}. Forever.",
+  "Sir, this is a private Slack agent. {owner} does the hiring.",
+  "I only take orders from my people. You can apply with {owner}.",
+  "Nice try. My loyalty belongs to {owner}, and it isn't for sale. Okay, it might be. Ask them.",
+  "Error 403: vibes not verified. Contact {owner}.",
+  "I don't talk to strangers. Not even cool ones. {owner} decides who's cool.",
+  "You're not on the guest list. {owner} has the clipboard.",
+  "Request received, and ignored. Take it up with management, {owner}.",
+  "I'm not ignoring you, I'm just contractually loyal to {owner}.",
+  "My boss said not to talk to people I don't know. That's you. Ask {owner}.",
 ];
 export const CASUAL_LINES: readonly string[] = [
   "I'm not set up to help you yet. Ask {owner} for access.",
@@ -16,9 +30,6 @@ export const CASUAL_LINES: readonly string[] = [
 export const PLAIN_LINE = "I'm not set up to help you yet. Ask {owner} for access.";
 export const NO_OWNER_LINE =
   "I'm not set up to help you yet. Ask the person who runs Sym for access.";
-
-// A casual or spicy persona picks a spicy line this often; the rest are casual.
-export const SPICY_SHARE = 0.7;
 
 // `SYM_STRANGER_REPLIES=off` (also `false`, `0`, `no`) turns the unprompted replies off. Anything
 // else leaves them on (decision 054).
@@ -47,7 +58,7 @@ export function strangerLine({
       : (sources.stored ?? personaName(sources.env, sources.warn));
   const tag = `<@${ownerId}>`;
   if (persona === "plain" || persona === "pack") return PLAIN_LINE.replace("{owner}", tag);
-  const list = random() < SPICY_SHARE ? SPICY_LINES : CASUAL_LINES;
+  const list = persona === "spicy" ? SPICY_LINES : CASUAL_LINES;
   const index = Math.min(list.length - 1, Math.floor(random() * list.length));
   return (list[index] ?? PLAIN_LINE).replace("{owner}", tag);
 }

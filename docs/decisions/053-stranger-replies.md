@@ -1,6 +1,6 @@
 # 053. Stranger replies: a private line for people off the allow-list
 
-Status: accepted
+Status: accepted; the line choice is amended by decision 098
 Date: 2026-10-20
 
 ## Context
