@@ -13,59 +13,45 @@ import {
 const OWNER_ID = "UOWNER";
 const TAG = "<@UOWNER>";
 
-// Returns the given numbers in order.
-const sequence = (...values: number[]) => {
-  let i = 0;
-  return () => values[i++] ?? 0;
-};
-
 const sourcesOf = (stored?: "plain" | "casual" | "spicy") => ({ stored });
 
 describe("strangerLine", () => {
-  it("picks the spicy list below 0.7 and the casual list from 0.7", () => {
-    const spicy = strangerLine({
-      sources: sourcesOf("casual"),
-      ownerId: OWNER_ID,
-      random: sequence(0.69, 0),
-    });
-    expect(spicy).toBe(SPICY_LINES[0]?.replace("{owner}", TAG));
+  it("gives the spicy persona the spicy lines and the casual persona the casual lines", () => {
+    const spicy = strangerLine({ sources: sourcesOf("spicy"), ownerId: OWNER_ID, random: () => 0 });
+    expect(spicy).toBe(
+      "I'm a bouncer with a very short list, and you're not on it. <@UOWNER> owns the club.",
+    );
     const casual = strangerLine({
-      sources: sourcesOf("spicy"),
-      ownerId: OWNER_ID,
-      random: sequence(0.7, 0),
-    });
-    expect(casual).toBe(CASUAL_LINES[0]?.replace("{owner}", TAG));
-  });
-
-  it("picks a uniform line, including the last one", () => {
-    const last = strangerLine({
       sources: sourcesOf("casual"),
       ownerId: OWNER_ID,
-      random: sequence(0, 0.999999),
+      random: () => 0,
     });
-    expect(last).toBe(SPICY_LINES.at(-1)?.replace("{owner}", TAG));
-    const lastCasual = strangerLine({
-      sources: sourcesOf("casual"),
-      ownerId: OWNER_ID,
-      random: sequence(0.99, 0.999999),
-    });
-    expect(lastCasual).toBe(CASUAL_LINES.at(-1)?.replace("{owner}", TAG));
+    expect(casual).toBe("I'm not set up to help you yet. Ask <@UOWNER> for access.");
   });
 
-  it("has 15 lines per list and tags the owner in every one", () => {
-    expect(SPICY_LINES).toHaveLength(2);
+  it("picks a uniform line, including the last one, and tags the owner in every one", () => {
+    expect(SPICY_LINES).toHaveLength(15);
     expect(CASUAL_LINES).toHaveLength(2);
-    for (const list of [SPICY_LINES, CASUAL_LINES]) {
+    for (const [persona, list] of [
+      ["spicy", SPICY_LINES],
+      ["casual", CASUAL_LINES],
+    ] as const) {
       for (const [index, template] of list.entries()) {
         expect(template).toContain("{owner}");
         const line = strangerLine({
-          sources: sourcesOf("spicy"),
+          sources: sourcesOf(persona),
           ownerId: OWNER_ID,
-          random: sequence(list === SPICY_LINES ? 0 : 0.9, (index + 0.5) / list.length),
+          random: () => (index + 0.5) / list.length,
         });
         expect(line).toBe(template.replace("{owner}", TAG));
         expect(line).not.toContain("{");
       }
+      const last = strangerLine({
+        sources: sourcesOf(persona),
+        ownerId: OWNER_ID,
+        random: () => 0.999999,
+      });
+      expect(last).toBe(list.at(-1)?.replace("{owner}", TAG));
     }
   });
 
@@ -77,11 +63,14 @@ describe("strangerLine", () => {
   });
 
   it("reads SYM_PERSONA and defaults to casual", () => {
-    const random = sequence(0.9, 0);
+    const random = () => 0;
     expect(strangerLine({ sources: { env: "plain" }, ownerId: OWNER_ID, random })).toBe(
       PLAIN_LINE.replace("{owner}", TAG),
     );
-    expect(strangerLine({ sources: {}, ownerId: OWNER_ID, random: sequence(0.9, 0) })).toBe(
+    expect(strangerLine({ sources: { env: "spicy" }, ownerId: OWNER_ID, random })).toBe(
+      SPICY_LINES[0]?.replace("{owner}", TAG),
+    );
+    expect(strangerLine({ sources: {}, ownerId: OWNER_ID, random })).toBe(
       CASUAL_LINES[0]?.replace("{owner}", TAG),
     );
   });

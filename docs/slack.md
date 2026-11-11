@@ -117,7 +117,7 @@ transcript note; the reply is the only visible change.
 Sym never sends a stranger's message to the brain. A tag, DM, or named reply in a known thread
 gets one private access line pointing to the owner. Untagged side talk stays silent. The limit
 is one line per person and channel per hour. Failed private delivery releases that cooldown.
-The persona can vary the wording without ridicule. With no owner, the line points to the person
+The spicy persona picks a joke line about access (decision 098); casual uses a mild line, and plain or a pack persona the straight one. With no owner, the line points to the person
 who runs Sym. `SYM_STRANGER_REPLIES=off` disables these replies.
 
 ## Slash command, card buttons, and feedback
