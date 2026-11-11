@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadPack, PackError, packFromEnv } from "../lib/pack/load.ts";
-import { briefGuardrails, isAllowedSlackUser, resolvePackProject } from "../lib/pack/policy.ts";
+import { briefGuardrails, resolvePackProject } from "../lib/pack/policy.ts";
+import { isSlackUserAllowed } from "../lib/slack/guard.ts";
 
 const FIXTURE = new URL("./fixtures/pack", import.meta.url).pathname;
 const dirs: string[] = [];
@@ -172,12 +173,14 @@ describe("pack policy", () => {
   });
 
   it("allows the owner and listed users only", () => {
-    expect(isAllowedSlackUser(pack, "U0OWNER01")).toBe(true);
-    expect(isAllowedSlackUser(pack, "U0SAM0001")).toBe(true);
-    expect(isAllowedSlackUser(pack, "U0STRANGER")).toBe(false);
+    const allowed = (p: typeof pack, user: string) =>
+      isSlackUserAllowed(p, "U0SAM0001,U0STRANGER", user, () => {});
+    expect(allowed(pack, "U0OWNER01")).toBe(true);
+    expect(allowed(pack, "U0SAM0001")).toBe(true);
+    expect(allowed(pack, "U0STRANGER")).toBe(false);
     const ownerOnly = loadPack(packWith(base));
-    expect(isAllowedSlackUser(ownerOnly, "U0OWNER01")).toBe(true);
-    expect(isAllowedSlackUser(ownerOnly, "U0SAM0001")).toBe(false);
+    expect(allowed(ownerOnly, "U0OWNER01")).toBe(true);
+    expect(allowed(ownerOnly, "U0SAM0001")).toBe(false);
   });
 });
 

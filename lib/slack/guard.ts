@@ -1,5 +1,4 @@
 import type { Pack } from "../pack/load.ts";
-import { isAllowedSlackUser } from "../pack/policy.ts";
 
 // Who may use Sym, and the private replies the Slack channel sends (docs/slack.md).
 
@@ -13,14 +12,17 @@ export function isSlackUserAllowed(
   warn: (line: string) => void = console.warn,
 ): boolean {
   if (!userId) return false;
-  const allowed = pack
-    ? isAllowedSlackUser(pack, userId)
-    : (usersEnv ?? "")
-        .split(",")
-        .map((id) => id.trim())
-        .includes(userId);
+  const allowed = allowedSlackUsers(pack, usersEnv).includes(userId);
   if (!allowed) warn(`Sym dropped an inbound Slack request from ${userId}: not on the allow-list.`);
   return allowed;
+}
+
+// The pack's owner and allow-list (an empty list means the owner only), else SYM_SLACK_USERS.
+export function allowedSlackUsers(pack: Pack | undefined, usersEnv: string | undefined): string[] {
+  const ids = pack
+    ? [pack.config.owner.slackUserId, ...pack.config.allowList]
+    : (usersEnv ?? "").split(",").map((id) => id.trim());
+  return [...new Set(ids.filter(Boolean))];
 }
 
 export interface EphemeralSlack {

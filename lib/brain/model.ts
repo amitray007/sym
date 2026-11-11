@@ -7,7 +7,7 @@ import { openai } from "eve/models/openai";
 // `openai/gpt-6-luna`. SYM_MODEL_PROVIDER=anthropic or openai calls that provider directly with
 // its own API key, and SYM_MODEL then takes the provider's model ID (decision 080).
 // `SYM_MODEL=fixture` runs the given scripted model for local end-to-end runs with no provider.
-const DEFAULT_MODEL = "anthropic/claude-sonnet-5.5";
+export const DEFAULT_MODEL = "anthropic/claude-sonnet-5.5";
 
 // Eve's helpers read ANTHROPIC_API_KEY and OPENAI_API_KEY. An unset model ID uses the helper's
 // default model.
@@ -71,7 +71,7 @@ export function promptCacheTtl(env: Record<string, string | undefined> = process
   return "5m";
 }
 
-function selectedProvider(env: Record<string, string | undefined>) {
+export function selectedProvider(env: Record<string, string | undefined> = process.env) {
   return env.SYM_MODEL_PROVIDER?.trim().toLowerCase() || "gateway";
 }
 

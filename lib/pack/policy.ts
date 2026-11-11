@@ -41,11 +41,6 @@ export function briefGuardrails(
   ];
 }
 
-// The owner always counts. An empty allow-list means the owner only.
-export function isAllowedSlackUser(pack: Pack, userId: string): boolean {
-  return userId === pack.config.owner.slackUserId || pack.config.allowList.includes(userId);
-}
-
 // The model list for a pack worker (decision 041). `envModel` is SYM_WORKER_MODEL.
 export function workerModelList(
   pack: Pack | undefined,
