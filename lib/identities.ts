@@ -54,6 +54,15 @@ function mapping(
   return map;
 }
 
+// Every Slack person some account of `source` maps to.
+export function mappedSlackUsers(
+  source: IdentitySource,
+  pack: Pack | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  return [...new Set(mapping(source, pack, env).values())];
+}
+
 // The allowed Slack person behind any of `ids` (a GitHub account ID; a Linear user ID or email),
 // or undefined.
 export function allowedSlackUserFor(

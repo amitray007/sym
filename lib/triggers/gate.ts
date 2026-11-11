@@ -30,18 +30,24 @@ export function triggerGate(
   return (text, triggers) => keepRelevant(decideImpl, model, text, triggers);
 }
 
-// The decision model, undefined for Eve's default, or null for no gate.
-function gateModel(env: Record<string, string | undefined>): DecisionModel | undefined | null {
+// The decision model ID, undefined for Eve's default, or null for no gate.
+export function gateModelId(
+  env: Record<string, string | undefined> = process.env,
+): string | undefined | null {
   const configured = env.SYM_TRIGGER_GATE?.trim();
   if (configured?.toLowerCase() === "off" || env.SYM_MODEL?.trim() === "fixture") return null;
   const provider = env.SYM_MODEL_PROVIDER?.trim().toLowerCase() || "gateway";
   if (provider === "anthropic") {
-    return anthropic.decisionModel(
-      (configured || DEFAULT_ANTHROPIC_MODEL).replace(/^anthropic\//, ""),
-    );
+    return (configured || DEFAULT_ANTHROPIC_MODEL).replace(/^anthropic\//, "");
   }
   if (provider === "openai") return null;
   return configured || undefined;
+}
+
+function gateModel(env: Record<string, string | undefined>): DecisionModel | undefined | null {
+  const id = gateModelId(env);
+  const direct = env.SYM_MODEL_PROVIDER?.trim().toLowerCase() === "anthropic";
+  return id && direct ? anthropic.decisionModel(id) : id;
 }
 
 async function keepRelevant(
