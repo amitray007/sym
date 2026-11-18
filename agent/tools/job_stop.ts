@@ -1,12 +1,11 @@
 import { defineTool } from "eve/tools";
-import { always } from "eve/tools/approval";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { jobReply } from "../../lib/jobs/names.ts";
 import { stopJob } from "../../lib/jobs/steer.ts";
 import { getJobByRef } from "../../lib/ledger/jobs.ts";
 import { mayDecideAsOwner, ownerResponse } from "../../lib/owner.ts";
-import { requesterOf } from "../../lib/requester.ts";
+import { adminApproval, requesterOf } from "../../lib/requester.ts";
 import { ledgerDeps, pack, withJobDeps } from "../../lib/runtime.ts";
 import { isSlackUserAllowed } from "../../lib/slack/guard.ts";
 
@@ -24,7 +23,7 @@ export default defineTool({
     title: z.string().describe("The job's exact title, as jobs_status shows it."),
   }),
   approval: {
-    request: always(),
+    request: ({ session }) => adminApproval(session),
     response: ownerResponse(pack),
     prompt: ({ input }) =>
       `Stop "${input.title}"? I'll stop its current work. If it already finished, I'll keep its result.`,

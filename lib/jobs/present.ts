@@ -5,7 +5,7 @@ import { recordOutcome } from "../learning/trust.ts";
 import { choiceBlocks, storeChoices } from "../ledger/choices.ts";
 import { type Job, type JobStatus, jobRef, setJobCard, updateJob } from "../ledger/jobs.ts";
 import { enqueuePost } from "../ledger/outbox.ts";
-import { proposalBlocks, propose } from "../ledger/proposals.ts";
+import { decideProposal, proposalBlocks, proposalStatus, propose } from "../ledger/proposals.ts";
 import { ownerUserId } from "../owner.ts";
 import type { Pack } from "../pack/load.ts";
 import { resolvePackProject } from "../pack/policy.ts";
@@ -50,7 +50,15 @@ export const SCHEDULED_CHECK = "scheduled-check";
 // characters, so the brief is Sym's own message in the job thread. It names the job, the
 // project, and the delivery; its Full brief button shows the goal, constraints, and done-when
 // list (decision 060). A brief needs an action, so quiet mode never hides it.
-export async function presentBrief(sql: Sql, job: Job, modelLine?: string): Promise<void> {
+// `startedBy` is set when `SYM_APPROVAL_START=never` (decision 099): the Start proposal is
+// approved for that person, so the job's wait ends at once, and the brief posts without buttons.
+// A proposal the ledger expired has cancelled its job, so nothing posts.
+export async function presentBrief(
+  sql: Sql,
+  job: Job,
+  modelLine?: string,
+  startedBy?: string,
+): Promise<void> {
   if (!job.slackChannel) return;
   const ref = jobRef(job.id);
   const text = briefPrompt(Brief.parse(job.brief), ref, modelLine);
@@ -72,17 +80,29 @@ export async function presentBrief(sql: Sql, job: Job, modelLine?: string): Prom
     payload: job.brief,
     message: text,
   });
+  const status = startedBy ? await startFor(sql, proposal.id, job.id, startedBy) : "pending";
+  if (status === "expired") return;
+  const started = status === "approved";
   await enqueuePost(sql, {
     idempotencyKey: `${ref}:brief`,
     jobId: job.id,
     method: "chat.postMessage",
     payload: {
       ...target(job),
-      text,
-      blocks: proposalBlocks(proposal),
+      ...(started
+        ? { text: `${text}\n\nStarting now.` }
+        : { text, blocks: proposalBlocks(proposal) }),
     },
     display: { ...display, target: "thread" },
   });
+}
+
+// Approves a Start proposal for a person. A retried step finds it decided already.
+async function startFor(sql: Sql, proposalId: string, jobId: number, by: string) {
+  const decided = await sql.begin((tx) =>
+    decideProposal(tx as unknown as Sql, proposalId, by, true),
+  );
+  return decided?.status ?? (await proposalStatus(sql, jobId));
 }
 
 // Posts the start of a job: a live card for long jobs with steps, otherwise one line.

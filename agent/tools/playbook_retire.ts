@@ -1,5 +1,4 @@
 import { defineTool } from "eve/tools";
-import { always } from "eve/tools/approval";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { playbookLine } from "../../lib/learning/format.ts";
@@ -11,7 +10,7 @@ import {
 } from "../../lib/learning/rows.ts";
 import { getSessionThread } from "../../lib/ledger/threads.ts";
 import { mayDecideAsOwner, OWNER_ONLY, ownerResponse } from "../../lib/owner.ts";
-import { requesterOf } from "../../lib/requester.ts";
+import { adminApproval, requesterOf } from "../../lib/requester.ts";
 import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
 
 // Retires an approved row so new sessions stop loading it. On a proposed row it rejects the
@@ -23,7 +22,7 @@ export default defineTool({
     "one. The owner approves the call.",
   inputSchema: z.object({ id: z.number().int().positive() }),
   approval: {
-    request: always(),
+    request: ({ session }) => adminApproval(session),
     response: ownerResponse(pack),
     prompt: ({ input }) => `Retire or reject ${playbookRef(input.id)}?`,
   },

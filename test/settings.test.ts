@@ -75,6 +75,21 @@ describe("settingsInstructions", () => {
     expect(note).not.toContain("U0050");
   });
 
+  // Decision 099.
+  it("lists each approval mode, and that admin clicks stay in runs", () => {
+    const text = settingsInstructions(undefined, {
+      SYM_APPROVAL_POSTS: "never",
+      SYM_APPROVAL_START: "always",
+      SYM_APPROVAL_ADMIN: "never",
+    });
+    expect(text).toContain("group pings outside the reply is skipped (`SYM_APPROVAL_POSTS`)");
+    expect(text).toContain("follow-ups is asked every time (`SYM_APPROVAL_START`)");
+    expect(text).toContain("DMs to other people follows Sym's own rules (`SYM_APPROVAL_DMS`)");
+    expect(text).toContain(
+      "is skipped, except in scheduled and trigger runs (`SYM_APPROVAL_ADMIN`)",
+    );
+  });
+
   it("follows each switch", () => {
     const on = settingsInstructions(undefined, {
       SYM_STRANGER_REPLIES: "on",

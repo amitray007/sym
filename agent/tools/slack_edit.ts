@@ -1,5 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { approvalStatus } from "../../lib/approvals.ts";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
@@ -19,17 +20,17 @@ export default defineTool({
     text: z.string().min(1).max(POST_MAX).describe("The full new text of the message."),
   }),
   approval: {
-    request: async ({ session, toolInput }) =>
-      editNeedsConfirmation(
-        ledgerDeps(),
-        session.id,
-        await requesterOf(session, ledgerDeps),
-        toolInput?.message,
-        toolInput?.text,
-      ).then(async (ask) =>
-        ask || (await readUntrustedInTurn(session, () => ledgerDeps().sql))
-          ? "user-approval"
-          : "not-applicable",
+    request: ({ session, toolInput }) =>
+      approvalStatus(
+        "posts",
+        async () =>
+          (await editNeedsConfirmation(
+            ledgerDeps(),
+            session.id,
+            await requesterOf(session, ledgerDeps),
+            toolInput?.message,
+            toolInput?.text,
+          )) || (await readUntrustedInTurn(session, () => ledgerDeps().sql)),
       ),
     response: requesterResponse("Only the person who asked can approve this edit.", ledgerDeps),
     prompt: ({ input }) => `Change the post to this?\n\n${input.text}`,

@@ -184,6 +184,21 @@ describe.skipIf(!hasDatabase)("conversation gates", () => {
     expect(await takeChoice({ sql, slack: s.slack, allowed }, input, async () => {})).toBe(false);
   });
 
+  // Decision 099: with SYM_APPROVAL_START=never the brief has no buttons and Start is decided.
+  it("approves Start for the person when the brief starts at once", async () => {
+    const original = await job("start-now");
+    const sql = ledger.sql();
+    await presentBrief(sql, original, undefined, "U1");
+    const [proposal] = await sql<
+      JobProposal[]
+    >`select * from job_proposals where job_id = ${original.id}`;
+    expect(proposal).toMatchObject({ status: "approved", decidedBy: "U1" });
+    const [post] =
+      await sql`select payload from outbox where idempotency_key = ${`J-${original.id}:brief`}`;
+    expect(post?.payload.blocks).toBeUndefined();
+    expect(post?.payload.text).toMatch(/Starting now\.$/);
+  });
+
   it("binds typed Start to the stored payload and rejects stale, forged and unauthorized approvals", async () => {
     const s = setup();
     const original = await job("initial-gate");

@@ -145,9 +145,22 @@ describe("slack_post approval", () => {
 // Decision 082: a main-thread post that pings a whole channel waits for the requester.
 describe("main_thread_post approval", () => {
   const request = (mainThreadPost.approval as { request: (ctx: unknown) => unknown }).request;
-  it("asks only for a broadcast ping", () => {
-    expect(request({ toolInput: { text: "<!here> shipped" } })).toBe("user-approval");
-    expect(request({ toolInput: { text: "shipped, see (@here) notes" } })).toBe("user-approval");
-    expect(request({ toolInput: { text: "shipped" } })).toBe("not-applicable");
+  it("asks only for a broadcast ping", async () => {
+    expect(await request({ toolInput: { text: "<!here> shipped" } })).toBe("user-approval");
+    expect(await request({ toolInput: { text: "shipped, see (@here) notes" } })).toBe(
+      "user-approval",
+    );
+    expect(await request({ toolInput: { text: "shipped" } })).toBe("not-applicable");
+  });
+
+  // Decision 099: SYM_APPROVAL_POSTS overrides the rule both ways.
+  it("follows SYM_APPROVAL_POSTS", async () => {
+    vi.stubEnv("SYM_APPROVAL_POSTS", "never");
+    expect(await request({ toolInput: { text: "<!subteam^S1> paging on-call" } })).toBe(
+      "not-applicable",
+    );
+    vi.stubEnv("SYM_APPROVAL_POSTS", "always");
+    expect(await request({ toolInput: { text: "shipped" } })).toBe("user-approval");
+    vi.unstubAllEnvs();
   });
 });

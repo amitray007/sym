@@ -1,4 +1,5 @@
 import { isScheduleAuth } from "eve/schedules";
+import { approvalStatus } from "./approvals.ts";
 import type { Caller } from "./callers.ts";
 import type { Sql } from "./db.ts";
 import { slackUserOfPrincipal } from "./owner.ts";
@@ -24,6 +25,14 @@ export interface RequesterSession {
 // True for a session the app principal started, such as a scheduled run.
 export function isAppSession(session: RequesterSession): boolean {
   return isScheduleAuth(session.auth.current as Parameters<typeof isScheduleAuth>[0]);
+}
+
+// Owner-only changes (decision 099). `SYM_APPROVAL_ADMIN=never` skips the click only on a person's
+// own turn: a scheduled or trigger run reads untrusted text, so it still asks.
+export function adminApproval(session: RequesterSession) {
+  return isAppSession(session)
+    ? Promise.resolve("user-approval" as const)
+    : approvalStatus("admin", () => true);
 }
 
 // `deps` is a getter, so a person's turn reads no ledger.

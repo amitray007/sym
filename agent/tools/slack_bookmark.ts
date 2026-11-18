@@ -1,5 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { approvalStatus } from "../../lib/approvals.ts";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps, pack, slackFromEnv } from "../../lib/runtime.ts";
@@ -20,15 +21,15 @@ export default defineTool({
   }),
   approval: {
     request: ({ session, toolInput }) =>
-      postNeedsConfirmation(
-        ledgerDeps(),
-        session.id,
-        toolInput?.target,
-        `${toolInput?.title ?? ""} ${toolInput?.url ?? ""}`,
-      ).then(async (ask) =>
-        ask || (await readUntrustedInTurn(session, () => ledgerDeps().sql))
-          ? "user-approval"
-          : "not-applicable",
+      approvalStatus(
+        "posts",
+        async () =>
+          (await postNeedsConfirmation(
+            ledgerDeps(),
+            session.id,
+            toolInput?.target,
+            `${toolInput?.title ?? ""} ${toolInput?.url ?? ""}`,
+          )) || (await readUntrustedInTurn(session, () => ledgerDeps().sql)),
       ),
     response: requesterResponse("Only the person who asked can approve this bookmark.", ledgerDeps),
     prompt: ({ input }) => `Bookmark "${input.title}" (${input.url}) in ${input.target}?`,

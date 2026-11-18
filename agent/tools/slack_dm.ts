@@ -1,5 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { approvalStatus } from "../../lib/approvals.ts";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
@@ -19,16 +20,16 @@ export default defineTool({
     text: z.string().min(1).max(POST_MAX).describe("The message to send. A few short lines."),
   }),
   approval: {
-    request: async ({ session, toolInput }) =>
-      dmNeedsConfirmation(
-        ledgerDeps(),
-        session.id,
-        await requesterOf(session, ledgerDeps),
-        toolInput?.person,
-      ).then(async (ask) =>
-        ask || (await readUntrustedInTurn(session, () => ledgerDeps().sql))
-          ? "user-approval"
-          : "not-applicable",
+    request: ({ session, toolInput }) =>
+      approvalStatus(
+        "dms",
+        async () =>
+          (await dmNeedsConfirmation(
+            ledgerDeps(),
+            session.id,
+            await requesterOf(session, ledgerDeps),
+            toolInput?.person,
+          )) || (await readUntrustedInTurn(session, () => ledgerDeps().sql)),
       ),
     response: requesterResponse("Only the person who asked can approve this DM.", ledgerDeps),
     prompt: ({ input }) => `Send this to ${input.person}?\n\n${input.text}`,

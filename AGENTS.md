@@ -15,8 +15,9 @@ planning or building anything.
 - Sym never edits repositories itself. Workers do, through an adapter. The brain's sandbox
   (decision 089) is for compute and shared files: it holds no secrets or repository credentials,
   and the brain never clones a repository there to change it.
-- Every interactive chat job shows Start / Not now. Runs of a schedule set to `auto` start
-  without a click (decision 085); the trust ladder no longer auto-starts jobs. Briefs keep production and customer data read-only. A job can
+- Every interactive chat job shows Start / Not now, unless `SYM_APPROVAL_START=never`
+  (decision 099). Runs of a schedule set to `auto` start without a click (decision 085); the
+  trust ladder no longer auto-starts jobs. Briefs keep production and customer data read-only. A job can
   prepare a production change; a person runs it (decision 064).
 - Learned behavior is text, rows, or code under review. Layer 2 rows load only after approval.
   Layer 3 changes arrive as draft PRs.

@@ -1,11 +1,10 @@
 import { defineTool } from "eve/tools";
-import { always } from "eve/tools/approval";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { removePrompt } from "../../lib/connections/format.ts";
 import { disableConnection } from "../../lib/connections/rows.ts";
 import { mayDecideAsOwner, OWNER_ONLY, ownerResponse } from "../../lib/owner.ts";
-import { requesterOf } from "../../lib/requester.ts";
+import { adminApproval, requesterOf } from "../../lib/requester.ts";
 import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
 
 // Removes a connection (decision 045): the row turns disabled and its stored sign-in is deleted.
@@ -16,7 +15,7 @@ export default defineTool({
     "stored sign-in. The owner approves the removal.",
   inputSchema: z.object({ name: z.string().describe("The connection name.") }),
   approval: {
-    request: always(),
+    request: ({ session }) => adminApproval(session),
     response: ownerResponse(pack),
     prompt: ({ input }) => removePrompt(input.name),
   },

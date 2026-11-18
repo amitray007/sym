@@ -1,5 +1,6 @@
 import { defineMcpClientConnection, type McpClientConnectionDefinition } from "eve/connections";
 import type { ApprovalPolicy, ApprovalResponsePolicy, ApprovalStatus } from "eve/tools/approval";
+import { type ApprovalMode, approvalMode } from "../approvals.ts";
 import type { SignInState } from "./credentials.ts";
 import { hasTokenEnv, nameProblem } from "./names.ts";
 import { checkServerUrl } from "./probe.ts";
@@ -10,6 +11,7 @@ import {
   type ConnectionTool,
   hiddenTools,
   modeFor,
+  type ToolMode,
   truncate,
 } from "./tools.ts";
 
@@ -32,6 +34,8 @@ export interface LoadDeps {
   token(row: Connection): Promise<{ token: string; expiresAt: Date | null } | undefined>;
   // Who may answer an `ask` prompt: the owner (lib/owner.ts ownerResponse).
   response: ApprovalResponsePolicy;
+  // Whether this turn acts for the owner, who alone may skip the click (decision 099).
+  ownerTurn: boolean;
 }
 
 export function connectionDefinitions(
@@ -67,7 +71,7 @@ export function connectionDefinitions(
           }),
       ...(hidden.length > 0 ? { tools: { block: hidden } } : {}),
       approval: {
-        request: toolApproval(row.name, row.tools, row.defaultMode),
+        request: toolApproval(row.name, row.tools, row.defaultMode, deps.ownerTurn),
         response: deps.response,
       },
     });
@@ -90,6 +94,7 @@ export function toolApproval(
   connection: string,
   tools: readonly ConnectionTool[],
   connectionDefault?: ConnectionDefault,
+  ownerTurn = false,
 ): ApprovalPolicy {
   return ({ toolName, toolAnnotations }): ApprovalStatus => {
     const mode = modeFor(
@@ -99,8 +104,18 @@ export function toolApproval(
       connectionDefault,
     );
     if (mode === "hidden") return { type: "denied", reason: "The owner hid this tool." };
-    return mode === "ask" ? "user-approval" : "not-applicable";
+    return asksOwner(mode, approvalMode("connections"), ownerTurn)
+      ? "user-approval"
+      : "not-applicable";
   };
+}
+
+// `SYM_APPROVAL_CONNECTIONS` (decision 099) overrides the tool modes; it never shows a hidden
+// tool. Only the owner answers the prompt, so `never` skips it only on a turn for the owner:
+// anyone else would otherwise run a tool the owner chose to approve.
+function asksOwner(mode: ToolMode, setting: ApprovalMode, ownerTurn: boolean): boolean {
+  if (setting === "always") return true;
+  return mode === "ask" && !(setting === "never" && ownerTurn);
 }
 
 // The most the description may hold, server instructions included (decision 048).
