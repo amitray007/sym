@@ -1,12 +1,11 @@
 import { defineTool } from "eve/tools";
-import { always } from "eve/tools/approval";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { approvalPrompt, reviewOf, sameReview } from "../../lib/connections/format.ts";
 import { hasTokenEnv, tokenEnvVar } from "../../lib/connections/names.ts";
 import { activateConnection, getConnection } from "../../lib/connections/rows.ts";
 import { mayDecideAsOwner, OWNER_ONLY, ownerResponse, ownerUserId } from "../../lib/owner.ts";
-import { requesterOf } from "../../lib/requester.ts";
+import { adminApproval, requesterOf } from "../../lib/requester.ts";
 import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
 
 // The second half of adding a connection (decision 045). Eve's approval prompt can read only
@@ -25,7 +24,7 @@ export default defineTool({
     instructions: z.string().max(400).optional(),
   }),
   approval: {
-    request: always(),
+    request: ({ session }) => adminApproval(session),
     response: ownerResponse(pack),
     prompt: ({ input }) =>
       approvalPrompt(input, input.auth === "env" ? tokenEnvVar(input.name) : null),

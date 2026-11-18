@@ -2,6 +2,7 @@ import type { SessionAuthContext } from "eve/context";
 import { isScheduleAuth } from "eve/schedules";
 import { defineWorkflowTool, type WorkflowToolContext } from "eve/tools";
 import { createHook, createWebhook, FatalError, sleep } from "eve/workflow";
+import { approvalMode } from "../../lib/approvals.ts";
 import type { Brief } from "../../lib/jobs/brief.ts";
 import { callbackFor } from "../../lib/jobs/callback.ts";
 import { parseOutputContract } from "../../lib/jobs/contract.ts";
@@ -423,7 +424,7 @@ async function markScheduled(jobId: number) {
 
 async function postBrief(jobId: number) {
   "use step";
-  await showBrief(ledgerDeps(), jobId);
+  await showBrief(ledgerDeps(), jobId, approvalMode("start") === "never");
 }
 
 async function launch(jobId: number, webhookUrl: string): Promise<string> {
@@ -538,13 +539,17 @@ async function isPreApproved(
     const row = await getTrigger(sql, triggerId);
     // The consent covers one job of this session's own run, once.
     return (
-      canSkipStart({ isSchedulePrincipal: true, schedule: row }) &&
+      canSkipStart({ isSchedulePrincipal: true, schedule: row, mode: approvalMode("start") }) &&
       (await claimRunWhenAttached(sql, sessionId, { trigger: triggerId }, jobId))
     );
   }
   const id = schedule ? parseScheduleRef(schedule) : undefined;
   if (id === undefined) return false;
-  const allowed = canSkipStart({ isSchedulePrincipal: true, schedule: await getSchedule(sql, id) });
+  const allowed = canSkipStart({
+    isSchedulePrincipal: true,
+    schedule: await getSchedule(sql, id),
+    mode: approvalMode("start"),
+  });
   // The consent covers one job of this session's own run, once. Another job, or a run of
   // another schedule, gets the normal Start prompt.
   return allowed && (await claimRunWhenAttached(sql, sessionId, id, jobId));

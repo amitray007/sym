@@ -1,3 +1,4 @@
+import { APPROVAL_SETTINGS, type ApprovalKind, approvalMode } from "./approvals.ts";
 import { researchBudgetUsd } from "./brain/budget.ts";
 import { DEFAULT_MODEL, promptCacheTtl, selectedProvider } from "./brain/model.ts";
 import { DEFAULT_DIGEST_CRON, digestChannel, digestEnabled } from "./digest/post.ts";
@@ -53,6 +54,9 @@ export function settingsInstructions(pack: Pack | undefined, env: Env = process.
     "",
     "## Connections",
     ...connectionLines(env),
+    "",
+    "## Approval clicks",
+    ...approvalLines(env),
   ].join("\n");
 }
 
@@ -212,4 +216,28 @@ function connectionLines(env: Env): string[] {
       ? "- Outside tools can read job status over Sym's MCP endpoint with a token (`SYM_MCP_TOKEN`)."
       : "- Sym's MCP endpoint takes job tokens only (`SYM_MCP_TOKEN` is not set).",
   ];
+}
+
+const APPROVAL_TEXT: Record<ApprovalKind, string> = {
+  start: "Start on Builder work and follow-ups",
+  connections: "The owner's click on connection tools",
+  posts:
+    "The requester's click on posts, edits, bookmarks, canvases, and group pings outside the reply",
+  dms: "The requester's click on DMs to other people",
+  admin: "The owner's click on connection, playbook, and job-stop changes",
+};
+
+const MODE_TEXT = {
+  rules: "follows Sym's own rules",
+  always: "is asked every time",
+  never: "is skipped",
+} as const;
+
+function approvalLines(env: Env): string[] {
+  return (Object.keys(APPROVAL_SETTINGS) as ApprovalKind[]).map((kind) => {
+    const mode = approvalMode(kind, env);
+    const note =
+      kind === "admin" && mode === "never" ? ", except in scheduled and trigger runs" : "";
+    return `- ${APPROVAL_TEXT[kind]} ${MODE_TEXT[mode]}${note} (\`${APPROVAL_SETTINGS[kind]}\`).`;
+  });
 }

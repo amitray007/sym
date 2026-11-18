@@ -30,6 +30,20 @@ describe("canSkipStart", () => {
   it("asks without a row", () => {
     expect(canSkipStart({ ...ok, schedule: undefined })).toBe(false);
   });
+
+  // Decision 099: SYM_APPROVAL_START overrides the row's Builder mode.
+  it("starts an ask row's run without a click in never mode", () => {
+    const ask = { ...ok, schedule: { ...auto, builder: "ask" as const } };
+    expect(canSkipStart({ ...ask, mode: "never" })).toBe(true);
+    expect(
+      canSkipStart({ ...ask, schedule: { ...ask.schedule, status: "paused" }, mode: "never" }),
+    ).toBe(false);
+    expect(canSkipStart({ ...ask, isSchedulePrincipal: false, mode: "never" })).toBe(false);
+  });
+
+  it("asks for an auto row's run in always mode", () => {
+    expect(canSkipStart({ ...ok, mode: "always" })).toBe(false);
+  });
 });
 
 describe("runOutcome", () => {

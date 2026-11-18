@@ -1,5 +1,4 @@
 import { defineTool } from "eve/tools";
-import { always } from "eve/tools/approval";
 import { z } from "zod";
 import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { relistTools } from "../../lib/connections/add.ts";
@@ -14,7 +13,7 @@ import {
 } from "../../lib/connections/rows.ts";
 import type { ToolMode } from "../../lib/connections/tools.ts";
 import { mayDecideAsOwner, OWNER_ONLY, ownerResponse } from "../../lib/owner.ts";
-import { requesterOf } from "../../lib/requester.ts";
+import { adminApproval, requesterOf } from "../../lib/requester.ts";
 import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
 
 // The owner changes how a connection's tools run (decisions 045 and 049): auto, ask, or hidden,
@@ -35,7 +34,7 @@ export default defineTool({
     mode: z.enum(["auto", "ask", "hidden", "default"] satisfies ModeChoice[]),
   }),
   approval: {
-    request: always(),
+    request: ({ session }) => adminApproval(session),
     response: ownerResponse(pack),
     prompt: ({ input }) => modePrompt(input.name, input.tool, input.mode),
   },

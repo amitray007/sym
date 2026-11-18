@@ -1,5 +1,6 @@
 import { defineMcpClientConnection, type McpClientConnectionDefinition } from "eve/connections";
 import type { ApprovalPolicy, ApprovalResponsePolicy, ApprovalStatus } from "eve/tools/approval";
+import { type ApprovalMode, approvalMode } from "../approvals.ts";
 import type { SignInState } from "./credentials.ts";
 import { hasTokenEnv, nameProblem } from "./names.ts";
 import { checkServerUrl } from "./probe.ts";
@@ -10,6 +11,7 @@ import {
   type ConnectionTool,
   hiddenTools,
   modeFor,
+  type ToolMode,
   truncate,
 } from "./tools.ts";
 
@@ -99,8 +101,14 @@ export function toolApproval(
       connectionDefault,
     );
     if (mode === "hidden") return { type: "denied", reason: "The owner hid this tool." };
-    return mode === "ask" ? "user-approval" : "not-applicable";
+    return asksOwner(mode, approvalMode("connections")) ? "user-approval" : "not-applicable";
   };
+}
+
+// `SYM_APPROVAL_CONNECTIONS` (decision 099) overrides the tool modes; it never shows a hidden tool.
+function asksOwner(mode: ToolMode, setting: ApprovalMode): boolean {
+  if (setting === "never") return false;
+  return setting === "always" || mode === "ask";
 }
 
 // The most the description may hold, server instructions included (decision 048).

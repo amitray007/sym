@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import connectionAdd from "../agent/tools/connection_add.ts";
 import connectionApprove from "../agent/tools/connection_approve.ts";
 import connectionRemove from "../agent/tools/connection_remove.ts";
@@ -286,6 +286,23 @@ describe("tool modes", () => {
     });
     expect(call("example-tracker__new_read", { readOnlyHint: true })).toBe("not-applicable");
     expect(call("example-tracker__new_write")).toBe("user-approval");
+  });
+
+  // Decision 099: SYM_APPROVAL_CONNECTIONS overrides tool modes but never shows a hidden tool.
+  it("follows SYM_APPROVAL_CONNECTIONS", () => {
+    const policy = toolApproval("example-tracker", [
+      tool("list_items", true, "auto"),
+      tool("create_item", false, "ask"),
+      tool("delete_item", false, "hidden"),
+    ]);
+    const call = (toolName: string) =>
+      policy({ toolName } as unknown as Parameters<typeof policy>[0]);
+    vi.stubEnv("SYM_APPROVAL_CONNECTIONS", "never");
+    expect(call("example-tracker__create_item")).toBe("not-applicable");
+    expect(call("example-tracker__delete_item")).toMatchObject({ type: "denied" });
+    vi.stubEnv("SYM_APPROVAL_CONNECTIONS", "always");
+    expect(call("example-tracker__list_items")).toBe("user-approval");
+    vi.unstubAllEnvs();
   });
 });
 

@@ -1,5 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
+import { approvalStatus } from "../../lib/approvals.ts";
 import { isWorkerCaller } from "../../lib/callers.ts";
 import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
@@ -24,9 +25,10 @@ export default defineTool({
   // A ping to a whole channel or group waits for the requester (decision 082).
   approval: {
     request: ({ session, toolInput }) =>
-      hasBroadcastMention(toolInput?.text ?? "") || readInTurn(session)
-        ? "user-approval"
-        : "not-applicable",
+      approvalStatus(
+        "posts",
+        () => hasBroadcastMention(toolInput?.text ?? "") || readInTurn(session),
+      ),
     response: requesterResponse("Only the person who asked can approve this post.", ledgerDeps),
     prompt: ({ input }) => `Post this in the main thread?\n\n${input.text}`,
   },
