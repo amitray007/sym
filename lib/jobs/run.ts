@@ -21,6 +21,7 @@ import {
   matchWorkerProject,
 } from "../projects/allowed.ts";
 import type { SlackApi } from "../slack/api.ts";
+import { isSlackUserAllowed } from "../slack/guard.ts";
 import { readThread, sourceOf, threadImages, threadLink } from "../slack/source-thread.ts";
 import { workerLabel, workerNoun } from "../worker-label.ts";
 import {
@@ -577,7 +578,7 @@ export async function markScheduledCheck(sql: Sql, jobId: number): Promise<void>
 // Shows the owner the short brief in the job thread before the Start prompt (decision 060).
 export async function showBrief(deps: LedgerDeps, jobId: number, startNow = false): Promise<void> {
   const job = await mustGetJob(deps.sql, jobId);
-  const startedBy = startNow ? await threadPerson(deps.sql, job) : undefined;
+  const startedBy = startNow ? await allowedThreadPerson(deps, job) : undefined;
   const brief = Brief.parse(job.brief);
   const { models, projectModel } = modelsFor(deps, brief.project);
   const line = briefModelLine(models, {
@@ -597,10 +598,12 @@ export async function showBrief(deps: LedgerDeps, jobId: number, startNow = fals
   await deliverNow(deps);
 }
 
-// The person a job's thread serves. Without one, the brief keeps its Start button.
-async function threadPerson(sql: Sql, job: Job): Promise<string | undefined> {
+// The person a job's thread serves, when they may press Start themselves. Without one, the
+// brief keeps its Start button.
+async function allowedThreadPerson(deps: LedgerDeps, job: Job): Promise<string | undefined> {
   if (!job.sessionId) return undefined;
-  return (await getSessionThread(sql, job.sessionId))?.userId ?? undefined;
+  const person = (await getSessionThread(deps.sql, job.sessionId))?.userId ?? undefined;
+  return isSlackUserAllowed(deps.pack, process.env.SYM_SLACK_USERS, person) ? person : undefined;
 }
 
 // Ends a job before it launched, for example when the owner cancels or edits the brief.

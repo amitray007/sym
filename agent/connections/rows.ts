@@ -6,8 +6,9 @@ import { connectionDefinitions } from "../../lib/connections/load.ts";
 import { probeServer } from "../../lib/connections/probe.ts";
 import { refreshStale } from "../../lib/connections/refresh.ts";
 import { activeConnections, type Connection } from "../../lib/connections/rows.ts";
-import { ownerResponse } from "../../lib/owner.ts";
-import { ledger, pack } from "../../lib/runtime.ts";
+import { mayDecideAsOwner, ownerResponse } from "../../lib/owner.ts";
+import { requesterOf } from "../../lib/requester.ts";
+import { ledger, ledgerDeps, pack } from "../../lib/runtime.ts";
 
 // The MCP connections the owner approved (decision 045). They load at each turn, so a new
 // approval, a tool mode change, or a removal applies to the next message. Worker threads get no
@@ -40,11 +41,15 @@ export default defineDynamic(async (ctx) => {
       }
     });
     if (saved.rows.length === 0) return null;
+    const ownerTurn = await ctx.memo(["owner-turn", ctx.turn?.id ?? null], async () =>
+      mayDecideAsOwner(await requesterOf(ctx.session, ledgerDeps), pack()),
+    );
     const definitions = connectionDefinitions(saved.rows.map(reviveRow), {
       env: process.env,
       signIns: new Map(saved.signIns),
       token: (row) => connectionToken(sql, row),
       response: ownerResponse(pack),
+      ownerTurn,
     });
     return Object.keys(definitions).length > 0 ? definitions : null;
   } catch (error) {

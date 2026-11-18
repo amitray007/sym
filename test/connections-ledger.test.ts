@@ -236,6 +236,7 @@ describe.skipIf(!hasDatabase)("OAuth connection sign-in against the fake server"
       signIns: await signInStates(sql, [row.id], new Date()),
       token: (item) => connectionToken(sql, item),
       response: () => ({ status: "allowed" }),
+      ownerTurn: false,
     });
     expect(before).toEqual({});
 
@@ -269,6 +270,7 @@ describe.skipIf(!hasDatabase)("OAuth connection sign-in against the fake server"
       signIns: await signInStates(sql, [row.id], new Date()),
       token: (item) => connectionToken(sql, item),
       response: () => ({ status: "allowed" }),
+      ownerTurn: false,
     });
     const auth = after.crm?.auth as {
       getToken: () => Promise<{ token: string; expiresAt?: number }>;

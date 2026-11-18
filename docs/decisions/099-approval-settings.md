@@ -30,14 +30,20 @@ same code with fewer clicks.
    untrusted event can steer, so `never` is the honest form of automatic.
 4. `SYM_APPROVAL_START=never` starts every interactive job: the brief posts without buttons and
    ends with "Starting now.", and its Start proposal is recorded as approved by the person the
-   thread serves, so reconcile and the ledger still see who started it. A follow-up starts at
+   thread serves, so reconcile and the ledger still see who started it. That person must be on
+   the allow-list; otherwise the brief keeps its buttons. A follow-up starts at
    once instead of posting a proposal. Every schedule and trigger run starts its Builder work,
    whatever its row's `builder` mode. `always` asks even for an `auto` row.
-5. `SYM_APPROVAL_CONNECTIONS=never` runs every `ask` tool without the owner's click. `always`
-   asks for every tool, `auto` ones included.
+5. `SYM_APPROVAL_CONNECTIONS=never` runs every `ask` tool without a click on a turn that acts
+   for the owner, a run the owner created included. Anyone else still waits for the owner,
+   because only the owner answers that prompt. `always` asks for every tool, `auto` ones
+   included.
 6. `SYM_APPROVAL_POSTS` covers `slack_post`, `slack_edit`, `slack_bookmark`, `slack_canvas`, and
    `main_thread_post`. With `never`, a trigger run can post in another channel and ping a user
-   group such as `@on-call`. `SYM_APPROVAL_DMS` covers `slack_dm`.
+   group such as `@on-call`. `never` drops every reason the rule asks: a broadcast or group
+   mention, a Slack Connect target, text leaving a private conversation, and a turn that read
+   Slack or an untrusted event. The reach checks and the hourly cap stay. `SYM_APPROVAL_DMS`
+   covers `slack_dm` the same way.
 7. `SYM_APPROVAL_ADMIN` covers `connection_approve`, `connection_remove`, `connection_tools`,
    `playbook_review`, `playbook_retire`, and `job_stop`. `never` skips the click only on a
    person's own turn. A scheduled or trigger run still asks, because an untrusted event must not
