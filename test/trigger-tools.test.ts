@@ -184,6 +184,8 @@ describe.skipIf(!hasDatabase)("trigger tools", () => {
       summary: string;
     };
     expect(listed.summary).toContain("Shared triage: on a new message in <#CHERE> - active");
+    // Eve rejects a tool return that is not plain JSON, such as a Date.
+    expect(JSON.parse(JSON.stringify(listed))).toEqual(listed);
     expect(await call(triggerDelete, { trigger: ref, title: "Wrong" }, other)).toMatch(
       /doesn't match/,
     );
