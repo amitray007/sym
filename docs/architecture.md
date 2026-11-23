@@ -138,8 +138,8 @@ Example: "When someone posts a bug report in #support, draft a ticket in its thr
    is the same as for schedules. The row is active at once.
 2. A new top-level message reaches `onMessage`, and a reaction reaches `onEvent`. Messages that
    mention Sym and replies in threads keep their normal path; only a new top-level message or a
-   reaction can fire a trigger. Bots and Sym's own posts and reactions fire nothing, so a run
-   cannot fire itself. Anyone's message can fire a trigger; its author is not the requester.
+   reaction can fire a trigger. Sym's own posts and reactions fire nothing, so a run cannot fire
+   itself. Other bots' posts fire only a trigger set to include bots (decision 101). Anyone's message can fire a trigger; its author is not the requester.
 3. For a message, a decision model then drops the triggers it is sure the message does not need,
    in one `decide` call; an unsure answer or a failure keeps them (decision 096).
    For each matching trigger, Sym reserves a `schedule_runs` row keyed by the trigger and the

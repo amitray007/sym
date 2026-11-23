@@ -74,6 +74,7 @@ export async function setUpTrigger(
     builder: input.builder,
     destination,
     owner: input.requester,
+    includeBots: input.includeBots,
   });
   return { trigger };
 }

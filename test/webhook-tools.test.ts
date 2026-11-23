@@ -120,6 +120,7 @@ describe.skipIf(!hasDatabase)("webhook trigger tools", () => {
       owner: "UALLOWED",
       status: "active",
       secretVersion: 1,
+      includeBots: false,
     });
     expect(row.hookId).toMatch(/^[A-Za-z0-9_-]{24}$/);
     const url = `https://sym.example.com/sym/hooks/${row.hookId}`;
