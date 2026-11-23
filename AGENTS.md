@@ -18,7 +18,8 @@ planning or building anything.
 - Every interactive chat job shows Start / Not now, unless `SYM_APPROVAL_START=never`
   (decision 099). Runs of a schedule set to `auto` start without a click (decision 085); the
   trust ladder no longer auto-starts jobs. Briefs keep production and customer data read-only. A job can
-  prepare a production change; a person runs it (decision 064).
+  prepare a production change (decision 064). The brain changes production only when the person
+  it helps asks and confirms the exact action, never in a run or from outside text (decision 100).
 - Learned behavior is text, rows, or code under review. Layer 2 rows load only after approval.
   Layer 3 changes arrive as draft PRs.
 - Secrets live in the deployment environment. Never commit them, log them, or put them in a pack.

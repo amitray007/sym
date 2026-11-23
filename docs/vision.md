@@ -21,8 +21,9 @@ an operations group with scheduled checks. One adopter's playbooks never shape t
 4. Builder work needs explicit consent, including repository investigations. A problem report
    does not authorize a job. Writes need a person. Any job that can change code, data, or settings needs an approval
    for every interactive chat request, including playbooks with historical trust data.
-   Runs of a schedule set to `auto` start without a click (decision 085). The trust ladder no longer auto-starts jobs. Production and customer data stay read-only:
-   a job can prepare a change to them, and a person runs it.
+   Runs of a schedule set to `auto` start without a click (decision 085). The trust ladder no longer auto-starts jobs. A job keeps production and customer data read-only
+   and can prepare a change to them. Sym changes them itself only when the person asks and confirms
+   the exact action (decision 100).
 5. Quiet by default. Code decides each message's display level. New messages are only for
    "you need to act" and "it is done".
 6. Everything learned is readable. Sym does not train a model. Memory, playbooks, and code are
