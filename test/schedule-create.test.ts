@@ -25,6 +25,7 @@ vi.mock("../lib/runtime.ts", async (original) => ({
 
 import scheduleCreate from "../agent/tools/schedule_create.ts";
 import scheduleDelete from "../agent/tools/schedule_delete.ts";
+import scheduleList from "../agent/tools/schedule_list.ts";
 import schedulePause from "../agent/tools/schedule_pause.ts";
 
 // Decision 085: anyone on the allow-list sets up and changes schedules, with no owner approval.
@@ -95,6 +96,13 @@ describe.skipIf(!hasDatabase)("schedule tools", () => {
     const row = await created({ ...base, at: later, builder: "auto" });
     expect(row).toMatchObject({ cron: null, builder: "auto", status: "active" });
     expect(row.runAt?.toISOString()).toBe(later);
+  });
+
+  it("lists schedules as plain JSON, which Eve requires of a tool return", async () => {
+    await created({ ...base, at: later });
+    const listed = await scheduleList.execute({} as never, ctx(ALLOWED, "x") as never);
+    expect(JSON.parse(JSON.stringify(listed))).toEqual(listed);
+    expect((listed as { schedules: { runAt: string }[] }).schedules.at(-1)?.runAt).toBe(later);
   });
 
   it("refuses a person outside the allow-list, a worker, and a scheduled run", async () => {

@@ -18,7 +18,13 @@ export default defineTool({
     const rows = await listTriggers(ledger());
     return {
       summary: triggerList(rows, urlOf),
-      triggers: rows.map((row) => ({ ...row, ref: triggerRef(row.id), url: urlOf(row) ?? null })),
+      // Eve accepts only plain JSON in a tool return, so dates go out as ISO strings.
+      triggers: rows.map((row) => ({
+        ...row,
+        createdAt: row.createdAt.toISOString(),
+        ref: triggerRef(row.id),
+        url: urlOf(row) ?? null,
+      })),
       note: "Use these facts to answer naturally. Do not paste this return verbatim.",
     };
   },
