@@ -1,6 +1,6 @@
 # 064. Fixes from the first real-model eval run
 
-Status: accepted
+Status: accepted; point 2 amended by [100](100-writes-on-request.md): Sym's own tools may change production on the person's request.
 Date: 2026-10-21
 
 ## Context
