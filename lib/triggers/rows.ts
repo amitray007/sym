@@ -53,13 +53,20 @@ export interface Trigger {
   secretVersion: number;
   // A GitHub or Linear trigger: which events fire it.
   sourceFilter: SourceFilter | null;
+  // A message or reaction trigger: whether posts by other apps and bots fire it (decision 101).
+  includeBots: boolean;
   createdAt: Date;
 }
 
 export type NewTrigger = Pick<
   Trigger,
   "kind" | "channel" | "keywords" | "emoji" | "title" | "instruction" | "builder" | "destination"
-> & { owner: string; hookId?: string | null; sourceFilter?: SourceFilter | null };
+> & {
+  owner: string;
+  hookId?: string | null;
+  sourceFilter?: SourceFilter | null;
+  includeBots?: boolean;
+};
 
 // The facts of the event that fired a run. They are untrusted data for the brain.
 export type TriggerEvent =
@@ -151,12 +158,13 @@ export async function createTrigger(sql: Sql, input: NewTrigger): Promise<Trigge
   const [row] = await sql<Trigger[]>`
     insert into triggers (
       kind, channel, keywords, emoji, title, instruction, builder, destination, owner, hook_id,
-      source_filter
+      source_filter, include_bots
     ) values (
       ${input.kind}, ${input.channel}, ${input.keywords}, ${input.emoji}, ${input.title},
       ${input.instruction}, ${input.builder}, ${input.destination}, ${input.owner},
       ${input.hookId ?? null},
-      ${input.sourceFilter ? json(sql, input.sourceFilter) : null}
+      ${input.sourceFilter ? json(sql, input.sourceFilter) : null},
+      ${input.includeBots ?? false}
     )
     returning *
   `;
@@ -465,6 +473,7 @@ function normalize(row: Trigger): Trigger {
     hookId: row.hookId ?? null,
     secretVersion: Number(row.secretVersion ?? 1),
     sourceFilter: row.sourceFilter ?? null,
+    includeBots: row.includeBots ?? false,
   };
 }
 

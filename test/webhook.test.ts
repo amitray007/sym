@@ -168,6 +168,7 @@ const WEBHOOK_TRIGGER: Trigger = {
   status: "active",
   hookId: "hook-id-0123456789",
   secretVersion: 1,
+  includeBots: false,
   sourceFilter: null,
   createdAt: new Date(),
 };

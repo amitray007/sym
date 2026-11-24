@@ -25,6 +25,7 @@ import {
   schedulesMigration,
 } from "../schedules/migration.ts";
 import { scheduleRunsMigration } from "../schedules/runs-migration.ts";
+import { triggerBotPostsMigration } from "../triggers/bot-posts-migration.ts";
 import {
   channelTriggersMigration,
   triggerRunLeaseMigration,
@@ -333,4 +334,5 @@ export const migrations: Migration[] = [
   triggerThreadsMigration,
   webhookTriggersMigration,
   sourceTriggersMigration,
+  triggerBotPostsMigration,
 ];

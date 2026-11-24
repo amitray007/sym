@@ -31,8 +31,8 @@ both.
    share, or the creator's DM, as for schedules.
 5. Only a new top-level message (in `onMessage`) or a reaction (in `onEvent`) can fire a trigger.
    A mention takes the `app_mention` path, and a reply in a thread keeps its normal path, so
-   messages addressed to Sym never become trigger runs. Bots, Sym's own posts, edits, and Sym's
-   own reactions fire nothing, so a run's own post or reaction never fires a trigger. A reaction
+   messages addressed to Sym never become trigger runs. Bots (unless the trigger includes them,
+   decision 101), Sym's own posts, edits, and Sym's own reactions fire nothing, so a run's own post or reaction never fires a trigger. A reaction
    on Sym's own message is feedback (decision 051), not a trigger event.
 6. Each run has its own session, so each acts for its own creator. Eve gives a Slack thread one
    session, so one run owns a thread. A run claims the thread in the ledger (`trigger_threads`,

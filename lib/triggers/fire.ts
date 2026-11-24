@@ -87,10 +87,11 @@ export interface MessageEventInput {
   threadTs: string;
   author: string | undefined;
   text: string;
+  // Posted by another app or bot. Only a trigger that includes bots fires on it (decision 101).
+  fromBot: boolean;
 }
 
-// A new top-level message in a channel. The caller drops bots, Sym's own posts, edits, and
-// thread replies first. `send` reaches only the message's own thread here, so a run that posts
+// A new top-level message in a channel. The caller drops Sym's own posts and edits first. `send` reaches only the message's own thread here, so a run that posts
 // elsewhere waits for the dispatcher.
 export async function fireMessageTriggers(
   deps: FireDeps,
@@ -98,8 +99,8 @@ export async function fireMessageTriggers(
   send: SendRun,
 ): Promise<FireResult[]> {
   if (input.threadTs !== input.ts) return [];
-  const matched = (await watchingTriggers(deps.sql, input.channel, "message")).filter((t) =>
-    matchesKeywords(input.text, t.keywords),
+  const matched = (await watchingTriggers(deps.sql, input.channel, "message")).filter(
+    (t) => (t.includeBots || !input.fromBot) && matchesKeywords(input.text, t.keywords),
   );
   const text = clip(input.text);
   const triggers = deps.gate ? await deps.gate(text, matched) : matched;
@@ -128,23 +129,24 @@ export interface ReactionEventInput {
 
 // A reaction added to a message in a channel. A reaction by Sym or another bot fires nothing, so
 // a run's own reaction never fires a trigger. Nor does a reaction on Sym's own message: that is
-// feedback (decision 051).
+// feedback (decision 051). A reaction on another bot's message fires only a trigger that
+// includes bots (decision 101).
 export async function fireReactionTriggers(
   deps: FireDeps,
   input: ReactionEventInput,
   send: SendRun,
 ): Promise<FireResult[]> {
   const emoji = normalizeEmoji(input.emoji);
-  const triggers = (await watchingTriggers(deps.sql, input.channel, "reaction")).filter(
+  const watching = (await watchingTriggers(deps.sql, input.channel, "reaction")).filter(
     (t) => t.emoji === emoji,
   );
-  if (triggers.length === 0 || !deps.slack) return [];
+  if (watching.length === 0 || !deps.slack) return [];
   if (!input.reactor || input.reactor === input.botUserId) return [];
   if (await isBotUser(deps.slack, input.reactor)) return [];
   const message = await findMessage(deps.slack, input.channel, input.ts);
-  if (!message || message.botId || (input.botUserId && message.user === input.botUserId)) {
-    return [];
-  }
+  if (!message || (input.botUserId && message.user === input.botUserId)) return [];
+  const triggers = message.botId ? watching.filter((t) => t.includeBots) : watching;
+  if (triggers.length === 0) return [];
   const facts: SlackTriggerEvent = {
     kind: "reaction",
     channel: input.channel,

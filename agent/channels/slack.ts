@@ -70,6 +70,7 @@ import {
   handleTypedProposal,
   JOB_ACTION_IDS,
 } from "../../lib/slack/job-actions.ts";
+import { messageText, type RawMessage } from "../../lib/slack/message.ts";
 import {
   MAYBE_NOTE,
   nameOf,
@@ -592,14 +593,19 @@ async function typedDecision(
   return true;
 }
 
-// Fires the message triggers that watch this channel (decision 088). Bots, Sym itself, and edits
-// fire nothing, so a run's own post never fires a trigger. The handler's send reaches only the
-// message's own thread; a trigger that posts elsewhere defers its run to the dispatcher. This
-// never throws.
+// Fires the message triggers that watch this channel (decision 088). Sym itself and edits fire
+// nothing, so a run's own post never fires a trigger; Eve already drops Sym's own posts. Another
+// app's post fires only a trigger that includes bots (decision 101). The handler's send reaches
+// only the message's own thread; a trigger that posts elsewhere defers its run to the
+// dispatcher. This never throws.
 async function fireTriggersOnMessage(ctx: SlackInboundMessageContext, message: SlackMessage) {
-  const subtype = (message.raw as { subtype?: unknown } | undefined)?.subtype;
-  if (message.author?.isBot || message.author?.isMe) return;
-  if (subtype !== undefined && subtype !== "file_share") return;
+  const raw = (message.raw ?? {}) as RawMessage & { subtype?: unknown };
+  if (message.author?.isMe) return;
+  if (raw.subtype !== undefined && raw.subtype !== "file_share" && raw.subtype !== "bot_message") {
+    return;
+  }
+  const fromBot =
+    message.author?.isBot === true || Boolean(raw.bot_id) || raw.subtype === "bot_message";
   const send: SendRun = async ({ message: text, target, key, title }) => {
     if (target.channelId !== message.channelId || target.threadTs !== message.ts) return undefined;
     const delivery = await ctx.send(text, { auth: APP_AUTH, idempotencyKey: key, title });
@@ -613,7 +619,9 @@ async function fireTriggersOnMessage(ctx: SlackInboundMessageContext, message: S
         ts: message.ts,
         threadTs: message.threadTs,
         author: message.author?.userId,
-        text: message.text,
+        // Alert apps often leave the text empty and put the alert in an attachment.
+        text: message.text.trim() ? message.text : messageText(raw),
+        fromBot,
       },
       send,
     );

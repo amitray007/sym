@@ -7,9 +7,12 @@ const INSTRUCTION_PREVIEW = 300;
 function firesOn(trigger: Trigger): string {
   if (trigger.kind === "webhook") return "a signed webhook request";
   if (trigger.kind === "github" || trigger.kind === "linear") return sourceEvents(trigger);
-  if (trigger.kind === "reaction") return `a :${trigger.emoji}: reaction in <#${trigger.channel}>`;
+  const bots = trigger.includeBots ? ", bot posts included" : "";
+  if (trigger.kind === "reaction") {
+    return `a :${trigger.emoji}: reaction in <#${trigger.channel}>${bots}`;
+  }
   const words = trigger.keywords.length ? ` with ${trigger.keywords.join(", ")}` : "";
-  return `a new message${words} in <#${trigger.channel}>`;
+  return `a new message${words} in <#${trigger.channel}>${bots}`;
 }
 
 // A GitHub or Linear trigger's filter, in words (decision 091).

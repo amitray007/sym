@@ -70,6 +70,14 @@ export const TriggerInput = z.object({
       "For 'message' only: fire only when the message has one of these words. The run still " +
         "decides relevance from the instruction. Empty: every new message.",
     ),
+  includeBots: z
+    .boolean()
+    .default(false)
+    .describe(
+      "For 'message' and 'reaction': also fire on posts by other apps and bots, such as alert " +
+        "or monitoring apps. Set it when the watched posts come from an app. Your own posts " +
+        "never fire a trigger. Default false.",
+    ),
   emoji: z
     .string()
     .max(100)

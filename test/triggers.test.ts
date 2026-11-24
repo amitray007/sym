@@ -65,6 +65,7 @@ const TRIGGER: Trigger = {
   status: "active",
   hookId: null,
   secretVersion: 1,
+  includeBots: false,
   sourceFilter: null,
   createdAt: new Date(),
 };
@@ -211,6 +212,7 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     threadTs: ts,
     author: "UAUTHOR",
     text,
+    fromBot: false,
   });
 
   it("fires once per message and binds the run to the session", async () => {
@@ -231,6 +233,25 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
     const runs = await runsOf(trigger.id);
     expect(runs).toHaveLength(1);
     expect(runs[0]?.sessionId).toBe(sessionOf(sent[0]));
+  });
+
+  it("fires on another app's post only for a trigger that includes bots", async () => {
+    const where = channel();
+    const humansOnly = await make({ channel: where, title: "Humans only" });
+    const alerts = await make({ channel: where, title: "Alert triage", includeBots: true });
+    expect(alerts.includeBots).toBe(true);
+    expect(humansOnly.includeBots).toBe(false);
+    const { sent, send } = sender();
+    const alert = {
+      ...message(where, "11.9", "CPU high on api-1"),
+      author: undefined,
+      fromBot: true,
+    };
+    expect(await fireMessageTriggers(base(), alert, send)).toEqual([
+      { trigger: `T-${alerts.id}`, status: "sent" },
+    ]);
+    expect(sent).toHaveLength(1);
+    expect(await runsOf(humansOnly.id)).toHaveLength(0);
   });
 
   it("ignores thread replies, keyword misses, and paused triggers", async () => {
@@ -688,6 +709,28 @@ describe.skipIf(!hasDatabase)("firing triggers", () => {
       ).toEqual(["sent"]);
       expect(sent).toHaveLength(1);
       expect(sent[0]?.target).toEqual({ channelId: "DUCREATOR" });
+    });
+
+    it("fires on another bot's message only for a trigger that includes bots", async () => {
+      const where = channel();
+      const humansOnly = await make({ channel: where, kind: "reaction", emoji: "eyes" });
+      const alerts = await make({
+        channel: where,
+        kind: "reaction",
+        emoji: "eyes",
+        includeBots: true,
+      });
+      const slack = fakeSlack([
+        { channel: where, ts: "23.1", text: "Disk full on db-1", bot_id: "BALERTS" },
+        { channel: where, ts: "23.2", text: "Sym's post", user: "UBOT", bot_id: "B1" },
+      ]);
+      const { send } = sender();
+      const deps = { sql: ledger.sql(), slack };
+      expect(await fireReactionTriggers(deps, reaction(where, "23.1", "eyes"), send)).toEqual([
+        { trigger: `T-${alerts.id}`, status: "sent" },
+      ]);
+      expect(await fireReactionTriggers(deps, reaction(where, "23.2", "eyes"), send)).toEqual([]);
+      expect(await runsOf(humansOnly.id)).toHaveLength(0);
     });
   });
 });

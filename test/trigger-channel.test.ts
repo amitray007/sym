@@ -156,6 +156,28 @@ describe.skipIf(!hasDatabase)("event triggers in the Slack channel", () => {
     expect(sends).toEqual([]);
   });
 
+  it("fires a trigger that includes bots on an alert app's post, reading its attachment", async () => {
+    const where = fresh("CALERT");
+    await watch({ channel: where, includeBots: true });
+    const { ctx, sends } = messageCtx(where);
+    // Slack sends an app's post with no user, so Eve gives it no author.
+    await channel.onMessage(ctx, {
+      ...topLevel(where, "31.5", ""),
+      author: undefined,
+      raw: {
+        subtype: "bot_message",
+        bot_id: "BALERTS",
+        attachments: [{ fallback: "CPU above 90% on api-1" }],
+      },
+    });
+    await channel.onMessage(
+      ctx,
+      topLevel(where, "31.6", "Sym says", { isMe: true, userId: "UBOT" }),
+    );
+    expect(sends).toHaveLength(1);
+    expect(String(sends[0]?.text)).toContain('"text":"CPU above 90% on api-1"');
+  });
+
   it("keeps the normal path for messages addressed to Sym", async () => {
     const where = fresh("CADDR");
     await watch({ channel: where });
