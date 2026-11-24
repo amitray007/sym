@@ -56,6 +56,11 @@ Sym uses short sentences in one configured persona (decisions 070 and 071). It g
 first and preserves facts, links, warnings, scope boundaries, and uncertainty. Plain is calm,
 casual is warm and practical, and spicy texts like a gen-z teammate. Failures and concerns never
 get jokes. Most replies are one to three short lines and match the person's length and style (decision 093).
+Every reply is written for a glance: the answer first, one idea per short line, and only the
+details that change what the reader does. A code check flags a reply with a line past 160
+characters, a line with more than four numbers, or more than 800 characters of prose. A small
+model rewrites a flagged reply once before it posts; a failed or unsafe rewrite posts the
+original (decision 103).
 The persona comes from the pack, then the saved owner setting, then `SYM_PERSONA`, then casual.
 The initial status fallback is "Working...". Tool labels replace it with known steps.
 

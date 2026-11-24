@@ -92,4 +92,18 @@ describe.skipIf(!hasDatabase)("durable brain replies", () => {
         ?.status,
     ).toBe("failed");
   });
+  it("posts the rewrite pass's text when a reply reads as a wall", async () => {
+    const wall = "a long reply ".repeat(80);
+    const tight = "the short version.";
+    expect(
+      await queueReply(
+        ledger.sql(),
+        api(),
+        { key: "tightened", channel: "C1", threadTs: "1.1", text: wall },
+        async () => tight,
+      ),
+    ).toBe(true);
+    expect(slack.messages.some((m) => m.text === tight)).toBe(true);
+    expect(slack.messages.some((m) => m.text === wall)).toBe(false);
+  });
 });
