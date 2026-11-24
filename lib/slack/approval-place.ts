@@ -20,6 +20,7 @@ const REQUESTER_APPROVED = new Set([
   "slack_bookmark",
   "slack_canvas",
   "main_thread_post",
+  "standing_approval_add",
 ]);
 
 export interface ApprovalRequest {

@@ -21,6 +21,7 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A message with "fixture-react <emoji>" calls slack_react, then ends the turn with no_reply.
 // - A message with "fixture-post-now <target>" calls slack_post.
 // - A trigger instruction with "fixture-post-event" calls slack_post on the event's own link.
+// - "fixture-ping <mention>" in a trigger instruction puts that ping before the run's post.
 // - A message with "fixture-bash <command>" runs the command with `bash` in the sandbox, then
 //   answers "Sandbox output: <stdout>", or "Sandbox error: <error>" when the tool fails.
 // - A message with "fixture-read-attachment" opens the first attached file Eve staged in the
@@ -120,11 +121,9 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
       ? facts.link
       : /\bfixture-post\s+(\S+)/.exec(instruction ?? "")?.[1];
     if (postTarget) {
-      return {
-        toolCalls: [
-          { name: "slack_post", input: { target: postTarget, text: "Fixture run post." } },
-        ],
-      };
+      const ping = /\bfixture-ping\s+(\S+)/.exec(instruction ?? "")?.[1];
+      const text = ping ? `${ping} Fixture run post.` : "Fixture run post.";
+      return { toolCalls: [{ name: "slack_post", input: { target: postTarget, text } }] };
     }
     if (!/\bfixture-say\b/.test(instruction ?? "")) return quiet(request);
     const text =

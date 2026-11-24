@@ -35,6 +35,14 @@ export function adminApproval(session: RequesterSession) {
     : approvalStatus("admin", () => true);
 }
 
+// The person on their own turn. A scheduled or trigger run acts for nobody here: a choice that
+// changes how Sym asks that person must come from them, never from a run (decision 105).
+export function ownTurnUser(session: RequesterSession): string | undefined {
+  return isAppSession(session)
+    ? undefined
+    : slackUserOfPrincipal(session.auth.current?.principalId);
+}
+
 // `deps` is a getter, so a person's turn reads no ledger.
 export async function requesterOf(
   session: RequesterSession,

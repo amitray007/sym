@@ -9,6 +9,7 @@ import {
   resolveTarget,
   UNREACHABLE,
 } from "./reach.ts";
+import { standingApprovalCovers } from "./standing-approvals.ts";
 
 // Posts in another channel or thread on request (decisions 081 and 082). Sym posts in its own
 // voice; the ledger records who asked. DMs and group DMs go through their own tool, so they are
@@ -92,6 +93,25 @@ export async function postsInOwnThread(
   const resolved = await resolveTarget(deps.slack, target).catch(() => undefined);
   if (!resolved || resolved.channel !== source.channelId) return false;
   return (resolved.threadTs ?? resolved.messageTs) === source.threadTs;
+}
+
+// A post the requester gave a standing approval for skips the click (decision 105). A Slack
+// Connect target never does. A failed lookup counts as no approval.
+export async function postHasStandingApproval(
+  deps: Pick<LedgerDeps, "sql" | "slack">,
+  requester: string | undefined,
+  target: string | undefined,
+  text: string | undefined,
+): Promise<boolean> {
+  if (!requester || !target || !deps.slack) return false;
+  const resolved = await resolveTarget(deps.slack, target).catch(() => undefined);
+  if (!resolved || (await isExternalConversation(deps.slack, resolved.channel))) return false;
+  return standingApprovalCovers(deps.sql, {
+    grantedBy: requester,
+    channelId: resolved.channel,
+    text: text ?? "",
+    hasPing: hasBroadcastMention(text ?? ""),
+  }).catch(() => false);
 }
 
 // An edit follows the same rules, aimed at the channel of the post it changes.
