@@ -54,6 +54,7 @@ import { turnOutcome } from "../../lib/schedules/outcome.ts";
 import { finishRunWithoutJob, listSchedules } from "../../lib/schedules/rows.ts";
 import { namesBot, threadPeople, triageThreadMessage } from "../../lib/slack/addressing.ts";
 import { SlackApiError } from "../../lib/slack/api.ts";
+import { type ApprovalChannelState, approvalPlace } from "../../lib/slack/approval-place.ts";
 import {
   codeChannelsOn,
   ensureConversationBar,
@@ -835,6 +836,15 @@ async function threadTurn(
 
 export default slackChannel({
   renderers: [symRenderer],
+  // A Slack write that only its requester approves asks in that person's DM (decision 102). Eve
+  // passes the event context, whose channel state names the DM's reviewer.
+  approvalChannel: (request, ctx) =>
+    approvalPlace(
+      request,
+      ctx.session,
+      (ctx as { channel?: { state?: ApprovalChannelState } }).channel?.state,
+      ledgerDeps,
+    ),
   // Off unless SYM_CODE_CHANNELS is on: Eve then serves each code channel as one session, and the
   // generated manifest asks for the code channel scopes and events.
   codeChannels: codeChannelsOn(),

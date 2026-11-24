@@ -20,6 +20,7 @@ import { type MockModelRequest, type MockModelResponse, mockModel } from "eve/ev
 // - A message that says "move this to a code channel" calls code_channel, then answers in one line.
 // - A message with "fixture-react <emoji>" calls slack_react, then ends the turn with no_reply.
 // - A message with "fixture-post-now <target>" calls slack_post.
+// - A trigger instruction with "fixture-post-event" calls slack_post on the event's own link.
 // - A message with "fixture-bash <command>" runs the command with `bash` in the sandbox, then
 //   answers "Sandbox output: <stdout>", or "Sandbox error: <error>" when the tool fails.
 // - A message with "fixture-read-attachment" opens the first attached file Eve staged in the
@@ -113,7 +114,11 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
         ],
       };
     }
-    const postTarget = /\bfixture-post\s+(\S+)/.exec(instruction ?? "")?.[1];
+    const event = /^Event \(JSON data\):\n(.*)$/m.exec(message)?.[1] ?? "{}";
+    const facts = toolData(event) as { text?: string; body?: unknown; link?: string };
+    const postTarget = /\bfixture-post-event\b/.test(instruction ?? "")
+      ? facts.link
+      : /\bfixture-post\s+(\S+)/.exec(instruction ?? "")?.[1];
     if (postTarget) {
       return {
         toolCalls: [
@@ -122,8 +127,6 @@ export function respondAsFixture(request: MockModelRequest): MockModelResponse |
       };
     }
     if (!/\bfixture-say\b/.test(instruction ?? "")) return quiet(request);
-    const event = /^Event \(JSON data\):\n(.*)$/m.exec(message)?.[1] ?? "{}";
-    const facts = toolData(event) as { text?: string; body?: unknown };
     const text =
       facts.text ??
       (typeof facts.body === "string" ? facts.body : JSON.stringify(facts.body ?? ""));

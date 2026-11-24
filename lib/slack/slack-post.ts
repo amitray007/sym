@@ -79,6 +79,21 @@ export async function postNeedsConfirmation(
   return isPrivateConversation(deps.slack, source.channelId);
 }
 
+// A post into the session's own thread is the same as replying there, so the read-untrusted rule
+// does not apply to it (decision 102). A failed lookup counts as another thread.
+export async function postsInOwnThread(
+  deps: Pick<LedgerDeps, "sql" | "slack">,
+  sessionId: string,
+  target: string | undefined,
+): Promise<boolean> {
+  if (!target || !deps.slack) return false;
+  const source = await getSessionThread(deps.sql, sessionId).catch(() => undefined);
+  if (!source?.threadTs) return false;
+  const resolved = await resolveTarget(deps.slack, target).catch(() => undefined);
+  if (!resolved || resolved.channel !== source.channelId) return false;
+  return (resolved.threadTs ?? resolved.messageTs) === source.threadTs;
+}
+
 // An edit follows the same rules, aimed at the channel of the post it changes.
 export async function editNeedsConfirmation(
   deps: Pick<LedgerDeps, "sql" | "slack">,
