@@ -6,6 +6,7 @@ import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
 import {
+  postHasStandingApproval,
   postNeedsConfirmation,
   postsInOwnThread,
   postToConversation,
@@ -31,18 +32,22 @@ export default defineTool({
   }),
   approval: {
     request: ({ session, toolInput }) =>
-      approvalStatus(
-        "posts",
-        async () =>
-          (await postNeedsConfirmation(
-            ledgerDeps(),
-            session.id,
+      approvalStatus("posts", async () => {
+        const deps = ledgerDeps();
+        const needed =
+          (await postNeedsConfirmation(deps, session.id, toolInput?.target, toolInput?.text)) ||
+          (!(await postsInOwnThread(deps, session.id, toolInput?.target)) &&
+            (await readUntrustedInTurn(session, () => deps.sql)));
+        return (
+          needed &&
+          !(await postHasStandingApproval(
+            deps,
+            await requesterOf(session, ledgerDeps),
             toolInput?.target,
             toolInput?.text,
-          )) ||
-          (!(await postsInOwnThread(ledgerDeps(), session.id, toolInput?.target)) &&
-            (await readUntrustedInTurn(session, () => ledgerDeps().sql))),
-      ),
+          ))
+        );
+      }),
     response: requesterResponse("Only the person who asked can approve this post.", ledgerDeps),
     prompt: ({ input }) => `Post this in ${input.target}?\n\n${input.text}`,
   },

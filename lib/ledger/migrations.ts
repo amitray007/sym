@@ -25,6 +25,7 @@ import {
   schedulesMigration,
 } from "../schedules/migration.ts";
 import { scheduleRunsMigration } from "../schedules/runs-migration.ts";
+import { standingApprovalsMigration } from "../slack/standing-approvals.ts";
 import { triggerBotPostsMigration } from "../triggers/bot-posts-migration.ts";
 import {
   channelTriggersMigration,
@@ -335,4 +336,5 @@ export const migrations: Migration[] = [
   webhookTriggersMigration,
   sourceTriggersMigration,
   triggerBotPostsMigration,
+  standingApprovalsMigration,
 ];

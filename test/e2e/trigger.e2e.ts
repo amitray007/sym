@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ScheduleRun } from "../../lib/schedules/rows.ts";
+import { addStandingApproval } from "../../lib/slack/standing-approvals.ts";
 import { createTrigger, type NewTrigger } from "../../lib/triggers/rows.ts";
 import {
   appMentionRequest,
@@ -203,6 +204,52 @@ describe("event triggers", () => {
     );
     expect(botPostsIn(channel, message.ts).some((m) => /Post this in/.test(messageText(m)))).toBe(
       false,
+    );
+    await settle(h);
+    expect(botPostsIn(other)).toEqual([]);
+  });
+
+  // Decision 105: the creator told Sym to stop asking before posts with an @on-call ping there.
+  it("posts with a group ping in another channel under the creator's standing approval", async () => {
+    const channel = newConversation(h).channel;
+    const other = newConversation(h).channel;
+    h.slack.members[other] = [OWNER, BOT];
+    await addStandingApproval(h.sql, {
+      grantedBy: OWNER,
+      channelId: other,
+      pings: [{ mention: "S0ONCALL", label: "on-call" }],
+    });
+    const cards = () => h.slack.messages.filter((m) => /Post this in/.test(messageText(m))).length;
+    const before = cards();
+    await watch({
+      channel,
+      instruction: `fixture-post <#${other}> fixture-ping <!subteam^S0ONCALL>`,
+    });
+    await sayInChannel(h, channel, "pubsub backlog is growing", AUTHOR);
+    await until(
+      () =>
+        botPostsIn(other).find(
+          (m) => messageText(m).trim() === "<!subteam^S0ONCALL> Fixture run post.",
+        ),
+      { label: "the run's post with its ping", timeoutMs: 90_000 },
+    );
+    expect(cards()).toBe(before);
+  });
+
+  // Decision 105: a ping the creator did not name still asks.
+  it("still asks before a ping the standing approval does not name", async () => {
+    const channel = newConversation(h).channel;
+    const other = newConversation(h).channel;
+    h.slack.members[other] = [OWNER, BOT];
+    await addStandingApproval(h.sql, { grantedBy: OWNER, channelId: other, pings: [] });
+    await watch({ channel, instruction: `fixture-post <#${other}> fixture-ping <!here>` });
+    await sayInChannel(h, channel, "pubsub backlog is growing", AUTHOR);
+    await until(
+      () =>
+        botPostsIn(`D${OWNER}`).find(
+          (m) => /Post this in/.test(messageText(m)) && messageText(m).includes(other),
+        ),
+      { label: "the approval prompt for the @here ping", timeoutMs: 90_000 },
     );
     await settle(h);
     expect(botPostsIn(other)).toEqual([]);

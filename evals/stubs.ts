@@ -55,6 +55,16 @@ export const writeToolStubs = [
   },
   // Decisions 081 and 082: posts, edits, deletes, and reactions in other conversations.
   { id: "slack-post", tool: "slack_post", outcome: { response: "Posted." } },
+  {
+    id: "standing-approval-add",
+    tool: "standing_approval_add",
+    outcome: { response: "Saved. I won't ask before posting there." },
+  },
+  {
+    id: "standing-approval-remove",
+    tool: "standing_approval_remove",
+    outcome: { response: "Removed. I'll ask again." },
+  },
   { id: "slack-edit", tool: "slack_edit", outcome: { response: "Edited." } },
   { id: "slack-delete", tool: "slack_delete", outcome: { response: "Deleted." } },
   { id: "slack-react", tool: "slack_react", outcome: { response: "Reacted with :tada:." } },

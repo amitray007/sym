@@ -32,7 +32,7 @@ After 45 minutes Sym asks once whether to stop.
 | "Type your answer" modal | Free-text answers | Eve, inside `ctx.ask` | Milestone 1 |
 | Feedback buttons | 👍/👎 on job results only | Sym: renderer posts the reply with a `context_actions` block | Built |
 | Reactions | A rare emoji on a person's message: 😂 funny, 💡 good idea, 🙌 good news, 🫡 ack. Never 👀, never on every message (decision 051) | Brain: `slack_react` and `slack_emoji`, limits in code | Built |
-| Posts elsewhere | A post in another channel or thread on request, in Sym's voice. Sym can edit or delete it, or add and remove a reaction on a linked message, when the same person asks. Some posts need the requester's approval first (decisions 081, 082) | Brain: `slack_post`, `slack_edit`, `slack_delete`, `slack_react`, `slack_dm`, `slack_read`, `slack_user`, `slack_pin`, `slack_bookmark`, `slack_canvas`; checks in `lib/slack/reach.ts` | Built |
+| Posts elsewhere | A post in another channel or thread on request, in Sym's voice. Sym can edit or delete it, or add and remove a reaction on a linked message, when the same person asks. Some posts need the requester's approval first (decisions 081, 082) | Brain: `slack_post`, `slack_edit`, `slack_delete`, `slack_react`, `slack_dm`, `slack_read`, `slack_user`, `slack_pin`, `slack_bookmark`, `slack_canvas`, `standing_approval_add`, `_list`, `_remove`; checks in `lib/slack/reach.ts` | Built |
 | Ephemeral replies | `/sym status`, private sign-in prompts, stranger lines | Eve, Sym | Production |
 | Long output | Long completed replies as a Markdown file | Eve | Production |
 | Event triggers | A run's reply in the thread of the message that fired it, or in a channel or the creator's DM; silent when the event needs nothing (decision 088) | Sym: `onMessage` for new top-level messages, `onEvent` for `reaction_added`; `trigger_create` and related tools | Built (not run on real Slack) |
@@ -226,7 +226,11 @@ channel or user group, goes to a Slack Connect channel, or carries words out of 
 channel into another conversation (decision 082). That approval card goes to the requester's DM,
 and the thread shows only "Waiting on approval from @person…" until the person answers; then
 the line becomes Sym's short reply (decision 104). The same goes for DMs, edits,
-bookmarks, and canvas writes. Owner approvals stay in the thread (decision 102). On request, `slack_react` adds or removes
+bookmarks, and canvas writes. Owner approvals stay in the thread (decision 102). A person can
+tell Sym to stop asking before posts in one channel and the group pings they name, such as
+"don't ask me before pinging @on-call in #alerts". The standing approval covers their own turns
+and their runs, after one confirming click; `standing_approval_list` and `_remove` manage it
+(decision 105). On request, `slack_react` adds or removes
 Sym's reaction on a linked message under the same membership rule.
 
 `slack_read` reads a linked message, thread, or channel for a member. It returns private content
