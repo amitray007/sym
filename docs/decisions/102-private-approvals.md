@@ -24,6 +24,7 @@ buttons that only the requester can use.
 2. The approval cards of `slack_post`, `slack_dm`, `slack_edit`, `slack_bookmark`,
    `slack_canvas`, and `main_thread_post` go to the requester's DM. Only the requester answers
    them (`requesterResponse`). The thread shows Eve's line "Waiting on approval from @person…".
+   Decision 104 turns it into the reply once the person answers.
    Sym uses Eve's `approvalChannel` setting, in `lib/slack/approval-place.ts`.
 3. Every other request stays in the thread: owner-only approvals (connections, playbooks, Stop),
    because the owner can be someone other than the requester, and Eve questions. A session that

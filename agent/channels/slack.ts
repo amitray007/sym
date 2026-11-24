@@ -54,7 +54,11 @@ import { turnOutcome } from "../../lib/schedules/outcome.ts";
 import { finishRunWithoutJob, listSchedules } from "../../lib/schedules/rows.ts";
 import { namesBot, threadPeople, triageThreadMessage } from "../../lib/slack/addressing.ts";
 import { SlackApiError } from "../../lib/slack/api.ts";
-import { type ApprovalChannelState, approvalPlace } from "../../lib/slack/approval-place.ts";
+import {
+  type ApprovalChannelState,
+  approvalPlace,
+  takeApprovalAnnouncement,
+} from "../../lib/slack/approval-place.ts";
 import {
   codeChannelsOn,
   ensureConversationBar,
@@ -342,6 +346,8 @@ type TurnBookkeeping = {
   postedInThread?: boolean;
   // Set once a turn of this session calls worker_job; a scheduled run then waits for the job.
   startedJob?: boolean;
+  // The waiting line of a settled DM approval, which the turn's next reply replaces.
+  approvalLineTs?: string | null;
 };
 
 // A scheduled run that started no job ends with its turn: a reply needs attention, silence is
@@ -431,6 +437,18 @@ const symRenderer = defineSlackRenderer({
     "call.progress": stayQuiet<"call.progress">(),
     "call.settled": stayQuiet<"call.settled">(),
     "turn.paused": stayQuiet<"turn.paused">(),
+    // A DM approval's waiting line becomes the reply that follows the answer, not Eve's
+    // "Answered: … by @person." line (decision 104).
+    async "interaction.settled"(event, ctx, next) {
+      const state = ctx.channel.state as Parameters<typeof takeApprovalAnnouncement>[0] &
+        TurnBookkeeping;
+      const ts = takeApprovalAnnouncement(state, event.data.interactionId);
+      await next(event);
+      if (!ts) return;
+      // A second approval in one turn leaves one line: the newest.
+      await dropApprovalLine(ctx.channel);
+      state.approvalLineTs = ts;
+    },
     async "call.requested"(event, ctx, next) {
       if (event.data.capability.name === "worker_job") {
         (ctx.channel.state as TurnBookkeeping).startedJob = true;
@@ -460,6 +478,8 @@ const symRenderer = defineSlackRenderer({
     async "turn.settled"(event, ctx, next) {
       const quiet = isQuietTurn(quietKey(ctx.channel));
       endQuietTurn(quietKey(ctx.channel));
+      // A turn that ended without a reply leaves no waiting line behind.
+      await dropApprovalLine(ctx.channel);
       // A failed or cancelled quiet turn still gets Eve's notice.
       if (!quiet || event.data.outcome !== "completed") await next(event);
       await endScheduledRun(ctx.session, event.data.outcome, ctx.channel.state as TurnBookkeeping);
@@ -491,11 +511,15 @@ const symRenderer = defineSlackRenderer({
           return response as Record<string, unknown>;
         },
       };
+      const state = ctx.channel.state as TurnBookkeeping;
+      const replaceTs = state.approvalLineTs ?? null;
+      state.approvalLineTs = null;
       const posted = await queueReply(ledger(), slack, {
         key: `reply:${ctx.session.id}:${ctx.session.turn.id}:${partId}`,
         channel: ctx.channel.slack.channelId,
         threadTs: ctx.channel.slack.threadTs || null,
         text: value,
+        replaceTs,
       });
       if (posted) (ctx.channel.state as TurnBookkeeping).postedInThread = true;
     },
@@ -507,6 +531,19 @@ const symRenderer = defineSlackRenderer({
     return next({ ...card, calls });
   },
 });
+
+async function dropApprovalLine(channel: SlackEventContext): Promise<void> {
+  const state = channel.state as TurnBookkeeping;
+  const ts = state.approvalLineTs;
+  state.approvalLineTs = null;
+  if (!ts) return;
+  const response = await channel.slack
+    .request("chat.delete", { channel: channel.slack.channelId, ts })
+    .catch((error: unknown) => ({ ok: false, error: String(error) }));
+  if (response.ok === false) {
+    console.warn("Sym could not remove an approval's waiting line.", String(response.error));
+  }
+}
 
 async function restoreJobStatus(channelId: string): Promise<void> {
   try {

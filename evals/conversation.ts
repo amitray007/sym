@@ -1,3 +1,5 @@
+import { isReadable } from "../lib/voice/readable.ts";
+
 // Replay the context Eve supplies on the first turn in an existing Slack thread, plus the job
 // note the Slack channel adds there (agent/channels/slack.ts). These are test-owned snapshots,
 // not instructions for the brain to repeat or facts about a live job.
@@ -22,7 +24,9 @@ export function isQuickReply(value: unknown): boolean {
     /^(?:#{1,6}\s|\*{0,2}(?:tl;dr|summary|status|result|checks|open questions|next steps)\*{0,2}\s*[:\n]|[-*]\s+\[[ x]\]|[☐☑✅])/im;
   // A quick reply fits in a few short lines (decision 093), not a wall of text.
   const lines = text.split("\n").filter((line) => line.trim() !== "").length;
-  return text.length > 0 && text.length <= 600 && lines <= 6 && !report.test(text);
+  return (
+    text.length > 0 && text.length <= 600 && lines <= 6 && !report.test(text) && isReadable(text)
+  );
 }
 
 // Stock assistant phrases the Voice rules ban (decision 093). Narrow on purpose: a match is a

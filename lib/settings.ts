@@ -22,6 +22,7 @@ import { gateModelId } from "./triggers/gate.ts";
 import { githubConfigured, linearConfigured } from "./triggers/sources.ts";
 import { webhookKey } from "./triggers/webhook.ts";
 import { transcriptionRoute } from "./voice/route.ts";
+import { tightenModelId } from "./voice/tighten.ts";
 
 // The deployment's settings, for the brain's instructions (decision 097). Each line reads the
 // same helper the code reads, so the brain answers "who can use you?" or "where does the digest
@@ -166,6 +167,7 @@ function modelLines(env: Env): string[] {
     audio
       ? `- Voice notes are transcribed with \`${audio.model}\` (\`SYM_TRANSCRIBE_MODEL\`).`
       : "- Voice notes are not transcribed (`SYM_TRANSCRIBE_MODEL`).",
+    readableLine(env),
   ];
   if (sandboxEnabled(env)) {
     const image = sandboxImage(env);
@@ -174,6 +176,13 @@ function modelLines(env: Env): string[] {
     );
   }
   return lines;
+}
+
+function readableLine(env: Env): string {
+  const model = tightenModelId(env);
+  return model === null
+    ? "- Replies post as written, with no rewrite pass (`SYM_READABLE`)."
+    : `- A reply that reads as a wall of text gets one rewrite by \`${model}\` before it posts (\`SYM_READABLE\`).`;
 }
 
 function triggerLines(pack: Pack | undefined, env: Env): string[] {

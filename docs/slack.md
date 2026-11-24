@@ -56,6 +56,11 @@ Sym uses short sentences in one configured persona (decisions 070 and 071). It g
 first and preserves facts, links, warnings, scope boundaries, and uncertainty. Plain is calm,
 casual is warm and practical, and spicy texts like a gen-z teammate. Failures and concerns never
 get jokes. Most replies are one to three short lines and match the person's length and style (decision 093).
+Every reply is written for a glance: the answer first, one idea per short line, and only the
+details that change what the reader does. A code check flags a reply with a line past 160
+characters, a line with more than four numbers, or more than 800 characters of prose. A small
+model rewrites a flagged reply once before it posts; a failed or unsafe rewrite posts the
+original (decision 103).
 The persona comes from the pack, then the saved owner setting, then `SYM_PERSONA`, then casual.
 The initial status fallback is "Working...". Tool labels replace it with known steps.
 
@@ -219,7 +224,8 @@ asked for each post (`requested_posts`), and only that person can have Sym edit 
 Each person gets 10 posts an hour. The requester approves a post first when it pings a whole
 channel or user group, goes to a Slack Connect channel, or carries words out of a DM or private
 channel into another conversation (decision 082). That approval card goes to the requester's DM,
-and the thread shows only "Waiting on approval from @person…". The same goes for DMs, edits,
+and the thread shows only "Waiting on approval from @person…" until the person answers; then
+the line becomes Sym's short reply (decision 104). The same goes for DMs, edits,
 bookmarks, and canvas writes. Owner approvals stay in the thread (decision 102). On request, `slack_react` adds or removes
 Sym's reaction on a linked message under the same membership rule.
 

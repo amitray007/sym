@@ -49,3 +49,24 @@ export async function approvalPlace(
   state.triggeringUserId = requester;
   return "direct-message";
 }
+
+// Eve posts "Waiting on approval from @person…" in the thread for a DM card and, once the person
+// answers, edits it to "Answered: … by @person." Sym deletes the line instead, so the thread
+// keeps no approval trace (decision 104). This takes the line's ts off Eve's card record, so
+// Eve skips its edit, and returns it for the delete.
+interface CardRecord {
+  announcementTs?: string;
+  requests: readonly { interactionId: string }[];
+}
+
+export function takeApprovalAnnouncement(
+  state: { interactionCards?: readonly CardRecord[] },
+  interactionId: string,
+): string | undefined {
+  const cards = state.interactionCards;
+  const card = cards?.find((c) => c.requests.some((r) => r.interactionId === interactionId));
+  if (!cards || !card?.announcementTs) return undefined;
+  const { announcementTs, ...rest } = card;
+  state.interactionCards = cards.map((c) => (c === card ? rest : c));
+  return announcementTs;
+}
