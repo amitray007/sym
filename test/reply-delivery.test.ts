@@ -37,6 +37,28 @@ describe.skipIf(!hasDatabase)("durable brain replies", () => {
     expect(slack.messages.filter((m) => m.text === input.text)).toHaveLength(1);
     expect(JSON.stringify(slack.calls)).not.toContain("sym_thread_reply");
   });
+  // Decision 104: the reply after a DM approval replaces the thread's waiting line.
+  it("replaces the waiting line of an approval in place", async () => {
+    const line = slack.addMessage({
+      channel: "C1",
+      user: "UBOT",
+      ts: "1.5",
+      thread_ts: "1.1",
+      text: "Waiting on approval from <@U1>…",
+    });
+    const text = "Posted it in #releases.";
+    const input = {
+      key: "approved-reply",
+      channel: "C1",
+      threadTs: "1.1",
+      text,
+      replaceTs: line.ts,
+    };
+    expect(await queueReply(ledger.sql(), api(), input)).toBe(true);
+    const inThread = slack.messages.filter((m) => m.channel === "C1" && m.thread_ts === "1.1");
+    expect(inThread.find((m) => m.ts === "1.5")?.text).toBe(text);
+    expect(inThread.filter((m) => m.text === text)).toHaveLength(1);
+  });
   it("falls back to full text if Slack rejects the markdown block", async () => {
     slack.failNext("chat.postMessage", "invalid_blocks");
     const text = "The test failed. PR #12 is still open.";

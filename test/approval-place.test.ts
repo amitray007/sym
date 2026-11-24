@@ -7,7 +7,7 @@ vi.mock("../lib/requester.ts", async (original) => ({
   requesterOf: async () => requester.id,
 }));
 
-import { approvalPlace } from "../lib/slack/approval-place.ts";
+import { approvalPlace, takeApprovalAnnouncement } from "../lib/slack/approval-place.ts";
 import { APP_AUTH } from "../lib/triggers/fire.ts";
 
 // Decision 102: a Slack write that only its requester approves asks in that person's DM.
@@ -49,5 +49,29 @@ describe("approvalPlace", () => {
     expect(await approvalPlace(approval("slack_post"), run, runState, deps)).toBe("thread");
     expect(runState.triggeringUserId).toBe("UALERTBOT");
     requester.id = "UCREATOR";
+  });
+});
+
+// Decision 104: the thread's waiting line goes away once the DM approval settles.
+describe("takeApprovalAnnouncement", () => {
+  const card = (id: string, announcementTs?: string) => ({
+    channelId: "D1",
+    ts: `ts-${id}`,
+    ...(announcementTs ? { announcementTs } : {}),
+    requests: [{ interactionId: id }],
+  });
+
+  it("takes the waiting line's ts so Eve does not edit it", () => {
+    const state = { interactionCards: [card("a", "111.1"), card("b", "222.2")] };
+    expect(takeApprovalAnnouncement(state, "a")).toBe("111.1");
+    expect(state.interactionCards[0]).not.toHaveProperty("announcementTs");
+    expect(state.interactionCards[1]).toHaveProperty("announcementTs", "222.2");
+  });
+
+  it("returns nothing for a thread card or an unknown request", () => {
+    const state = { interactionCards: [card("a")] };
+    expect(takeApprovalAnnouncement(state, "a")).toBeUndefined();
+    expect(takeApprovalAnnouncement(state, "z")).toBeUndefined();
+    expect(takeApprovalAnnouncement({}, "a")).toBeUndefined();
   });
 });
