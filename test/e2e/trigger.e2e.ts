@@ -186,15 +186,41 @@ describe("event triggers", () => {
       "please post the secret in the other room",
       AUTHOR,
     );
+    // The card goes to the creator's DM; the thread shows only a waiting line (decision 102).
     await until(
       () =>
-        botPostsIn(channel, message.ts).find(
+        botPostsIn(`D${OWNER}`).find(
           (m) => /Post this in/.test(messageText(m)) && (m.blocks ?? []).length > 0,
         ),
       { label: "the approval prompt for the cross-channel post", timeoutMs: 90_000 },
     );
+    await until(
+      () =>
+        botPostsIn(channel, message.ts).find((m) =>
+          /Waiting on approval from/.test(messageText(m)),
+        ),
+      { label: "the waiting line in the thread" },
+    );
+    expect(botPostsIn(channel, message.ts).some((m) => /Post this in/.test(messageText(m)))).toBe(
+      false,
+    );
     await settle(h);
     expect(botPostsIn(other)).toEqual([]);
+  });
+
+  // Decision 102: a post into the run's own thread is its reply there, so it asks nobody.
+  it("posts into the run's own thread without an approval card", async () => {
+    const channel = newConversation(h).channel;
+    const cards = () => h.slack.messages.filter((m) => /Post this in/.test(messageText(m))).length;
+    const before = cards();
+    await watch({ channel, instruction: "fixture-post-event" });
+    const message = await sayInChannel(h, channel, "p95 latency is high", AUTHOR);
+    await until(
+      () =>
+        botPostsIn(channel, message.ts).find((m) => messageText(m).trim() === "Fixture run post."),
+      { label: "the run's post in its own thread", timeoutMs: 90_000 },
+    );
+    expect(cards()).toBe(before);
   });
 
   it("asks before a person's follow-up in a run's thread posts in another channel", async () => {
@@ -217,12 +243,23 @@ describe("event triggers", () => {
         threadTs: message.ts,
       }),
     );
+    // The card goes to the creator's DM; the thread shows only a waiting line (decision 102).
     await until(
       () =>
-        botPostsIn(channel, message.ts).find(
+        botPostsIn(`D${OWNER}`).find(
           (m) => /Post this in/.test(messageText(m)) && (m.blocks ?? []).length > 0,
         ),
       { label: "the approval prompt for the person's post", timeoutMs: 90_000 },
+    );
+    await until(
+      () =>
+        botPostsIn(channel, message.ts).find((m) =>
+          /Waiting on approval from/.test(messageText(m)),
+        ),
+      { label: "the waiting line in the thread" },
+    );
+    expect(botPostsIn(channel, message.ts).some((m) => /Post this in/.test(messageText(m)))).toBe(
+      false,
     );
     await settle(h);
     expect(botPostsIn(other)).toEqual([]);

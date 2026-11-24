@@ -291,6 +291,23 @@ export class Conversation {
     );
   }
 
+  // Waits for an approval card that Eve sent to a person's DM (decision 102).
+  async waitForDirectControls(match: RegExp, user = OWNER): Promise<HitlMessage> {
+    return until(
+      () => {
+        for (const message of this.h.slack.messages) {
+          if (message.channel !== `D${user}` || message.user !== BOT) continue;
+          const controls = hitlControls(message.blocks ?? []);
+          if (controls.length > 0 && match.test(messageText(message))) {
+            return { message, controls };
+          }
+        }
+        return undefined;
+      },
+      { label: `DM controls matching ${match}` },
+    );
+  }
+
   // Waits for a bot message in this thread whose text matches, with or without controls.
   async waitForPrompt(match: RegExp, timeoutMs = 60_000): Promise<FakeSlackMessage> {
     return until(() => this.botMessages().find((m) => match.test(messageText(m))), {
@@ -364,10 +381,10 @@ export class Conversation {
       this.h,
       blockActionsRequest({
         signingSecret: SIGNING_SECRET,
-        channel: this.channel,
+        channel: hitl.message.channel,
         user,
         messageTs: hitl.message.ts,
-        threadTs: this.rootTs,
+        ...(hitl.message.channel === this.channel ? { threadTs: this.rootTs } : {}),
         actionId: control.actionId,
         actionType: control.type,
         ...(control.value === undefined

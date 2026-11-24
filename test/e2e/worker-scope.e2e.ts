@@ -10,6 +10,7 @@ import { t3Adapter } from "../../lib/workers/t3/adapter.ts";
 import { connectT3 } from "../../lib/workers/t3/client.ts";
 import {
   type Harness,
+  messageText,
   newConversation,
   OWNER,
   startHarness,
@@ -176,7 +177,11 @@ it("requires approval before posting research findings in the same parent turn",
   const c = newConversation(h);
   h.slack.members[c.channel] = [OWNER];
   await c.mention(`fixture-research-post ${c.channel}`);
-  const prompt = await c.waitForControls(/Post this in/);
+  const prompt = await c.waitForDirectControls(/Post this in/);
+  await c.waitForPrompt(/Waiting on approval from/);
+  expect(c.messages().some((message) => /Research findings/.test(messageText(message)))).toBe(
+    false,
+  );
   const [session] = await h.sql<{ sessionId: string }[]>`
     select session_id from session_threads where channel_id = ${c.channel}
   `;

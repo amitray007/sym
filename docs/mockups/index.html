@@ -611,6 +611,30 @@ footer p + p { margin-top: 8px; }
     </div>
     <div class="pair">
       <div>
+        <p class="label">A post that needs approval in a shared thread: the thread sees only a waiting line</p>
+        <div class="slack">
+          <div class="sl-top"><b># alerts</b><span>Thread</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av user">M</div><div><div class="mh"><b>Monitoring</b><span class="app">APP</span><time>19:12</time></div><div class="mt"><p>api: 2xx p95 latency is above 5s</p></div></div></div>
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>19:13</time></div><div class="mt"><p>Waiting on approval from <span class="sl-link">@Sam</span>…</p></div></div></div>
+            <div class="compose">Reply…</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="label">The card goes to the person who asked, in their DM (decision 102)</p>
+        <div class="slack">
+          <div class="sl-top"><b>Sym</b><span>Direct message</span></div>
+          <div class="sl-body">
+            <div class="msg"><div class="av sym">J</div><div><div class="mh"><b>Sym</b><span class="app">APP</span><time>19:13</time></div><div class="mt"><p>Post this in #on-call?</p><p>p95 latency on api is 17s: lock contention on the app database since 19:00.</p></div>
+              <div class="btns"><span class="sb">Deny</span><span class="sb go">Approve</span></div></div></div>
+            <div class="compose">Message Sym</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="pair">
+      <div>
         <p class="label">A voice note: Sym reads the transcript and answers what Sam said</p>
         <div class="slack">
           <div class="sl-top"><b>Sym</b><span>Direct message</span></div>

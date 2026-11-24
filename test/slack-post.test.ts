@@ -4,7 +4,11 @@ import slackPost from "../agent/tools/slack_post.ts";
 import { recordSessionThread } from "../lib/ledger/threads.ts";
 import { slackApiFromEnv } from "../lib/slack/eve-api.ts";
 import { UNREACHABLE } from "../lib/slack/reach.ts";
-import { postNeedsConfirmation, postToConversation } from "../lib/slack/slack-post.ts";
+import {
+  postNeedsConfirmation,
+  postsInOwnThread,
+  postToConversation,
+} from "../lib/slack/slack-post.ts";
 import { type FakeSlack, startFakeSlack } from "./fakes/slack-server.ts";
 import { hasDatabase, useLedger } from "./helpers/ledger.ts";
 
@@ -100,6 +104,29 @@ describe.skipIf(!hasDatabase)("slack_post", () => {
     expect(await ask("s-dm", "#releases")).toBe(true);
     expect(await ask("s-private", "<#G0PRIV|secret>")).toBe(false);
     expect(await ask("s-unknown", "#releases")).toBe(true);
+  });
+
+  // Decision 102: a post into the session's own thread is a reply there, not a write elsewhere.
+  it("knows a post into the session's own thread", async () => {
+    await recordSessionThread(ledger.sql(), {
+      sessionId: "s-run",
+      teamId: "T1",
+      channelId: "C0SOURCE",
+      threadTs: "1700000000.000100",
+      userId: "UASKER",
+    });
+    const own = (target: string, sessionId = "s-run") =>
+      postsInOwnThread(deps(), sessionId, target);
+    const link = (channel: string, ts: string) =>
+      `https://acme.slack.com/archives/${channel}/p${ts.replace(".", "")}`;
+    expect(await own(link("C0SOURCE", "1700000000.000100"))).toBe(true);
+    expect(await own(`${link("C0SOURCE", "1700000000.000200")}?thread_ts=1700000000.000100`)).toBe(
+      true,
+    );
+    expect(await own(link("C0SOURCE", "1700000000.000300"))).toBe(false);
+    expect(await own(link("C0RELEASE", "1700000000.000100"))).toBe(false);
+    expect(await own("#general")).toBe(false);
+    expect(await own(link("C0SOURCE", "1700000000.000100"), "s-unknown")).toBe(false);
   });
 
   // Decision 082: a broadcast ping or a Slack Connect channel always needs approval.

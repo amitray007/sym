@@ -5,7 +5,11 @@ import { isWorkerCaller, NOT_FOR_WORKERS } from "../../lib/callers.ts";
 import { requesterOf, requesterResponse } from "../../lib/requester.ts";
 import { ledgerDeps } from "../../lib/runtime.ts";
 import { POST_MAX } from "../../lib/slack/post.ts";
-import { postNeedsConfirmation, postToConversation } from "../../lib/slack/slack-post.ts";
+import {
+  postNeedsConfirmation,
+  postsInOwnThread,
+  postToConversation,
+} from "../../lib/slack/slack-post.ts";
 import { readUntrustedInTurn } from "../../lib/triggers/untrusted.ts";
 
 // Posts in another Slack channel or thread when a person asks (decision 081). Code checks the
@@ -18,7 +22,8 @@ export default defineTool({
     "message or thread link, a #channel, or a channel mention. A message link posts in that " +
     "message's thread; a channel posts at the top level. Write the message for the people in " +
     "that channel, in your own voice. Mention the person who asked (<@their user ID>) only when " +
-    "they ask you to. Never post on your own. Use main_thread_post for a code channel's main thread. " +
+    "they ask you to. Never post on your own. To answer in the conversation you are in, just " +
+    "reply; do not use this tool. Use main_thread_post for a code channel's main thread. " +
     "If the tool says it can't reach the conversation, say so in one line and do not guess why.",
   inputSchema: z.object({
     target: z.string().min(1).max(500).describe("A Slack link, #channel, or channel mention."),
@@ -34,7 +39,9 @@ export default defineTool({
             session.id,
             toolInput?.target,
             toolInput?.text,
-          )) || (await readUntrustedInTurn(session, () => ledgerDeps().sql)),
+          )) ||
+          (!(await postsInOwnThread(ledgerDeps(), session.id, toolInput?.target)) &&
+            (await readUntrustedInTurn(session, () => ledgerDeps().sql))),
       ),
     response: requesterResponse("Only the person who asked can approve this post.", ledgerDeps),
     prompt: ({ input }) => `Post this in ${input.target}?\n\n${input.text}`,
